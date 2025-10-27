@@ -13,14 +13,14 @@ This document consolidates all implementation tasks from the architecture and de
 ### Timeline
 
 **Original Estimate**: 12 weeks (650 hours, 3 months)
-**Revised with Open-Source Tools**: **9.5 weeks** (520 hours, ~2.5 months)
-**Savings**: 2.5 weeks (130 hours, 20% reduction)
+**Revised with Open-Source Tools & CoinGecko MCP**: **9 weeks** (488 hours, ~2.25 months)
+**Savings**: 3 weeks (162 hours, 25% reduction)
 
-> **📚 See**: [OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md) for detailed analysis of tools that accelerate development
+> **📚 See**: [OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md) and [MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md) for detailed analysis
 
 **Phase Breakdown**:
 - Phase 1 (Foundation): 1 week
-- Phase 2 (MCP Servers): 1 week
+- Phase 2 (MCP Servers): **0.5 weeks** *(reduced from 1.5 weeks with CoinGecko MCP)*
 - Phase 3 (Analysis Agents): 1 week *(reduced from 1.5 weeks)*
 - Phase 4 (Strategy Agents): 1 week *(reduced from 1.5 weeks)*
 - Phase 5 (Orchestrator): 1 week *(reduced from 1.5 weeks)*
@@ -31,6 +31,7 @@ This document consolidates all implementation tasks from the architecture and de
 - Phase 10 (Advanced Features): 1 week *(reduced from 2 weeks)*
 
 **Key Accelerators**:
+- **CoinGecko MCP** - 76+ pre-built market data tools (saves 32+ hours!) ⭐ NEW
 - **Bifrost** - Unified LLM gateway, 50x faster than alternatives, automatic failover (saves 40+ hours)
 - **Public LLMs** - Claude/GPT-4 for reasoning instead of training custom models (saves 32+ hours)
 - **CCXT** - Unified exchange API (saves 18 hours on exchange integration)
@@ -233,52 +234,56 @@ This document consolidates all implementation tasks from the architecture and de
 
 ## Phase 2: Core MCP Servers (Week 2)
 
-**Goal**: Build all MCP tool and resource servers
+**Goal**: Integrate external MCP servers and build custom MCP tool servers
 
-**Duration**: 1 week (reduced from 1.5 weeks with cinar/indicator + CCXT)
+**Duration**: 0.5 weeks (reduced from 1.5 weeks with CoinGecko MCP + cinar/indicator + CCXT)
 **Dependencies**: Phase 1 complete
 **Milestone**: All MCP servers operational with tests
 **Accelerators**:
+- **CoinGecko MCP** - 76+ pre-built market data tools (saves 32+ hours!)
 - **cinar/indicator** - Pre-built technical indicators (saves 24 hours)
 - **CCXT** - Unified exchange API (saves 18 hours)
-- Use libraries internally, expose via MCP tools
+- Use external and internal MCP servers in hybrid architecture
 
-### 2.1 Complete Market Data Server (Week 2, Days 3-4)
+### 2.1 Integrate CoinGecko MCP Server (Week 2, Day 3)
 
-- [ ] **T018** [P0] Add get_candlesticks tool
-  - Input: symbol, interval, limit
-  - Output: OHLCV candlesticks array
-  - Binance API integration
-  - Data validation
-  - **Acceptance**: Returns correct candlestick data
-  - **Estimate**: 3 hours
+- [ ] **T018** [P0] Configure CoinGecko MCP client connection
+  - Add MCP configuration to configs/config.yaml
+  - Configure endpoint: `https://mcp.api.coingecko.com/mcp`
+  - HTTP streaming transport setup
+  - Connection validation
+  - **Acceptance**: Can connect to CoinGecko MCP server
+  - **Estimate**: 1 hour (reduced from 3 hours - no building required!)
 
-- [ ] **T019** [P0] Add get_orderbook tool
-  - Input: symbol, depth
-  - Output: Bids and asks
-  - Real-time order book from Binance
-  - **Acceptance**: Returns current order book
+- [ ] **T019** [P0] Test CoinGecko MCP market data tools
+  - Test `get_price` tool (current cryptocurrency prices)
+  - Test `get_market_chart` tool (historical OHLCV data)
+  - Test `get_coin_info` tool (coin details and metadata)
+  - Verify response formats and data quality
+  - **Acceptance**: All CoinGecko tools accessible and working
+  - **Estimate**: 2 hours (reduced from 5 hours - just testing!)
+
+- [ ] **T020** [P0] Create market data wrapper service (optional)
+  - internal/market/coingecko.go
+  - Wrapper for CoinGecko MCP tools with our internal interface
+  - Type-safe Go structs for responses
+  - Error handling and retry logic
+  - **Acceptance**: Clean internal API for market data
   - **Estimate**: 2 hours
 
-- [ ] **T020** [P1] Add market data resources
-  - `market://candlesticks/{symbol}/{interval}`
-  - `market://orderbook/{symbol}`
-  - `market://trades/{symbol}`
-  - **Acceptance**: Resources accessible via MCP
+- [ ] **T021** [P1] Implement market data caching layer
+  - Cache CoinGecko responses in Redis
+  - Reduce API calls and respect rate limits
+  - TTL-based cache invalidation
+  - Cache key strategy (symbol, timeframe)
+  - **Acceptance**: Market data cached efficiently
   - **Estimate**: 2 hours
 
-- [ ] **T021** [P1] Implement WebSocket market data streaming
-  - **Use CCXT** for unified WebSocket API: `exchange.watchOHLCV(symbol)`
-  - Supports Binance and 100+ other exchanges with same interface
-  - Cache latest data in memory
-  - Serve via MCP resources
-  - **Acceptance**: Resources return real-time data
-  - **Estimate**: 3 hours (reduced from 4 hours with CCXT)
-
-- [ ] **T022** [P1] Add data persistence (optional)
-  - Store candlesticks in TimescaleDB
-  - Historical data retrieval
-  - **Acceptance**: Can retrieve historical data
+- [ ] **T022** [P1] Store historical data in TimescaleDB
+  - Periodic sync of historical candlesticks from CoinGecko
+  - Store in TimescaleDB hypertables
+  - Enable fast local backtesting
+  - **Acceptance**: Historical data persisted locally
   - **Estimate**: 3 hours
 
 ### 2.2 Technical Indicators Server (Week 2, Days 4-5)
@@ -470,7 +475,9 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### Phase 2 Deliverables
 
-- ✅ Market Data Server (complete with WebSocket)
+- ✅ **CoinGecko MCP Integration** (76+ market data tools)
+- ✅ Market data caching layer (Redis)
+- ✅ Historical data persistence (TimescaleDB)
 - ✅ Technical Indicators Server (RSI, MACD, Bollinger, EMA, ADX)
 - ✅ Risk Analyzer Server (Kelly, VaR, limits, Sharpe, drawdown)
 - ✅ Order Executor Server (paper trading mode)
@@ -478,7 +485,9 @@ This document consolidates all implementation tasks from the architecture and de
 - ✅ Integration tests
 - ✅ API documentation for all servers
 
-**Exit Criteria**: All MCP servers can be started, called via MCP tools, and return correct results. Tests pass.
+**Exit Criteria**: CoinGecko MCP server accessible, custom MCP servers operational, all tools callable via MCP, tests pass.
+
+**Time Saved**: **32+ hours** by using CoinGecko MCP instead of building market data infrastructure from scratch!
 
 ---
 

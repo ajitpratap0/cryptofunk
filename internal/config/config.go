@@ -14,6 +14,7 @@ type Config struct {
 	Redis      RedisConfig               `mapstructure:"redis"`
 	NATS       NATSConfig                `mapstructure:"nats"`
 	LLM        LLMConfig                 `mapstructure:"llm"`
+	MCP        MCPConfig                 `mapstructure:"mcp"`
 	Trading    TradingConfig             `mapstructure:"trading"`
 	Risk       RiskConfig                `mapstructure:"risk"`
 	Exchanges  map[string]ExchangeConfig `mapstructure:"exchanges"`
@@ -64,6 +65,56 @@ type LLMConfig struct {
 	MaxTokens     int     `mapstructure:"max_tokens"`     // 2000
 	EnableCaching bool    `mapstructure:"enable_caching"` // true
 	Timeout       int     `mapstructure:"timeout"`        // 30000 (ms)
+}
+
+// MCPConfig contains MCP server configuration (hybrid architecture)
+type MCPConfig struct {
+	External MCPExternalServers `mapstructure:"external"` // External MCP servers (CoinGecko, etc.)
+	Internal MCPInternalServers `mapstructure:"internal"` // Custom MCP servers
+}
+
+// MCPExternalServers contains configuration for external MCP servers
+type MCPExternalServers struct {
+	CoinGecko MCPExternalServerConfig `mapstructure:"coingecko"`
+}
+
+// MCPInternalServers contains configuration for custom MCP servers
+type MCPInternalServers struct {
+	OrderExecutor       MCPInternalServerConfig `mapstructure:"order_executor"`
+	RiskAnalyzer        MCPInternalServerConfig `mapstructure:"risk_analyzer"`
+	TechnicalIndicators MCPInternalServerConfig `mapstructure:"technical_indicators"`
+	MarketData          MCPInternalServerConfig `mapstructure:"market_data"`
+}
+
+// MCPExternalServerConfig contains configuration for an external MCP server
+type MCPExternalServerConfig struct {
+	Enabled     bool               `mapstructure:"enabled"`
+	Name        string             `mapstructure:"name"`
+	URL         string             `mapstructure:"url"`
+	Transport   string             `mapstructure:"transport"` // "http_streaming"
+	Description string             `mapstructure:"description"`
+	CacheTTL    int                `mapstructure:"cache_ttl"` // seconds
+	RateLimit   MCPRateLimitConfig `mapstructure:"rate_limit"`
+	Tools       []string           `mapstructure:"tools"`
+}
+
+// MCPInternalServerConfig contains configuration for a custom MCP server
+type MCPInternalServerConfig struct {
+	Enabled     bool              `mapstructure:"enabled"`
+	Name        string            `mapstructure:"name"`
+	Command     string            `mapstructure:"command"`   // path to binary
+	Transport   string            `mapstructure:"transport"` // "stdio"
+	Description string            `mapstructure:"description"`
+	Args        []string          `mapstructure:"args"`
+	Env         map[string]string `mapstructure:"env"`
+	Tools       []string          `mapstructure:"tools"`
+	Note        string            `mapstructure:"note"` // optional note
+}
+
+// MCPRateLimitConfig contains rate limit settings
+type MCPRateLimitConfig struct {
+	Enabled           bool `mapstructure:"enabled"`
+	RequestsPerMinute int  `mapstructure:"requests_per_minute"`
 }
 
 // TradingConfig contains trading settings
@@ -184,6 +235,36 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("llm.max_tokens", 2000)
 	v.SetDefault("llm.enable_caching", true)
 	v.SetDefault("llm.timeout", 30000)
+
+	// MCP defaults - External servers
+	v.SetDefault("mcp.external.coingecko.enabled", true)
+	v.SetDefault("mcp.external.coingecko.name", "CoinGecko MCP")
+	v.SetDefault("mcp.external.coingecko.url", "https://mcp.api.coingecko.com/mcp")
+	v.SetDefault("mcp.external.coingecko.transport", "http_streaming")
+	v.SetDefault("mcp.external.coingecko.cache_ttl", 60)
+	v.SetDefault("mcp.external.coingecko.rate_limit.enabled", true)
+	v.SetDefault("mcp.external.coingecko.rate_limit.requests_per_minute", 100)
+
+	// MCP defaults - Internal servers
+	v.SetDefault("mcp.internal.order_executor.enabled", true)
+	v.SetDefault("mcp.internal.order_executor.name", "Order Executor")
+	v.SetDefault("mcp.internal.order_executor.command", "./bin/order-executor-server")
+	v.SetDefault("mcp.internal.order_executor.transport", "stdio")
+
+	v.SetDefault("mcp.internal.risk_analyzer.enabled", true)
+	v.SetDefault("mcp.internal.risk_analyzer.name", "Risk Analyzer")
+	v.SetDefault("mcp.internal.risk_analyzer.command", "./bin/risk-analyzer-server")
+	v.SetDefault("mcp.internal.risk_analyzer.transport", "stdio")
+
+	v.SetDefault("mcp.internal.technical_indicators.enabled", true)
+	v.SetDefault("mcp.internal.technical_indicators.name", "Technical Indicators")
+	v.SetDefault("mcp.internal.technical_indicators.command", "./bin/technical-indicators-server")
+	v.SetDefault("mcp.internal.technical_indicators.transport", "stdio")
+
+	v.SetDefault("mcp.internal.market_data.enabled", false)
+	v.SetDefault("mcp.internal.market_data.name", "Market Data (Binance)")
+	v.SetDefault("mcp.internal.market_data.command", "./bin/market-data-server")
+	v.SetDefault("mcp.internal.market_data.transport", "stdio")
 
 	// Trading defaults
 	v.SetDefault("trading.mode", "paper")
