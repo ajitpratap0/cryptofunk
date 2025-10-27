@@ -12,7 +12,7 @@ brew install go-task/tap/go-task  # macOS/Linux
 winget install Task.Task           # Windows
 
 # Clone and setup
-git clone https://github.com/yourusername/cryptofunk.git
+git clone https://github.com/ajitpratap0/cryptofunk.git
 cd cryptofunk
 cp .env.example .env              # Add your API keys
 task init                          # Initialize everything
@@ -537,7 +537,7 @@ cat docs/TASK_VS_MAKE.md
 
 # Online resources
 # - Task docs: https://taskfile.dev
-# - Project docs: https://github.com/yourusername/cryptofunk
+# - Project docs: https://github.com/ajitpratap0/cryptofunk
 ```
 
 ---

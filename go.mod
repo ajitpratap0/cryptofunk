@@ -1,4 +1,4 @@
-module github.com/ajitpratapsingh/cryptofunk
+module github.com/ajitpratap0/cryptofunk
 
 go 1.25.3
 

@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![MCP](https://img.shields.io/badge/MCP-Official%20SDK-7C3AED?style=flat)](https://github.com/modelcontextprotocol/go-sdk)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-In%20Development-yellow)](https://github.com/yourusername/cryptofunk)
+[![Status](https://img.shields.io/badge/Status-In%20Development-yellow)](https://github.com/ajitpratap0/cryptofunk)
 
 [Documentation](#documentation) •
 [Quick Start](#quick-start) •
@@ -158,7 +158,7 @@ winget install Task.Task
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/cryptofunk.git
+git clone https://github.com/ajitpratap0/cryptofunk.git
 cd cryptofunk
 
 # Copy environment template
@@ -686,8 +686,8 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 ## Support
 
 - **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/cryptofunk/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/cryptofunk/discussions)
+- **Issues**: [GitHub Issues](https://github.com/ajitpratap0/cryptofunk/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ajitpratap0/cryptofunk/discussions)
 - **Email**: support@cryptofunk.io
 
 ---

@@ -58,7 +58,7 @@ git --version
 cd /Users/ajitpratapsingh/dev/cryptofunk
 
 # Initialize Go module
-go mod init github.com/yourusername/cryptofunk
+go mod init github.com/ajitpratap0/cryptofunk
 
 # Add the official MCP Go SDK
 go get github.com/modelcontextprotocol/go-sdk
