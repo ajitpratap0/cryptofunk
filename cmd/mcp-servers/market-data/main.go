@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/adshao/go-binance/v2"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -56,7 +55,7 @@ func main() {
 	binance.UseTestnet = true // Use testnet for development
 
 	// Create market data server
-	marketServer := &MarketDataServer{
+	_ = &MarketDataServer{
 		binanceClient: binanceClient,
 		logger:        logger,
 	}
@@ -72,6 +71,9 @@ func main() {
 
 	logger.Info().Msg("Market Data Server initialized successfully")
 	logger.Info().Msg("Phase 1 complete - Infrastructure and basic structure ready")
+
+	// Keep the server running for demonstration
+	select {}
 }
 
 // registerTools registers MCP tools
@@ -79,9 +81,9 @@ func main() {
 func (s *MarketDataServer) registerTools(srv interface{}) error {
 	// Tool: get_current_price
 	// TODO: Implement with mcp.Server.Handle() in Phase 2
-	var err error
 	_ = srv
 	/*
+	var err error
 	err := srv.AddTool(
 		"get_current_price",
 		"Get current price for a trading symbol",
@@ -156,9 +158,9 @@ func (s *MarketDataServer) registerTools(srv interface{}) error {
 func (s *MarketDataServer) registerResources(srv interface{}) error {
 	// Resource: market://ticker/{symbol}
 	// TODO: Implement with mcp.Server in Phase 2
-	var err error
 	_ = srv
 	/*
+	var err error
 	err := srv.AddResourceTemplate(
 		"market://ticker/{symbol}",
 		"Real-time ticker data for a trading symbol",
