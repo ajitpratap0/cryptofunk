@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/market"
+	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -134,6 +136,13 @@ func testRedisCaching(cfg *config.Config, client *market.CoinGeckoClient) {
 	fmt.Println("    - InvalidateCache(symbol) → Clear specific symbol cache")
 	fmt.Println("    - ClearCache() → Clear all cached data")
 
+	// Test TimescaleDB sync (if Redis is available)
+	if err := redisClient.Ping(ctx).Err(); err == nil {
+		fmt.Println()
+		fmt.Println("Testing TimescaleDB Sync Service:")
+		testTimescaleDBSync(cfg, cachedClient)
+	}
+
 	fmt.Println()
 	fmt.Println("Custom MCP Servers Configuration:")
 	fmt.Printf("  - Order Executor: %v\n", cfg.MCP.Internal.OrderExecutor.Enabled)
@@ -151,4 +160,69 @@ func testRedisCaching(cfg *config.Config, client *market.CoinGeckoClient) {
 	fmt.Println("  - Create analysis and strategy agents")
 	fmt.Println()
 	fmt.Println("=== Phase 1 Complete + Architecture Enhanced! ===")
+}
+
+func testTimescaleDBSync(cfg *config.Config, cachedClient *market.CachedCoinGeckoClient) {
+	// Connect to database
+	db, err := sql.Open("postgres", cfg.Database.GetDSN())
+	if err != nil {
+		fmt.Printf("  ✗ Database connection failed: %v\n", err)
+		fmt.Println("  ℹ Start PostgreSQL with: docker-compose up -d postgres")
+		return
+	}
+	defer db.Close()
+
+	// Test database connection
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		fmt.Printf("  ✗ Database ping failed: %v\n", err)
+		fmt.Println("  ℹ Start PostgreSQL with: docker-compose up -d postgres")
+		return
+	}
+	fmt.Println("  ✓ Database connection established")
+
+	// Create sync service
+	symbols := cfg.Trading.Symbols
+	syncInterval := 15 * time.Minute // Sync every 15 minutes
+	syncService := market.NewSyncService(cachedClient, db, symbols, syncInterval)
+	fmt.Printf("  ✓ Sync service created (interval: %v)\n", syncInterval)
+
+	// Get data statistics for each symbol
+	fmt.Println()
+	fmt.Println("  Data Statistics:")
+	for _, symbol := range symbols {
+		stats, err := syncService.GetDataStats(ctx, symbol)
+		if err != nil {
+			fmt.Printf("    %s: No data yet\n", symbol)
+			continue
+		}
+
+		count := stats["count"].(int)
+		if count > 0 {
+			earliest := stats["earliest"].(time.Time)
+			latest := stats["latest"].(time.Time)
+			daysStored := stats["days_stored"].(int)
+			fmt.Printf("    %s: %d candlesticks (%d days, %s to %s)\n",
+				symbol, count, daysStored,
+				earliest.Format("2006-01-02"), latest.Format("2006-01-02"))
+		} else {
+			fmt.Printf("    %s: No data yet\n", symbol)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("  Sync Service Features:")
+	fmt.Println("    - Periodic sync of historical data from CoinGecko")
+	fmt.Println("    - Stores OHLCV candlesticks in TimescaleDB")
+	fmt.Println("    - Automatic gap detection and backfilling")
+	fmt.Println("    - Fast local backtesting without API calls")
+	fmt.Println()
+	fmt.Println("  Available Methods:")
+	fmt.Println("    - Start(ctx) → Begin periodic sync")
+	fmt.Println("    - Stop() → Stop sync service")
+	fmt.Println("    - GetCandlesticks(symbol, start, end) → Query historical data")
+	fmt.Println("    - GetLatestPrice(symbol) → Get most recent price")
+	fmt.Println("    - GetDataStats(symbol) → Get storage statistics")
 }
