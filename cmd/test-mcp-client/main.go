@@ -7,6 +7,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/market"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -68,6 +69,11 @@ func main() {
 				fmt.Println("  ✓ Health check passed")
 			}
 
+			// Test Redis caching layer
+			fmt.Println()
+			fmt.Println("Testing Redis Caching Layer:")
+			testRedisCaching(cfg, client)
+
 			// Demonstrate API structure (actual calls in Phase 2)
 			fmt.Println()
 			fmt.Println("  Available Methods (Structure Ready):")
@@ -80,6 +86,53 @@ func main() {
 	} else {
 		fmt.Println("  ⚠ CoinGecko MCP is disabled in configuration")
 	}
+}
+
+func testRedisCaching(cfg *config.Config, client *market.CoinGeckoClient) {
+	// Initialize Redis client
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.GetRedisAddr(),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	defer redisClient.Close()
+
+	// Test Redis connection
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		fmt.Printf("  ✗ Redis connection failed: %v\n", err)
+		fmt.Println("  ℹ Start Redis with: docker-compose up -d redis")
+		return
+	}
+	fmt.Println("  ✓ Redis connection established")
+
+	// Create cached client
+	cacheTTL := time.Duration(cfg.MCP.External.CoinGecko.CacheTTL) * time.Second
+	cachedClient := market.NewCachedCoinGeckoClient(client, redisClient, cacheTTL)
+	fmt.Printf("  ✓ Cached client created (TTL: %v)\n", cacheTTL)
+
+	// Test health check with cache
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	if err := cachedClient.Health(ctx2); err != nil {
+		fmt.Printf("  ✗ Cached client health check failed: %v\n", err)
+	} else {
+		fmt.Println("  ✓ Cached client health check passed")
+	}
+
+	// Demonstrate cache behavior
+	fmt.Println()
+	fmt.Println("  Cache Behavior Demo:")
+	fmt.Println("    - First call: Cache miss → Fetch from CoinGecko MCP")
+	fmt.Println("    - Second call: Cache hit → Fast response from Redis")
+	fmt.Println("    - After TTL: Cache expires → Fresh fetch")
+	fmt.Println()
+	fmt.Println("  Cache Management:")
+	fmt.Println("    - InvalidateCache(symbol) → Clear specific symbol cache")
+	fmt.Println("    - ClearCache() → Clear all cached data")
 
 	fmt.Println()
 	fmt.Println("Custom MCP Servers Configuration:")
