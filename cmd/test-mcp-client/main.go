@@ -5,7 +5,8 @@ import (
 )
 
 func main() {
-	fmt.Println("=== CryptoFunk MCP Client Test ===\n")
+	fmt.Println("=== CryptoFunk MCP Client Test ===")
+	fmt.Println()
 	fmt.Println("Phase 1: Infrastructure Setup Complete")
 	fmt.Println("Note: Full MCP client integration will be implemented in Phase 2")
 	fmt.Println()

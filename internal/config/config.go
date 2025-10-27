@@ -9,16 +9,16 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	App          AppConfig          `mapstructure:"app"`
-	Database     DatabaseConfig     `mapstructure:"database"`
-	Redis        RedisConfig        `mapstructure:"redis"`
-	NATS         NATSConfig         `mapstructure:"nats"`
-	LLM          LLMConfig          `mapstructure:"llm"`
-	Trading      TradingConfig      `mapstructure:"trading"`
-	Risk         RiskConfig         `mapstructure:"risk"`
-	Exchanges    map[string]ExchangeConfig `mapstructure:"exchanges"`
-	API          APIConfig          `mapstructure:"api"`
-	Monitoring   MonitoringConfig   `mapstructure:"monitoring"`
+	App        AppConfig                 `mapstructure:"app"`
+	Database   DatabaseConfig            `mapstructure:"database"`
+	Redis      RedisConfig               `mapstructure:"redis"`
+	NATS       NATSConfig                `mapstructure:"nats"`
+	LLM        LLMConfig                 `mapstructure:"llm"`
+	Trading    TradingConfig             `mapstructure:"trading"`
+	Risk       RiskConfig                `mapstructure:"risk"`
+	Exchanges  map[string]ExchangeConfig `mapstructure:"exchanges"`
+	API        APIConfig                 `mapstructure:"api"`
+	Monitoring MonitoringConfig          `mapstructure:"monitoring"`
 }
 
 // AppConfig contains application-level settings
@@ -50,20 +50,20 @@ type RedisConfig struct {
 
 // NATSConfig contains NATS messaging settings
 type NATSConfig struct {
-	URL            string `mapstructure:"url"`
+	URL             string `mapstructure:"url"`
 	EnableJetStream bool   `mapstructure:"enable_jetstream"`
 }
 
 // LLMConfig contains LLM gateway settings
 type LLMConfig struct {
-	Gateway         string  `mapstructure:"gateway"`          // "bifrost"
-	Endpoint        string  `mapstructure:"endpoint"`         // "http://localhost:8080/v1/chat/completions"
-	PrimaryModel    string  `mapstructure:"primary_model"`    // "claude-sonnet-4-20250514"
-	FallbackModel   string  `mapstructure:"fallback_model"`   // "gpt-4-turbo"
-	Temperature     float64 `mapstructure:"temperature"`      // 0.7
-	MaxTokens       int     `mapstructure:"max_tokens"`       // 2000
-	EnableCaching   bool    `mapstructure:"enable_caching"`   // true
-	Timeout         int     `mapstructure:"timeout"`          // 30000 (ms)
+	Gateway       string  `mapstructure:"gateway"`        // "bifrost"
+	Endpoint      string  `mapstructure:"endpoint"`       // "http://localhost:8080/v1/chat/completions"
+	PrimaryModel  string  `mapstructure:"primary_model"`  // "claude-sonnet-4-20250514"
+	FallbackModel string  `mapstructure:"fallback_model"` // "gpt-4-turbo"
+	Temperature   float64 `mapstructure:"temperature"`    // 0.7
+	MaxTokens     int     `mapstructure:"max_tokens"`     // 2000
+	EnableCaching bool    `mapstructure:"enable_caching"` // true
+	Timeout       int     `mapstructure:"timeout"`        // 30000 (ms)
 }
 
 // TradingConfig contains trading settings
@@ -78,13 +78,13 @@ type TradingConfig struct {
 
 // RiskConfig contains risk management settings
 type RiskConfig struct {
-	MaxPositionSize      float64 `mapstructure:"max_position_size"`       // 0.1 (10% of portfolio)
-	MaxDailyLoss         float64 `mapstructure:"max_daily_loss"`          // 0.02 (2%)
-	MaxDrawdown          float64 `mapstructure:"max_drawdown"`            // 0.1 (10%)
-	DefaultStopLoss      float64 `mapstructure:"default_stop_loss"`       // 0.02 (2%)
-	DefaultTakeProfit    float64 `mapstructure:"default_take_profit"`     // 0.05 (5%)
-	LLMApprovalRequired  bool    `mapstructure:"llm_approval_required"`   // true
-	MinConfidence        float64 `mapstructure:"min_confidence"`          // 0.7
+	MaxPositionSize     float64 `mapstructure:"max_position_size"`     // 0.1 (10% of portfolio)
+	MaxDailyLoss        float64 `mapstructure:"max_daily_loss"`        // 0.02 (2%)
+	MaxDrawdown         float64 `mapstructure:"max_drawdown"`          // 0.1 (10%)
+	DefaultStopLoss     float64 `mapstructure:"default_stop_loss"`     // 0.02 (2%)
+	DefaultTakeProfit   float64 `mapstructure:"default_take_profit"`   // 0.05 (5%)
+	LLMApprovalRequired bool    `mapstructure:"llm_approval_required"` // true
+	MinConfidence       float64 `mapstructure:"min_confidence"`        // 0.7
 }
 
 // ExchangeConfig contains exchange-specific settings

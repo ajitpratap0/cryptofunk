@@ -580,3 +580,43 @@ tasks:
       - echo ""
       - echo "Or download from: https://taskfile.dev/installation/"
     silent: true
+
+  # ===========================================
+  # Git Hooks Tasks
+  # ===========================================
+
+  install-hooks:
+    desc: "Install Git hooks for pre-commit checks"
+    cmds:
+      - echo "Installing Git hooks..."
+      - ./scripts/install-hooks.sh
+      - echo "✓ Git hooks installed successfully"
+
+  test-all:
+    desc: "Run all validation checks (full mode)"
+    cmds:
+      - echo "Running comprehensive validation checks..."
+      - ./scripts/test-all.sh
+      - echo "✓ All checks passed"
+
+  test-fast:
+    desc: "Run quick validation checks (skip slow tests)"
+    cmds:
+      - echo "Running fast validation checks..."
+      - ./scripts/test-all.sh --fast
+      - echo "✓ Fast checks passed"
+
+  pre-commit:
+    desc: "Run pre-commit checks manually"
+    cmds:
+      - task: test-fast
+
+  validate:
+    desc: "Validate code quality (format, vet, build)"
+    cmds:
+      - echo "Validating code quality..."
+      - go mod tidy
+      - go fmt ./...
+      - go vet ./...
+      - go build ./...
+      - echo "✓ Code validation passed"

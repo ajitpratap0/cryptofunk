@@ -26,13 +26,13 @@ type MarketDataServer struct {
 
 // TickerData represents ticker information
 type TickerData struct {
-	Symbol           string  `json:"symbol"`
-	Price            string  `json:"price"`
+	Symbol             string `json:"symbol"`
+	Price              string `json:"price"`
 	PriceChangePercent string `json:"priceChangePercent"`
-	Volume           string  `json:"volume"`
-	High24h          string  `json:"high24h"`
-	Low24h           string  `json:"low24h"`
-	Timestamp        int64   `json:"timestamp"`
+	Volume             string `json:"volume"`
+	High24h            string `json:"high24h"`
+	Low24h             string `json:"low24h"`
+	Timestamp          int64  `json:"timestamp"`
 }
 
 func main() {
@@ -83,70 +83,70 @@ func (s *MarketDataServer) registerTools(srv interface{}) error {
 	// TODO: Implement with mcp.Server.Handle() in Phase 2
 	_ = srv
 	/*
-	var err error
-	err := srv.AddTool(
-		"get_current_price",
-		"Get current price for a trading symbol",
-		map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"symbol": map[string]interface{}{
-					"type":        "string",
-					"description": "Trading pair symbol (e.g., BTCUSDT, ETHUSDT)",
+		var err error
+		err := srv.AddTool(
+			"get_current_price",
+			"Get current price for a trading symbol",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"symbol": map[string]interface{}{
+						"type":        "string",
+						"description": "Trading pair symbol (e.g., BTCUSDT, ETHUSDT)",
+					},
 				},
+				"required": []string{"symbol"},
 			},
-			"required": []string{"symbol"},
-		},
-		s.handleGetCurrentPrice,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to add get_current_price tool: %w", err)
-	}
+			s.handleGetCurrentPrice,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to add get_current_price tool: %w", err)
+		}
 
-	// Tool: get_ticker_24h
-	err = srv.AddTool(
-		"get_ticker_24h",
-		"Get 24-hour ticker statistics for a symbol",
-		map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"symbol": map[string]interface{}{
-					"type":        "string",
-					"description": "Trading pair symbol (e.g., BTCUSDT)",
+		// Tool: get_ticker_24h
+		err = srv.AddTool(
+			"get_ticker_24h",
+			"Get 24-hour ticker statistics for a symbol",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"symbol": map[string]interface{}{
+						"type":        "string",
+						"description": "Trading pair symbol (e.g., BTCUSDT)",
+					},
 				},
+				"required": []string{"symbol"},
 			},
-			"required": []string{"symbol"},
-		},
-		s.handleGetTicker24h,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to add get_ticker_24h tool: %w", err)
-	}
+			s.handleGetTicker24h,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to add get_ticker_24h tool: %w", err)
+		}
 
-	// Tool: get_orderbook
-	err = srv.AddTool(
-		"get_orderbook",
-		"Get order book depth for a symbol",
-		map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"symbol": map[string]interface{}{
-					"type":        "string",
-					"description": "Trading pair symbol (e.g., BTCUSDT)",
+		// Tool: get_orderbook
+		err = srv.AddTool(
+			"get_orderbook",
+			"Get order book depth for a symbol",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"symbol": map[string]interface{}{
+						"type":        "string",
+						"description": "Trading pair symbol (e.g., BTCUSDT)",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Depth limit (5, 10, 20, 50, 100, 500, 1000)",
+						"default":     20,
+					},
 				},
-				"limit": map[string]interface{}{
-					"type":        "number",
-					"description": "Depth limit (5, 10, 20, 50, 100, 500, 1000)",
-					"default":     20,
-				},
+				"required": []string{"symbol"},
 			},
-			"required": []string{"symbol"},
-		},
-		s.handleGetOrderbook,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to add get_orderbook tool: %w", err)
-	}
+			s.handleGetOrderbook,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to add get_orderbook tool: %w", err)
+		}
 	*/
 
 	s.logger.Info().Msg("Tools registration structure ready (full implementation in Phase 2)")
@@ -160,16 +160,16 @@ func (s *MarketDataServer) registerResources(srv interface{}) error {
 	// TODO: Implement with mcp.Server in Phase 2
 	_ = srv
 	/*
-	var err error
-	err := srv.AddResourceTemplate(
-		"market://ticker/{symbol}",
-		"Real-time ticker data for a trading symbol",
-		"application/json",
-		s.handleTickerResource,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to add ticker resource: %w", err)
-	}
+		var err error
+		err := srv.AddResourceTemplate(
+			"market://ticker/{symbol}",
+			"Real-time ticker data for a trading symbol",
+			"application/json",
+			s.handleTickerResource,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to add ticker resource: %w", err)
+		}
 	*/
 
 	s.logger.Info().Msg("Resources registration structure ready (full implementation in Phase 2)")
@@ -198,8 +198,8 @@ func (s *MarketDataServer) handleGetCurrentPrice(ctx context.Context, args map[s
 	}
 
 	result := map[string]interface{}{
-		"symbol": prices[0].Symbol,
-		"price":  prices[0].Price,
+		"symbol":    prices[0].Symbol,
+		"price":     prices[0].Price,
 		"timestamp": time.Now().Unix(),
 	}
 
