@@ -1,0 +1,55 @@
+# Prometheus configuration for CryptoFunk
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'cryptofunk'
+    environment: 'development'
+
+# Alerting configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # CryptoFunk API
+  - job_name: 'cryptofunk-api'
+    static_configs:
+      - targets: ['host.docker.internal:8081']
+    metrics_path: '/metrics'
+
+  # CryptoFunk Orchestrator
+  - job_name: 'cryptofunk-orchestrator'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+    metrics_path: '/metrics'
+
+  # Bifrost LLM Gateway
+  - job_name: 'bifrost'
+    static_configs:
+      - targets: ['bifrost:9091']
+    metrics_path: '/metrics'
+
+  # NATS Monitoring
+  - job_name: 'nats'
+    static_configs:
+      - targets: ['nats:8222']
+    metrics_path: '/metrics'
+
+  # PostgreSQL Exporter (if enabled)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+
+  # Redis Exporter (if enabled)
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']

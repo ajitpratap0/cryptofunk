@@ -1,0 +1,72 @@
+# CryptoFunk Configuration
+# Environment variables override these settings with CRYPTOFUNK_ prefix
+# Example: CRYPTOFUNK_TRADING_MODE=live overrides trading.mode
+
+app:
+  name: "CryptoFunk"
+  version: "0.1.0"
+  environment: "development"  # development, staging, production
+  log_level: "info"           # debug, info, warn, error
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "${POSTGRES_PASSWORD}"
+  database: "cryptofunk"
+  ssl_mode: "disable"
+  pool_size: 10
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+nats:
+  url: "nats://localhost:4222"
+  enable_jetstream: true
+
+llm:
+  gateway: "bifrost"
+  endpoint: "http://localhost:8080/v1/chat/completions"
+  primary_model: "claude-sonnet-4-20250514"
+  fallback_model: "gpt-4-turbo"
+  temperature: 0.7
+  max_tokens: 2000
+  enable_caching: true
+  timeout: 30000  # milliseconds
+
+trading:
+  mode: "paper"  # paper or live
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+  exchange: "binance"
+  initial_capital: 10000.0
+  max_positions: 3
+  default_quantity: 0.01
+
+risk:
+  max_position_size: 0.1       # 10% of portfolio
+  max_daily_loss: 0.02         # 2% maximum daily loss
+  max_drawdown: 0.1            # 10% maximum drawdown
+  default_stop_loss: 0.02      # 2% stop loss
+  default_take_profit: 0.05    # 5% take profit
+  llm_approval_required: true  # Require LLM approval for trades
+  min_confidence: 0.7          # Minimum confidence for signals
+
+exchanges:
+  binance:
+    api_key: "${BINANCE_API_KEY}"
+    secret_key: "${BINANCE_SECRET_KEY}"
+    testnet: true
+    rate_limit_ms: 100
+
+api:
+  host: "0.0.0.0"
+  port: 8081
+
+monitoring:
+  prometheus_port: 9100
+  enable_metrics: true
