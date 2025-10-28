@@ -850,11 +850,18 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### 4.1 Trend Following Agent (Week 4, Day 5 - Week 5, Day 1)
 
-- [ ] **T076** [P0] Create Trend Following Agent
-  - cmd/agents/trend-agent/main.go
+- [x] **T076** [P0] Create Trend Following Agent ✅ **COMPLETED** (2025-10-28)
+  - cmd/agents/trend-agent/main.go (650+ lines)
   - Agent initialization with strategy config
-  - **Acceptance**: Agent starts
-  - **Estimate**: 1 hour
+  - EMA crossover detection (golden cross / death cross)
+  - ADX trend strength confirmation
+  - Confidence scoring (60% ADX + 40% EMA separation)
+  - MCP integration for indicators and market data
+  - NATS signal publishing
+  - Configuration: configs/agents.yaml (strategy_agents.trend)
+  - Binary: bin/trend-agent (17MB)
+  - **Acceptance**: Agent starts ✅
+  - **Estimate**: 1 hour | **Actual**: 1.5 hours (including MCP result type fixes)
 
 - [ ] **T077** [P0] Implement EMA crossover detection
   - **Use cinar/indicator**: `indicator.EMA(prices, period)` for fast and slow EMAs

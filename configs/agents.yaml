@@ -161,9 +161,9 @@ analysis_agents:
 # ================================================================================
 
 strategy_agents:
-  trend_following:
+  trend:  # Updated key to match agent name
     enabled: true
-    name: "trend-agent"
+    name: "trend-follower"
     type: "strategy"
     version: "1.0.0"
 
@@ -179,28 +179,25 @@ strategy_agents:
         tools:
           - "calculate_ema"
           - "calculate_adx"
-          - "calculate_macd"
 
-    step_interval: "1m"  # Check for trade opportunities every minute
+    step_interval: "5m"  # Analyze trend every 5 minutes
 
     config:
-      strategy: "trend_following"
-      entry_conditions:
-        min_adx: 25  # Strong trend required
-        ema_crossover: true
-        macd_confirmation: true
+      # Symbols to analyze (CoinGecko IDs)
+      symbols: ["bitcoin", "ethereum"]
 
-      exit_conditions:
-        adx_below: 20  # Weak trend
-        reverse_crossover: true
-        take_profit_pct: 0.05  # 5%
-        stop_loss_pct: 0.02    # 2%
+      # EMA periods for crossover strategy
+      fast_ema_period: 9   # Fast EMA (default: 9)
+      slow_ema_period: 21  # Slow EMA (default: 21)
 
-      position_sizing:
-        method: "kelly"
-        max_size: 0.1  # 10% of portfolio
-        min_size: 0.01  # 1% of portfolio
+      # ADX configuration for trend strength
+      adx_period: 14        # ADX calculation period (default: 14)
+      adx_threshold: 25.0   # Minimum ADX for strong trend (default: 25.0)
 
+      # Data lookback
+      lookback_candles: 100  # Number of historical candles to fetch (default: 100)
+
+      # Confidence weights
       confidence_threshold: 0.75
       vote_weight: 0.4  # Weight in consensus voting
 
@@ -378,6 +375,7 @@ communication:
       sentiment_signals: "agents.analysis.sentiment"
 
       # Strategy decisions
+      trend_signals: "agents.strategy.trend"
       strategy_decisions: "agents.strategy.decisions"
       trade_proposals: "agents.strategy.proposals"
 
