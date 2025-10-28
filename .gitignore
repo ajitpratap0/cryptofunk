@@ -78,3 +78,5 @@ checkpoints/
 *.pkl
 *.pt
 *.pth
+
+.claude/skills/
