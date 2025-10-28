@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -112,6 +113,7 @@ func TestTrendIndicators_TrendDetection(t *testing.T) {
 func TestGenerateTrendSignal_BuySignal(t *testing.T) {
 	agent := &TrendAgent{
 		BaseAgent:     &agents.BaseAgent{},
+		beliefs:       NewBeliefBase(),
 		fastEMAPeriod: 9,
 		slowEMAPeriod: 21,
 		adxThreshold:  25.0,
@@ -142,6 +144,7 @@ func TestGenerateTrendSignal_BuySignal(t *testing.T) {
 func TestGenerateTrendSignal_SellSignal(t *testing.T) {
 	agent := &TrendAgent{
 		BaseAgent:     &agents.BaseAgent{},
+		beliefs:       NewBeliefBase(),
 		fastEMAPeriod: 9,
 		slowEMAPeriod: 21,
 		adxThreshold:  25.0,
@@ -202,6 +205,7 @@ func TestGenerateTrendSignal_HoldSignal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			agent := &TrendAgent{
 				BaseAgent:     &agents.BaseAgent{},
+				beliefs:       NewBeliefBase(),
 				fastEMAPeriod: 9,
 				slowEMAPeriod: 21,
 				adxThreshold:  25.0,
@@ -571,6 +575,7 @@ func TestTrendAgent_FullDecisionCycle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := &TrendAgent{
 				BaseAgent:     &agents.BaseAgent{},
+				beliefs:       NewBeliefBase(),
 				adxThreshold:  25.0,
 				fastEMAPeriod: 9,
 				slowEMAPeriod: 21,
@@ -694,6 +699,7 @@ func TestMax(t *testing.T) {
 func BenchmarkGenerateTrendSignal(b *testing.B) {
 	agent := &TrendAgent{
 		BaseAgent:     &agents.BaseAgent{},
+		beliefs:       NewBeliefBase(),
 		adxThreshold:  25.0,
 		fastEMAPeriod: 9,
 		slowEMAPeriod: 21,
@@ -942,6 +948,7 @@ func TestResetPositionTracking(t *testing.T) {
 func TestRiskManagement_SignalFields(t *testing.T) {
 	agent := &TrendAgent{
 		BaseAgent:       &agents.BaseAgent{},
+		beliefs:         NewBeliefBase(),
 		adxThreshold:    25.0,
 		stopLossPct:     0.01, // 1% stop loss
 		takeProfitPct:   0.03, // 3% take profit
@@ -976,6 +983,7 @@ func TestRiskManagement_SignalFields(t *testing.T) {
 func TestRiskManagement_LowRiskRewardConvertsToHold(t *testing.T) {
 	agent := &TrendAgent{
 		BaseAgent:       &agents.BaseAgent{},
+		beliefs:         NewBeliefBase(),
 		adxThreshold:    25.0,
 		stopLossPct:     0.03, // 3% stop loss
 		takeProfitPct:   0.02, // 2% take profit (lower than stop loss)
@@ -1003,6 +1011,306 @@ func TestRiskManagement_LowRiskRewardConvertsToHold(t *testing.T) {
 	assert.Equal(t, 0.0, signal.TakeProfit)
 	assert.Equal(t, 0.0, signal.RiskReward)
 	assert.Contains(t, signal.Reasoning, "risk/reward")
+}
+
+// ============================================================================
+// BDI (Belief-Desire-Intention) Belief System Tests
+// ============================================================================
+
+func TestBeliefBase_UpdateAndRetrieve(t *testing.T) {
+	bb := NewBeliefBase()
+
+	// Update a belief
+	bb.UpdateBelief("trend_direction", "uptrend", 0.8, "EMA")
+
+	// Retrieve it
+	belief, exists := bb.GetBelief("trend_direction")
+	require.True(t, exists)
+	assert.Equal(t, "trend_direction", belief.Key)
+	assert.Equal(t, "uptrend", belief.Value)
+	assert.Equal(t, 0.8, belief.Confidence)
+	assert.Equal(t, "EMA", belief.Source)
+	assert.False(t, belief.Timestamp.IsZero())
+}
+
+func TestBeliefBase_GetNonExistent(t *testing.T) {
+	bb := NewBeliefBase()
+
+	belief, exists := bb.GetBelief("nonexistent")
+	assert.False(t, exists)
+	assert.Nil(t, belief)
+}
+
+func TestBeliefBase_UpdateExisting(t *testing.T) {
+	bb := NewBeliefBase()
+
+	// Initial belief
+	bb.UpdateBelief("trend_direction", "uptrend", 0.6, "EMA")
+	firstTimestamp, _ := bb.GetBelief("trend_direction")
+
+	// Update with new value
+	time.Sleep(10 * time.Millisecond) // Ensure timestamp difference
+	bb.UpdateBelief("trend_direction", "downtrend", 0.9, "ADX")
+
+	// Verify update
+	belief, exists := bb.GetBelief("trend_direction")
+	require.True(t, exists)
+	assert.Equal(t, "downtrend", belief.Value)
+	assert.Equal(t, 0.9, belief.Confidence)
+	assert.Equal(t, "ADX", belief.Source)
+	assert.True(t, belief.Timestamp.After(firstTimestamp.Timestamp))
+}
+
+func TestBeliefBase_GetAllBeliefs(t *testing.T) {
+	bb := NewBeliefBase()
+
+	// Add multiple beliefs
+	bb.UpdateBelief("trend_direction", "uptrend", 0.8, "EMA")
+	bb.UpdateBelief("trend_strength", "strong", 0.7, "ADX")
+	bb.UpdateBelief("position_state", "long", 1.0, "agent_state")
+
+	// Get all
+	beliefs := bb.GetAllBeliefs()
+	assert.Equal(t, 3, len(beliefs))
+
+	// Verify all beliefs present
+	assert.Contains(t, beliefs, "trend_direction")
+	assert.Contains(t, beliefs, "trend_strength")
+	assert.Contains(t, beliefs, "position_state")
+
+	// Verify it's a copy (modify shouldn't affect original)
+	beliefs["new_belief"] = &Belief{Key: "test"}
+	assert.Equal(t, 3, len(bb.GetAllBeliefs())) // Still 3
+}
+
+func TestBeliefBase_GetConfidence(t *testing.T) {
+	bb := NewBeliefBase()
+
+	// Empty belief base
+	assert.Equal(t, 0.0, bb.GetConfidence())
+
+	// Add beliefs with known confidences
+	bb.UpdateBelief("belief1", "value1", 0.6, "source1")
+	bb.UpdateBelief("belief2", "value2", 0.8, "source2")
+	bb.UpdateBelief("belief3", "value3", 1.0, "source3")
+
+	// Average: (0.6 + 0.8 + 1.0) / 3 = 0.8
+	assert.InDelta(t, 0.8, bb.GetConfidence(), 0.01)
+}
+
+func TestUpdateBeliefs_StrongUptrend(t *testing.T) {
+	agent := &TrendAgent{
+		BaseAgent:    &agents.BaseAgent{},
+		beliefs:      NewBeliefBase(),
+		adxThreshold: 25.0,
+		lastSignal:   "HOLD",
+	}
+
+	indicators := &TrendIndicators{
+		FastEMA:   50000.0,
+		SlowEMA:   48000.0,
+		ADX:       35.0,
+		Trend:     "uptrend",
+		Strength:  "strong",
+		Timestamp: time.Now(),
+	}
+
+	agent.updateBeliefs("bitcoin", indicators, 50000.0)
+
+	// Verify trend direction belief
+	trendDir, exists := agent.beliefs.GetBelief("trend_direction")
+	require.True(t, exists)
+	assert.Equal(t, "uptrend", trendDir.Value)
+	assert.Equal(t, 0.8, trendDir.Confidence) // Strong trend = 0.8
+	assert.Equal(t, "EMA_crossover", trendDir.Source)
+
+	// Verify trend strength belief
+	trendStrength, exists := agent.beliefs.GetBelief("trend_strength")
+	require.True(t, exists)
+	assert.Equal(t, "strong", trendStrength.Value)
+	assert.InDelta(t, 0.35, trendStrength.Confidence, 0.01) // ADX/100 = 35/100
+	assert.Equal(t, "ADX", trendStrength.Source)
+
+	// Verify EMA beliefs
+	fastEMA, exists := agent.beliefs.GetBelief("fast_ema")
+	require.True(t, exists)
+	assert.Equal(t, 50000.0, fastEMA.Value)
+	assert.Equal(t, 0.9, fastEMA.Confidence)
+
+	slowEMA, exists := agent.beliefs.GetBelief("slow_ema")
+	require.True(t, exists)
+	assert.Equal(t, 48000.0, slowEMA.Value)
+	assert.Equal(t, 0.9, slowEMA.Confidence)
+
+	// Verify position state
+	posState, exists := agent.beliefs.GetBelief("position_state")
+	require.True(t, exists)
+	assert.Equal(t, "none", posState.Value) // lastSignal was HOLD
+	assert.Equal(t, 1.0, posState.Confidence)
+
+	// Verify price and symbol
+	price, exists := agent.beliefs.GetBelief("current_price")
+	require.True(t, exists)
+	assert.Equal(t, 50000.0, price.Value)
+
+	symbol, exists := agent.beliefs.GetBelief("symbol")
+	require.True(t, exists)
+	assert.Equal(t, "bitcoin", symbol.Value)
+
+	// Overall confidence should be reasonable
+	assert.Greater(t, agent.beliefs.GetConfidence(), 0.5)
+}
+
+func TestUpdateBeliefs_WeakDowntrend(t *testing.T) {
+	agent := &TrendAgent{
+		BaseAgent:    &agents.BaseAgent{},
+		beliefs:      NewBeliefBase(),
+		adxThreshold: 25.0,
+		lastSignal:   "SELL",
+	}
+
+	indicators := &TrendIndicators{
+		FastEMA:   48000.0,
+		SlowEMA:   50000.0,
+		ADX:       18.0, // Below threshold
+		Trend:     "downtrend",
+		Strength:  "weak",
+		Timestamp: time.Now(),
+	}
+
+	agent.updateBeliefs("ethereum", indicators, 48000.0)
+
+	// Verify trend direction belief
+	trendDir, exists := agent.beliefs.GetBelief("trend_direction")
+	require.True(t, exists)
+	assert.Equal(t, "downtrend", trendDir.Value)
+	assert.Equal(t, 0.4, trendDir.Confidence) // Weak trend = 0.4
+
+	// Verify trend strength belief
+	trendStrength, exists := agent.beliefs.GetBelief("trend_strength")
+	require.True(t, exists)
+	assert.Equal(t, "weak", trendStrength.Value)
+	assert.InDelta(t, 0.18, trendStrength.Confidence, 0.01) // ADX/100 = 18/100
+
+	// Verify position state (should be "short" because lastSignal was SELL)
+	posState, exists := agent.beliefs.GetBelief("position_state")
+	require.True(t, exists)
+	assert.Equal(t, "short", posState.Value)
+}
+
+func TestUpdateBeliefs_RangingMarket(t *testing.T) {
+	agent := &TrendAgent{
+		BaseAgent:    &agents.BaseAgent{},
+		beliefs:      NewBeliefBase(),
+		adxThreshold: 25.0,
+		lastSignal:   "BUY",
+	}
+
+	indicators := &TrendIndicators{
+		FastEMA:   49500.0,
+		SlowEMA:   49500.0, // EMAs converged
+		ADX:       20.0,
+		Trend:     "ranging",
+		Strength:  "weak",
+		Timestamp: time.Now(),
+	}
+
+	agent.updateBeliefs("bitcoin", indicators, 49500.0)
+
+	// Verify trend direction belief
+	trendDir, exists := agent.beliefs.GetBelief("trend_direction")
+	require.True(t, exists)
+	assert.Equal(t, "ranging", trendDir.Value)
+	assert.Equal(t, 0.4, trendDir.Confidence) // Weak = 0.4
+
+	// Position state should be "long" because lastSignal was BUY
+	posState, exists := agent.beliefs.GetBelief("position_state")
+	require.True(t, exists)
+	assert.Equal(t, "long", posState.Value)
+}
+
+func TestSignalContainsBeliefs(t *testing.T) {
+	agent := &TrendAgent{
+		BaseAgent:       &agents.BaseAgent{},
+		beliefs:         NewBeliefBase(),
+		adxThreshold:    25.0,
+		stopLossPct:     0.02,
+		takeProfitPct:   0.03,
+		trailingStopPct: 0.015,
+		useTrailingStop: true,
+		riskRewardRatio: 1.0, // Lower threshold so signal passes risk/reward check
+		lastSignal:      "HOLD",
+	}
+
+	// Update beliefs first
+	indicators := &TrendIndicators{
+		FastEMA:   50000.0,
+		SlowEMA:   48000.0,
+		ADX:       30.0,
+		Trend:     "uptrend",
+		Strength:  "strong",
+		Timestamp: time.Now(),
+	}
+
+	agent.updateBeliefs("bitcoin", indicators, 50000.0)
+
+	// Generate signal
+	ctx := context.Background()
+	signal, err := agent.generateTrendSignal(ctx, "bitcoin", indicators, 50000.0)
+
+	require.NoError(t, err)
+	assert.Equal(t, "BUY", signal.Signal)
+
+	// Verify beliefs are included in signal
+	require.NotNil(t, signal.Beliefs)
+	assert.Greater(t, len(signal.Beliefs), 0)
+
+	// Spot check some beliefs
+	assert.Contains(t, signal.Beliefs, "trend_direction")
+	assert.Contains(t, signal.Beliefs, "trend_strength")
+	assert.Contains(t, signal.Beliefs, "fast_ema")
+	assert.Contains(t, signal.Beliefs, "slow_ema")
+	assert.Contains(t, signal.Beliefs, "current_price")
+}
+
+func TestBeliefBase_ThreadSafety(t *testing.T) {
+	bb := NewBeliefBase()
+	done := make(chan bool)
+
+	// Concurrent writes
+	for i := 0; i < 10; i++ {
+		go func(id int) {
+			for j := 0; j < 100; j++ {
+				bb.UpdateBelief(
+					fmt.Sprintf("belief_%d", id),
+					fmt.Sprintf("value_%d", j),
+					float64(j)/100.0,
+					"test",
+				)
+			}
+			done <- true
+		}(i)
+	}
+
+	// Concurrent reads
+	for i := 0; i < 5; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				bb.GetAllBeliefs()
+				bb.GetConfidence()
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 15; i++ {
+		<-done
+	}
+
+	// Verify data integrity
+	beliefs := bb.GetAllBeliefs()
+	assert.Equal(t, 10, len(beliefs)) // Should have 10 beliefs (one per writer goroutine)
 }
 
 // TestMain can be used for setup/teardown if needed

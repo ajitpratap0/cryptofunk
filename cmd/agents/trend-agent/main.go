@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,6 +45,9 @@ type TrendAgent struct {
 	useTrailingStop bool    // Whether to use trailing stop-loss
 	riskRewardRatio float64 // Minimum risk/reward ratio (e.g., 2.0)
 
+	// BDI (Belief-Desire-Intention) architecture
+	beliefs *BeliefBase // Agent's beliefs about market state
+
 	// Cached indicator values
 	currentIndicators *TrendIndicators
 
@@ -68,17 +72,93 @@ type TrendIndicators struct {
 
 // TrendSignal represents a trend-following trading signal
 type TrendSignal struct {
-	Timestamp    time.Time        `json:"timestamp"`
-	Symbol       string           `json:"symbol"`
-	Signal       string           `json:"signal"`     // "BUY", "SELL", "HOLD"
-	Confidence   float64          `json:"confidence"` // 0.0 to 1.0
-	Indicators   *TrendIndicators `json:"indicators"`
-	Reasoning    string           `json:"reasoning"`
-	Price        float64          `json:"price"`
-	StopLoss     float64          `json:"stop_loss,omitempty"`     // Calculated stop-loss price
-	TakeProfit   float64          `json:"take_profit,omitempty"`   // Calculated take-profit price
-	TrailingStop float64          `json:"trailing_stop,omitempty"` // Current trailing stop price
-	RiskReward   float64          `json:"risk_reward,omitempty"`   // Actual risk/reward ratio
+	Timestamp    time.Time          `json:"timestamp"`
+	Symbol       string             `json:"symbol"`
+	Signal       string             `json:"signal"`     // "BUY", "SELL", "HOLD"
+	Confidence   float64            `json:"confidence"` // 0.0 to 1.0
+	Indicators   *TrendIndicators   `json:"indicators"`
+	Reasoning    string             `json:"reasoning"`
+	Price        float64            `json:"price"`
+	StopLoss     float64            `json:"stop_loss,omitempty"`     // Calculated stop-loss price
+	TakeProfit   float64            `json:"take_profit,omitempty"`   // Calculated take-profit price
+	TrailingStop float64            `json:"trailing_stop,omitempty"` // Current trailing stop price
+	RiskReward   float64            `json:"risk_reward,omitempty"`   // Actual risk/reward ratio
+	Beliefs      map[string]*Belief `json:"beliefs,omitempty"`       // Current beliefs for transparency
+}
+
+// Belief represents a single belief in the agent's belief base
+// Part of BDI (Belief-Desire-Intention) architecture
+type Belief struct {
+	Key        string      `json:"key"`        // Belief identifier (e.g., "trend_direction", "trend_strength")
+	Value      interface{} `json:"value"`      // Belief value (can be string, number, bool, etc.)
+	Confidence float64     `json:"confidence"` // Confidence level (0.0 to 1.0)
+	Timestamp  time.Time   `json:"timestamp"`  // When belief was last updated
+	Source     string      `json:"source"`     // Source of belief (e.g., "EMA", "ADX", "price_action")
+}
+
+// BeliefBase represents the agent's beliefs about the market
+// Implements basic BDI (Belief-Desire-Intention) architecture
+type BeliefBase struct {
+	beliefs map[string]*Belief // Map of belief key -> belief
+	mutex   sync.RWMutex       // Thread-safe access
+}
+
+// NewBeliefBase creates a new belief base
+func NewBeliefBase() *BeliefBase {
+	return &BeliefBase{
+		beliefs: make(map[string]*Belief),
+	}
+}
+
+// UpdateBelief updates or creates a belief
+func (bb *BeliefBase) UpdateBelief(key string, value interface{}, confidence float64, source string) {
+	bb.mutex.Lock()
+	defer bb.mutex.Unlock()
+
+	bb.beliefs[key] = &Belief{
+		Key:        key,
+		Value:      value,
+		Confidence: confidence,
+		Timestamp:  time.Now(),
+		Source:     source,
+	}
+}
+
+// GetBelief retrieves a belief by key
+func (bb *BeliefBase) GetBelief(key string) (*Belief, bool) {
+	bb.mutex.RLock()
+	defer bb.mutex.RUnlock()
+
+	belief, exists := bb.beliefs[key]
+	return belief, exists
+}
+
+// GetAllBeliefs returns a copy of all beliefs
+func (bb *BeliefBase) GetAllBeliefs() map[string]*Belief {
+	bb.mutex.RLock()
+	defer bb.mutex.RUnlock()
+
+	beliefs := make(map[string]*Belief, len(bb.beliefs))
+	for k, v := range bb.beliefs {
+		beliefs[k] = v
+	}
+	return beliefs
+}
+
+// GetConfidence returns overall confidence (average of all beliefs)
+func (bb *BeliefBase) GetConfidence() float64 {
+	bb.mutex.RLock()
+	defer bb.mutex.RUnlock()
+
+	if len(bb.beliefs) == 0 {
+		return 0.0
+	}
+
+	var total float64
+	for _, belief := range bb.beliefs {
+		total += belief.Confidence
+	}
+	return total / float64(len(bb.beliefs))
 }
 
 // NewTrendAgent creates a new trend following agent
@@ -143,6 +223,7 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 		trailingStopPct: trailingStopPct,
 		useTrailingStop: useTrailingStop,
 		riskRewardRatio: riskRewardRatio,
+		beliefs:         NewBeliefBase(), // Initialize BDI belief system
 		lastCrossover:   "none",
 		lastSignal:      "HOLD",
 	}, nil
@@ -196,6 +277,9 @@ func (a *TrendAgent) Step(ctx context.Context) error {
 		Str("trend", indicators.Trend).
 		Str("strength", indicators.Strength).
 		Msg("Trend indicators calculated")
+
+	// Step 2.5: Update agent beliefs (BDI architecture)
+	a.updateBeliefs(symbol, indicators, currentPrice)
 
 	// Step 3: Generate trading signal from trend analysis
 	signal, err := a.generateTrendSignal(ctx, symbol, indicators, currentPrice)
@@ -386,6 +470,7 @@ func (a *TrendAgent) generateTrendSignal(ctx context.Context, symbol string, ind
 		TakeProfit:   takeProfit,
 		TrailingStop: trailingStop,
 		RiskReward:   riskReward,
+		Beliefs:      a.beliefs.GetAllBeliefs(), // Include current beliefs for transparency
 	}, nil
 }
 
@@ -506,6 +591,101 @@ func (a *TrendAgent) resetPositionTracking() {
 	a.highestPrice = 0
 	a.lowestPrice = 0
 	log.Debug().Msg("Position tracking reset")
+}
+
+// updateBeliefs updates the agent's beliefs based on current market observations
+// This implements the BDI architecture's belief update mechanism
+func (a *TrendAgent) updateBeliefs(symbol string, indicators *TrendIndicators, currentPrice float64) {
+	log.Debug().Msg("Updating agent beliefs from trend indicators")
+
+	// Update trend direction belief
+	trendConfidence := 0.5 // Base confidence
+	if indicators.Strength == "strong" {
+		trendConfidence = 0.8
+	} else if indicators.Strength == "weak" {
+		trendConfidence = 0.4
+	}
+
+	a.beliefs.UpdateBelief(
+		"trend_direction",
+		indicators.Trend, // "uptrend", "downtrend", "ranging"
+		trendConfidence,
+		"EMA_crossover",
+	)
+
+	// Update trend strength belief
+	adxConfidence := math.Min(indicators.ADX/100.0, 1.0) // Normalize ADX (0-100) to 0-1
+	a.beliefs.UpdateBelief(
+		"trend_strength",
+		indicators.Strength, // "strong", "weak"
+		adxConfidence,
+		"ADX",
+	)
+
+	// Update Fast EMA belief
+	a.beliefs.UpdateBelief(
+		"fast_ema",
+		indicators.FastEMA,
+		0.9, // EMA values are reliable
+		"EMA",
+	)
+
+	// Update Slow EMA belief
+	a.beliefs.UpdateBelief(
+		"slow_ema",
+		indicators.SlowEMA,
+		0.9, // EMA values are reliable
+		"EMA",
+	)
+
+	// Update ADX value belief
+	a.beliefs.UpdateBelief(
+		"adx_value",
+		indicators.ADX,
+		adxConfidence,
+		"ADX",
+	)
+
+	// Update position state belief
+	positionState := "none"
+	if a.lastSignal == "BUY" {
+		positionState = "long"
+	} else if a.lastSignal == "SELL" {
+		positionState = "short"
+	}
+
+	a.beliefs.UpdateBelief(
+		"position_state",
+		positionState,
+		1.0, // Position state is always known
+		"agent_state",
+	)
+
+	// Update current price belief
+	a.beliefs.UpdateBelief(
+		"current_price",
+		currentPrice,
+		1.0, // Price data is always reliable
+		"market_data",
+	)
+
+	// Update symbol belief
+	a.beliefs.UpdateBelief(
+		"symbol",
+		symbol,
+		1.0,
+		"config",
+	)
+
+	// Log belief update summary
+	log.Debug().
+		Str("trend_direction", indicators.Trend).
+		Str("trend_strength", indicators.Strength).
+		Float64("adx", indicators.ADX).
+		Str("position_state", positionState).
+		Float64("overall_confidence", a.beliefs.GetConfidence()).
+		Int("belief_count", len(a.beliefs.GetAllBeliefs())).
+		Msg("Beliefs updated successfully")
 }
 
 // callCalculateEMA calls the Technical Indicators MCP server to calculate EMA
