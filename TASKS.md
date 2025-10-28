@@ -940,12 +940,15 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Agent compiles and builds successfully ✅
   - **Estimate**: 1 hour → **Actual**: 1 hour
 
-- [ ] **T085** [P0] Implement Bollinger Band strategy
-  - **Use cinar/indicator**: `indicator.BollingerBands(prices, period, stdDev)`
-  - Detect price touching lower/upper bands
-  - Identify oversold (price < lower) / overbought (price > upper) conditions
-  - **Acceptance**: Band touches detected
-  - **Estimate**: 2 hours (reduced from 3 hours with library)
+- [x] **T085** [P0] Implement Bollinger Band strategy ✅ **COMPLETED 2025-10-28**
+  - Implemented Bollinger Band calculation using MCP Technical Indicators server
+  - Added BollingerIndicators struct with upper/middle/lower bands, bandwidth, and position tracking
+  - Implemented detectBandPosition() for 5-state position detection (above_upper, at_upper, between, at_lower, below_lower)
+  - Implemented detectBandTouch() for signal generation (BUY on oversold, SELL on overbought) with dynamic confidence (0.7-0.9)
+  - Integrated Bollinger logic into Step() decision cycle with price data fetching and belief updates
+  - **Files**: calculateBollingerBands(), detectBandPosition(), detectBandTouch(), updateBollingerBeliefs() in main.go
+  - **Acceptance**: Band touches detected ✅ - Agent compiles successfully
+  - **Estimate**: 2 hours → **Actual**: 1.5 hours
 
 - [ ] **T086** [P0] Implement RSI extremes detection
   - Call Technical Indicators Server for RSI

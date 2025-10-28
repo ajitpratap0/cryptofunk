@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -139,19 +141,40 @@ type ReversionAgent struct {
 	mutex      sync.RWMutex
 }
 
+// BollingerIndicators holds Bollinger Band calculations
+type BollingerIndicators struct {
+	UpperBand  float64   `json:"upper_band"`  // Upper Bollinger Band (mean + k*stddev)
+	MiddleBand float64   `json:"middle_band"` // Middle band (SMA)
+	LowerBand  float64   `json:"lower_band"`  // Lower Bollinger Band (mean - k*stddev)
+	Bandwidth  float64   `json:"bandwidth"`   // (Upper - Lower) / Middle (volatility measure)
+	Position   string    `json:"position"`    // "above_upper", "below_lower", "between", "at_upper", "at_lower"
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+// MarketRegime represents the current market state
+type MarketRegime struct {
+	Type       string    `json:"type"`       // "ranging", "trending", "volatile"
+	ADX        float64   `json:"adx"`        // ADX value for trend strength
+	Confidence float64   `json:"confidence"` // Confidence in regime assessment
+	Timestamp  time.Time `json:"timestamp"`
+}
+
 // ReversionSignal represents a mean reversion trading signal
 type ReversionSignal struct {
-	AgentID    string             `json:"agent_id"`
-	Symbol     string             `json:"symbol"`
-	Signal     string             `json:"signal"` // BUY, SELL, HOLD
-	Confidence float64            `json:"confidence"`
-	Price      float64            `json:"price"`
-	StopLoss   float64            `json:"stop_loss"`
-	TakeProfit float64            `json:"take_profit"`
-	RiskReward float64            `json:"risk_reward"`
-	Reasoning  string             `json:"reasoning"`
-	Timestamp  time.Time          `json:"timestamp"`
-	Beliefs    map[string]*Belief `json:"beliefs,omitempty"`
+	AgentID        string               `json:"agent_id"`
+	Symbol         string               `json:"symbol"`
+	Signal         string               `json:"signal"` // BUY, SELL, HOLD
+	Confidence     float64              `json:"confidence"`
+	Price          float64              `json:"price"`
+	StopLoss       float64              `json:"stop_loss"`
+	TakeProfit     float64              `json:"take_profit"`
+	RiskReward     float64              `json:"risk_reward"`
+	Reasoning      string               `json:"reasoning"`
+	Timestamp      time.Time            `json:"timestamp"`
+	BollingerBands *BollingerIndicators `json:"bollinger_bands,omitempty"`
+	MarketRegime   *MarketRegime        `json:"market_regime,omitempty"`
+	RSI            float64              `json:"rsi,omitempty"`
+	Beliefs        map[string]*Belief   `json:"beliefs,omitempty"`
 }
 
 // NewReversionAgent creates a new Mean Reversion Agent
@@ -236,19 +259,69 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 
 	log.Debug().Msg("Executing mean reversion strategy step")
 
-	// TODO: Implement decision cycle in subsequent tasks:
-	// - T085: Fetch price data and calculate Bollinger Bands
-	// - T086: Calculate RSI and detect extremes
-	// - T087: Detect market regime (ranging vs trending)
-	// - T088: Generate mean reversion signals
-	// - T089: Apply risk management and publish signals
+	// Step 1: Fetch market data
+	symbols := a.getSymbolsToAnalyze()
+	if len(symbols) == 0 {
+		log.Warn().Msg("No symbols to analyze")
+		return nil
+	}
 
-	// For now, just update basic beliefs
-	a.updateBasicBeliefs()
+	symbol := symbols[0] // Analyze first symbol
+	log.Debug().Str("symbol", symbol).Msg("Analyzing symbol for mean reversion")
+
+	// Fetch price data (need enough candles for Bollinger Band calculations)
+	prices, currentPrice, err := a.fetchPriceData(ctx, symbol)
+	if err != nil {
+		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch price data")
+		return fmt.Errorf("failed to fetch market data: %w", err)
+	}
+
+	log.Debug().
+		Str("symbol", symbol).
+		Int("price_count", len(prices)).
+		Float64("current_price", currentPrice).
+		Msg("Retrieved price data")
+
+	// Step 2: Calculate Bollinger Bands (T085)
+	bollinger, err := a.calculateBollingerBands(ctx, symbol, prices)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to calculate Bollinger Bands")
+		return fmt.Errorf("Bollinger Band calculation failed: %w", err)
+	}
+
+	log.Info().
+		Float64("upper_band", bollinger.UpperBand).
+		Float64("middle_band", bollinger.MiddleBand).
+		Float64("lower_band", bollinger.LowerBand).
+		Float64("bandwidth", bollinger.Bandwidth).
+		Str("position", bollinger.Position).
+		Msg("Bollinger Bands calculated")
+
+	// Step 2.5: Detect band touch and generate signal
+	signal, confidence, reasoning := a.detectBandTouch(bollinger, currentPrice)
+
+	log.Info().
+		Str("signal", signal).
+		Float64("confidence", confidence).
+		Str("reasoning", reasoning).
+		Msg("Bollinger Band signal detected")
+
+	// Step 3: Update agent beliefs with Bollinger Band data
+	a.updateBollingerBeliefs(bollinger, currentPrice)
+	a.beliefs.UpdateBelief("last_signal", signal, confidence, "bollinger_bands")
+
+	// Update agent state
+	a.lastSignal = signal
 
 	log.Debug().
 		Float64("overall_confidence", a.beliefs.GetConfidence()).
 		Msg("Decision cycle complete")
+
+	// TODO: Remaining tasks:
+	// - T086: Calculate RSI and detect extremes (combine with Bollinger for confirmation)
+	// - T087: Detect market regime (ranging vs trending) - only trade in ranging markets
+	// - T088: Implement quick exit logic (tight stops, small profit targets)
+	// - T089: Generate full trading signal with risk management and publish to NATS
 
 	return nil
 }
@@ -261,6 +334,261 @@ func (a *ReversionAgent) updateBasicBeliefs() {
 	a.beliefs.UpdateBelief("strategy", "mean_reversion", 1.0, "config")
 
 	// Market beliefs will be added in subsequent tasks (T085-T089)
+}
+
+// getSymbolsToAnalyze returns the list of symbols to analyze
+func (a *ReversionAgent) getSymbolsToAnalyze() []string {
+	return a.symbols
+}
+
+// fetchPriceData fetches historical price data from CoinGecko
+func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]float64, float64, error) {
+	// Calculate days needed for lookback candles (using hourly data)
+	days := max(1, (a.lookbackCandles+23)/24)
+
+	// Call CoinGecko MCP tool
+	result, err := a.CallMCPTool(ctx, "coingecko", "get_market_chart", map[string]interface{}{
+		"id":          symbol,
+		"vs_currency": "usd",
+		"days":        days,
+		"interval":    "hourly",
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("MCP tool call failed: %w", err)
+	}
+
+	// Extract text content
+	if len(result.Content) == 0 {
+		return nil, 0, fmt.Errorf("empty result from CoinGecko")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, 0, fmt.Errorf("invalid content type")
+	}
+
+	// Parse JSON - CoinGecko returns {prices: [[timestamp, price], ...]}
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	pricesRaw, ok := resultMap["prices"].([]interface{})
+	if !ok {
+		return nil, 0, fmt.Errorf("prices field not found")
+	}
+
+	// Extract close prices
+	prices := make([]float64, 0, len(pricesRaw))
+	var latestPrice float64
+
+	for _, p := range pricesRaw {
+		point, ok := p.([]interface{})
+		if !ok || len(point) != 2 {
+			continue
+		}
+
+		price, ok := point[1].(float64)
+		if !ok {
+			continue
+		}
+
+		prices = append(prices, price)
+		latestPrice = price // Keep track of latest
+	}
+
+	if len(prices) == 0 {
+		return nil, 0, fmt.Errorf("no price data available")
+	}
+
+	log.Debug().
+		Str("symbol", symbol).
+		Int("days", days).
+		Int("candles", len(prices)).
+		Float64("latest_price", latestPrice).
+		Msg("Fetched price data from CoinGecko")
+
+	return prices, latestPrice, nil
+}
+
+// ============================================================================
+// BOLLINGER BAND STRATEGY (T085)
+// ============================================================================
+
+// calculateBollingerBands fetches price data and calculates Bollinger Bands using MCP server
+func (a *ReversionAgent) calculateBollingerBands(ctx context.Context, symbol string, priceData []float64) (*BollingerIndicators, error) {
+	log.Debug().
+		Str("symbol", symbol).
+		Int("data_points", len(priceData)).
+		Int("period", a.bollingerPeriod).
+		Float64("std_dev", a.bollingerStdDev).
+		Msg("Calculating Bollinger Bands")
+
+	// Call Technical Indicators MCP server for Bollinger Bands
+	result, err := a.CallMCPTool(ctx, "technical_indicators", "calculate_bollinger_bands", map[string]interface{}{
+		"prices": priceData,
+		"period": a.bollingerPeriod,
+		"k":      a.bollingerStdDev, // Number of standard deviations
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate Bollinger Bands: %w", err)
+	}
+
+	// Parse result - extract text content
+	if len(result.Content) == 0 {
+		return nil, fmt.Errorf("empty result from technical indicators server")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, fmt.Errorf("invalid content type")
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
+		return nil, fmt.Errorf("failed to parse Bollinger Bands result: %w", err)
+	}
+
+	// Extract band values (last value in each array)
+	upperBands := data["upper_band"].([]interface{})
+	middleBands := data["middle_band"].([]interface{})
+	lowerBands := data["lower_band"].([]interface{})
+
+	if len(upperBands) == 0 || len(middleBands) == 0 || len(lowerBands) == 0 {
+		return nil, fmt.Errorf("insufficient data for Bollinger Bands calculation")
+	}
+
+	// Get current (last) values
+	upperBand := upperBands[len(upperBands)-1].(float64)
+	middleBand := middleBands[len(middleBands)-1].(float64)
+	lowerBand := lowerBands[len(lowerBands)-1].(float64)
+
+	// Calculate bandwidth (volatility measure)
+	bandwidth := 0.0
+	if middleBand > 0 {
+		bandwidth = (upperBand - lowerBand) / middleBand
+	}
+
+	// Detect position relative to bands
+	currentPrice := priceData[len(priceData)-1]
+	position := a.detectBandPosition(currentPrice, upperBand, middleBand, lowerBand)
+
+	indicators := &BollingerIndicators{
+		UpperBand:  upperBand,
+		MiddleBand: middleBand,
+		LowerBand:  lowerBand,
+		Bandwidth:  bandwidth,
+		Position:   position,
+		Timestamp:  time.Now(),
+	}
+
+	log.Debug().
+		Float64("upper", upperBand).
+		Float64("middle", middleBand).
+		Float64("lower", lowerBand).
+		Float64("bandwidth", bandwidth).
+		Str("position", position).
+		Msg("Bollinger Bands calculated")
+
+	return indicators, nil
+}
+
+// detectBandPosition determines where price is relative to Bollinger Bands
+func (a *ReversionAgent) detectBandPosition(price, upperBand, middleBand, lowerBand float64) string {
+	// Calculate thresholds (within 0.5% of band = "at band")
+	touchThreshold := 0.005 // 0.5%
+	upperThreshold := upperBand * (1 - touchThreshold)
+	lowerThreshold := lowerBand * (1 + touchThreshold)
+
+	if price >= upperThreshold && price <= upperBand {
+		return "at_upper" // Price touching upper band (overbought signal)
+	} else if price >= lowerBand && price <= lowerThreshold {
+		return "at_lower" // Price touching lower band (oversold signal)
+	} else if price > upperBand {
+		return "above_upper" // Price above upper band (extreme overbought)
+	} else if price < lowerBand {
+		return "below_lower" // Price below lower band (extreme oversold)
+	} else {
+		return "between" // Price between bands (no signal)
+	}
+}
+
+// detectBandTouch checks if current price is touching Bollinger Bands
+// Returns: signal type ("BUY", "SELL", "HOLD"), confidence (0.0-1.0), reasoning
+func (a *ReversionAgent) detectBandTouch(indicators *BollingerIndicators, currentPrice float64) (string, float64, string) {
+	position := indicators.Position
+
+	// Mean reversion signals:
+	// - Price at lower band = oversold = BUY signal (expect bounce back up)
+	// - Price at upper band = overbought = SELL signal (expect pullback down)
+	// - Price between bands = no clear signal = HOLD
+
+	switch position {
+	case "at_lower", "below_lower":
+		// Oversold condition - price likely to revert UP
+		confidence := 0.7
+		if position == "below_lower" {
+			confidence = 0.8 // Higher confidence when price is extremely low
+		}
+		// Adjust confidence based on bandwidth (tighter bands = higher confidence)
+		if indicators.Bandwidth < 0.05 { // Low volatility
+			confidence += 0.1
+		}
+		confidence = math.Min(confidence, 1.0)
+
+		reasoning := fmt.Sprintf("Price %.2f at/below lower Bollinger Band (%.2f). Oversold condition detected - expect mean reversion upward. Bandwidth: %.4f",
+			currentPrice, indicators.LowerBand, indicators.Bandwidth)
+
+		return "BUY", confidence, reasoning
+
+	case "at_upper", "above_upper":
+		// Overbought condition - price likely to revert DOWN
+		confidence := 0.7
+		if position == "above_upper" {
+			confidence = 0.8 // Higher confidence when price is extremely high
+		}
+		// Adjust confidence based on bandwidth
+		if indicators.Bandwidth < 0.05 {
+			confidence += 0.1
+		}
+		confidence = math.Min(confidence, 1.0)
+
+		reasoning := fmt.Sprintf("Price %.2f at/above upper Bollinger Band (%.2f). Overbought condition detected - expect mean reversion downward. Bandwidth: %.4f",
+			currentPrice, indicators.UpperBand, indicators.Bandwidth)
+
+		return "SELL", confidence, reasoning
+
+	default: // "between"
+		// Price within bands - no clear mean reversion signal
+		reasoning := fmt.Sprintf("Price %.2f between Bollinger Bands (%.2f - %.2f). No mean reversion signal - awaiting band touch.",
+			currentPrice, indicators.LowerBand, indicators.UpperBand)
+
+		return "HOLD", 0.5, reasoning
+	}
+}
+
+// updateBollingerBeliefs updates beliefs with Bollinger Band data
+func (a *ReversionAgent) updateBollingerBeliefs(indicators *BollingerIndicators, currentPrice float64) {
+	a.beliefs.UpdateBelief("bollinger_upper", indicators.UpperBand, 0.9, "bollinger_bands")
+	a.beliefs.UpdateBelief("bollinger_middle", indicators.MiddleBand, 0.9, "bollinger_bands")
+	a.beliefs.UpdateBelief("bollinger_lower", indicators.LowerBand, 0.9, "bollinger_bands")
+	a.beliefs.UpdateBelief("bollinger_bandwidth", indicators.Bandwidth, 0.85, "bollinger_bands")
+	a.beliefs.UpdateBelief("bollinger_position", indicators.Position, 0.9, "bollinger_bands")
+	a.beliefs.UpdateBelief("current_price", currentPrice, 1.0, "market_data")
+
+	// Calculate position confidence based on bandwidth
+	// Tighter bands (low bandwidth) = more reliable signals
+	positionConfidence := 0.7
+	if indicators.Bandwidth < 0.05 {
+		positionConfidence = 0.9
+	} else if indicators.Bandwidth > 0.15 {
+		positionConfidence = 0.5 // High volatility reduces confidence
+	}
+	a.beliefs.UpdateBelief("band_signal_confidence", positionConfidence, positionConfidence, "bollinger_bands")
+
+	log.Debug().
+		Str("position", indicators.Position).
+		Float64("bandwidth", indicators.Bandwidth).
+		Float64("confidence", positionConfidence).
+		Msg("Bollinger beliefs updated")
 }
 
 // publishSignal publishes a trading signal to NATS
