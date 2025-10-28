@@ -950,11 +950,16 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Band touches detected ✅ - Agent compiles successfully
   - **Estimate**: 2 hours → **Actual**: 1.5 hours
 
-- [ ] **T086** [P0] Implement RSI extremes detection
-  - Call Technical Indicators Server for RSI
-  - Identify RSI < 30 (oversold) or RSI > 70 (overbought)
-  - **Acceptance**: Extremes detected
-  - **Estimate**: 2 hours
+- [x] **T086** [P0] Implement RSI extremes detection ✅ **COMPLETED 2025-10-28**
+  - Implemented RSI calculation using MCP Technical Indicators server
+  - Added detectRSIExtreme() for oversold/overbought detection (RSI < 30 = BUY, RSI > 70 = SELL)
+  - Implemented combineSignals() to merge Bollinger and RSI signals with confirmation logic
+  - 4 signal combination cases: Both agree (high confidence), Conflict (HOLD), One HOLD (partial confidence), Both HOLD (neutral)
+  - Added updateRSIBeliefs() to track RSI value, signal, and state (very_oversold, oversold, neutral, overbought, very_overbought)
+  - Integrated into Step() cycle: calculates RSI, detects extremes, combines with Bollinger, updates beliefs
+  - **Files**: calculateRSI(), detectRSIExtreme(), combineSignals(), updateRSIBeliefs() in main.go
+  - **Acceptance**: Extremes detected ✅ - Agent compiles successfully with RSI+Bollinger confirmation
+  - **Estimate**: 2 hours → **Actual**: 1 hour
 
 - [ ] **T087** [P0] Implement market regime detection
   - Use ADX to detect ranging vs trending market

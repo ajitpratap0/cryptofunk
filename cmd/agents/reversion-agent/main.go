@@ -297,28 +297,60 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Str("position", bollinger.Position).
 		Msg("Bollinger Bands calculated")
 
-	// Step 2.5: Detect band touch and generate signal
-	signal, confidence, reasoning := a.detectBandTouch(bollinger, currentPrice)
+	// Step 2.5: Detect Bollinger Band signal
+	bbSignal, bbConfidence, bbReasoning := a.detectBandTouch(bollinger, currentPrice)
 
 	log.Info().
-		Str("signal", signal).
-		Float64("confidence", confidence).
-		Str("reasoning", reasoning).
+		Str("signal", bbSignal).
+		Float64("confidence", bbConfidence).
+		Str("reasoning", bbReasoning).
 		Msg("Bollinger Band signal detected")
 
-	// Step 3: Update agent beliefs with Bollinger Band data
+	// Step 3: Calculate RSI (T086)
+	rsi, err := a.calculateRSI(ctx, symbol, prices)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to calculate RSI")
+		return fmt.Errorf("RSI calculation failed: %w", err)
+	}
+
+	log.Info().
+		Float64("rsi", rsi).
+		Msg("RSI calculated")
+
+	// Step 3.5: Detect RSI extremes
+	rsiSignal, rsiConfidence, rsiReasoning := a.detectRSIExtreme(rsi)
+
+	log.Info().
+		Str("signal", rsiSignal).
+		Float64("confidence", rsiConfidence).
+		Str("reasoning", rsiReasoning).
+		Msg("RSI signal detected")
+
+	// Step 4: Combine Bollinger and RSI signals for confirmation
+	finalSignal, finalConfidence, finalReasoning := a.combineSignals(
+		bbSignal, bbConfidence, bbReasoning,
+		rsiSignal, rsiConfidence, rsiReasoning,
+	)
+
+	log.Info().
+		Str("final_signal", finalSignal).
+		Float64("final_confidence", finalConfidence).
+		Str("reasoning", finalReasoning).
+		Msg("Combined signal generated")
+
+	// Step 5: Update agent beliefs with Bollinger Band and RSI data
 	a.updateBollingerBeliefs(bollinger, currentPrice)
-	a.beliefs.UpdateBelief("last_signal", signal, confidence, "bollinger_bands")
+	a.updateRSIBeliefs(rsi, rsiSignal, rsiConfidence)
+	a.beliefs.UpdateBelief("combined_signal", finalSignal, finalConfidence, "signal_combiner")
 
 	// Update agent state
-	a.lastSignal = signal
+	a.lastSignal = finalSignal
 
 	log.Debug().
 		Float64("overall_confidence", a.beliefs.GetConfidence()).
 		Msg("Decision cycle complete")
 
 	// TODO: Remaining tasks:
-	// - T086: Calculate RSI and detect extremes (combine with Bollinger for confirmation)
 	// - T087: Detect market regime (ranging vs trending) - only trade in ranging markets
 	// - T088: Implement quick exit logic (tight stops, small profit targets)
 	// - T089: Generate full trading signal with risk management and publish to NATS
@@ -589,6 +621,154 @@ func (a *ReversionAgent) updateBollingerBeliefs(indicators *BollingerIndicators,
 		Float64("bandwidth", indicators.Bandwidth).
 		Float64("confidence", positionConfidence).
 		Msg("Bollinger beliefs updated")
+}
+
+// ============================================================================
+// RSI EXTREMES DETECTION (T086)
+// ============================================================================
+
+// calculateRSI calculates the Relative Strength Index using MCP Technical Indicators server
+func (a *ReversionAgent) calculateRSI(ctx context.Context, symbol string, priceData []float64) (float64, error) {
+	log.Debug().
+		Str("symbol", symbol).
+		Int("data_points", len(priceData)).
+		Int("period", a.rsiPeriod).
+		Msg("Calculating RSI")
+
+	// Call Technical Indicators MCP server for RSI
+	result, err := a.CallMCPTool(ctx, "technical_indicators", "calculate_rsi", map[string]interface{}{
+		"prices": priceData,
+		"period": a.rsiPeriod, // Default: 14
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to calculate RSI: %w", err)
+	}
+
+	// Parse result - extract text content
+	if len(result.Content) == 0 {
+		return 0, fmt.Errorf("empty result from technical indicators server")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return 0, fmt.Errorf("invalid content type")
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
+		return 0, fmt.Errorf("failed to parse RSI result: %w", err)
+	}
+
+	// Extract RSI values array
+	rsiValues, ok := data["values"].([]interface{})
+	if !ok || len(rsiValues) == 0 {
+		return 0, fmt.Errorf("RSI values not found in result")
+	}
+
+	// Get current (last) RSI value
+	currentRSI := rsiValues[len(rsiValues)-1].(float64)
+
+	log.Debug().
+		Float64("rsi", currentRSI).
+		Msg("RSI calculated")
+
+	return currentRSI, nil
+}
+
+// detectRSIExtreme detects oversold/overbought conditions based on RSI
+// Returns: signal (BUY/SELL/HOLD), confidence (0.0-1.0), reasoning
+func (a *ReversionAgent) detectRSIExtreme(rsi float64) (string, float64, string) {
+	if rsi < 30 {
+		// Oversold condition - price likely to revert UP
+		confidence := 0.7
+		if rsi < 20 {
+			confidence = 0.9 // Very oversold - higher confidence
+		}
+		reasoning := fmt.Sprintf("RSI %.2f indicates oversold condition (< 30). Expect mean reversion upward.", rsi)
+		return "BUY", confidence, reasoning
+	} else if rsi > 70 {
+		// Overbought condition - price likely to revert DOWN
+		confidence := 0.7
+		if rsi > 80 {
+			confidence = 0.9 // Very overbought - higher confidence
+		}
+		reasoning := fmt.Sprintf("RSI %.2f indicates overbought condition (> 70). Expect mean reversion downward.", rsi)
+		return "SELL", confidence, reasoning
+	} else {
+		// Neutral zone - no clear signal
+		reasoning := fmt.Sprintf("RSI %.2f in neutral zone (30-70). No RSI-based signal.", rsi)
+		return "HOLD", 0.5, reasoning
+	}
+}
+
+// combineSignals combines Bollinger Band and RSI signals for confirmation
+// Returns: final signal, combined confidence, reasoning
+func (a *ReversionAgent) combineSignals(bbSignal string, bbConfidence float64, bbReasoning string,
+	rsiSignal string, rsiConfidence float64, rsiReasoning string) (string, float64, string) {
+
+	// Case 1: Both signals agree (strong confirmation)
+	if bbSignal == rsiSignal && bbSignal != "HOLD" {
+		// Both agree on BUY or SELL - high confidence
+		combinedConfidence := (bbConfidence + rsiConfidence) / 2.0
+		combinedConfidence = math.Min(combinedConfidence+0.1, 1.0) // Bonus for agreement
+		reasoning := fmt.Sprintf("STRONG SIGNAL - Both Bollinger Bands and RSI agree on %s. Bollinger: %s. RSI: %s",
+			bbSignal, bbReasoning, rsiReasoning)
+		return bbSignal, combinedConfidence, reasoning
+	}
+
+	// Case 2: Signals conflict (one BUY, one SELL)
+	if (bbSignal == "BUY" && rsiSignal == "SELL") || (bbSignal == "SELL" && rsiSignal == "BUY") {
+		// Conflicting signals - reduce confidence, use HOLD
+		reasoning := fmt.Sprintf("CONFLICTING SIGNALS - Bollinger says %s (%.2f), RSI says %s (%.2f). Holding position due to uncertainty.",
+			bbSignal, bbConfidence, rsiSignal, rsiConfidence)
+		return "HOLD", 0.3, reasoning
+	}
+
+	// Case 3: One signal is HOLD (use the non-HOLD signal)
+	if bbSignal == "HOLD" && rsiSignal != "HOLD" {
+		// RSI has signal, Bollinger is neutral
+		reasoning := fmt.Sprintf("RSI signal %s (confidence: %.2f) with neutral Bollinger position. RSI: %s",
+			rsiSignal, rsiConfidence, rsiReasoning)
+		return rsiSignal, rsiConfidence * 0.8, reasoning // Slightly reduce confidence without full confirmation
+	}
+	if rsiSignal == "HOLD" && bbSignal != "HOLD" {
+		// Bollinger has signal, RSI is neutral
+		reasoning := fmt.Sprintf("Bollinger signal %s (confidence: %.2f) with neutral RSI. Bollinger: %s",
+			bbSignal, bbConfidence, bbReasoning)
+		return bbSignal, bbConfidence * 0.8, reasoning // Slightly reduce confidence without full confirmation
+	}
+
+	// Case 4: Both signals are HOLD
+	reasoning := fmt.Sprintf("Both Bollinger Bands and RSI are neutral. No clear mean reversion signal. Bollinger: %s. RSI: %s",
+		bbReasoning, rsiReasoning)
+	return "HOLD", 0.5, reasoning
+}
+
+// updateRSIBeliefs updates the agent's belief base with RSI data
+func (a *ReversionAgent) updateRSIBeliefs(rsi float64, signal string, confidence float64) {
+	a.beliefs.UpdateBelief("rsi_value", rsi, 0.9, "rsi_indicator")
+	a.beliefs.UpdateBelief("rsi_signal", signal, confidence, "rsi_indicator")
+
+	// Classify RSI state
+	var rsiState string
+	if rsi < 20 {
+		rsiState = "very_oversold"
+	} else if rsi < 30 {
+		rsiState = "oversold"
+	} else if rsi > 80 {
+		rsiState = "very_overbought"
+	} else if rsi > 70 {
+		rsiState = "overbought"
+	} else {
+		rsiState = "neutral"
+	}
+	a.beliefs.UpdateBelief("rsi_state", rsiState, 0.9, "rsi_indicator")
+
+	log.Debug().
+		Float64("rsi", rsi).
+		Str("state", rsiState).
+		Str("signal", signal).
+		Float64("confidence", confidence).
+		Msg("RSI beliefs updated")
 }
 
 // publishSignal publishes a trading signal to NATS
