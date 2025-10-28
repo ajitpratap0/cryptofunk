@@ -330,8 +330,13 @@ tasks:
     desc: "Run database migrations"
     cmds:
       - echo "Running database migrations..."
-      - docker exec -i $(docker-compose ps -q postgres) psql -U postgres -d cryptofunk < migrations/001_initial_schema.sql
+      - go run cmd/migrate/main.go -command=migrate
       - echo "✓ Migrations complete"
+
+  db-status:
+    desc: "Show database migration status"
+    cmds:
+      - go run cmd/migrate/main.go -command=status
 
   db-reset:
     desc: "Reset database (WARNING: deletes all data)"

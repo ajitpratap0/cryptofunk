@@ -1,0 +1,411 @@
+# CryptoFunk Agent Configuration
+# Configuration for all AI trading agents
+# Environment variables override these settings with CRYPTOFUNK_AGENT_ prefix
+# Example: CRYPTOFUNK_AGENT_TECHNICAL_ENABLED=false disables technical agent
+
+# Global agent settings
+global:
+  default_step_interval: "30s"  # Default decision cycle interval
+  default_confidence_threshold: 0.7
+  enable_metrics: true
+  metrics_port: 9101  # Prometheus metrics port for agents
+
+# ================================================================================
+# ANALYSIS AGENTS
+# Generate market insights and signals
+# ================================================================================
+
+analysis_agents:
+  technical:
+    enabled: true
+    name: "technical-agent"
+    type: "analysis"
+    version: "1.0.0"
+
+    # MCP Server Connections
+    mcp_servers:
+      # Primary: CoinGecko for market data
+      - name: "coingecko"
+        type: "external"
+        tools:
+          - "get_price"
+          - "get_market_chart"
+
+      # Technical Indicators server
+      - name: "technical_indicators"
+        type: "internal"
+        command: "./bin/technical-indicators-server"
+        tools:
+          - "calculate_rsi"
+          - "calculate_macd"
+          - "calculate_bollinger_bands"
+          - "calculate_ema"
+          - "calculate_adx"
+
+    # Decision cycle timing
+    step_interval: "30s"  # Analyze market every 30 seconds
+
+    # Agent-specific configuration
+    config:
+      indicators:
+        rsi:
+          period: 14
+          overbought: 70
+          oversold: 30
+        macd:
+          fast_period: 12
+          slow_period: 26
+          signal_period: 9
+        bollinger:
+          period: 20
+          std_dev: 2
+        ema:
+          periods: [9, 21, 50, 200]
+        adx:
+          period: 14
+          trend_threshold: 25
+
+      lookback_periods:
+        short: "1h"
+        medium: "4h"
+        long: "1d"
+
+      confidence_weights:
+        rsi: 0.25
+        macd: 0.25
+        bollinger: 0.20
+        trend: 0.20
+        volume: 0.10
+
+  orderbook:
+    enabled: false  # Phase 3.3 - not yet implemented
+    name: "orderbook-agent"
+    type: "analysis"
+    version: "1.0.0"
+
+    mcp_servers:
+      - name: "coingecko"
+        type: "external"
+        tools:
+          - "get_price"
+      - name: "market_data"
+        type: "internal"
+        command: "./bin/market-data-server"
+        tools:
+          - "get_order_book"
+
+    step_interval: "10s"  # Order book changes quickly
+
+    config:
+      depth_levels: 20
+      imbalance_threshold: 0.7  # 70% buy/sell imbalance
+      large_order_threshold: 10000  # USD value
+      min_confidence: 0.6
+
+  sentiment:
+    enabled: true  # Phase 3.4 - Sentiment Analysis Agent
+    name: "sentiment-agent"
+    type: "analysis"
+    version: "1.0.0"
+
+    mcp_servers:
+      - name: "coingecko"
+        type: "external"
+        tools:
+          - "get_trending"
+          - "get_coin_info"
+
+    step_interval: "5m"  # Sentiment changes slower
+
+    config:
+      # Primary symbol to analyze
+      symbol: "bitcoin"
+
+      # Analysis interval (overrides step_interval for internal logic)
+      analysis_interval: "300s"  # 5 minutes
+
+      # News API Configuration
+      news_sources:
+        - name: "cryptopanic"
+          api_key: "${CRYPTOPANIC_API_KEY}"  # Get free key from cryptopanic.com
+          weight: 1.0
+          endpoint: "https://cryptopanic.com/api/v1/posts/"
+
+      # Lookback period for news analysis
+      lookback_hours: 24
+
+      # Sentiment thresholds for signal generation
+      sentiment_threshold: 0.3  # Absolute value threshold for action
+
+      # Fear & Greed Index integration
+      include_fear_greed: true
+      fear_greed_endpoint: "https://api.alternative.me/fng/"
+
+      # Sentiment aggregation weights
+      news_weight: 0.6      # 60% weight for news sentiment
+      fear_greed_weight: 0.4  # 40% weight for Fear & Greed Index
+
+      # Confidence calculation parameters
+      min_articles: 5  # Minimum articles needed for high confidence
+
+      # Source weights for different news outlets (future extension)
+      source_weights:
+        cryptopanic: 1.0
+        cointelegraph: 0.9
+        coindesk: 0.9
+        decrypt: 0.8
+
+# ================================================================================
+# STRATEGY AGENTS
+# Generate trading decisions based on analysis
+# ================================================================================
+
+strategy_agents:
+  trend_following:
+    enabled: true
+    name: "trend-agent"
+    type: "strategy"
+    version: "1.0.0"
+
+    mcp_servers:
+      - name: "coingecko"
+        type: "external"
+        tools:
+          - "get_price"
+          - "get_market_chart"
+      - name: "technical_indicators"
+        type: "internal"
+        command: "./bin/technical-indicators-server"
+        tools:
+          - "calculate_ema"
+          - "calculate_adx"
+          - "calculate_macd"
+
+    step_interval: "1m"  # Check for trade opportunities every minute
+
+    config:
+      strategy: "trend_following"
+      entry_conditions:
+        min_adx: 25  # Strong trend required
+        ema_crossover: true
+        macd_confirmation: true
+
+      exit_conditions:
+        adx_below: 20  # Weak trend
+        reverse_crossover: true
+        take_profit_pct: 0.05  # 5%
+        stop_loss_pct: 0.02    # 2%
+
+      position_sizing:
+        method: "kelly"
+        max_size: 0.1  # 10% of portfolio
+        min_size: 0.01  # 1% of portfolio
+
+      confidence_threshold: 0.75
+      vote_weight: 0.4  # Weight in consensus voting
+
+  mean_reversion:
+    enabled: false  # Phase 3.6 - not yet implemented
+    name: "reversion-agent"
+    type: "strategy"
+    version: "1.0.0"
+
+    mcp_servers:
+      - name: "coingecko"
+        type: "external"
+        tools:
+          - "get_price"
+          - "get_market_chart"
+      - name: "technical_indicators"
+        type: "internal"
+        command: "./bin/technical-indicators-server"
+        tools:
+          - "calculate_rsi"
+          - "calculate_bollinger_bands"
+
+    step_interval: "1m"
+
+    config:
+      strategy: "mean_reversion"
+      entry_conditions:
+        rsi_oversold: 30
+        bollinger_touch: true
+        volume_spike: 1.5  # 1.5x average
+
+      exit_conditions:
+        rsi_neutral: 50
+        bollinger_middle: true
+        take_profit_pct: 0.03
+        stop_loss_pct: 0.02
+
+      confidence_threshold: 0.70
+      vote_weight: 0.3
+
+  arbitrage:
+    enabled: false  # Phase 3.7 - not yet implemented
+    name: "arbitrage-agent"
+    type: "strategy"
+    version: "1.0.0"
+
+    mcp_servers:
+      - name: "market_data"
+        type: "internal"
+        command: "./bin/market-data-server"
+        tools:
+          - "get_price"
+          - "get_order_book"
+
+    step_interval: "5s"  # Arbitrage requires speed
+
+    config:
+      strategy: "arbitrage"
+      min_spread: 0.005  # 0.5% minimum profit
+      exchanges:
+        - "binance"
+        - "coinbase"
+        - "kraken"
+      max_latency_ms: 100
+      confidence_threshold: 0.80
+      vote_weight: 0.3
+
+# ================================================================================
+# RISK MANAGEMENT AGENT
+# Oversees all trades with veto power
+# ================================================================================
+
+risk_agent:
+  enabled: true
+  name: "risk-agent"
+  type: "risk"
+  version: "1.0.0"
+
+  mcp_servers:
+    - name: "risk_analyzer"
+      type: "internal"
+      command: "./bin/risk-analyzer-server"
+      tools:
+        - "calculate_position_size"
+        - "calculate_var"
+        - "check_portfolio_limits"
+        - "calculate_sharpe"
+        - "calculate_drawdown"
+
+    - name: "order_executor"
+      type: "internal"
+      command: "./bin/order-executor-server"
+      tools:
+        - "get_positions"
+        - "get_order_status"
+
+  step_interval: "10s"  # Monitor risk frequently
+
+  config:
+    # Portfolio limits
+    max_portfolio_exposure: 0.8  # 80% of capital
+    max_position_size: 0.1       # 10% per position
+    max_positions: 3
+    max_correlation: 0.7         # Max correlation between positions
+
+    # Risk metrics
+    max_daily_loss: 0.02         # 2% maximum daily loss
+    max_drawdown: 0.1            # 10% maximum drawdown
+    min_sharpe_ratio: 1.0        # Minimum acceptable Sharpe
+    max_var_95: 0.05             # 5% VaR at 95% confidence
+
+    # Trade approval
+    veto_power: true
+    min_strategy_confidence: 0.70
+    min_consensus_votes: 2        # Minimum strategies agreeing
+    max_leverage: 1.0             # No leverage in v1
+
+    # Circuit breakers
+    circuit_breakers:
+      enabled: true
+      max_trades_per_hour: 10
+      max_losses_per_day: 3
+      volatility_threshold: 0.5   # Halt if volatility > 50%
+      drawdown_halt: 0.08         # Emergency stop at 8% drawdown
+
+    # Position sizing
+    kelly_fraction: 0.25          # Use 25% of Kelly recommendation
+    min_position_usd: 10.0
+    max_position_usd: 1000.0
+
+# ================================================================================
+# ORCHESTRATION SETTINGS
+# How agents coordinate and make decisions
+# ================================================================================
+
+orchestration:
+  # Voting mechanism
+  voting:
+    enabled: true
+    method: "weighted_consensus"  # weighted_consensus or majority
+    min_votes: 2
+    quorum: 0.6  # 60% of enabled strategy agents must vote
+
+  # LLM-based reasoning
+  llm_reasoning:
+    enabled: true
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 2000
+    temperature: 0.7
+    prompt_template: "templates/agent_decision.txt"
+
+  # Agent coordination
+  coordination:
+    broadcast_signals: true       # Agents share signals via NATS
+    signal_expiry: "5m"           # Signals expire after 5 minutes
+    enable_learning: false        # ML-based learning (Phase 9)
+
+  # Performance tracking
+  performance:
+    track_agent_accuracy: true
+    adjust_weights: false         # Dynamic weight adjustment (Phase 9)
+    min_sample_size: 50           # Minimum trades before adjusting
+
+# ================================================================================
+# AGENT COMMUNICATION
+# NATS topics for inter-agent communication
+# ================================================================================
+
+communication:
+  nats:
+    topics:
+      # Analysis signals
+      technical_signals: "agents.analysis.technical"
+      orderbook_signals: "agents.analysis.orderbook"
+      sentiment_signals: "agents.analysis.sentiment"
+
+      # Strategy decisions
+      strategy_decisions: "agents.strategy.decisions"
+      trade_proposals: "agents.strategy.proposals"
+
+      # Risk management
+      risk_approvals: "agents.risk.approvals"
+      risk_vetoes: "agents.risk.vetoes"
+
+      # System events
+      agent_heartbeat: "agents.system.heartbeat"
+      agent_errors: "agents.system.errors"
+
+    # Message retention
+    retention:
+      signals: "1h"
+      decisions: "24h"
+      heartbeat: "5m"
+
+# ================================================================================
+# LOGGING & DEBUGGING
+# ================================================================================
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json or console
+  output: "stderr"  # All logs to stderr (stdout reserved for MCP)
+
+  # Per-agent log levels (optional overrides)
+  agent_levels:
+    technical-agent: "debug"
+    risk-agent: "info"
+    trend-agent: "info"

@@ -28,6 +28,7 @@ CryptoFunk uses a **hybrid MCP architecture** that combines:
 2. **Custom MCP Servers** - Internal servers for execution, risk, and indicators
 
 This approach provides the best of both worlds:
+
 - **Rapid development** - Leverage existing MCP servers
 - **Full control** - Custom logic where needed
 - **Reduced maintenance** - External servers maintained by providers
@@ -75,46 +76,53 @@ CoinGecko MCP is an external MCP server provided by CoinGecko that gives access 
 ### Available Tools (76+)
 
 #### Price Data
+
 - `get_price` - Current cryptocurrency prices
 - `get_price_by_id` - Price for specific coin
 - `get_simple_price` - Simple price query with multiple vs currencies
 - `get_token_price` - Token price by contract address
 
 #### Market Data
+
 - `get_market_chart` - Historical market data (price, volume, market cap)
 - `get_market_chart_range` - Market data for specific date range
 - `get_ohlc` - OHLCV candlestick data
 - `get_coin_market_data` - Comprehensive market statistics
 
 #### Coin Information
+
 - `get_coin_info` - Detailed coin information
 - `get_coin_by_id` - Coin data by ID
 - `get_coin_tickers` - Trading pair tickers
 - `get_coin_history` - Historical snapshots
 
 #### Market Trends
+
 - `get_trending` - Trending coins
 - `get_top_gainers` - Top gaining coins
 - `get_top_losers` - Top losing coins
 - `get_recently_added` - Recently listed coins
 
 #### Categories & Search
+
 - `search_coins` - Search for cryptocurrencies
 - `list_coins` - List all supported coins
 - `get_categories` - Market categories
 - `get_category_coins` - Coins in specific category
 
 #### NFT Data
+
 - `get_nft_collection` - NFT collection data
 - `get_nft_market` - NFT marketplace statistics
 - `list_nft_collections` - All NFT collections
 
 #### DeFi Data
+
 - `get_defi_pools` - DeFi liquidity pools
 - `get_exchanges` - Exchange information
 - `get_exchange_tickers` - Exchange trading pairs
 
-**Full list**: See CoinGecko MCP documentation at https://mcp.api.coingecko.com
+**Full list**: See CoinGecko MCP documentation at <https://mcp.api.coingecko.com>
 
 ### Benefits
 
@@ -149,6 +157,7 @@ These are internal servers we build for functionality not available externally.
 **Transport**: stdio
 
 **Tools**:
+
 - `place_market_order(symbol, side, quantity)` → order_id
 - `place_limit_order(symbol, side, quantity, price)` → order_id
 - `cancel_order(order_id)` → status
@@ -165,6 +174,7 @@ These are internal servers we build for functionality not available externally.
 **Transport**: stdio
 
 **Tools**:
+
 - `calculate_position_size(win_rate, capital, kelly_fraction)` → size
 - `calculate_var(returns[], confidence)` → var_value
 - `check_portfolio_limits(positions, new_trade, limits)` → approved
@@ -181,6 +191,7 @@ These are internal servers we build for functionality not available externally.
 **Transport**: stdio
 
 **Tools**:
+
 - `calculate_rsi(prices[], period)` → rsi_value
 - `calculate_macd(prices[], fast, slow, signal)` → macd_result
 - `calculate_bollinger_bands(prices[], period, std_devs)` → bands
@@ -198,6 +209,7 @@ These are internal servers we build for functionality not available externally.
 **Transport**: stdio
 
 **Use Case**: Only enable if you need:
+
 - Exchange-specific order book depth
 - Real-time WebSocket from specific exchange
 - Binance-specific endpoints
@@ -538,6 +550,7 @@ cacheTTL := map[string]time.Duration{
 ```
 
 **Benefits**:
+
 - Reduce API calls (stay within rate limits)
 - Lower latency (Redis is faster than external API)
 - Cost savings (if using Pro tier)
@@ -631,6 +644,7 @@ go func() {
 **Error**: `failed to connect to https://mcp.api.coingecko.com/mcp`
 
 **Solutions**:
+
 ```bash
 # 1. Check internet connectivity
 ping mcp.api.coingecko.com
@@ -647,6 +661,7 @@ curl https://mcp.api.coingecko.com/mcp
 **Error**: `429 Too Many Requests`
 
 **Solutions**:
+
 ```yaml
 # 1. Enable caching in config.yaml
 mcp:
@@ -668,6 +683,7 @@ rate_limit:
 **Problem**: CoinGecko MCP calls taking >2 seconds
 
 **Solutions**:
+
 ```go
 // 1. Add timeout to client
 client := mcp.NewClient(mcp.ClientConfig{
@@ -701,6 +717,7 @@ wg.Wait()
 **Error**: `failed to start order-executor-server`
 
 **Solutions**:
+
 ```bash
 # 1. Check binary exists and is executable
 ls -la ./bin/order-executor-server
@@ -723,6 +740,7 @@ echo $BINANCE_API_KEY
 **Explanation**: CoinGecko aggregates prices from multiple exchanges, so there may be slight differences.
 
 **Solutions**:
+
 ```go
 // 1. Use specific exchange ticker
 tickers, _ := coinGecko.CallTool("get_coin_tickers", map[string]any{
@@ -743,6 +761,7 @@ executionPrice := binanceAPI.GetPrice("BTCUSDT")
 1. **Review Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md) for hybrid MCP design
 2. **Implementation**: Follow [TASKS.md](../TASKS.md) Phase 2.1 for integration steps
 3. **Testing**: Test CoinGecko MCP connection:
+
    ```bash
    go run cmd/test-mcp-client/main.go
    ```
@@ -753,9 +772,9 @@ executionPrice := binanceAPI.GetPrice("BTCUSDT")
 
 ## Resources
 
-- **CoinGecko MCP Docs**: https://mcp.api.coingecko.com
-- **Official MCP Go SDK**: https://github.com/modelcontextprotocol/go-sdk
-- **CoinGecko API Docs**: https://www.coingecko.com/en/api/documentation
+- **CoinGecko MCP Docs**: <https://mcp.api.coingecko.com>
+- **Official MCP Go SDK**: <https://github.com/modelcontextprotocol/go-sdk>
+- **CoinGecko API Docs**: <https://www.coingecko.com/en/api/documentation>
 - **CryptoFunk Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
 - **CryptoFunk Tasks**: [TASKS.md](../TASKS.md)
 

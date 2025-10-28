@@ -810,12 +810,14 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Agents can publish to mock
   - **Estimate**: 2 hours
 
-- [ ] **T075** [P1] Performance benchmarks for agents
+- [x] **T075** [P1] Performance benchmarks for agents ✅
   - Measure decision latency
   - Measure resource usage
   - Identify bottlenecks
   - **Acceptance**: Performance baselines set
   - **Estimate**: 2 hours
+  - **Completed**: 2025-10-28
+  - **Files**: `internal/agents/testing/mock_orchestrator_bench_test.go`, `internal/agents/testing/PERFORMANCE_BASELINES.md`
 
 ### Phase 3 Deliverables
 

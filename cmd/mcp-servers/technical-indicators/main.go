@@ -58,7 +58,6 @@ func (s *MCPServer) Run() error {
 
 		log.Debug().
 			Str("method", request.Method).
-			Str("tool", request.Params.Name).
 			Msg("Received request")
 
 		// Handle request
@@ -74,13 +73,10 @@ func (s *MCPServer) Run() error {
 
 // MCPRequest represents an MCP tool call request
 type MCPRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
-	Method  string `json:"method"`
-	Params  struct {
-		Name      string                 `json:"name"`
-		Arguments map[string]interface{} `json:"arguments"`
-	} `json:"params"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int             `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
 }
 
 // MCPResponse represents an MCP response
@@ -106,12 +102,28 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 
 	// Handle different MCP methods
 	switch req.Method {
+	case "initialize":
+		response.Result = s.handleInitialize(req.Params)
+		return response
+
 	case "tools/list":
 		response.Result = s.listTools()
 		return response
 
 	case "tools/call":
-		result, err := s.callTool(req.Params.Name, req.Params.Arguments)
+		var toolParams struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &toolParams); err != nil {
+			response.Error = &MCPError{
+				Code:    -32602,
+				Message: fmt.Sprintf("Invalid params: %v", err),
+			}
+			return response
+		}
+
+		result, err := s.callTool(toolParams.Name, toolParams.Arguments)
 		if err != nil {
 			response.Error = &MCPError{
 				Code:    -32000,
@@ -128,6 +140,22 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 			Message: fmt.Sprintf("Method not found: %s", req.Method),
 		}
 		return response
+	}
+}
+
+// handleInitialize responds to MCP initialize request
+func (s *MCPServer) handleInitialize(params json.RawMessage) interface{} {
+	log.Info().Msg("Handling initialize request")
+
+	return map[string]interface{}{
+		"protocolVersion": "2024-11-05",
+		"serverInfo": map[string]interface{}{
+			"name":    "technical-indicators",
+			"version": "1.0.0",
+		},
+		"capabilities": map[string]interface{}{
+			"tools": map[string]interface{}{},
+		},
 	}
 }
 

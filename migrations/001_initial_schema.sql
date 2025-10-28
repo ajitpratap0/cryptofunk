@@ -25,7 +25,7 @@ CREATE TYPE order_status AS ENUM ('NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED
 CREATE TYPE position_side AS ENUM ('LONG', 'SHORT', 'FLAT');
 CREATE TYPE signal_type AS ENUM ('BUY', 'SELL', 'HOLD');
 CREATE TYPE trading_mode AS ENUM ('PAPER', 'LIVE');
-CREATE TYPE agent_status AS ENUM ('STARTING', 'RUNNING', 'STOPPED', 'ERROR');
+CREATE TYPE agent_state_type AS ENUM ('STARTING', 'RUNNING', 'STOPPED', 'ERROR');
 
 -- =============================================================================
 -- CANDLESTICK DATA (TimescaleDB Hypertable)
@@ -223,7 +223,7 @@ CREATE TABLE agent_status (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     agent_name VARCHAR(100) UNIQUE NOT NULL,
     agent_type VARCHAR(50) NOT NULL,
-    status agent_status NOT NULL,
+    status agent_state_type NOT NULL,
     pid INTEGER,
     started_at TIMESTAMPTZ,
     last_heartbeat TIMESTAMPTZ,
@@ -276,7 +276,7 @@ WITH (lists = 100);
 -- =============================================================================
 
 CREATE TABLE performance_metrics (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID DEFAULT uuid_generate_v4(),
     session_id UUID REFERENCES trading_sessions(id) ON DELETE CASCADE,
     metric_time TIMESTAMPTZ NOT NULL,
     symbol VARCHAR(20) NOT NULL,
@@ -290,7 +290,8 @@ CREATE TABLE performance_metrics (
     sharpe_ratio DECIMAL(10, 4),
     max_drawdown DECIMAL(20, 8),
     metadata JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (id, metric_time)
 );
 
 -- Convert to hypertable
