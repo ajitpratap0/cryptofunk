@@ -197,6 +197,14 @@ strategy_agents:
       # Data lookback
       lookback_candles: 100  # Number of historical candles to fetch (default: 100)
 
+      # Risk management (T079+T080)
+      risk_management:
+        stop_loss_pct: 0.02        # 2% stop-loss
+        take_profit_pct: 0.03      # 3% take-profit
+        trailing_stop_pct: 0.015   # 1.5% trailing stop
+        use_trailing_stop: true    # Enable trailing stop-loss
+        min_risk_reward: 2.0       # Minimum 2:1 risk/reward ratio
+
       # Confidence weights
       confidence_threshold: 0.75
       vote_weight: 0.4  # Weight in consensus voting

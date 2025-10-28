@@ -732,6 +732,279 @@ func BenchmarkConfidenceCalculation(b *testing.B) {
 	}
 }
 
+// ============================================================================
+// Risk Management Tests (T079+T080)
+// ============================================================================
+
+func TestCalculateStopLoss(t *testing.T) {
+	agent := &TrendAgent{
+		stopLossPct: 0.02, // 2%
+	}
+
+	tests := []struct {
+		name       string
+		entryPrice float64
+		signal     string
+		expected   float64
+	}{
+		{
+			name:       "buy signal - stop loss below entry",
+			entryPrice: 50000.0,
+			signal:     "BUY",
+			expected:   49000.0, // 50000 * (1 - 0.02)
+		},
+		{
+			name:       "sell signal - stop loss above entry",
+			entryPrice: 50000.0,
+			signal:     "SELL",
+			expected:   51000.0, // 50000 * (1 + 0.02)
+		},
+		{
+			name:       "hold signal - no stop loss",
+			entryPrice: 50000.0,
+			signal:     "HOLD",
+			expected:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := agent.calculateStopLoss(tt.entryPrice, tt.signal)
+			assert.InDelta(t, tt.expected, result, 0.01)
+		})
+	}
+}
+
+func TestCalculateTakeProfit(t *testing.T) {
+	agent := &TrendAgent{
+		takeProfitPct: 0.03, // 3%
+	}
+
+	tests := []struct {
+		name       string
+		entryPrice float64
+		signal     string
+		expected   float64
+	}{
+		{
+			name:       "buy signal - take profit above entry",
+			entryPrice: 50000.0,
+			signal:     "BUY",
+			expected:   51500.0, // 50000 * (1 + 0.03)
+		},
+		{
+			name:       "sell signal - take profit below entry",
+			entryPrice: 50000.0,
+			signal:     "SELL",
+			expected:   48500.0, // 50000 * (1 - 0.03)
+		},
+		{
+			name:       "hold signal - no take profit",
+			entryPrice: 50000.0,
+			signal:     "HOLD",
+			expected:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := agent.calculateTakeProfit(tt.entryPrice, tt.signal)
+			assert.InDelta(t, tt.expected, result, 0.01)
+		})
+	}
+}
+
+func TestCalculateRiskReward(t *testing.T) {
+	agent := &TrendAgent{}
+
+	tests := []struct {
+		name       string
+		entryPrice float64
+		stopLoss   float64
+		takeProfit float64
+		expected   float64
+	}{
+		{
+			name:       "2:1 risk/reward for long",
+			entryPrice: 50000.0,
+			stopLoss:   49000.0, // Risk: 1000
+			takeProfit: 52000.0, // Reward: 2000
+			expected:   2.0,
+		},
+		{
+			name:       "3:1 risk/reward for short",
+			entryPrice: 50000.0,
+			stopLoss:   51000.0, // Risk: 1000
+			takeProfit: 47000.0, // Reward: 3000
+			expected:   3.0,
+		},
+		{
+			name:       "1:1 risk/reward",
+			entryPrice: 50000.0,
+			stopLoss:   49000.0, // Risk: 1000
+			takeProfit: 51000.0, // Reward: 1000
+			expected:   1.0,
+		},
+		{
+			name:       "zero risk returns zero",
+			entryPrice: 50000.0,
+			stopLoss:   50000.0, // Risk: 0
+			takeProfit: 51000.0,
+			expected:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := agent.calculateRiskReward(tt.entryPrice, tt.stopLoss, tt.takeProfit)
+			assert.InDelta(t, tt.expected, result, 0.01)
+		})
+	}
+}
+
+func TestUpdateTrailingStop_LongPosition(t *testing.T) {
+	agent := &TrendAgent{
+		useTrailingStop: true,
+		trailingStopPct: 0.015, // 1.5%
+		lastSignal:      "HOLD",
+	}
+
+	// First BUY signal - should initialize tracking
+	trailingStop := agent.updateTrailingStop(50000.0, "BUY")
+	assert.Equal(t, 50000.0, agent.entryPrice)
+	assert.Equal(t, 50000.0, agent.highestPrice)
+	assert.InDelta(t, 49250.0, trailingStop, 1.0) // 50000 * (1 - 0.015)
+
+	// Update lastSignal to simulate production behavior
+	agent.lastSignal = "BUY"
+
+	// Price goes up - trailing stop should move up
+	trailingStop = agent.updateTrailingStop(51000.0, "BUY")
+	assert.Equal(t, 51000.0, agent.highestPrice)
+	assert.InDelta(t, 50235.0, trailingStop, 1.0) // 51000 * (1 - 0.015)
+
+	// Price goes down - trailing stop should NOT move down
+	trailingStop = agent.updateTrailingStop(50500.0, "BUY")
+	assert.Equal(t, 51000.0, agent.highestPrice)  // Still 51000
+	assert.InDelta(t, 50235.0, trailingStop, 1.0) // Still based on 51000
+}
+
+func TestUpdateTrailingStop_ShortPosition(t *testing.T) {
+	agent := &TrendAgent{
+		useTrailingStop: true,
+		trailingStopPct: 0.015, // 1.5%
+		lastSignal:      "HOLD",
+	}
+
+	// First SELL signal - should initialize tracking
+	trailingStop := agent.updateTrailingStop(50000.0, "SELL")
+	assert.Equal(t, 50000.0, agent.entryPrice)
+	assert.Equal(t, 50000.0, agent.lowestPrice)
+	assert.InDelta(t, 50750.0, trailingStop, 1.0) // 50000 * (1 + 0.015)
+
+	// Update lastSignal to simulate production behavior
+	agent.lastSignal = "SELL"
+
+	// Price goes down - trailing stop should move down
+	trailingStop = agent.updateTrailingStop(49000.0, "SELL")
+	assert.Equal(t, 49000.0, agent.lowestPrice)
+	assert.InDelta(t, 49735.0, trailingStop, 1.0) // 49000 * (1 + 0.015)
+
+	// Price goes up - trailing stop should NOT move up
+	trailingStop = agent.updateTrailingStop(49500.0, "SELL")
+	assert.Equal(t, 49000.0, agent.lowestPrice)   // Still 49000
+	assert.InDelta(t, 49735.0, trailingStop, 1.0) // Still based on 49000
+}
+
+func TestUpdateTrailingStop_Disabled(t *testing.T) {
+	agent := &TrendAgent{
+		useTrailingStop: false,
+	}
+
+	trailingStop := agent.updateTrailingStop(50000.0, "BUY")
+	assert.Equal(t, 0.0, trailingStop)
+}
+
+func TestResetPositionTracking(t *testing.T) {
+	agent := &TrendAgent{
+		entryPrice:   50000.0,
+		highestPrice: 51000.0,
+		lowestPrice:  49000.0,
+	}
+
+	agent.resetPositionTracking()
+
+	assert.Equal(t, 0.0, agent.entryPrice)
+	assert.Equal(t, 0.0, agent.highestPrice)
+	assert.Equal(t, 0.0, agent.lowestPrice)
+}
+
+func TestRiskManagement_SignalFields(t *testing.T) {
+	agent := &TrendAgent{
+		BaseAgent:       &agents.BaseAgent{},
+		adxThreshold:    25.0,
+		stopLossPct:     0.01, // 1% stop loss
+		takeProfitPct:   0.03, // 3% take profit
+		trailingStopPct: 0.015,
+		useTrailingStop: true,
+		riskRewardRatio: 2.0, // Require 2:1, actual will be 3:1
+		lastSignal:      "HOLD",
+	}
+
+	indicators := &TrendIndicators{
+		FastEMA:   50000.0,
+		SlowEMA:   48000.0,
+		ADX:       30.0,
+		Trend:     "uptrend",
+		Strength:  "strong",
+		Timestamp: time.Now(),
+	}
+
+	ctx := context.Background()
+	signal, err := agent.generateTrendSignal(ctx, "bitcoin", indicators, 50000.0)
+
+	require.NoError(t, err)
+	assert.Equal(t, "BUY", signal.Signal)
+	assert.Greater(t, signal.StopLoss, 0.0)
+	assert.Greater(t, signal.TakeProfit, 0.0)
+	assert.Greater(t, signal.RiskReward, 0.0)
+	assert.InDelta(t, 49500.0, signal.StopLoss, 1.0)   // 50000 * (1 - 0.01)
+	assert.InDelta(t, 51500.0, signal.TakeProfit, 1.0) // 50000 * (1 + 0.03)
+	assert.InDelta(t, 3.0, signal.RiskReward, 0.1)     // (1500 / 500) = 3.0
+}
+
+func TestRiskManagement_LowRiskRewardConvertsToHold(t *testing.T) {
+	agent := &TrendAgent{
+		BaseAgent:       &agents.BaseAgent{},
+		adxThreshold:    25.0,
+		stopLossPct:     0.03, // 3% stop loss
+		takeProfitPct:   0.02, // 2% take profit (lower than stop loss)
+		riskRewardRatio: 2.0,  // Require 2:1, but actual will be 0.67:1
+		useTrailingStop: false,
+		lastSignal:      "HOLD",
+	}
+
+	indicators := &TrendIndicators{
+		FastEMA:   50000.0,
+		SlowEMA:   48000.0,
+		ADX:       30.0,
+		Trend:     "uptrend",
+		Strength:  "strong",
+		Timestamp: time.Now(),
+	}
+
+	ctx := context.Background()
+	signal, err := agent.generateTrendSignal(ctx, "bitcoin", indicators, 50000.0)
+
+	require.NoError(t, err)
+	// Signal should be converted to HOLD because risk/reward is too low
+	assert.Equal(t, "HOLD", signal.Signal)
+	assert.Equal(t, 0.0, signal.StopLoss)
+	assert.Equal(t, 0.0, signal.TakeProfit)
+	assert.Equal(t, 0.0, signal.RiskReward)
+	assert.Contains(t, signal.Reasoning, "risk/reward")
+}
+
 // TestMain can be used for setup/teardown if needed
 func TestMain(m *testing.M) {
 	// Disable logging during tests

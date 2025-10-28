@@ -877,17 +877,23 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Weak trends filtered out
   - **Estimate**: 2 hours
 
-- [ ] **T079** [P0] Implement entry/exit rules
-  - Entry: EMA crossover + strong ADX
-  - Exit: Opposite crossover or stop-loss
-  - **Acceptance**: Rules implemented correctly
-  - **Estimate**: 2 hours
+- [x] **T079** [P0] Implement entry/exit rules ✅ **COMPLETED 2025-10-28**
+  - Entry: EMA crossover + strong ADX (implemented in generateTrendSignal)
+  - Exit: Opposite crossover or stop-loss (stop-loss, take-profit, risk/reward validation)
+  - **Implementation**: calculateStopLoss(), calculateTakeProfit(), calculateRiskReward()
+  - Risk management fields added to TrendAgent and TrendSignal
+  - Configurable via agents.yaml (stop_loss_pct, take_profit_pct, min_risk_reward)
+  - **Acceptance**: Rules implemented correctly - signals rejected if risk/reward < 2:1
+  - **Tests**: 9 comprehensive test functions, all passing
 
-- [ ] **T080** [P0] Implement trailing stop-loss
-  - Dynamic stop-loss that trails price
-  - Lock in profits as trend continues
-  - **Acceptance**: Stop-loss trails correctly
-  - **Estimate**: 2 hours
+- [x] **T080** [P0] Implement trailing stop-loss ✅ **COMPLETED 2025-10-28**
+  - Dynamic stop-loss that trails price (updateTrailingStop() function)
+  - Lock in profits as trend continues (tracks highest/lowest price since entry)
+  - Position tracking: entryPrice, highestPrice, lowestPrice fields
+  - **Implementation**: Separate logic for long (trails below highest) and short (trails above lowest)
+  - Configurable via agents.yaml (trailing_stop_pct, use_trailing_stop)
+  - **Acceptance**: Stop-loss trails correctly - moves only in favorable direction
+  - **Tests**: Long position, short position, disabled scenarios all tested
 
 - [ ] **T081** [P0] Implement decision generation
   - Generate trading decision with confidence

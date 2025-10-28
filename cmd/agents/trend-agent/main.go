@@ -37,6 +37,13 @@ type TrendAgent struct {
 	adxThreshold    float64 // Minimum ADX to consider trend strong
 	lookbackCandles int     // Number of candles to fetch for analysis
 
+	// Risk management configuration
+	stopLossPct     float64 // Stop-loss percentage (e.g., 0.02 for 2%)
+	takeProfitPct   float64 // Take-profit percentage (e.g., 0.03 for 3%)
+	trailingStopPct float64 // Trailing stop percentage (e.g., 0.015 for 1.5%)
+	useTrailingStop bool    // Whether to use trailing stop-loss
+	riskRewardRatio float64 // Minimum risk/reward ratio (e.g., 2.0)
+
 	// Cached indicator values
 	currentIndicators *TrendIndicators
 
@@ -44,6 +51,9 @@ type TrendAgent struct {
 	lastCrossover  string // "bullish", "bearish", "none"
 	lastSignal     string // Last signal generated
 	lastSignalTime time.Time
+	entryPrice     float64 // Entry price for trailing stop calculation
+	highestPrice   float64 // Highest price since entry (for long trailing stop)
+	lowestPrice    float64 // Lowest price since entry (for short trailing stop)
 }
 
 // TrendIndicators holds all calculated trend indicators
@@ -58,13 +68,17 @@ type TrendIndicators struct {
 
 // TrendSignal represents a trend-following trading signal
 type TrendSignal struct {
-	Timestamp  time.Time        `json:"timestamp"`
-	Symbol     string           `json:"symbol"`
-	Signal     string           `json:"signal"`     // "BUY", "SELL", "HOLD"
-	Confidence float64          `json:"confidence"` // 0.0 to 1.0
-	Indicators *TrendIndicators `json:"indicators"`
-	Reasoning  string           `json:"reasoning"`
-	Price      float64          `json:"price"`
+	Timestamp    time.Time        `json:"timestamp"`
+	Symbol       string           `json:"symbol"`
+	Signal       string           `json:"signal"`     // "BUY", "SELL", "HOLD"
+	Confidence   float64          `json:"confidence"` // 0.0 to 1.0
+	Indicators   *TrendIndicators `json:"indicators"`
+	Reasoning    string           `json:"reasoning"`
+	Price        float64          `json:"price"`
+	StopLoss     float64          `json:"stop_loss,omitempty"`     // Calculated stop-loss price
+	TakeProfit   float64          `json:"take_profit,omitempty"`   // Calculated take-profit price
+	TrailingStop float64          `json:"trailing_stop,omitempty"` // Current trailing stop price
+	RiskReward   float64          `json:"risk_reward,omitempty"`   // Actual risk/reward ratio
 }
 
 // NewTrendAgent creates a new trend following agent
@@ -101,6 +115,20 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 	adxThreshold := getFloatFromConfig(agentConfig, "adx_threshold", 25.0)
 	lookback := getIntFromConfig(agentConfig, "lookback_candles", 100)
 
+	// Extract risk management configuration
+	stopLossPct := getFloatFromConfig(agentConfig, "risk_management.stop_loss_pct", 0.02)          // 2%
+	takeProfitPct := getFloatFromConfig(agentConfig, "risk_management.take_profit_pct", 0.03)      // 3%
+	trailingStopPct := getFloatFromConfig(agentConfig, "risk_management.trailing_stop_pct", 0.015) // 1.5%
+	riskRewardRatio := getFloatFromConfig(agentConfig, "risk_management.min_risk_reward", 2.0)     // 2:1
+
+	// Check if trailing stop is enabled (default true)
+	useTrailingStop := true
+	if val, ok := agentConfig["risk_management"].(map[string]interface{}); ok {
+		if enabled, ok := val["use_trailing_stop"].(bool); ok {
+			useTrailingStop = enabled
+		}
+	}
+
 	return &TrendAgent{
 		BaseAgent:       baseAgent,
 		natsConn:        nc,
@@ -110,6 +138,11 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 		adxPeriod:       adxPeriod,
 		adxThreshold:    adxThreshold,
 		lookbackCandles: lookback,
+		stopLossPct:     stopLossPct,
+		takeProfitPct:   takeProfitPct,
+		trailingStopPct: trailingStopPct,
+		useTrailingStop: useTrailingStop,
+		riskRewardRatio: riskRewardRatio,
 		lastCrossover:   "none",
 		lastSignal:      "HOLD",
 	}, nil
@@ -315,15 +348,164 @@ func (a *TrendAgent) generateTrendSignal(ctx context.Context, symbol string, ind
 		)
 	}
 
+	// Calculate risk management levels for BUY/SELL signals
+	var stopLoss, takeProfit, riskReward, trailingStop float64
+	if signal == "BUY" || signal == "SELL" {
+		stopLoss = a.calculateStopLoss(currentPrice, signal)
+		takeProfit = a.calculateTakeProfit(currentPrice, signal)
+		riskReward = a.calculateRiskReward(currentPrice, stopLoss, takeProfit)
+
+		// Verify risk/reward ratio meets minimum threshold
+		if riskReward < a.riskRewardRatio {
+			log.Debug().
+				Float64("risk_reward", riskReward).
+				Float64("min_required", a.riskRewardRatio).
+				Msg("Risk/reward ratio too low - converting to HOLD")
+			signal = "HOLD"
+			confidence = 0.3
+			reasoning = fmt.Sprintf("%s (but risk/reward %.2f < %.2f required)", reasoning, riskReward, a.riskRewardRatio)
+			// Clear risk management fields for HOLD signals
+			stopLoss = 0
+			takeProfit = 0
+			riskReward = 0
+		} else {
+			// Calculate trailing stop for active positions
+			trailingStop = a.updateTrailingStop(currentPrice, signal)
+		}
+	}
+
 	return &TrendSignal{
-		Timestamp:  time.Now(),
-		Symbol:     symbol,
-		Signal:     signal,
-		Confidence: confidence,
-		Indicators: indicators,
-		Reasoning:  reasoning,
-		Price:      currentPrice,
+		Timestamp:    time.Now(),
+		Symbol:       symbol,
+		Signal:       signal,
+		Confidence:   confidence,
+		Indicators:   indicators,
+		Reasoning:    reasoning,
+		Price:        currentPrice,
+		StopLoss:     stopLoss,
+		TakeProfit:   takeProfit,
+		TrailingStop: trailingStop,
+		RiskReward:   riskReward,
 	}, nil
+}
+
+// calculateStopLoss calculates the stop-loss price based on entry price and signal direction
+func (a *TrendAgent) calculateStopLoss(entryPrice float64, signal string) float64 {
+	if signal == "BUY" {
+		// For long positions, stop-loss is below entry price
+		return entryPrice * (1.0 - a.stopLossPct)
+	} else if signal == "SELL" {
+		// For short positions, stop-loss is above entry price
+		return entryPrice * (1.0 + a.stopLossPct)
+	}
+	return 0
+}
+
+// calculateTakeProfit calculates the take-profit price based on entry price and signal direction
+func (a *TrendAgent) calculateTakeProfit(entryPrice float64, signal string) float64 {
+	if signal == "BUY" {
+		// For long positions, take-profit is above entry price
+		return entryPrice * (1.0 + a.takeProfitPct)
+	} else if signal == "SELL" {
+		// For short positions, take-profit is below entry price
+		return entryPrice * (1.0 - a.takeProfitPct)
+	}
+	return 0
+}
+
+// calculateRiskReward calculates the risk/reward ratio for a trade
+func (a *TrendAgent) calculateRiskReward(entryPrice, stopLoss, takeProfit float64) float64 {
+	risk := math.Abs(entryPrice - stopLoss)
+	reward := math.Abs(takeProfit - entryPrice)
+
+	if risk == 0 {
+		return 0
+	}
+
+	return reward / risk
+}
+
+// updateTrailingStop updates the trailing stop-loss level based on current price
+// Returns the new trailing stop price, or 0 if trailing stop is disabled or position not active
+func (a *TrendAgent) updateTrailingStop(currentPrice float64, signal string) float64 {
+	if !a.useTrailingStop {
+		return 0
+	}
+
+	// Initialize position tracking on new signal
+	if signal == "BUY" && a.lastSignal != "BUY" {
+		a.entryPrice = currentPrice
+		a.highestPrice = currentPrice
+		a.lowestPrice = 0
+		log.Debug().
+			Float64("entry_price", currentPrice).
+			Msg("Initialized long position for trailing stop")
+	} else if signal == "SELL" && a.lastSignal != "SELL" {
+		a.entryPrice = currentPrice
+		a.lowestPrice = currentPrice
+		a.highestPrice = 0
+		log.Debug().
+			Float64("entry_price", currentPrice).
+			Msg("Initialized short position for trailing stop")
+	}
+
+	// Calculate trailing stop based on position type
+	if signal == "BUY" {
+		// For long positions, track highest price and trail below it
+		if currentPrice > a.highestPrice {
+			a.highestPrice = currentPrice
+			log.Debug().
+				Float64("new_high", currentPrice).
+				Msg("Updated highest price for trailing stop")
+		}
+
+		trailingStop := a.highestPrice * (1.0 - a.trailingStopPct)
+
+		// Check if trailing stop is hit
+		if currentPrice <= trailingStop {
+			log.Info().
+				Float64("current_price", currentPrice).
+				Float64("trailing_stop", trailingStop).
+				Float64("entry_price", a.entryPrice).
+				Float64("profit_pct", ((currentPrice-a.entryPrice)/a.entryPrice)*100).
+				Msg("Trailing stop hit for long position")
+		}
+
+		return trailingStop
+
+	} else if signal == "SELL" {
+		// For short positions, track lowest price and trail above it
+		if a.lowestPrice == 0 || currentPrice < a.lowestPrice {
+			a.lowestPrice = currentPrice
+			log.Debug().
+				Float64("new_low", currentPrice).
+				Msg("Updated lowest price for trailing stop")
+		}
+
+		trailingStop := a.lowestPrice * (1.0 + a.trailingStopPct)
+
+		// Check if trailing stop is hit
+		if currentPrice >= trailingStop {
+			log.Info().
+				Float64("current_price", currentPrice).
+				Float64("trailing_stop", trailingStop).
+				Float64("entry_price", a.entryPrice).
+				Float64("profit_pct", ((a.entryPrice-currentPrice)/a.entryPrice)*100).
+				Msg("Trailing stop hit for short position")
+		}
+
+		return trailingStop
+	}
+
+	return 0
+}
+
+// resetPositionTracking resets position tracking state (called when position is closed)
+func (a *TrendAgent) resetPositionTracking() {
+	a.entryPrice = 0
+	a.highestPrice = 0
+	a.lowestPrice = 0
+	log.Debug().Msg("Position tracking reset")
 }
 
 // callCalculateEMA calls the Technical Indicators MCP server to calculate EMA
