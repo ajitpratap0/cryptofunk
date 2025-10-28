@@ -984,11 +984,17 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Exit logic works ✅ - Agent compiles successfully with exit level calculation
   - **Estimate**: 2 hours → **Actual**: 1 hour
 
-- [ ] **T089** [P0] Implement decision generation
-  - Generate trading decision
-  - Include confidence, entry, targets
-  - **Acceptance**: Decisions generated
-  - **Estimate**: 2 hours
+- [x] **T089** [P0] Implement decision generation ✅ **COMPLETED 2025-10-28**
+  - Implemented generateTradingSignal() to create complete ReversionSignal with all collected data
+  - Populates signal with: AgentID, Symbol, Signal (BUY/SELL/HOLD), Confidence, Price, Stop-loss, Take-profit, Risk/Reward
+  - Includes indicator data: BollingerBands, RSI, MarketRegime, Beliefs (full transparency)
+  - Added Step 6 in decision cycle: Generate trading signal after all beliefs updated
+  - Added Step 7 in decision cycle: Publish signal to NATS for orchestrator and other agents
+  - Signal includes reasoning string explaining all decision factors (Bollinger, RSI, regime, exit levels)
+  - Complete signal flow: Bollinger → RSI → Combined → Regime Filter → Exit Levels → R:R Validation → Signal Generation → NATS Publication
+  - **Files**: generateTradingSignal() in main.go (47 lines), integrated into Step() cycle
+  - **Acceptance**: Decisions generated ✅ - Agent compiles successfully, signals published to NATS with full data
+  - **Estimate**: 2 hours → **Actual**: 45 minutes
 
 - [ ] **T090** [P1] Unit tests for Mean Reversion Agent
   - Test strategy logic

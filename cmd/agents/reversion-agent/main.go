@@ -404,12 +404,33 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 	// Update agent state
 	a.lastSignal = filteredSignal
 
-	log.Debug().
-		Float64("overall_confidence", a.beliefs.GetConfidence()).
-		Msg("Decision cycle complete")
+	// Step 6: Generate full trading signal with all data (T089)
+	tradingSignal := a.generateTradingSignal(
+		symbol,
+		filteredSignal,
+		filteredConfidence,
+		filteredReasoning,
+		currentPrice,
+		stopLoss,
+		takeProfit,
+		riskReward,
+		bollinger,
+		rsi,
+		regime,
+	)
 
-	// TODO: Remaining tasks:
-	// - T089: Generate full trading signal with risk management and publish to NATS
+	// Step 7: Publish signal to NATS for orchestrator and other agents
+	if err := a.publishSignal(ctx, tradingSignal); err != nil {
+		log.Error().Err(err).Msg("Failed to publish trading signal")
+		return fmt.Errorf("signal publication failed: %w", err)
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Str("signal", filteredSignal).
+		Float64("confidence", filteredConfidence).
+		Float64("overall_confidence", a.beliefs.GetConfidence()).
+		Msg("Decision cycle complete - signal published")
 
 	return nil
 }
@@ -1041,6 +1062,55 @@ func (a *ReversionAgent) updateExitBeliefs(stopLoss, takeProfit, riskReward floa
 		Float64("risk_reward", riskReward).
 		Bool("favorable", isFavorable).
 		Msg("Exit beliefs updated")
+}
+
+// generateTradingSignal creates a complete ReversionSignal with all indicator data (T089)
+func (a *ReversionAgent) generateTradingSignal(
+	symbol string,
+	signal string,
+	confidence float64,
+	reasoning string,
+	currentPrice float64,
+	stopLoss float64,
+	takeProfit float64,
+	riskReward float64,
+	bollinger *BollingerIndicators,
+	rsi float64,
+	regime *MarketRegime,
+) *ReversionSignal {
+	// Create the signal with all collected data
+	tradingSignal := &ReversionSignal{
+		AgentID:        a.GetName(),
+		Symbol:         symbol,
+		Signal:         signal,
+		Confidence:     confidence,
+		Price:          currentPrice,
+		StopLoss:       stopLoss,
+		TakeProfit:     takeProfit,
+		RiskReward:     riskReward,
+		Reasoning:      reasoning,
+		Timestamp:      time.Now(),
+		BollingerBands: bollinger,
+		RSI:            rsi,
+		MarketRegime:   regime,
+		Beliefs:        a.beliefs.GetAllBeliefs(), // Include full belief state for transparency
+	}
+
+	log.Info().
+		Str("agent_id", tradingSignal.AgentID).
+		Str("symbol", tradingSignal.Symbol).
+		Str("signal", tradingSignal.Signal).
+		Float64("confidence", tradingSignal.Confidence).
+		Float64("price", tradingSignal.Price).
+		Float64("stop_loss", tradingSignal.StopLoss).
+		Float64("take_profit", tradingSignal.TakeProfit).
+		Float64("risk_reward", tradingSignal.RiskReward).
+		Float64("rsi", tradingSignal.RSI).
+		Str("regime", tradingSignal.MarketRegime.Type).
+		Int("belief_count", len(tradingSignal.Beliefs)).
+		Msg("Trading signal generated")
+
+	return tradingSignal
 }
 
 // publishSignal publishes a trading signal to NATS
