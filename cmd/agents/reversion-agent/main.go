@@ -370,10 +370,34 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Str("reasoning", filteredReasoning).
 		Msg("Signal filtered by market regime")
 
+	// Step 4.7: Calculate exit levels for quick exits (T088)
+	stopLoss, takeProfit, riskReward := a.calculateExitLevels(filteredSignal, currentPrice)
+
+	log.Info().
+		Str("signal", filteredSignal).
+		Float64("stop_loss", stopLoss).
+		Float64("take_profit", takeProfit).
+		Float64("risk_reward", riskReward).
+		Msg("Exit levels calculated")
+
+	// Check if risk/reward meets minimum threshold
+	if filteredSignal != "HOLD" && riskReward < a.riskRewardRatio {
+		log.Warn().
+			Float64("risk_reward", riskReward).
+			Float64("min_required", a.riskRewardRatio).
+			Msg("Risk/reward ratio too low - changing signal to HOLD")
+
+		filteredSignal = "HOLD"
+		filteredConfidence = 0.3
+		filteredReasoning = fmt.Sprintf("RISK/REWARD FILTER: Risk/reward ratio %.2f is below minimum %.2f. Trade rejected. %s",
+			riskReward, a.riskRewardRatio, filteredReasoning)
+	}
+
 	// Step 5: Update agent beliefs with all indicator data
 	a.updateBollingerBeliefs(bollinger, currentPrice)
 	a.updateRSIBeliefs(rsi, rsiSignal, rsiConfidence)
 	a.updateRegimeBeliefs(regime)
+	a.updateExitBeliefs(stopLoss, takeProfit, riskReward)
 	a.beliefs.UpdateBelief("combined_signal", finalSignal, finalConfidence, "signal_combiner")
 	a.beliefs.UpdateBelief("final_signal", filteredSignal, filteredConfidence, "regime_filter")
 
@@ -385,7 +409,6 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Msg("Decision cycle complete")
 
 	// TODO: Remaining tasks:
-	// - T088: Implement quick exit logic (tight stops, small profit targets)
 	// - T089: Generate full trading signal with risk management and publish to NATS
 
 	return nil
@@ -948,6 +971,76 @@ func (a *ReversionAgent) updateRegimeBeliefs(regime *MarketRegime) {
 		Float64("adx", regime.ADX).
 		Bool("favorable", isFavorable).
 		Msg("Regime beliefs updated")
+}
+
+// calculateExitLevels calculates stop-loss and take-profit levels for quick exits (T088)
+// Mean reversion strategy uses tight stops (2%) and quick profit targets (1-2%)
+// Returns: stopLoss, takeProfit, riskReward
+func (a *ReversionAgent) calculateExitLevels(signal string, entryPrice float64) (float64, float64, float64) {
+	if signal == "HOLD" {
+		return 0, 0, 0
+	}
+
+	var stopLoss, takeProfit, risk, reward, riskReward float64
+
+	if signal == "BUY" {
+		// For BUY (long position):
+		// - Entry: current price
+		// - Stop-loss: 2% below entry (tight stop for mean reversion)
+		// - Take-profit: 1-2% above entry (quick exit)
+		stopLoss = entryPrice * (1.0 - a.stopLossPct)
+		takeProfit = entryPrice * (1.0 + a.takeProfitPct)
+
+		// Calculate risk/reward
+		risk = entryPrice - stopLoss
+		reward = takeProfit - entryPrice
+	} else if signal == "SELL" {
+		// For SELL (short position):
+		// - Entry: current price
+		// - Stop-loss: 2% above entry (tight stop for mean reversion)
+		// - Take-profit: 1-2% below entry (quick exit)
+		stopLoss = entryPrice * (1.0 + a.stopLossPct)
+		takeProfit = entryPrice * (1.0 - a.takeProfitPct)
+
+		// Calculate risk/reward
+		risk = stopLoss - entryPrice
+		reward = entryPrice - takeProfit
+	}
+
+	// Calculate risk/reward ratio
+	if risk > 0 {
+		riskReward = reward / risk
+	}
+
+	log.Debug().
+		Str("signal", signal).
+		Float64("entry", entryPrice).
+		Float64("stop_loss", stopLoss).
+		Float64("take_profit", takeProfit).
+		Float64("risk", risk).
+		Float64("reward", reward).
+		Float64("risk_reward", riskReward).
+		Msg("Exit levels calculated")
+
+	return stopLoss, takeProfit, riskReward
+}
+
+// updateExitBeliefs updates the agent's belief base with exit level data
+func (a *ReversionAgent) updateExitBeliefs(stopLoss, takeProfit, riskReward float64) {
+	a.beliefs.UpdateBelief("stop_loss", stopLoss, 1.0, "risk_management")
+	a.beliefs.UpdateBelief("take_profit", takeProfit, 1.0, "risk_management")
+	a.beliefs.UpdateBelief("risk_reward_ratio", riskReward, 1.0, "risk_management")
+
+	// Assess if risk/reward is favorable
+	isFavorable := riskReward >= a.riskRewardRatio
+	a.beliefs.UpdateBelief("risk_reward_favorable", isFavorable, 1.0, "risk_management")
+
+	log.Debug().
+		Float64("stop_loss", stopLoss).
+		Float64("take_profit", takeProfit).
+		Float64("risk_reward", riskReward).
+		Bool("favorable", isFavorable).
+		Msg("Exit beliefs updated")
 }
 
 // publishSignal publishes a trading signal to NATS
