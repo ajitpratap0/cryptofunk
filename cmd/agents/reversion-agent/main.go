@@ -338,20 +338,53 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Str("reasoning", finalReasoning).
 		Msg("Combined signal generated")
 
-	// Step 5: Update agent beliefs with Bollinger Band and RSI data
+	// Step 4.5: Detect market regime and filter signal (T087)
+	adx, err := a.calculateADX(ctx, symbol, prices)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to calculate ADX")
+		return fmt.Errorf("ADX calculation failed: %w", err)
+	}
+
+	log.Info().
+		Float64("adx", adx).
+		Msg("ADX calculated for regime detection")
+
+	// Detect market regime (ranging vs trending vs volatile)
+	regime := a.detectMarketRegime(adx)
+
+	log.Info().
+		Str("regime", regime.Type).
+		Float64("adx", regime.ADX).
+		Float64("confidence", regime.Confidence).
+		Msg("Market regime detected")
+
+	// Filter signal based on regime (mean reversion only works in ranging markets)
+	filteredSignal, filteredConfidence, filteredReasoning := a.filterSignalByRegime(
+		finalSignal, finalConfidence, finalReasoning, regime,
+	)
+
+	log.Info().
+		Str("filtered_signal", filteredSignal).
+		Float64("filtered_confidence", filteredConfidence).
+		Bool("signal_changed", filteredSignal != finalSignal).
+		Str("reasoning", filteredReasoning).
+		Msg("Signal filtered by market regime")
+
+	// Step 5: Update agent beliefs with all indicator data
 	a.updateBollingerBeliefs(bollinger, currentPrice)
 	a.updateRSIBeliefs(rsi, rsiSignal, rsiConfidence)
+	a.updateRegimeBeliefs(regime)
 	a.beliefs.UpdateBelief("combined_signal", finalSignal, finalConfidence, "signal_combiner")
+	a.beliefs.UpdateBelief("final_signal", filteredSignal, filteredConfidence, "regime_filter")
 
 	// Update agent state
-	a.lastSignal = finalSignal
+	a.lastSignal = filteredSignal
 
 	log.Debug().
 		Float64("overall_confidence", a.beliefs.GetConfidence()).
 		Msg("Decision cycle complete")
 
 	// TODO: Remaining tasks:
-	// - T087: Detect market regime (ranging vs trending) - only trade in ranging markets
 	// - T088: Implement quick exit logic (tight stops, small profit targets)
 	// - T089: Generate full trading signal with risk management and publish to NATS
 
@@ -769,6 +802,152 @@ func (a *ReversionAgent) updateRSIBeliefs(rsi float64, signal string, confidence
 		Str("signal", signal).
 		Float64("confidence", confidence).
 		Msg("RSI beliefs updated")
+}
+
+// ============================================================================
+// MARKET REGIME DETECTION (T087)
+// ============================================================================
+
+// calculateADX calculates the Average Directional Index using MCP Technical Indicators server
+func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, priceData []float64) (float64, error) {
+	log.Debug().
+		Str("symbol", symbol).
+		Int("data_points", len(priceData)).
+		Msg("Calculating ADX for regime detection")
+
+	// Call Technical Indicators MCP server for ADX
+	// Note: ADX typically requires high/low/close data, but we'll use a simplified version with close prices
+	result, err := a.CallMCPTool(ctx, "technical_indicators", "calculate_adx", map[string]interface{}{
+		"prices": priceData,
+		"period": 14, // Standard ADX period
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to calculate ADX: %w", err)
+	}
+
+	// Parse result - extract text content
+	if len(result.Content) == 0 {
+		return 0, fmt.Errorf("empty result from technical indicators server")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return 0, fmt.Errorf("invalid content type")
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
+		return 0, fmt.Errorf("failed to parse ADX result: %w", err)
+	}
+
+	// Extract ADX value
+	var adx float64
+	if adxValue, ok := data["value"].(float64); ok {
+		adx = adxValue
+	} else if adxValues, ok := data["values"].([]interface{}); ok && len(adxValues) > 0 {
+		// If array, get last value
+		adx = adxValues[len(adxValues)-1].(float64)
+	} else {
+		return 0, fmt.Errorf("ADX value not found in result")
+	}
+
+	log.Debug().
+		Float64("adx", adx).
+		Msg("ADX calculated")
+
+	return adx, nil
+}
+
+// detectMarketRegime detects whether the market is ranging or trending based on ADX
+// Mean reversion strategies work best in ranging markets (low ADX)
+// Returns: MarketRegime with type, ADX value, confidence
+func (a *ReversionAgent) detectMarketRegime(adx float64) *MarketRegime {
+	var regimeType string
+	var confidence float64
+
+	if adx < 20 {
+		// Very weak trend - ranging market (ideal for mean reversion)
+		regimeType = "ranging"
+		confidence = 0.9
+	} else if adx < 25 {
+		// Weak trend - still ranging but less clear
+		regimeType = "ranging"
+		confidence = 0.7
+	} else if adx < 40 {
+		// Moderate trend - not ideal for mean reversion
+		regimeType = "trending"
+		confidence = 0.7
+	} else if adx < 50 {
+		// Strong trend - avoid mean reversion
+		regimeType = "trending"
+		confidence = 0.9
+	} else {
+		// Very strong trend or high volatility - definitely avoid mean reversion
+		regimeType = "volatile"
+		confidence = 0.95
+	}
+
+	regime := &MarketRegime{
+		Type:       regimeType,
+		ADX:        adx,
+		Confidence: confidence,
+		Timestamp:  time.Now(),
+	}
+
+	log.Debug().
+		Str("regime", regimeType).
+		Float64("adx", adx).
+		Float64("confidence", confidence).
+		Msg("Market regime detected")
+
+	return regime
+}
+
+// filterSignalByRegime filters trading signals based on market regime
+// Mean reversion only works in ranging markets - returns HOLD if trending/volatile
+func (a *ReversionAgent) filterSignalByRegime(signal string, confidence float64, reasoning string, regime *MarketRegime) (string, float64, string) {
+	// If already HOLD, no need to filter
+	if signal == "HOLD" {
+		return signal, confidence, reasoning
+	}
+
+	// Check if regime is suitable for mean reversion trading
+	if regime.Type == "ranging" {
+		// Good regime for mean reversion - allow signal through
+		updatedReasoning := fmt.Sprintf("%s Market regime: RANGING (ADX: %.2f) - favorable for mean reversion.",
+			reasoning, regime.ADX)
+		return signal, confidence, updatedReasoning
+	}
+
+	// Trending or volatile market - suppress mean reversion signal
+	filteredReasoning := fmt.Sprintf("REGIME FILTER: Market is %s (ADX: %.2f). Mean reversion suppressed. Original signal: %s (%.2f confidence). %s",
+		regime.Type, regime.ADX, signal, confidence, reasoning)
+
+	// Reduce confidence significantly when regime is unfavorable
+	reducedConfidence := 0.2
+
+	log.Warn().
+		Str("regime", regime.Type).
+		Float64("adx", regime.ADX).
+		Str("original_signal", signal).
+		Msg("Signal suppressed due to unfavorable market regime")
+
+	return "HOLD", reducedConfidence, filteredReasoning
+}
+
+// updateRegimeBeliefs updates the agent's belief base with market regime data
+func (a *ReversionAgent) updateRegimeBeliefs(regime *MarketRegime) {
+	a.beliefs.UpdateBelief("market_regime", regime.Type, regime.Confidence, "adx_indicator")
+	a.beliefs.UpdateBelief("adx_value", regime.ADX, 0.9, "adx_indicator")
+
+	// Determine if regime is favorable for mean reversion
+	isFavorable := regime.Type == "ranging"
+	a.beliefs.UpdateBelief("regime_favorable", isFavorable, regime.Confidence, "adx_indicator")
+
+	log.Debug().
+		Str("regime", regime.Type).
+		Float64("adx", regime.ADX).
+		Bool("favorable", isFavorable).
+		Msg("Regime beliefs updated")
 }
 
 // publishSignal publishes a trading signal to NATS
