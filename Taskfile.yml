@@ -1,0 +1,627 @@
+version: '3'
+
+# Environment variables
+dotenv: ['.env']
+
+vars:
+  BINARY_DIR: bin
+  GO_FLAGS: -v
+  DOCKER_COMPOSE: docker-compose
+
+# Global task options
+set:
+  - nounset
+  - errexit
+  - pipefail
+
+tasks:
+  # Help is the default task
+  default:
+    desc: "Show available tasks"
+    cmds:
+      - task --list
+    silent: true
+
+  # ===========================================
+  # Build Tasks
+  # ===========================================
+
+  build:
+    desc: "Build all binaries"
+    deps:
+      - build-orchestrator
+      - build-servers
+      - build-agents
+      - build-api
+    cmds:
+      - echo "✓ All services built successfully"
+
+  build-orchestrator:
+    desc: "Build orchestrator"
+    sources:
+      - cmd/orchestrator/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/orchestrator"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/orchestrator cmd/orchestrator/main.go
+      - echo "✓ Orchestrator built"
+
+  build-servers:
+    desc: "Build all MCP servers"
+    deps:
+      - build-server-market-data
+      - build-server-technical-indicators
+      - build-server-risk-analyzer
+      - build-server-order-executor
+
+  build-server-market-data:
+    desc: "Build market data server"
+    sources:
+      - cmd/mcp-servers/market-data/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/market-data-server"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/market-data-server cmd/mcp-servers/market-data/main.go
+
+  build-server-technical-indicators:
+    desc: "Build technical indicators server"
+    sources:
+      - cmd/mcp-servers/technical-indicators/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/technical-indicators-server"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/technical-indicators-server cmd/mcp-servers/technical-indicators/main.go
+
+  build-server-risk-analyzer:
+    desc: "Build risk analyzer server"
+    sources:
+      - cmd/mcp-servers/risk-analyzer/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/risk-analyzer-server"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/risk-analyzer-server cmd/mcp-servers/risk-analyzer/main.go
+
+  build-server-order-executor:
+    desc: "Build order executor server"
+    sources:
+      - cmd/mcp-servers/order-executor/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/order-executor-server"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/order-executor-server cmd/mcp-servers/order-executor/main.go
+
+  build-agents:
+    desc: "Build all agents"
+    deps:
+      - build-agent-technical
+      - build-agent-orderbook
+      - build-agent-sentiment
+      - build-agent-trend
+      - build-agent-reversion
+      - build-agent-risk
+
+  build-agent-technical:
+    desc: "Build technical analysis agent"
+    sources:
+      - cmd/agents/technical-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/technical-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/technical-agent cmd/agents/technical-agent/main.go
+
+  build-agent-orderbook:
+    desc: "Build orderbook agent"
+    sources:
+      - cmd/agents/orderbook-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/orderbook-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/orderbook-agent cmd/agents/orderbook-agent/main.go
+
+  build-agent-sentiment:
+    desc: "Build sentiment agent"
+    sources:
+      - cmd/agents/sentiment-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/sentiment-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/sentiment-agent cmd/agents/sentiment-agent/main.go
+
+  build-agent-trend:
+    desc: "Build trend following agent"
+    sources:
+      - cmd/agents/trend-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/trend-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/trend-agent cmd/agents/trend-agent/main.go
+
+  build-agent-reversion:
+    desc: "Build mean reversion agent"
+    sources:
+      - cmd/agents/reversion-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/reversion-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/reversion-agent cmd/agents/reversion-agent/main.go
+
+  build-agent-risk:
+    desc: "Build risk management agent"
+    sources:
+      - cmd/agents/risk-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/risk-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/risk-agent cmd/agents/risk-agent/main.go
+
+  build-api:
+    desc: "Build API server"
+    sources:
+      - cmd/api/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/api"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/api cmd/api/main.go
+
+  # ===========================================
+  # Development Tasks
+  # ===========================================
+
+  deps:
+    desc: "Download Go dependencies"
+    cmds:
+      - echo "Downloading dependencies..."
+      - go mod download
+      - go mod tidy
+      - echo "✓ Dependencies updated"
+
+  dev-deps:
+    desc: "Install development dependencies"
+    cmds:
+      - echo "Installing development tools..."
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - go install github.com/vektra/mockery/v2@latest
+      - echo "✓ Development tools installed"
+
+  # ===========================================
+  # Test Tasks
+  # ===========================================
+
+  test:
+    desc: "Run all tests with race detector and coverage"
+    cmds:
+      - echo "Running tests..."
+      - go test -v -race -coverprofile=coverage.out ./...
+      - echo "✓ Tests passed"
+
+  test-unit:
+    desc: "Run unit tests only"
+    cmds:
+      - go test -v -short ./...
+
+  test-integration:
+    desc: "Run integration tests"
+    cmds:
+      - go test -v -tags=integration ./...
+
+  test-coverage:
+    desc: "Generate test coverage report"
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - echo "✓ Coverage report generated: coverage.html"
+
+  test-watch:
+    desc: "Watch and run tests on file changes"
+    watch: true
+    sources:
+      - "**/*.go"
+    cmds:
+      - go test -short ./...
+
+  # ===========================================
+  # Code Quality Tasks
+  # ===========================================
+
+  lint:
+    desc: "Run linter"
+    cmds:
+      - echo "Running linter..."
+      - golangci-lint run ./...
+      - echo "✓ Linting complete"
+
+  fmt:
+    desc: "Format code"
+    cmds:
+      - echo "Formatting code..."
+      - go fmt ./...
+      - gofmt -s -w .
+      - echo "✓ Code formatted"
+
+  check:
+    desc: "Run all checks (fmt, lint, test)"
+    deps:
+      - fmt
+      - lint
+      - test
+
+  # ===========================================
+  # Docker Tasks
+  # ===========================================
+
+  docker-up:
+    desc: "Start Docker services"
+    cmds:
+      - echo "Starting Docker services..."
+      - "{{.DOCKER_COMPOSE}} up -d"
+      - sleep 3
+      - task: docker-status
+      - echo "✓ Docker services started"
+
+  docker-down:
+    desc: "Stop Docker services"
+    cmds:
+      - echo "Stopping Docker services..."
+      - "{{.DOCKER_COMPOSE}} down"
+      - echo "✓ Docker services stopped"
+
+  docker-restart:
+    desc: "Restart Docker services"
+    cmds:
+      - task: docker-down
+      - task: docker-up
+
+  docker-status:
+    desc: "Show Docker services status"
+    cmds:
+      - "{{.DOCKER_COMPOSE}} ps"
+
+  docker-logs:
+    desc: "Show all Docker logs (follow)"
+    cmds:
+      - "{{.DOCKER_COMPOSE}} logs -f"
+
+  docker-logs-postgres:
+    desc: "Show PostgreSQL logs"
+    cmds:
+      - "{{.DOCKER_COMPOSE}} logs -f postgres"
+
+  docker-logs-redis:
+    desc: "Show Redis logs"
+    cmds:
+      - "{{.DOCKER_COMPOSE}} logs -f redis"
+
+  docker-clean:
+    desc: "Remove Docker volumes (WARNING: deletes data)"
+    prompt: "This will delete all Docker data. Continue?"
+    cmds:
+      - "{{.DOCKER_COMPOSE}} down -v"
+      - echo "✓ Docker volumes removed"
+
+  # ===========================================
+  # Database Tasks
+  # ===========================================
+
+  db-migrate:
+    desc: "Run database migrations"
+    cmds:
+      - echo "Running database migrations..."
+      - go run cmd/migrate/main.go -command=migrate
+      - echo "✓ Migrations complete"
+
+  db-status:
+    desc: "Show database migration status"
+    cmds:
+      - go run cmd/migrate/main.go -command=status
+
+  db-reset:
+    desc: "Reset database (WARNING: deletes all data)"
+    prompt: "This will delete all database data. Continue?"
+    cmds:
+      - echo "Resetting database..."
+      - docker exec -i $(docker-compose ps -q postgres) psql -U postgres -c "DROP DATABASE IF EXISTS cryptofunk;"
+      - docker exec -i $(docker-compose ps -q postgres) psql -U postgres -c "CREATE DATABASE cryptofunk;"
+      - task: db-migrate
+      - echo "✓ Database reset complete"
+
+  db-shell:
+    desc: "Open PostgreSQL shell"
+    interactive: true
+    cmds:
+      - docker exec -it $(docker-compose ps -q postgres) psql -U postgres -d cryptofunk
+
+  db-backup:
+    desc: "Backup database"
+    vars:
+      TIMESTAMP:
+        sh: date +%Y%m%d_%H%M%S
+    cmds:
+      - echo "Backing up database..."
+      - docker exec $(docker-compose ps -q postgres) pg_dump -U postgres cryptofunk > backup_{{.TIMESTAMP}}.sql
+      - echo "✓ Backup saved: backup_{{.TIMESTAMP}}.sql"
+
+  # ===========================================
+  # Run Tasks
+  # ===========================================
+
+  run-orchestrator:
+    desc: "Run orchestrator"
+    deps:
+      - build-orchestrator
+    cmds:
+      - echo "Starting orchestrator..."
+      - ./{{.BINARY_DIR}}/orchestrator
+
+  run-agent-technical:
+    desc: "Run technical analysis agent"
+    deps:
+      - build-agent-technical
+    cmds:
+      - echo "Starting technical agent..."
+      - ./{{.BINARY_DIR}}/technical-agent
+
+  run-agent-trend:
+    desc: "Run trend following agent"
+    deps:
+      - build-agent-trend
+    cmds:
+      - echo "Starting trend agent..."
+      - ./{{.BINARY_DIR}}/trend-agent
+
+  run-agent-risk:
+    desc: "Run risk management agent"
+    deps:
+      - build-agent-risk
+    cmds:
+      - echo "Starting risk agent..."
+      - ./{{.BINARY_DIR}}/risk-agent
+
+  run-api:
+    desc: "Run API server"
+    deps:
+      - build-api
+    cmds:
+      - echo "Starting API server..."
+      - ./{{.BINARY_DIR}}/api
+
+  run-paper:
+    desc: "Start in paper trading mode"
+    deps:
+      - build-orchestrator
+    cmds:
+      - echo "Starting paper trading mode..."
+      - ./{{.BINARY_DIR}}/orchestrator --mode=paper
+
+  run-live:
+    desc: "Start in live trading mode (CAUTION!)"
+    prompt: "⚠️  Starting LIVE trading mode! Real money will be used. Continue?"
+    deps:
+      - build-orchestrator
+    cmds:
+      - echo "⚠️  Starting LIVE trading mode..."
+      - ./{{.BINARY_DIR}}/orchestrator --mode=live
+
+  # ===========================================
+  # Development Workflow
+  # ===========================================
+
+  dev:
+    desc: "Setup complete development environment"
+    cmds:
+      - task: docker-up
+      - task: deps
+      - task: build
+      - echo ""
+      - echo "✓ Development environment ready"
+      - echo ""
+      - echo "Next steps:"
+      - echo "  1. Run 'task run-orchestrator' in one terminal"
+      - echo "  2. Run agents in separate terminals:"
+      - echo "     - task run-agent-technical"
+      - echo "     - task run-agent-trend"
+      - echo "     - task run-agent-risk"
+
+  dev-clean:
+    desc: "Clean development environment"
+    cmds:
+      - task: docker-down
+      - task: clean
+      - echo "✓ Development environment cleaned"
+
+  dev-watch:
+    desc: "Watch and rebuild on file changes"
+    watch: true
+    sources:
+      - "**/*.go"
+    cmds:
+      - task: build
+
+  # ===========================================
+  # Clean Tasks
+  # ===========================================
+
+  clean:
+    desc: "Remove built binaries and test artifacts"
+    cmds:
+      - echo "Cleaning build artifacts..."
+      - rm -rf {{.BINARY_DIR}}
+      - rm -f coverage.out coverage.html
+      - echo "✓ Clean complete"
+
+  clean-all:
+    desc: "Remove all artifacts and stop services"
+    cmds:
+      - task: clean
+      - task: docker-down
+      - go clean -cache -testcache -modcache
+      - echo "✓ All clean"
+
+  # ===========================================
+  # Monitoring Tasks
+  # ===========================================
+
+  monitor:
+    desc: "Open monitoring dashboards"
+    cmds:
+      - echo "Opening Grafana (http://localhost:3000)..."
+      - echo "Opening Prometheus (http://localhost:9090)..."
+      - cmd: open http://localhost:3000
+        platforms: [darwin]
+      - cmd: xdg-open http://localhost:3000
+        platforms: [linux]
+      - cmd: start http://localhost:3000
+        platforms: [windows]
+
+  metrics:
+    desc: "Show current metrics"
+    cmds:
+      - curl -s http://localhost:8080/api/v1/metrics | jq
+
+  status:
+    desc: "Show system status"
+    cmds:
+      - curl -s http://localhost:8080/api/v1/status | jq
+
+  positions:
+    desc: "Show current positions"
+    cmds:
+      - curl -s http://localhost:8080/api/v1/positions | jq
+
+  agents:
+    desc: "Show agent status"
+    cmds:
+      - curl -s http://localhost:8080/api/v1/agents | jq
+
+  # ===========================================
+  # Utility Tasks
+  # ===========================================
+
+  check-env:
+    desc: "Check if required environment variables are set"
+    cmds:
+      - echo "Checking environment variables..."
+      - |
+        if [ -z "$BINANCE_API_KEY" ]; then
+          echo "❌ BINANCE_API_KEY not set"
+          exit 1
+        fi
+      - |
+        if [ -z "$BINANCE_SECRET_KEY" ]; then
+          echo "❌ BINANCE_SECRET_KEY not set"
+          exit 1
+        fi
+      - |
+        if [ -z "$POSTGRES_PASSWORD" ]; then
+          echo "❌ POSTGRES_PASSWORD not set"
+          exit 1
+        fi
+      - echo "✓ All required environment variables are set"
+
+  verify-keys:
+    desc: "Verify exchange API keys"
+    deps:
+      - build-orchestrator
+    cmds:
+      - ./{{.BINARY_DIR}}/orchestrator --verify-keys
+
+  init:
+    desc: "Initialize new project"
+    cmds:
+      - echo "Initializing CryptoFunk project..."
+      - task: deps
+      - task: docker-up
+      - sleep 5
+      - task: db-migrate
+      - task: build
+      - echo ""
+      - echo "✓ Project initialized successfully!"
+      - echo ""
+      - echo "Next steps:"
+      - echo "  1. Copy .env.example to .env and add your API keys"
+      - echo "  2. Run 'task check-env' to verify"
+      - echo "  3. Run 'task dev' to start development"
+
+  version:
+    desc: "Show version information"
+    cmds:
+      - echo "CryptoFunk Trading Platform"
+      - echo "Version: 0.1.0"
+      - go version
+
+  install-task:
+    desc: "Show instructions to install Task"
+    cmds:
+      - echo "To install Task, run:"
+      - echo ""
+      - echo "macOS/Linux (Homebrew):"
+      - echo "  brew install go-task/tap/go-task"
+      - echo ""
+      - echo "Windows (Winget):"
+      - echo "  winget install Task.Task"
+      - echo ""
+      - echo "Or download from: https://taskfile.dev/installation/"
+    silent: true
+
+  # ===========================================
+  # Git Hooks Tasks
+  # ===========================================
+
+  install-hooks:
+    desc: "Install Git hooks for pre-commit checks"
+    cmds:
+      - echo "Installing Git hooks..."
+      - ./scripts/install-hooks.sh
+      - echo "✓ Git hooks installed successfully"
+
+  test-all:
+    desc: "Run all validation checks (full mode)"
+    cmds:
+      - echo "Running comprehensive validation checks..."
+      - ./scripts/test-all.sh
+      - echo "✓ All checks passed"
+
+  test-fast:
+    desc: "Run quick validation checks (skip slow tests)"
+    cmds:
+      - echo "Running fast validation checks..."
+      - ./scripts/test-all.sh --fast
+      - echo "✓ Fast checks passed"
+
+  pre-commit:
+    desc: "Run pre-commit checks manually"
+    cmds:
+      - task: test-fast
+
+  validate:
+    desc: "Validate code quality (format, vet, build)"
+    cmds:
+      - echo "Validating code quality..."
+      - go mod tidy
+      - go fmt ./...
+      - go vet ./...
+      - go build ./...
+      - echo "✓ Code validation passed"

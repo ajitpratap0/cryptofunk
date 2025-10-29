@@ -1,0 +1,96 @@
+# Bifrost LLM Gateway Configuration
+# See: https://github.com/maximhq/bifrost
+
+# Provider configuration
+providers:
+  - name: claude
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    priority: 1  # Primary provider
+    models:
+      - claude-sonnet-4-20250514
+      - claude-3-5-sonnet-20241022
+    rate_limit:
+      requests_per_second: 50
+      tokens_per_minute: 40000
+  
+  - name: openai
+    type: openai
+    api_key: ${OPENAI_API_KEY}
+    priority: 2  # Fallback provider
+    models:
+      - gpt-4-turbo
+      - gpt-4o
+    rate_limit:
+      requests_per_second: 60
+      tokens_per_minute: 90000
+  
+  - name: gemini
+    type: google
+    api_key: ${GEMINI_API_KEY}
+    priority: 3  # Backup provider
+    models:
+      - gemini-pro
+      - gemini-1.5-pro
+    rate_limit:
+      requests_per_second: 30
+      tokens_per_minute: 32000
+    enabled: false  # Optional provider
+
+# Routing strategy
+routing:
+  strategy: failover  # Options: failover, round-robin, least-latency
+  retry_attempts: 2
+  retry_delay_ms: 500
+  timeout_ms: 30000
+
+# Semantic caching configuration
+cache:
+  enabled: true
+  backend: redis
+  redis_url: ${REDIS_URL:-redis://localhost:6379}
+  ttl: 3600  # 1 hour
+  similarity_threshold: 0.95  # 95% similarity for cache hit
+  max_cache_size_mb: 512
+  eviction_policy: lru
+
+# Observability
+observability:
+  metrics:
+    enabled: true
+    port: 9091
+    path: /metrics
+  
+  logging:
+    level: info  # debug, info, warn, error
+    format: json
+    output: stdout
+  
+  tracing:
+    enabled: false
+    provider: jaeger
+    endpoint: http://localhost:14268/api/traces
+
+# Security
+security:
+  api_key_validation: false
+  rate_limiting:
+    enabled: true
+    global_requests_per_second: 100
+    burst: 200
+  
+  allowed_origins:
+    - "*"  # Development only - restrict in production
+
+# Performance
+performance:
+  connection_pool_size: 100
+  idle_timeout_ms: 60000
+  max_concurrent_requests: 500
+  request_buffer_size: 1024
+
+# Cost tracking
+cost_tracking:
+  enabled: true
+  log_requests: true
+  alert_threshold_usd: 100.0  # Alert if daily cost exceeds $100
