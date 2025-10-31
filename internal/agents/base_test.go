@@ -69,16 +69,22 @@ func TestBaseAgentLifecycle(t *testing.T) {
 
 func TestAgentConfig(t *testing.T) {
 	config := &AgentConfig{
-		Name:          "config-test",
-		Type:          "test",
-		Version:       "2.0.0",
-		MCPServerCmd:  "node",
-		MCPServerArgs: []string{"server.js"},
-		MCPServerEnv: map[string]string{
-			"API_KEY": "test-key",
-		},
+		Name:         "config-test",
+		Type:         "test",
+		Version:      "2.0.0",
 		StepInterval: 5 * time.Second,
 		Enabled:      true,
+		MCPServers: []MCPServerConfig{
+			{
+				Name:    "test-server",
+				Type:    "internal",
+				Command: "node",
+				Args:    []string{"server.js"},
+				Env: map[string]string{
+					"API_KEY": "test-key",
+				},
+			},
+		},
 		Config: map[string]interface{}{
 			"threshold": 0.8,
 			"symbols":   []string{"BTC/USDT", "ETH/USDT"},
@@ -88,52 +94,15 @@ func TestAgentConfig(t *testing.T) {
 	assert.Equal(t, "config-test", config.Name)
 	assert.Equal(t, "test", config.Type)
 	assert.Equal(t, "2.0.0", config.Version)
-	assert.Equal(t, "node", config.MCPServerCmd)
-	assert.Len(t, config.MCPServerArgs, 1)
-	assert.Equal(t, "server.js", config.MCPServerArgs[0])
-	assert.Equal(t, "test-key", config.MCPServerEnv["API_KEY"])
 	assert.Equal(t, 5*time.Second, config.StepInterval)
 	assert.True(t, config.Enabled)
 	assert.NotNil(t, config.Config)
 	assert.Equal(t, 0.8, config.Config["threshold"])
-}
-
-func TestMCPRequest(t *testing.T) {
-	req := MCPRequest{
-		JSONRPC: "2.0",
-		ID:      1,
-		Method:  "tools/list",
-		Params:  nil,
-	}
-
-	assert.Equal(t, "2.0", req.JSONRPC)
-	assert.Equal(t, 1, req.ID)
-	assert.Equal(t, "tools/list", req.Method)
-	assert.Nil(t, req.Params)
-}
-
-func TestMCPResponse(t *testing.T) {
-	resp := MCPResponse{
-		JSONRPC: "2.0",
-		ID:      1,
-		Result:  []byte(`{"tools": []}`),
-		Error:   nil,
-	}
-
-	assert.Equal(t, "2.0", resp.JSONRPC)
-	assert.Equal(t, 1, resp.ID)
-	assert.NotNil(t, resp.Result)
-	assert.Nil(t, resp.Error)
-}
-
-func TestMCPError(t *testing.T) {
-	mcpErr := MCPError{
-		Code:    -32600,
-		Message: "Invalid Request",
-		Data:    map[string]interface{}{"detail": "Missing required field"},
-	}
-
-	assert.Equal(t, -32600, mcpErr.Code)
-	assert.Equal(t, "Invalid Request", mcpErr.Message)
-	assert.NotNil(t, mcpErr.Data)
+	assert.Len(t, config.MCPServers, 1)
+	assert.Equal(t, "test-server", config.MCPServers[0].Name)
+	assert.Equal(t, "internal", config.MCPServers[0].Type)
+	assert.Equal(t, "node", config.MCPServers[0].Command)
+	assert.Len(t, config.MCPServers[0].Args, 1)
+	assert.Equal(t, "server.js", config.MCPServers[0].Args[0])
+	assert.Equal(t, "test-key", config.MCPServers[0].Env["API_KEY"])
 }

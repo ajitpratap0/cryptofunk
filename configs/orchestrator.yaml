@@ -1,0 +1,33 @@
+# MCP Orchestrator Configuration
+orchestrator:
+  name: "mcp-orchestrator"
+
+  # NATS Configuration
+  nats_url: "nats://localhost:4222"
+
+  # Topics
+  signal_topic: "cryptofunk.agent.signals"        # Subscribe to agent signals
+  decision_topic: "cryptofunk.orchestrator.decisions"  # Publish trading decisions
+  heartbeat_topic: "cryptofunk.agent.heartbeat"   # Subscribe to agent heartbeats
+
+  # Decision-Making Configuration
+  step_interval: "30s"         # How often to make trading decisions
+  min_consensus: 0.6           # Minimum consensus threshold (0.0-1.0)
+  min_confidence: 0.5          # Minimum confidence threshold (0.0-1.0)
+  max_signal_age: "5m"         # Discard signals older than this
+
+  # Health Monitoring
+  health_check_interval: "1m"  # How often to check agent health
+
+  # Metrics
+  metrics_port: 9100           # Prometheus metrics endpoint port
+
+# Agent Weights Configuration (optional - overrides defaults)
+# agent_weights:
+#   technical-agent: 0.25
+#   orderbook-agent: 0.20
+#   sentiment-agent: 0.15
+#   trend-agent: 0.30
+#   reversion-agent: 0.25
+#   arbitrage-agent: 0.20
+#   risk-agent: 1.00  # Risk agent has veto power

@@ -108,6 +108,7 @@ tasks:
       - build-agent-sentiment
       - build-agent-trend
       - build-agent-reversion
+      - build-agent-arbitrage
       - build-agent-risk
 
   build-agent-technical:
@@ -164,6 +165,17 @@ tasks:
     cmds:
       - mkdir -p {{.BINARY_DIR}}
       - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/reversion-agent cmd/agents/reversion-agent/main.go
+
+  build-agent-arbitrage:
+    desc: "Build arbitrage agent"
+    sources:
+      - cmd/agents/arbitrage-agent/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/arbitrage-agent"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/arbitrage-agent cmd/agents/arbitrage-agent/main.go
 
   build-agent-risk:
     desc: "Build risk management agent"
