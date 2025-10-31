@@ -23,6 +23,7 @@ type Service struct {
 	db              *db.DB
 	mode            TradingMode
 	positionManager *PositionManager
+	alertManager    *AlertManager
 }
 
 // ServiceConfig contains configuration for the exchange service
@@ -71,11 +72,15 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	// Create position manager
 	positionManager := NewPositionManager(database)
 
+	// Create alert manager
+	alertManager := NewAlertManager()
+
 	return &Service{
 		exchange:        exchange,
 		db:              database,
 		mode:            config.Mode,
 		positionManager: positionManager,
+		alertManager:    alertManager,
 	}, nil
 }
 

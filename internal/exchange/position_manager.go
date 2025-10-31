@@ -17,6 +17,7 @@ type PositionManager struct {
 	mu               sync.RWMutex
 	openPositions    map[string]*db.Position // symbol -> position
 	currentSessionID *uuid.UUID
+	alertManager     *AlertManager
 }
 
 // NewPositionManager creates a new position manager
@@ -24,6 +25,7 @@ func NewPositionManager(database *db.DB) *PositionManager {
 	return &PositionManager{
 		db:            database,
 		openPositions: make(map[string]*db.Position),
+		alertManager:  NewAlertManager(),
 	}
 }
 
@@ -97,6 +99,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 					closeQty := existingPos.Quantity
 					err := pm.closePosition(ctx, existingPos, avgFillPrice, "Closed by BUY order", totalFees)
 					if err != nil {
+						alert := AlertPositionUpdateFailed(err, order.Symbol, "close SHORT position")
+						pm.alertManager.SendAlert(ctx, alert)
 						return err
 					}
 
@@ -105,6 +109,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 						remainingQty := totalQty - closeQty
 						err := pm.openPosition(ctx, order.Symbol, db.PositionSideLong, avgFillPrice, remainingQty, "Opened after closing SHORT", totalFees)
 						if err != nil {
+							alert := AlertPositionUpdateFailed(err, order.Symbol, "open LONG position after closing SHORT")
+							pm.alertManager.SendAlert(ctx, alert)
 							return err
 						}
 					}
@@ -121,6 +127,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 			// Opening new LONG position
 			err := pm.openPosition(ctx, order.Symbol, db.PositionSideLong, avgFillPrice, totalQty, "Opened by BUY order", totalFees)
 			if err != nil {
+				alert := AlertPositionUpdateFailed(err, order.Symbol, "open LONG position")
+				pm.alertManager.SendAlert(ctx, alert)
 				return err
 			}
 		}
@@ -134,6 +142,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 					closeQty := existingPos.Quantity
 					err := pm.closePosition(ctx, existingPos, avgFillPrice, "Closed by SELL order", totalFees)
 					if err != nil {
+						alert := AlertPositionUpdateFailed(err, order.Symbol, "close LONG position")
+						pm.alertManager.SendAlert(ctx, alert)
 						return err
 					}
 
@@ -142,6 +152,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 						remainingQty := totalQty - closeQty
 						err := pm.openPosition(ctx, order.Symbol, db.PositionSideShort, avgFillPrice, remainingQty, "Opened after closing LONG", totalFees)
 						if err != nil {
+							alert := AlertPositionUpdateFailed(err, order.Symbol, "open SHORT position after closing LONG")
+							pm.alertManager.SendAlert(ctx, alert)
 							return err
 						}
 					}
@@ -157,6 +169,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 			// Opening new SHORT position
 			err := pm.openPosition(ctx, order.Symbol, db.PositionSideShort, avgFillPrice, totalQty, "Opened by SELL order", totalFees)
 			if err != nil {
+				alert := AlertPositionUpdateFailed(err, order.Symbol, "open SHORT position")
+				pm.alertManager.SendAlert(ctx, alert)
 				return err
 			}
 		}

@@ -27,8 +27,9 @@ type BinanceExchange struct {
 	currentSessionID *uuid.UUID
 
 	// Configuration
-	testnet     bool
-	retryConfig RetryConfig
+	testnet      bool
+	retryConfig  RetryConfig
+	alertManager *AlertManager
 }
 
 // BinanceConfig contains configuration for Binance exchange
@@ -53,12 +54,13 @@ func NewBinanceExchange(config BinanceConfig, database *db.DB) (*BinanceExchange
 	}
 
 	return &BinanceExchange{
-		client:      client,
-		db:          database,
-		orders:      make(map[string]*Order),
-		fills:       make(map[string][]Fill),
-		testnet:     config.Testnet,
-		retryConfig: config.RetryConfig,
+		client:       client,
+		db:           database,
+		orders:       make(map[string]*Order),
+		fills:        make(map[string][]Fill),
+		testnet:      config.Testnet,
+		retryConfig:  config.RetryConfig,
+		alertManager: NewAlertManager(),
 	}, nil
 }
 
@@ -116,11 +118,10 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 	})
 
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("symbol", req.Symbol).
-			Str("side", string(req.Side)).
-			Msg("Failed to place order on Binance after retries")
+		// Send alert for order placement failure
+		ctx := context.Background()
+		alert := AlertOrderPlacementFailed(err, req.Symbol, req.Side, req.Quantity, req.Type)
+		b.alertManager.SendAlert(ctx, alert)
 
 		return &PlaceOrderResponse{
 			Status:  OrderStatusRejected,
@@ -193,10 +194,10 @@ func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
 	})
 
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("order_id", orderID).
-			Msg("Failed to cancel order on Binance after retries")
+		// Send alert for order cancellation failure
+		ctx := context.Background()
+		alert := AlertOrderCancellationFailed(err, orderID)
+		b.alertManager.SendAlert(ctx, alert)
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
 
@@ -262,10 +263,10 @@ func (b *BinanceExchange) GetOrder(orderID string) (*Order, error) {
 	})
 
 	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("order_id", orderID).
-			Msg("Failed to query order status from Binance after retries, returning cached")
+		// Send alert for order query failure
+		ctx := context.Background()
+		alert := AlertOrderQueryFailed(err, orderID)
+		b.alertManager.SendAlert(ctx, alert)
 		return order, nil
 	}
 
