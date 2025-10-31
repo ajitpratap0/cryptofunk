@@ -1582,8 +1582,23 @@ func main() {
 							}
 						}
 					} else if serverConfig.Type == "external" {
+						// DEBUG: Log raw server map to see all fields
+						log.Debug().Interface("server_map", server).Msg("Raw server map for external type")
+
+						// DEBUG: Check if URL key exists and what value it has
+						urlValue, urlExists := server["url"]
+						log.Debug().
+							Bool("url_exists", urlExists).
+							Interface("url_value", urlValue).
+							Str("url_type", fmt.Sprintf("%T", urlValue)).
+							Msg("URL field check")
+
+						// Existing URL extraction with debug logging
 						if url, ok := server["url"].(string); ok {
 							serverConfig.URL = url
+							log.Debug().Str("extracted_url", url).Msg("Successfully extracted URL")
+						} else {
+							log.Warn().Msg("Failed to extract URL from server map - type assertion failed")
 						}
 					}
 
@@ -1591,6 +1606,8 @@ func main() {
 					log.Info().
 						Str("name", serverConfig.Name).
 						Str("type", serverConfig.Type).
+						Str("url", serverConfig.URL).
+						Str("command", serverConfig.Command).
 						Msg("Configured MCP server")
 				}
 			}

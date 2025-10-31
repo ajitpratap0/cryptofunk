@@ -27,6 +27,7 @@ analysis_agents:
       # Primary: CoinGecko for market data
       - name: "coingecko"
         type: "external"
+        url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
           - "get_market_chart"
@@ -86,6 +87,7 @@ analysis_agents:
     mcp_servers:
       - name: "coingecko"
         type: "external"
+        url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
       - name: "market_data"
@@ -111,6 +113,7 @@ analysis_agents:
     mcp_servers:
       - name: "coingecko"
         type: "external"
+        url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_trending"
           - "get_coin_info"
@@ -170,6 +173,7 @@ strategy_agents:
     mcp_servers:
       - name: "coingecko"
         type: "external"
+        url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
           - "get_market_chart"
@@ -218,6 +222,7 @@ strategy_agents:
     mcp_servers:
       - name: "coingecko"
         type: "external"
+        url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
           - "get_market_chart"
@@ -253,6 +258,11 @@ strategy_agents:
     version: "1.0.0"
 
     mcp_servers:
+      - name: "coingecko"
+        type: "external"
+        url: "https://mcp.api.coingecko.com/sse"
+        tools:
+          - "get_simple_price"
       - name: "market_data"
         type: "internal"
         command: "./bin/market-data-server"

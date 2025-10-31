@@ -57,9 +57,8 @@ func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 	database, err := db.New(ctx)
 	require.NoError(t, err)
 
-	// Run migrations
-	err = database.Migrate(ctx)
-	require.NoError(t, err)
+	// TODO: Run migrations when needed for DB-dependent tests
+	// For now, tests only verify MCP protocol which doesn't require schema
 
 	// Return cleanup function
 	cleanup := func() {

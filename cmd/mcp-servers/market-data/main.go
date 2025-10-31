@@ -15,28 +15,55 @@ import (
 
 const (
 	serverName    = "market-data"
-	serverVersion = "0.1.0"
+	serverVersion = "1.0.0"
 )
 
-// MarketDataServer implements MCP server for market data
+// TickerData represents 24h ticker statistics
+type TickerData struct {
+	Symbol             string `json:"symbol"`
+	Price              string `json:"price"`
+	PriceChangePercent string `json:"price_change_percent"`
+	Volume             string `json:"volume"`
+	High24h            string `json:"high_24h"`
+	Low24h             string `json:"low_24h"`
+	Timestamp          int64  `json:"timestamp"`
+}
+
+// MCPRequest represents an MCP tool call request
+type MCPRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int             `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+}
+
+// MCPResponse represents an MCP response
+type MCPResponse struct {
+	JSONRPC string      `json:"jsonrpc"`
+	ID      int         `json:"id"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *MCPError   `json:"error,omitempty"`
+}
+
+// MCPError represents an MCP error
+type MCPError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// MCPServer handles MCP protocol over stdio
+type MCPServer struct {
+	service *MarketDataServer
+}
+
+// MarketDataServer provides market data from Binance
 type MarketDataServer struct {
 	binanceClient *binance.Client
 	logger        zerolog.Logger
 }
 
-// TickerData represents ticker information
-type TickerData struct {
-	Symbol             string `json:"symbol"`
-	Price              string `json:"price"`
-	PriceChangePercent string `json:"priceChangePercent"`
-	Volume             string `json:"volume"`
-	High24h            string `json:"high24h"`
-	Low24h             string `json:"low24h"`
-	Timestamp          int64  `json:"timestamp"`
-}
-
 func main() {
-	// Initialize logger
+	// Configure logging to stderr (stdout reserved for MCP protocol)
 	zerolog.TimeFieldFormat = time.RFC3339
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{
 		Out:        os.Stderr,
@@ -52,132 +79,201 @@ func main() {
 
 	// Initialize Binance client (testnet)
 	binanceClient := binance.NewClient(apiKey, secretKey)
-	binance.UseTestnet = true // Use testnet for development
+	binance.UseTestnet = true
 
-	// Create market data server
-	_ = &MarketDataServer{
+	// Create market data service
+	marketDataService := &MarketDataServer{
 		binanceClient: binanceClient,
 		logger:        logger,
 	}
 
 	// Create MCP server
-	// Note: Full MCP integration will be implemented in Phase 2
-	// For Phase 1, we're setting up the basic structure
-	logger.Info().Msg("MCP Server structure ready")
-	logger.Info().Msg("Note: Full MCP integration to be completed in Phase 2")
+	mcpServer := &MCPServer{
+		service: marketDataService,
+	}
 
-	// TODO: Implement full MCP server with mcp.NewServer and proper handlers
-	// This placeholder ensures the project compiles and infrastructure is ready
+	logger.Info().Msg("Market Data MCP Server ready, listening on stdio")
 
-	logger.Info().Msg("Market Data Server initialized successfully")
-	logger.Info().Msg("Phase 1 complete - Infrastructure and basic structure ready")
-
-	// Keep the server running for demonstration
-	select {}
+	// Run MCP server
+	if err := mcpServer.Run(); err != nil {
+		logger.Fatal().Err(err).Msg("MCP server failed")
+	}
 }
 
-// registerTools registers MCP tools
-// TODO: Update to use mcp.Server API in Phase 2
-func (s *MarketDataServer) registerTools(srv interface{}) error {
-	// Tool: get_current_price
-	// TODO: Implement with mcp.Server.Handle() in Phase 2
-	_ = srv
-	/*
-		var err error
-		err := srv.AddTool(
-			"get_current_price",
-			"Get current price for a trading symbol",
-			map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"symbol": map[string]interface{}{
-						"type":        "string",
-						"description": "Trading pair symbol (e.g., BTCUSDT, ETHUSDT)",
-					},
-				},
-				"required": []string{"symbol"},
-			},
-			s.handleGetCurrentPrice,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to add get_current_price tool: %w", err)
+// Run starts the MCP server with stdio transport
+func (s *MCPServer) Run() error {
+	s.service.logger.Info().Msg("MCP server ready, listening on stdio")
+
+	decoder := json.NewDecoder(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+
+	for {
+		var request MCPRequest
+		if err := decoder.Decode(&request); err != nil {
+			if err.Error() == "EOF" {
+				s.service.logger.Info().Msg("Client disconnected")
+				return nil
+			}
+			s.service.logger.Error().Err(err).Msg("Failed to decode request")
+			continue
 		}
 
-		// Tool: get_ticker_24h
-		err = srv.AddTool(
-			"get_ticker_24h",
-			"Get 24-hour ticker statistics for a symbol",
-			map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"symbol": map[string]interface{}{
-						"type":        "string",
-						"description": "Trading pair symbol (e.g., BTCUSDT)",
-					},
-				},
-				"required": []string{"symbol"},
-			},
-			s.handleGetTicker24h,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to add get_ticker_24h tool: %w", err)
-		}
+		s.service.logger.Debug().
+			Str("method", request.Method).
+			Int("id", request.ID).
+			Msg("Received MCP request")
 
-		// Tool: get_orderbook
-		err = srv.AddTool(
-			"get_orderbook",
-			"Get order book depth for a symbol",
-			map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"symbol": map[string]interface{}{
-						"type":        "string",
-						"description": "Trading pair symbol (e.g., BTCUSDT)",
-					},
-					"limit": map[string]interface{}{
-						"type":        "number",
-						"description": "Depth limit (5, 10, 20, 50, 100, 500, 1000)",
-						"default":     20,
-					},
-				},
-				"required": []string{"symbol"},
-			},
-			s.handleGetOrderbook,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to add get_orderbook tool: %w", err)
-		}
-	*/
+		response := s.handleRequest(&request)
 
-	s.logger.Info().Msg("Tools registration structure ready (full implementation in Phase 2)")
-	return nil
+		if err := encoder.Encode(response); err != nil {
+			s.service.logger.Error().Err(err).Msg("Failed to encode response")
+			return err
+		}
+	}
 }
 
-// registerResources registers MCP resources
-// TODO: Update to use mcp.Server API in Phase 2
-func (s *MarketDataServer) registerResources(srv interface{}) error {
-	// Resource: market://ticker/{symbol}
-	// TODO: Implement with mcp.Server in Phase 2
-	_ = srv
-	/*
-		var err error
-		err := srv.AddResourceTemplate(
-			"market://ticker/{symbol}",
-			"Real-time ticker data for a trading symbol",
-			"application/json",
-			s.handleTickerResource,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to add ticker resource: %w", err)
-		}
-	*/
+// handleRequest routes MCP requests to appropriate handlers
+func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
+	response := &MCPResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+	}
 
-	s.logger.Info().Msg("Resources registration structure ready (full implementation in Phase 2)")
-	return nil
+	switch req.Method {
+	case "initialize":
+		response.Result = s.handleInitialize(req.Params)
+		return response
+
+	case "tools/list":
+		response.Result = s.listTools()
+		return response
+
+	case "tools/call":
+		var toolParams struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &toolParams); err != nil {
+			response.Error = &MCPError{
+				Code:    -32602,
+				Message: fmt.Sprintf("Invalid params: %v", err),
+			}
+			return response
+		}
+
+		result, err := s.callTool(toolParams.Name, toolParams.Arguments)
+		if err != nil {
+			response.Error = &MCPError{
+				Code:    -32000,
+				Message: err.Error(),
+			}
+		} else {
+			response.Result = result
+		}
+		return response
+
+	default:
+		response.Error = &MCPError{
+			Code:    -32601,
+			Message: fmt.Sprintf("Method not found: %s", req.Method),
+		}
+		return response
+	}
 }
 
-// Tool handlers
+// handleInitialize responds to MCP initialize request
+func (s *MCPServer) handleInitialize(params json.RawMessage) interface{} {
+	s.service.logger.Info().Msg("Handling initialize request")
 
+	return map[string]interface{}{
+		"protocolVersion": "2024-11-05",
+		"serverInfo": map[string]interface{}{
+			"name":    serverName,
+			"version": serverVersion,
+		},
+		"capabilities": map[string]interface{}{
+			"tools": map[string]interface{}{},
+		},
+	}
+}
+
+// listTools returns available MCP tools
+func (s *MCPServer) listTools() interface{} {
+	return map[string]interface{}{
+		"tools": []map[string]interface{}{
+			{
+				"name":        "get_price",
+				"description": "Get current price for a trading symbol",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"symbol": map[string]interface{}{
+							"type":        "string",
+							"description": "Trading pair symbol (e.g., BTCUSDT)",
+						},
+					},
+					"required": []string{"symbol"},
+				},
+			},
+			{
+				"name":        "get_ticker_24h",
+				"description": "Get 24-hour ticker statistics for a symbol",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"symbol": map[string]interface{}{
+							"type":        "string",
+							"description": "Trading pair symbol (e.g., BTCUSDT)",
+						},
+					},
+					"required": []string{"symbol"},
+				},
+			},
+			{
+				"name":        "get_order_book",
+				"description": "Get order book depth for a symbol",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"symbol": map[string]interface{}{
+							"type":        "string",
+							"description": "Trading pair symbol (e.g., BTCUSDT)",
+						},
+						"limit": map[string]interface{}{
+							"type":        "number",
+							"description": "Number of price levels (default: 20)",
+							"default":     20,
+						},
+					},
+					"required": []string{"symbol"},
+				},
+			},
+		},
+	}
+}
+
+// callTool executes the requested tool
+func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
+	s.service.logger.Debug().
+		Str("tool", name).
+		Interface("args", args).
+		Msg("Calling tool")
+
+	ctx := context.Background()
+
+	switch name {
+	case "get_price":
+		return s.service.handleGetCurrentPrice(ctx, args)
+	case "get_ticker_24h":
+		return s.service.handleGetTicker24h(ctx, args)
+	case "get_order_book":
+		return s.service.handleGetOrderbook(ctx, args)
+	default:
+		return nil, fmt.Errorf("unknown tool: %s", name)
+	}
+}
+
+// handleGetCurrentPrice gets current price for a symbol
 func (s *MarketDataServer) handleGetCurrentPrice(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	symbol, ok := args["symbol"].(string)
 	if !ok {
@@ -186,7 +282,6 @@ func (s *MarketDataServer) handleGetCurrentPrice(ctx context.Context, args map[s
 
 	s.logger.Debug().Str("symbol", symbol).Msg("Getting current price")
 
-	// Get price from Binance
 	prices, err := s.binanceClient.NewListPricesService().Symbol(symbol).Do(ctx)
 	if err != nil {
 		s.logger.Error().Err(err).Str("symbol", symbol).Msg("Failed to get price")
@@ -211,6 +306,7 @@ func (s *MarketDataServer) handleGetCurrentPrice(ctx context.Context, args map[s
 	return result, nil
 }
 
+// handleGetTicker24h gets 24-hour ticker for a symbol
 func (s *MarketDataServer) handleGetTicker24h(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	symbol, ok := args["symbol"].(string)
 	if !ok {
@@ -219,7 +315,6 @@ func (s *MarketDataServer) handleGetTicker24h(ctx context.Context, args map[stri
 
 	s.logger.Debug().Str("symbol", symbol).Msg("Getting 24h ticker")
 
-	// Get 24h ticker from Binance
 	ticker, err := s.binanceClient.NewListPriceChangeStatsService().Symbol(symbol).Do(ctx)
 	if err != nil {
 		s.logger.Error().Err(err).Str("symbol", symbol).Msg("Failed to get ticker")
@@ -250,13 +345,14 @@ func (s *MarketDataServer) handleGetTicker24h(ctx context.Context, args map[stri
 	return result, nil
 }
 
+// handleGetOrderbook gets order book for a symbol
 func (s *MarketDataServer) handleGetOrderbook(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	symbol, ok := args["symbol"].(string)
 	if !ok {
 		return nil, fmt.Errorf("symbol must be a string")
 	}
 
-	limit := 20 // default
+	limit := 20
 	if l, ok := args["limit"]; ok {
 		if lNum, ok := l.(float64); ok {
 			limit = int(lNum)
@@ -272,7 +368,6 @@ func (s *MarketDataServer) handleGetOrderbook(ctx context.Context, args map[stri
 		Int("limit", limit).
 		Msg("Getting orderbook")
 
-	// Get orderbook from Binance
 	orderbook, err := s.binanceClient.NewDepthService().
 		Symbol(symbol).
 		Limit(limit).
@@ -296,29 +391,4 @@ func (s *MarketDataServer) handleGetOrderbook(ctx context.Context, args map[stri
 		Msg("Orderbook retrieved")
 
 	return result, nil
-}
-
-// Resource handlers
-
-func (s *MarketDataServer) handleTickerResource(ctx context.Context, uri string, params map[string]string) (string, string, error) {
-	symbol, ok := params["symbol"]
-	if !ok {
-		return "", "", fmt.Errorf("symbol parameter required")
-	}
-
-	s.logger.Debug().Str("symbol", symbol).Msg("Handling ticker resource")
-
-	// Get ticker data (reuse tool handler logic)
-	result, err := s.handleGetTicker24h(ctx, map[string]interface{}{"symbol": symbol})
-	if err != nil {
-		return "", "", err
-	}
-
-	// Marshal to JSON
-	data, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal ticker data: %w", err)
-	}
-
-	return string(data), "application/json", nil
 }
