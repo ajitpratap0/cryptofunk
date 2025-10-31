@@ -73,7 +73,7 @@ func TestOrderExecutorServer_ListTools(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -115,7 +115,7 @@ func TestStartSession_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -154,7 +154,7 @@ func TestStartSession_MissingSymbol(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -181,7 +181,7 @@ func TestStartSession_NegativeCapital(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -206,7 +206,7 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -256,7 +256,7 @@ func TestPlaceMarketOrder_MissingSymbol(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -283,7 +283,7 @@ func TestPlaceMarketOrder_InvalidSide(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -310,7 +310,7 @@ func TestPlaceMarketOrder_NegativeQuantity(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -337,7 +337,7 @@ func TestPlaceLimitOrder_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -389,7 +389,7 @@ func TestPlaceLimitOrder_MissingPrice(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -417,7 +417,7 @@ func TestPlaceLimitOrder_NegativePrice(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -445,7 +445,7 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -506,7 +506,7 @@ func TestGetOrderStatus_InvalidOrderID(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -530,7 +530,7 @@ func TestCancelOrder_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -587,7 +587,7 @@ func TestCancelOrder_MissingOrderID(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -612,7 +612,7 @@ func TestGetSessionStats_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -660,7 +660,7 @@ func TestGetSessionStats_NoActiveSession(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -683,7 +683,7 @@ func TestStopSession_ValidInput(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -729,7 +729,7 @@ func TestStopSession_NoActiveSession(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -754,7 +754,7 @@ func TestStopSession_NegativeFinalCapital(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -793,7 +793,7 @@ func TestInvalidMethod(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -814,7 +814,7 @@ func TestInvalidToolName(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -837,7 +837,7 @@ func TestStdioIntegration(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -884,7 +884,7 @@ func TestCompleteSessionLifecycle(t *testing.T) {
 	database, cleanup := setupTestDatabase(t)
 	defer cleanup()
 
-	exchangeService := exchange.NewService(database)
+	exchangeService := exchange.NewServicePaper(database)
 	server := &MCPServer{
 		service: exchangeService,
 	}

@@ -9,20 +9,67 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// TradingMode represents the trading mode (paper or live)
+type TradingMode string
+
+const (
+	TradingModePaper TradingMode = "paper"
+	TradingModeLive  TradingMode = "live"
+)
+
 // Service provides order execution functionality
 type Service struct {
-	exchange *MockExchange
+	exchange Exchange // Interface - can be MockExchange or BinanceExchange
 	db       *db.DB
+	mode     TradingMode
 }
 
-// NewService creates a new exchange service
-func NewService(database *db.DB) *Service {
-	log.Info().Msg("Exchange service initialized")
+// ServiceConfig contains configuration for the exchange service
+type ServiceConfig struct {
+	Mode           TradingMode
+	BinanceAPIKey  string
+	BinanceSecret  string
+	BinanceTestnet bool
+}
+
+// NewService creates a new exchange service with specified trading mode
+func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
+	var exchange Exchange
+	var err error
+
+	switch config.Mode {
+	case TradingModeLive:
+		// Create Binance exchange for live trading
+		binanceConfig := BinanceConfig{
+			APIKey:    config.BinanceAPIKey,
+			SecretKey: config.BinanceSecret,
+			Testnet:   config.BinanceTestnet,
+		}
+		exchange, err = NewBinanceExchange(binanceConfig, database)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Binance exchange: %w", err)
+		}
+		log.Info().Bool("testnet", config.BinanceTestnet).Msg("Exchange service initialized (LIVE trading)")
+
+	case TradingModePaper:
+		fallthrough
+	default:
+		// Create mock exchange for paper trading
+		exchange = NewMockExchange(database)
+		log.Info().Msg("Exchange service initialized (PAPER trading)")
+	}
 
 	return &Service{
-		exchange: NewMockExchange(database),
+		exchange: exchange,
 		db:       database,
-	}
+		mode:     config.Mode,
+	}, nil
+}
+
+// NewServicePaper creates a service in paper trading mode (for backward compatibility)
+func NewServicePaper(database *db.DB) *Service {
+	service, _ := NewService(database, ServiceConfig{Mode: TradingModePaper})
+	return service
 }
 
 // PlaceMarketOrder places a market order
