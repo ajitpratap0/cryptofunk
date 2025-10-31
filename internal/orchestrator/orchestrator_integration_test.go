@@ -175,12 +175,28 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 3: Low confidence - should result in HOLD
 	t.Run("low_confidence_hold", func(t *testing.T) {
+		// Register agents with heartbeats first
+		agents := []struct {
+			name   string
+			typ    string
+			weight float64
+		}{
+			{"technical-agent-low", "analysis", 0.25},
+			{"trend-agent-low", "analysis", 0.30},
+			{"sentiment-agent-low", "analysis", 0.15},
+		}
+
+		for _, agent := range agents {
+			sendHeartbeat(t, nc, config.HeartbeatTopic, agent.name, agent.typ, agent.weight)
+		}
+
+		time.Sleep(200 * time.Millisecond)
+
 		// All agents vote with low confidence
-		agents := []string{"technical-agent", "trend-agent", "sentiment-agent"}
-		for _, name := range agents {
+		for _, agent := range agents {
 			signal := &orchestrator.AgentSignal{
-				AgentName:  name,
-				AgentType:  "analysis",
+				AgentName:  agent.name,
+				AgentType:  agent.typ,
 				Symbol:     "SOL/USDT",
 				Signal:     "BUY",
 				Confidence: 0.35, // Below threshold
