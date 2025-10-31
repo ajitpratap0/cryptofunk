@@ -19,9 +19,10 @@ const (
 
 // Service provides order execution functionality
 type Service struct {
-	exchange Exchange // Interface - can be MockExchange or BinanceExchange
-	db       *db.DB
-	mode     TradingMode
+	exchange        Exchange // Interface - can be MockExchange or BinanceExchange
+	db              *db.DB
+	mode            TradingMode
+	positionManager *PositionManager
 }
 
 // ServiceConfig contains configuration for the exchange service
@@ -59,10 +60,14 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 		log.Info().Msg("Exchange service initialized (PAPER trading)")
 	}
 
+	// Create position manager
+	positionManager := NewPositionManager(database)
+
 	return &Service{
-		exchange: exchange,
-		db:       database,
-		mode:     config.Mode,
+		exchange:        exchange,
+		db:              database,
+		mode:            config.Mode,
+		positionManager: positionManager,
 	}, nil
 }
 
@@ -120,6 +125,17 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 	if err != nil {
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil // Still return the response even if we can't get details
+	}
+
+	// Update positions if order was filled
+	if order.Status == OrderStatusFilled {
+		fills, err := s.exchange.GetOrderFills(order.ID)
+		if err == nil && len(fills) > 0 {
+			ctx := context.Background()
+			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
+				log.Error().Err(err).Msg("Failed to update positions after order fill")
+			}
+		}
 	}
 
 	return order, nil
@@ -183,6 +199,17 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 	if err != nil {
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil
+	}
+
+	// Update positions if order was filled (limit orders may fill immediately in some cases)
+	if order.Status == OrderStatusFilled {
+		fills, err := s.exchange.GetOrderFills(order.ID)
+		if err == nil && len(fills) > 0 {
+			ctx := context.Background()
+			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
+				log.Error().Err(err).Msg("Failed to update positions after order fill")
+			}
+		}
 	}
 
 	return order, nil
@@ -279,6 +306,9 @@ func (s *Service) StartSession(args map[string]interface{}) (interface{}, error)
 	// Set session in exchange
 	s.exchange.SetSession(&session.ID)
 
+	// Set session in position manager
+	s.positionManager.SetSession(&session.ID)
+
 	log.Info().
 		Str("session_id", session.ID.String()).
 		Str("symbol", symbol).
@@ -322,6 +352,9 @@ func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) 
 
 	// Clear session from exchange
 	s.exchange.SetSession(nil)
+
+	// Clear session from position manager
+	s.positionManager.SetSession(nil)
 
 	// Get final session data
 	session, err := s.db.GetSession(ctx, *sessionID)
@@ -388,6 +421,122 @@ func (s *Service) GetSessionStats(args map[string]interface{}) (interface{}, err
 		"total_pnl":       session.TotalPnL,
 		"max_drawdown":    session.MaxDrawdown,
 		"sharpe_ratio":    session.SharpeRatio,
+	}, nil
+}
+
+// GetPositions retrieves current open positions
+func (s *Service) GetPositions(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("GetPositions called")
+
+	positions := s.positionManager.GetOpenPositions()
+
+	return map[string]interface{}{
+		"positions": positions,
+		"count":     len(positions),
+	}, nil
+}
+
+// GetPositionBySymbol retrieves a specific position by symbol
+func (s *Service) GetPositionBySymbol(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("GetPositionBySymbol called")
+
+	symbol, ok := args["symbol"].(string)
+	if !ok || symbol == "" {
+		return nil, fmt.Errorf("symbol is required and must be a string")
+	}
+
+	position, exists := s.positionManager.GetPosition(symbol)
+	if !exists {
+		return map[string]interface{}{
+			"position": nil,
+			"exists":   false,
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"position": position,
+		"exists":   true,
+	}, nil
+}
+
+// UpdatePositionPnL updates unrealized P&L for positions based on current prices
+func (s *Service) UpdatePositionPnL(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("UpdatePositionPnL called")
+
+	// Extract prices map
+	pricesArg, ok := args["prices"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("prices must be a map of symbol -> price")
+	}
+
+	// Convert to map[string]float64
+	prices := make(map[string]float64)
+	for symbol, priceVal := range pricesArg {
+		switch v := priceVal.(type) {
+		case float64:
+			prices[symbol] = v
+		case int:
+			prices[symbol] = float64(v)
+		case int64:
+			prices[symbol] = float64(v)
+		default:
+			return nil, fmt.Errorf("invalid price for symbol %s", symbol)
+		}
+	}
+
+	ctx := context.Background()
+	err := s.positionManager.UpdateUnrealizedPnL(ctx, prices)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update P&L: %w", err)
+	}
+
+	totalUnrealizedPnL := s.positionManager.GetTotalUnrealizedPnL()
+
+	return map[string]interface{}{
+		"total_unrealized_pnl": totalUnrealizedPnL,
+		"success":              true,
+	}, nil
+}
+
+// ClosePositionBySymbol closes a position for a specific symbol
+func (s *Service) ClosePositionBySymbol(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("ClosePositionBySymbol called")
+
+	symbol, ok := args["symbol"].(string)
+	if !ok || symbol == "" {
+		return nil, fmt.Errorf("symbol is required and must be a string")
+	}
+
+	exitPrice, err := extractFloat(args, "exit_price")
+	if err != nil {
+		return nil, fmt.Errorf("exit_price error: %w", err)
+	}
+
+	exitReason, ok := args["exit_reason"].(string)
+	if !ok {
+		exitReason = "Manual close"
+	}
+
+	position, exists := s.positionManager.GetPosition(symbol)
+	if !exists {
+		return nil, fmt.Errorf("no open position for symbol: %s", symbol)
+	}
+
+	ctx := context.Background()
+	err = s.db.ClosePosition(ctx, position.ID, exitPrice, exitReason, 0.0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to close position: %w", err)
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Float64("exit_price", exitPrice).
+		Msg("Position closed via ClosePositionBySymbol")
+
+	return map[string]interface{}{
+		"position_id": position.ID.String(),
+		"symbol":      symbol,
+		"closed":      true,
 	}, nil
 }
 
