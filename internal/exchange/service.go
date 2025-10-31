@@ -31,6 +31,7 @@ type ServiceConfig struct {
 	BinanceAPIKey  string
 	BinanceSecret  string
 	BinanceTestnet bool
+	RetryConfig    *RetryConfig // Optional retry configuration (defaults to DefaultRetryConfig if nil)
 }
 
 // NewService creates a new exchange service with specified trading mode
@@ -41,10 +42,17 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	switch config.Mode {
 	case TradingModeLive:
 		// Create Binance exchange for live trading
+		retryConfig := config.RetryConfig
+		if retryConfig == nil {
+			defaultConfig := DefaultRetryConfig()
+			retryConfig = &defaultConfig
+		}
+
 		binanceConfig := BinanceConfig{
-			APIKey:    config.BinanceAPIKey,
-			SecretKey: config.BinanceSecret,
-			Testnet:   config.BinanceTestnet,
+			APIKey:      config.BinanceAPIKey,
+			SecretKey:   config.BinanceSecret,
+			Testnet:     config.BinanceTestnet,
+			RetryConfig: *retryConfig,
 		}
 		exchange, err = NewBinanceExchange(binanceConfig, database)
 		if err != nil {

@@ -27,14 +27,16 @@ type BinanceExchange struct {
 	currentSessionID *uuid.UUID
 
 	// Configuration
-	testnet bool
+	testnet     bool
+	retryConfig RetryConfig
 }
 
 // BinanceConfig contains configuration for Binance exchange
 type BinanceConfig struct {
-	APIKey    string
-	SecretKey string
-	Testnet   bool
+	APIKey      string
+	SecretKey   string
+	Testnet     bool
+	RetryConfig RetryConfig
 }
 
 // NewBinanceExchange creates a new Binance exchange client
@@ -51,11 +53,12 @@ func NewBinanceExchange(config BinanceConfig, database *db.DB) (*BinanceExchange
 	}
 
 	return &BinanceExchange{
-		client:  client,
-		db:      database,
-		orders:  make(map[string]*Order),
-		fills:   make(map[string][]Fill),
-		testnet: config.Testnet,
+		client:      client,
+		db:          database,
+		orders:      make(map[string]*Order),
+		fills:       make(map[string][]Fill),
+		testnet:     config.Testnet,
+		retryConfig: config.RetryConfig,
 	}, nil
 }
 
@@ -78,7 +81,7 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 		}, nil
 	}
 
-	// Create Binance order
+	// Create Binance order with retry logic
 	var binanceOrder *binance.CreateOrderResponse
 	var err error
 
@@ -88,32 +91,36 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 		side = binance.SideTypeSell
 	}
 
-	if req.Type == OrderTypeMarket {
-		// Market order
-		binanceOrder, err = b.client.NewCreateOrderService().
-			Symbol(req.Symbol).
-			Side(side).
-			Type(binance.OrderTypeMarket).
-			Quantity(fmt.Sprintf("%.8f", req.Quantity)).
-			Do(ctx)
-	} else {
-		// Limit order
-		binanceOrder, err = b.client.NewCreateOrderService().
-			Symbol(req.Symbol).
-			Side(side).
-			Type(binance.OrderTypeLimit).
-			TimeInForce(binance.TimeInForceTypeGTC).
-			Quantity(fmt.Sprintf("%.8f", req.Quantity)).
-			Price(fmt.Sprintf("%.8f", req.Price)).
-			Do(ctx)
-	}
+	// Wrap API call in retry logic
+	err = WithRetry(ctx, b.retryConfig, func() error {
+		if req.Type == OrderTypeMarket {
+			// Market order
+			binanceOrder, err = b.client.NewCreateOrderService().
+				Symbol(req.Symbol).
+				Side(side).
+				Type(binance.OrderTypeMarket).
+				Quantity(fmt.Sprintf("%.8f", req.Quantity)).
+				Do(ctx)
+		} else {
+			// Limit order
+			binanceOrder, err = b.client.NewCreateOrderService().
+				Symbol(req.Symbol).
+				Side(side).
+				Type(binance.OrderTypeLimit).
+				TimeInForce(binance.TimeInForceTypeGTC).
+				Quantity(fmt.Sprintf("%.8f", req.Quantity)).
+				Price(fmt.Sprintf("%.8f", req.Price)).
+				Do(ctx)
+		}
+		return err
+	})
 
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("symbol", req.Symbol).
 			Str("side", string(req.Side)).
-			Msg("Failed to place order on Binance")
+			Msg("Failed to place order on Binance after retries")
 
 		return &PlaceOrderResponse{
 			Status:  OrderStatusRejected,
@@ -175,18 +182,21 @@ func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
 		return nil, fmt.Errorf("invalid order ID format: %w", err)
 	}
 
-	// Cancel order on Binance
+	// Cancel order on Binance with retry logic
 	ctx := context.Background()
-	_, err = b.client.NewCancelOrderService().
-		Symbol(order.Symbol).
-		OrderID(binanceOrderID).
-		Do(ctx)
+	err = WithRetry(ctx, b.retryConfig, func() error {
+		_, err := b.client.NewCancelOrderService().
+			Symbol(order.Symbol).
+			OrderID(binanceOrderID).
+			Do(ctx)
+		return err
+	})
 
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("order_id", orderID).
-			Msg("Failed to cancel order on Binance")
+			Msg("Failed to cancel order on Binance after retries")
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
 
@@ -234,23 +244,28 @@ func (b *BinanceExchange) GetOrder(orderID string) (*Order, error) {
 		return nil, fmt.Errorf("order not found: %s", orderID)
 	}
 
-	// Query Binance for latest order status
+	// Query Binance for latest order status with retry logic
 	binanceOrderID, err := strconv.ParseInt(orderID, 10, 64)
 	if err != nil {
 		return order, nil // Return cached order if ID parsing fails
 	}
 
 	ctx := context.Background()
-	binanceOrder, err := b.client.NewGetOrderService().
-		Symbol(order.Symbol).
-		OrderID(binanceOrderID).
-		Do(ctx)
+	var binanceOrder *binance.Order
+	err = WithRetry(ctx, b.retryConfig, func() error {
+		var retryErr error
+		binanceOrder, retryErr = b.client.NewGetOrderService().
+			Symbol(order.Symbol).
+			OrderID(binanceOrderID).
+			Do(ctx)
+		return retryErr
+	})
 
 	if err != nil {
 		log.Warn().
 			Err(err).
 			Str("order_id", orderID).
-			Msg("Failed to query order status from Binance, returning cached")
+			Msg("Failed to query order status from Binance after retries, returning cached")
 		return order, nil
 	}
 
