@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -129,10 +131,6 @@ type ArbitrageAgent struct {
 	// Price tracking for each exchange
 	priceCache map[string]map[string]*ExchangePrice // symbol -> exchange -> price
 	cacheMutex sync.RWMutex
-
-	// Opportunity tracking
-	lastOpportunities map[string]*ArbitrageOpportunity
-	opportunityMutex  sync.RWMutex
 }
 
 // ExchangeFees represents fee structure for an exchange
@@ -203,7 +201,6 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 
 	// Initialize price cache
 	a.priceCache = make(map[string]map[string]*ExchangePrice)
-	a.lastOpportunities = make(map[string]*ArbitrageOpportunity)
 
 	// Initialize default exchange fees (TODO: Make configurable)
 	a.exchangeFees = map[string]*ExchangeFees{
@@ -449,7 +446,7 @@ func (a *ArbitrageAgent) fetchPriceFromExchange(ctx context.Context, symbol, exc
 	// In a real implementation, this would call exchange-specific APIs
 
 	// Call MCP tool to get price
-	result, err := a.BaseAgent.CallMCPTool(ctx, "coingecko", "get_simple_price", map[string]interface{}{
+	result, err := a.CallMCPTool(ctx, "coingecko", "get_simple_price", map[string]interface{}{
 		"ids":                 symbol,
 		"vs_currencies":       "usd",
 		"include_24hr_vol":    true,
@@ -461,7 +458,7 @@ func (a *ArbitrageAgent) fetchPriceFromExchange(ctx context.Context, symbol, exc
 	}
 
 	// Parse result
-	if result.Content == nil || len(result.Content) == 0 {
+	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty result from get_simple_price")
 	}
 
@@ -555,32 +552,520 @@ func (a *ArbitrageAgent) updatePriceCache(price *ExchangePrice) {
 }
 
 // calculateSpreads calculates price spreads between exchanges
-// TODO: Implement in T093 - Spread calculation with fees
+// T093: Spread calculation with fees
 func (a *ArbitrageAgent) calculateSpreads() []*ArbitrageOpportunity {
-	log.Debug().Msg("Calculating spreads (placeholder)")
-	// Placeholder: Will be implemented in T093
-	return nil
-}
+	log.Debug().Msg("Calculating spreads between exchanges")
 
-// scoreOpportunities scores arbitrage opportunities
-// TODO: Implement in T094 - Opportunity scoring
-func (a *ArbitrageAgent) scoreOpportunities(opportunities []*ArbitrageOpportunity) []*ArbitrageOpportunity {
-	log.Debug().Msg("Scoring opportunities (placeholder)")
-	// Placeholder: Will be implemented in T094
+	a.cacheMutex.RLock()
+	defer a.cacheMutex.RUnlock()
+
+	var opportunities []*ArbitrageOpportunity
+
+	// For each symbol, compare prices across all exchange pairs
+	for symbol, exchangePrices := range a.priceCache {
+		// Need at least 2 exchanges to find arbitrage
+		if len(exchangePrices) < 2 {
+			log.Debug().
+				Str("symbol", symbol).
+				Int("exchanges", len(exchangePrices)).
+				Msg("Insufficient exchanges for arbitrage comparison")
+			continue
+		}
+
+		// Compare all exchange pairs (n*(n-1)/2 combinations)
+		exchanges := make([]string, 0, len(exchangePrices))
+		for exch := range exchangePrices {
+			exchanges = append(exchanges, exch)
+		}
+
+		for i := 0; i < len(exchanges); i++ {
+			for j := i + 1; j < len(exchanges); j++ {
+				exch1 := exchanges[i]
+				exch2 := exchanges[j]
+
+				price1 := exchangePrices[exch1]
+				price2 := exchangePrices[exch2]
+
+				// Skip if prices are stale (older than 1 minute)
+				if time.Since(price1.Timestamp) > time.Minute || time.Since(price2.Timestamp) > time.Minute {
+					log.Debug().
+						Str("symbol", symbol).
+						Str("exch1", exch1).
+						Str("exch2", exch2).
+						Msg("Skipping stale prices")
+					continue
+				}
+
+				// Calculate both directions (buy on exch1, sell on exch2 AND vice versa)
+				opp1 := a.calculateOpportunity(symbol, exch1, exch2, price1, price2)
+				opp2 := a.calculateOpportunity(symbol, exch2, exch1, price2, price1)
+
+				// Add profitable opportunities
+				if opp1 != nil && opp1.NetSpread > 0 {
+					opportunities = append(opportunities, opp1)
+				}
+				if opp2 != nil && opp2.NetSpread > 0 {
+					opportunities = append(opportunities, opp2)
+				}
+			}
+		}
+	}
+
+	log.Debug().
+		Int("opportunities_found", len(opportunities)).
+		Msg("Spread calculation completed")
+
 	return opportunities
 }
 
+// calculateOpportunity calculates arbitrage opportunity for a specific direction
+func (a *ArbitrageAgent) calculateOpportunity(symbol, buyExchange, sellExchange string, buyPrice, sellPrice *ExchangePrice) *ArbitrageOpportunity {
+	// Get fee structures
+	buyFees, buyFeesOk := a.exchangeFees[buyExchange]
+	sellFees, sellFeesOk := a.exchangeFees[sellExchange]
+
+	if !buyFeesOk || !sellFeesOk {
+		log.Warn().
+			Str("buy_exchange", buyExchange).
+			Str("sell_exchange", sellExchange).
+			Bool("buy_fees_ok", buyFeesOk).
+			Bool("sell_fees_ok", sellFeesOk).
+			Msg("Fee structure not found for exchange")
+		return nil
+	}
+
+	// Calculate raw spread (before fees)
+	rawSpread := sellPrice.Price - buyPrice.Price
+	rawSpreadPct := (rawSpread / buyPrice.Price) * 100.0
+
+	// Calculate total fees
+	// Buy side: taker fee (immediate execution)
+	buyFee := buyPrice.Price * buyFees.TakerFee
+
+	// Sell side: taker fee
+	sellFee := sellPrice.Price * sellFees.TakerFee
+
+	// Withdrawal fee (assume flat fee in base currency)
+	withdrawalFee := buyFees.WithdrawFee * buyPrice.Price
+
+	// Total cost
+	totalCost := buyPrice.Price + buyFee + sellFee + withdrawalFee
+
+	// Net profit
+	netProfit := sellPrice.Price - totalCost
+	netSpread := netProfit
+	profitPct := (netProfit / totalCost) * 100.0
+
+	// Filter by minimum spread threshold
+	if profitPct < (a.minSpread * 100.0) {
+		return nil // Not profitable enough
+	}
+
+	// Determine execution risk based on spread size and latency
+	executionRisk := "medium"
+	if profitPct > 1.0 {
+		executionRisk = "low" // Large spread, safer
+	} else if profitPct < 0.3 {
+		executionRisk = "high" // Tiny spread, risky
+	}
+
+	// Check for latency warnings
+	latencyWarning := buyPrice.Latency > int64(a.maxLatencyMs) || sellPrice.Latency > int64(a.maxLatencyMs)
+
+	// Calculate opportunity expiration (fast-moving arbitrage, 30s window)
+	expiresAt := time.Now().Add(30 * time.Second)
+
+	// Use minimum volume from both exchanges
+	volume := buyPrice.Volume24h
+	if sellPrice.Volume24h < volume {
+		volume = sellPrice.Volume24h
+	}
+
+	opportunity := &ArbitrageOpportunity{
+		Symbol:         symbol,
+		BuyExchange:    buyExchange,
+		SellExchange:   sellExchange,
+		BuyPrice:       buyPrice.Price,
+		SellPrice:      sellPrice.Price,
+		RawSpread:      rawSpreadPct,
+		NetSpread:      netSpread,
+		ProfitPct:      profitPct,
+		Score:          0.0, // Will be calculated in scoring phase
+		Volume24h:      volume,
+		Confidence:     0.0, // Will be calculated in scoring phase
+		Timestamp:      time.Now(),
+		ExpiresAt:      expiresAt,
+		ExecutionRisk:  executionRisk,
+		LatencyWarning: latencyWarning,
+	}
+
+	log.Debug().
+		Str("symbol", symbol).
+		Str("buy_exchange", buyExchange).
+		Str("sell_exchange", sellExchange).
+		Float64("buy_price", buyPrice.Price).
+		Float64("sell_price", sellPrice.Price).
+		Float64("raw_spread_pct", rawSpreadPct).
+		Float64("profit_pct", profitPct).
+		Str("risk", executionRisk).
+		Msg("Arbitrage opportunity calculated")
+
+	return opportunity
+}
+
+// scoreOpportunities scores arbitrage opportunities
+// T094: Opportunity scoring with risk-adjusted returns
+func (a *ArbitrageAgent) scoreOpportunities(opportunities []*ArbitrageOpportunity) []*ArbitrageOpportunity {
+	log.Debug().Int("count", len(opportunities)).Msg("Scoring arbitrage opportunities")
+
+	if len(opportunities) == 0 {
+		return opportunities
+	}
+
+	// Score each opportunity
+	for _, opp := range opportunities {
+		score := a.calculateOpportunityScore(opp)
+		opp.Score = score
+
+		// Calculate confidence based on score and data quality
+		confidence := a.calculateOpportunityConfidence(opp)
+		opp.Confidence = confidence
+
+		log.Debug().
+			Str("symbol", opp.Symbol).
+			Str("route", fmt.Sprintf("%s -> %s", opp.BuyExchange, opp.SellExchange)).
+			Float64("profit_pct", opp.ProfitPct).
+			Float64("score", score).
+			Float64("confidence", confidence).
+			Str("risk", opp.ExecutionRisk).
+			Msg("Scored opportunity")
+	}
+
+	// Sort by score descending (best opportunities first)
+	sort.Slice(opportunities, func(i, j int) bool {
+		return opportunities[i].Score > opportunities[j].Score
+	})
+
+	// Update beliefs with top opportunities
+	a.updateOpportunityBeliefs(opportunities)
+
+	return opportunities
+}
+
+// calculateOpportunityScore calculates a risk-adjusted score (0-1) for an opportunity
+func (a *ArbitrageAgent) calculateOpportunityScore(opp *ArbitrageOpportunity) float64 {
+	// Component 1: Profit Score (0-1)
+	// Use sigmoid-like curve to favor higher profits
+	// At 1% profit -> ~0.63, at 2% -> ~0.88, at 5% -> ~0.99
+	profitScore := 1.0 - math.Exp(-opp.ProfitPct)
+	if profitScore > 1.0 {
+		profitScore = 1.0
+	}
+
+	// Component 2: Liquidity Score (0-1)
+	// Higher volume = better liquidity = lower slippage risk
+	// Normalize by typical crypto volume ranges
+	liquidityScore := 0.0
+	if opp.Volume24h > 0 {
+		// Log scale for volume (typical range: $10k to $100M)
+		logVolume := math.Log10(opp.Volume24h + 1) // +1 to avoid log(0)
+		// Map 4 (10k) to 0.3, 6 (1M) to 0.7, 8 (100M) to 1.0
+		liquidityScore = (logVolume - 4.0) / 4.0
+		if liquidityScore < 0 {
+			liquidityScore = 0
+		}
+		if liquidityScore > 1.0 {
+			liquidityScore = 1.0
+		}
+	}
+
+	// Component 3: Execution Risk Penalty
+	riskMultiplier := 1.0
+	switch opp.ExecutionRisk {
+	case "low":
+		riskMultiplier = 1.0 // No penalty
+	case "medium":
+		riskMultiplier = 0.8 // 20% penalty
+	case "high":
+		riskMultiplier = 0.6 // 40% penalty
+	}
+
+	// Component 4: Latency Penalty
+	latencyMultiplier := 1.0
+	if opp.LatencyWarning {
+		latencyMultiplier = 0.7 // 30% penalty for high latency
+	}
+
+	// Component 5: Time Penalty (urgency)
+	// Opportunities expiring soon are riskier (price may move)
+	timeUntilExpiry := time.Until(opp.ExpiresAt).Seconds()
+	timeMultiplier := 1.0
+	if timeUntilExpiry < 30 { // Less than 30 seconds
+		// Linear decay: 30s -> 1.0, 15s -> 0.5, 0s -> 0.0
+		timeMultiplier = timeUntilExpiry / 30.0
+		if timeMultiplier < 0 {
+			timeMultiplier = 0
+		}
+	}
+
+	// Weighted combination
+	// Profit is most important (50%), liquidity (25%), risk factors (25%)
+	baseScore := (profitScore * 0.5) + (liquidityScore * 0.25)
+
+	// Apply risk penalties
+	finalScore := baseScore * riskMultiplier * latencyMultiplier * timeMultiplier
+
+	// Additional penalty if multiple risk factors present
+	riskFactorCount := 0
+	if opp.ExecutionRisk == "high" {
+		riskFactorCount++
+	}
+	if opp.LatencyWarning {
+		riskFactorCount++
+	}
+	if timeUntilExpiry < 15 {
+		riskFactorCount++
+	}
+
+	// If 2+ risk factors, apply extra penalty
+	if riskFactorCount >= 2 {
+		finalScore *= 0.8
+	}
+
+	// Clamp to [0, 1]
+	if finalScore < 0 {
+		finalScore = 0
+	}
+	if finalScore > 1.0 {
+		finalScore = 1.0
+	}
+
+	return finalScore
+}
+
+// calculateOpportunityConfidence calculates confidence level (0-1) for an opportunity
+func (a *ArbitrageAgent) calculateOpportunityConfidence(opp *ArbitrageOpportunity) float64 {
+	// Start with score as base confidence
+	confidence := opp.Score
+
+	// Adjust based on data quality indicators
+
+	// Factor 1: Execution risk affects confidence
+	switch opp.ExecutionRisk {
+	case "low":
+		confidence *= 1.0 // No adjustment
+	case "medium":
+		confidence *= 0.9 // Slight reduction
+	case "high":
+		confidence *= 0.75 // Significant reduction
+	}
+
+	// Factor 2: Latency affects confidence
+	if opp.LatencyWarning {
+		confidence *= 0.85 // Stale data = lower confidence
+	}
+
+	// Factor 3: Spread magnitude affects confidence
+	// Very small spreads are less reliable (noise)
+	if opp.ProfitPct < 0.2 {
+		confidence *= 0.7
+	} else if opp.ProfitPct < 0.5 {
+		confidence *= 0.85
+	}
+
+	// Factor 4: Volume affects confidence
+	// Low volume = higher slippage uncertainty
+	if opp.Volume24h < 100000 { // < $100k volume
+		confidence *= 0.7
+	} else if opp.Volume24h < 1000000 { // < $1M volume
+		confidence *= 0.85
+	}
+
+	// Clamp to [0, 1]
+	if confidence < 0 {
+		confidence = 0
+	}
+	if confidence > 1.0 {
+		confidence = 1.0
+	}
+
+	return confidence
+}
+
+// updateOpportunityBeliefs updates agent beliefs with scored opportunities
+func (a *ArbitrageAgent) updateOpportunityBeliefs(opportunities []*ArbitrageOpportunity) {
+	// Update belief with top opportunity
+	if len(opportunities) > 0 {
+		top := opportunities[0]
+		beliefKey := fmt.Sprintf("opportunity:%s:%s->%s",
+			top.Symbol, top.BuyExchange, top.SellExchange)
+
+		a.beliefs.UpdateBelief(beliefKey, top, top.Confidence, "arbitrage_agent")
+
+		log.Debug().
+			Str("key", beliefKey).
+			Float64("score", top.Score).
+			Float64("confidence", top.Confidence).
+			Msg("Updated opportunity belief")
+	}
+
+	// Update belief with opportunity count
+	a.beliefs.UpdateBelief("opportunity_count", len(opportunities), 1.0, "arbitrage_agent")
+}
+
 // generateDecision generates trading decision
-// TODO: Implement in T095 - Decision generation
+// T095: Decision generation based on top opportunity
 func (a *ArbitrageAgent) generateDecision(opportunities []*ArbitrageOpportunity) *ArbitrageSignal {
-	log.Debug().Msg("Generating decision (placeholder)")
-	// Placeholder: Will be implemented in T095
-	return &ArbitrageSignal{
+	log.Debug().Int("opportunities", len(opportunities)).Msg("Generating arbitrage decision")
+
+	// Base signal (HOLD by default)
+	signal := &ArbitrageSignal{
 		Timestamp:  time.Now(),
 		Signal:     "HOLD",
 		Confidence: 0.0,
 		Reasoning:  "No opportunities detected",
+		Beliefs:    a.beliefs.GetAllBeliefs(),
 	}
+
+	// No opportunities found
+	if len(opportunities) == 0 {
+		log.Debug().Msg("No arbitrage opportunities found, holding")
+		return signal
+	}
+
+	// Get top opportunity (already sorted by score in scoreOpportunities)
+	topOpp := opportunities[0]
+
+	// Check if top opportunity meets confidence threshold
+	if topOpp.Confidence < a.confidenceThresh {
+		signal.Reasoning = fmt.Sprintf(
+			"Top opportunity (%s: %s->%s) has confidence %.2f%% below threshold %.2f%%",
+			topOpp.Symbol,
+			topOpp.BuyExchange,
+			topOpp.SellExchange,
+			topOpp.Confidence*100,
+			a.confidenceThresh*100,
+		)
+
+		log.Debug().
+			Str("symbol", topOpp.Symbol).
+			Float64("confidence", topOpp.Confidence).
+			Float64("threshold", a.confidenceThresh).
+			Msg("Opportunity below confidence threshold")
+
+		return signal
+	}
+
+	// Check if opportunity has expired
+	if time.Now().After(topOpp.ExpiresAt) {
+		signal.Reasoning = fmt.Sprintf(
+			"Top opportunity (%s: %s->%s) has expired",
+			topOpp.Symbol,
+			topOpp.BuyExchange,
+			topOpp.SellExchange,
+		)
+
+		log.Debug().
+			Str("symbol", topOpp.Symbol).
+			Time("expired_at", topOpp.ExpiresAt).
+			Msg("Opportunity has expired")
+
+		return signal
+	}
+
+	// Generate ARBITRAGE signal
+	signal.Signal = "ARBITRAGE"
+	signal.Symbol = topOpp.Symbol
+	signal.Confidence = topOpp.Confidence
+	signal.Opportunity = topOpp
+
+	// Build detailed reasoning
+	reasoning := a.buildReasoning(topOpp, opportunities)
+	signal.Reasoning = reasoning
+
+	log.Info().
+		Str("signal", signal.Signal).
+		Str("symbol", topOpp.Symbol).
+		Str("route", fmt.Sprintf("%s -> %s", topOpp.BuyExchange, topOpp.SellExchange)).
+		Float64("profit_pct", topOpp.ProfitPct).
+		Float64("confidence", topOpp.Confidence).
+		Float64("score", topOpp.Score).
+		Msg("Generated arbitrage signal")
+
+	return signal
+}
+
+// buildReasoning constructs detailed reasoning for the arbitrage decision
+func (a *ArbitrageAgent) buildReasoning(topOpp *ArbitrageOpportunity, allOpps []*ArbitrageOpportunity) string {
+	var reasoning string
+
+	// Main opportunity description
+	reasoning += fmt.Sprintf(
+		"ARBITRAGE OPPORTUNITY DETECTED\n\n"+
+			"Symbol: %s\n"+
+			"Route: Buy on %s @ $%.6f → Sell on %s @ $%.6f\n"+
+			"Profit: %.2f%% (Net spread: $%.6f after fees)\n"+
+			"Score: %.2f/1.0 | Confidence: %.0f%%\n\n",
+		topOpp.Symbol,
+		topOpp.BuyExchange, topOpp.BuyPrice,
+		topOpp.SellExchange, topOpp.SellPrice,
+		topOpp.ProfitPct, topOpp.NetSpread,
+		topOpp.Score, topOpp.Confidence*100,
+	)
+
+	// Risk assessment
+	reasoning += "RISK ASSESSMENT\n"
+	reasoning += fmt.Sprintf("Execution Risk: %s\n", topOpp.ExecutionRisk)
+	reasoning += fmt.Sprintf("24h Volume: $%.2f\n", topOpp.Volume24h)
+
+	if topOpp.LatencyWarning {
+		reasoning += "⚠ Latency Warning: Price data may be stale\n"
+	}
+
+	timeRemaining := time.Until(topOpp.ExpiresAt).Seconds()
+	reasoning += fmt.Sprintf("Time Remaining: %.0fs until expiration\n\n", timeRemaining)
+
+	// Alternative opportunities
+	if len(allOpps) > 1 {
+		reasoning += "ALTERNATIVE OPPORTUNITIES\n"
+		maxAlternatives := 3
+		if len(allOpps) < maxAlternatives+1 {
+			maxAlternatives = len(allOpps) - 1
+		}
+
+		for i := 1; i <= maxAlternatives; i++ {
+			alt := allOpps[i]
+			reasoning += fmt.Sprintf(
+				"%d. %s: %s->%s (%.2f%%, score: %.2f)\n",
+				i, alt.Symbol,
+				alt.BuyExchange, alt.SellExchange,
+				alt.ProfitPct, alt.Score,
+			)
+		}
+		reasoning += "\n"
+	}
+
+	// Strategy context
+	reasoning += "STRATEGY CONTEXT\n"
+	reasoning += fmt.Sprintf("Minimum Spread Threshold: %.2f%%\n", a.minSpread*100)
+	reasoning += fmt.Sprintf("Confidence Threshold: %.0f%%\n", a.confidenceThresh*100)
+	reasoning += fmt.Sprintf("Total Opportunities Found: %d\n", len(allOpps))
+
+	// Add belief context
+	overallConfidence := a.beliefs.GetConfidence()
+	reasoning += fmt.Sprintf("Agent Overall Confidence: %.0f%%\n", overallConfidence*100)
+
+	// Recommendation
+	reasoning += "\nRECOMMENDATION\n"
+	if topOpp.Score > 0.7 && topOpp.ExecutionRisk == "low" {
+		reasoning += "STRONG BUY - High-quality arbitrage opportunity with low risk\n"
+	} else if topOpp.Score > 0.5 {
+		reasoning += "MODERATE BUY - Viable opportunity but monitor execution carefully\n"
+	} else {
+		reasoning += "CAUTIOUS BUY - Marginal opportunity, consider position sizing\n"
+	}
+
+	return reasoning
 }
 
 // publishSignal publishes signal to NATS
