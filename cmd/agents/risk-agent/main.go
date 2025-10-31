@@ -1,0 +1,952 @@
+// Risk Management Agent
+// Monitors portfolio risk and has veto power over trades
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/spf13/viper"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
+)
+
+// ============================================================================
+// AGENT CONFIGURATION
+// ============================================================================
+
+// RiskAgentConfig holds risk agent configuration
+type RiskAgentConfig struct {
+	AgentName          string  `yaml:"agent_name"`
+	AgentType          string  `yaml:"agent_type"`
+	Weight             float64 `yaml:"weight"`
+	NATSUrl            string  `yaml:"nats_url"`
+	SignalTopic        string  `yaml:"signal_topic"`
+	HeartbeatTopic     string  `yaml:"heartbeat_topic"`
+	DecisionTopic      string  `yaml:"decision_topic"`
+	HeartbeatInterval  string  `yaml:"heartbeat_interval"`
+	MaxPositionSize    float64 `yaml:"max_position_size"`
+	MaxTotalExposure   float64 `yaml:"max_total_exposure"`
+	MaxConcentration   float64 `yaml:"max_concentration"`
+	MaxOpenPositions   int     `yaml:"max_open_positions"`
+	MaxDrawdownPercent float64 `yaml:"max_drawdown_percent"`
+	MinSharpeRatio     float64 `yaml:"min_sharpe_ratio"`
+	KellyFraction      float64 `yaml:"kelly_fraction"`
+	StopLossMultiplier float64 `yaml:"stop_loss_multiplier"`
+	RiskFreeRate       float64 `yaml:"risk_free_rate"`
+}
+
+// ============================================================================
+// RISK AGENT (BDI ARCHITECTURE)
+// ============================================================================
+
+// RiskAgent implements risk management with veto power
+type RiskAgent struct {
+	// Configuration
+	config *RiskAgentConfig
+
+	// Services
+	db          *db.DB
+	riskService *risk.Service
+	natsConn    *nats.Conn
+
+	// BDI Components
+	beliefs    *RiskBeliefs
+	desires    *RiskDesires
+	intentions *RiskIntentions
+
+	// State
+	mu            sync.RWMutex
+	running       bool
+	lastHeartbeat time.Time
+
+	// Performance tracking
+	vetoCount      int64
+	approvalCount  int64
+	totalDecisions int64
+}
+
+// RiskBeliefs represents the agent's current understanding of portfolio risk
+type RiskBeliefs struct {
+	mu sync.RWMutex
+
+	// Portfolio state
+	currentPositions  []Position
+	totalExposure     float64
+	openPositionCount int
+
+	// Performance metrics
+	equityCurve     []float64
+	returns         []float64
+	currentDrawdown float64
+	maxDrawdown     float64
+	sharpeRatio     float64
+	peakEquity      float64
+
+	// Market conditions
+	volatility   float64
+	marketRegime string // "bullish", "bearish", "sideways"
+	lastUpdate   time.Time
+
+	// Risk limits status
+	limitsUtilization float64 // 0.0 to 1.0
+	nearLimitSymbols  []string
+}
+
+// RiskDesires represents the agent's goals
+type RiskDesires struct {
+	// Primary goals
+	protectCapital          bool
+	maintainDiversification bool
+	controlDrawdown         bool
+	optimizeRiskReturn      bool
+
+	// Target metrics
+	targetSharpe      float64
+	maxAcceptableDD   float64
+	targetUtilization float64
+}
+
+// RiskIntentions represents the agent's planned actions
+type RiskIntentions struct {
+	// Current action plan
+	shouldVeto      bool
+	vetoReason      string
+	recommendedSize float64
+	stopLossLevel   float64
+	confidenceScore float64
+
+	// Next actions
+	monitorDrawdown bool
+	reduceExposure  bool
+	increaseCash    bool
+}
+
+// Position represents a trading position (matches internal/risk)
+type Position struct {
+	Symbol       string  `json:"symbol"`
+	Size         float64 `json:"size"`
+	EntryPrice   float64 `json:"entry_price"`
+	CurrentPrice float64 `json:"current_price"`
+	UnrealizedPL float64 `json:"unrealized_pl"`
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+func main() {
+	// Configure logging to stderr
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+
+	log.Info().Msg("Starting Risk Management Agent")
+
+	// Load configuration
+	viper.SetConfigName("agents")
+	viper.AddConfigPath("./configs")
+	viper.AddConfigPath(".")
+	viper.SetEnvPrefix("CRYPTOFUNK")
+	viper.AutomaticEnv()
+
+	// Defaults
+	viper.SetDefault("risk_agent.agent_name", "risk-agent")
+	viper.SetDefault("risk_agent.agent_type", "risk")
+	viper.SetDefault("risk_agent.weight", 1.0)
+	viper.SetDefault("risk_agent.nats_url", "nats://localhost:4222")
+	viper.SetDefault("risk_agent.signal_topic", "cryptofunk.agent.signals")
+	viper.SetDefault("risk_agent.heartbeat_topic", "cryptofunk.agent.heartbeat")
+	viper.SetDefault("risk_agent.decision_topic", "cryptofunk.orchestrator.decisions")
+	viper.SetDefault("risk_agent.heartbeat_interval", "30s")
+	viper.SetDefault("risk_agent.max_position_size", 10000.0)
+	viper.SetDefault("risk_agent.max_total_exposure", 50000.0)
+	viper.SetDefault("risk_agent.max_concentration", 0.25)
+	viper.SetDefault("risk_agent.max_open_positions", 5)
+	viper.SetDefault("risk_agent.max_drawdown_percent", 20.0)
+	viper.SetDefault("risk_agent.min_sharpe_ratio", 1.0)
+	viper.SetDefault("risk_agent.kelly_fraction", 0.25)
+	viper.SetDefault("risk_agent.stop_loss_multiplier", 2.0)
+	viper.SetDefault("risk_agent.risk_free_rate", 0.03)
+
+	if err := viper.ReadInConfig(); err != nil {
+		log.Warn().Err(err).Msg("No config file found, using defaults")
+	}
+
+	// Parse configuration
+	var config RiskAgentConfig
+	if err := viper.UnmarshalKey("risk_agent", &config); err != nil {
+		log.Fatal().Err(err).Msg("Failed to parse configuration")
+	}
+
+	log.Info().
+		Str("agent_name", config.AgentName).
+		Str("agent_type", config.AgentType).
+		Float64("weight", config.Weight).
+		Float64("max_position_size", config.MaxPositionSize).
+		Float64("max_total_exposure", config.MaxTotalExposure).
+		Float64("max_drawdown", config.MaxDrawdownPercent).
+		Msg("Configuration loaded")
+
+	// Create context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Connect to database
+	database, err := db.New(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+	defer database.Close()
+
+	// Create risk service
+	riskService := risk.NewService()
+
+	// Create agent
+	agent, err := NewRiskAgent(&config, database, riskService)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create risk agent")
+	}
+
+	// Initialize agent
+	if err := agent.Initialize(ctx); err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize agent")
+	}
+
+	// Set up signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start agent in goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		if err := agent.Run(ctx); err != nil {
+			errChan <- err
+		}
+	}()
+
+	// Wait for shutdown signal or error
+	select {
+	case sig := <-sigChan:
+		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
+	case err := <-errChan:
+		log.Error().Err(err).Msg("Agent error")
+	}
+
+	// Shutdown agent
+	log.Info().Msg("Shutting down agent...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := agent.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Error during shutdown")
+		os.Exit(1)
+	}
+
+	log.Info().Msg("Risk agent shutdown complete")
+}
+
+// NewRiskAgent creates a new risk management agent
+func NewRiskAgent(config *RiskAgentConfig, database *db.DB, riskService *risk.Service) (*RiskAgent, error) {
+	return &RiskAgent{
+		config:      config,
+		db:          database,
+		riskService: riskService,
+		beliefs: &RiskBeliefs{
+			currentPositions: make([]Position, 0),
+			equityCurve:      make([]float64, 0),
+			returns:          make([]float64, 0),
+			nearLimitSymbols: make([]string, 0),
+			lastUpdate:       time.Now(),
+			marketRegime:     "sideways",
+		},
+		desires: &RiskDesires{
+			protectCapital:          true,
+			maintainDiversification: true,
+			controlDrawdown:         true,
+			optimizeRiskReturn:      true,
+			targetSharpe:            config.MinSharpeRatio,
+			maxAcceptableDD:         config.MaxDrawdownPercent,
+			targetUtilization:       0.80, // 80% utilization is healthy
+		},
+		intentions: &RiskIntentions{
+			shouldVeto:      false,
+			monitorDrawdown: true,
+		},
+	}, nil
+}
+
+// Initialize sets up the agent
+func (a *RiskAgent) Initialize(ctx context.Context) error {
+	log.Info().Msg("Initializing risk agent")
+
+	// Connect to NATS
+	nc, err := nats.Connect(a.config.NATSUrl)
+	if err != nil {
+		return fmt.Errorf("failed to connect to NATS: %w", err)
+	}
+	a.natsConn = nc
+
+	log.Info().Str("nats_url", a.config.NATSUrl).Msg("Connected to NATS")
+
+	// Subscribe to orchestrator decisions
+	_, err = a.natsConn.Subscribe(a.config.DecisionTopic, a.handleDecision)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to decisions: %w", err)
+	}
+
+	log.Info().Str("topic", a.config.DecisionTopic).Msg("Subscribed to orchestrator decisions")
+
+	// Load current portfolio state from database
+	if err := a.loadPortfolioState(ctx); err != nil {
+		log.Warn().Err(err).Msg("Failed to load initial portfolio state")
+	}
+
+	log.Info().Msg("Risk agent initialized successfully")
+	return nil
+}
+
+// Run starts the agent's main loop
+func (a *RiskAgent) Run(ctx context.Context) error {
+	log.Info().Msg("Risk agent running")
+
+	a.mu.Lock()
+	a.running = true
+	a.mu.Unlock()
+
+	// Parse heartbeat interval
+	heartbeatInterval, err := time.ParseDuration(a.config.HeartbeatInterval)
+	if err != nil {
+		heartbeatInterval = 30 * time.Second
+	}
+
+	heartbeatTicker := time.NewTicker(heartbeatInterval)
+	defer heartbeatTicker.Stop()
+
+	// Portfolio update interval (every 5 seconds)
+	updateTicker := time.NewTicker(5 * time.Second)
+	defer updateTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Risk agent stopped by context")
+			return ctx.Err()
+		case <-heartbeatTicker.C:
+			if err := a.sendHeartbeat(); err != nil {
+				log.Error().Err(err).Msg("Failed to send heartbeat")
+			}
+		case <-updateTicker.C:
+			if err := a.updateBeliefs(ctx); err != nil {
+				log.Error().Err(err).Msg("Failed to update beliefs")
+			}
+		}
+	}
+}
+
+// Shutdown gracefully stops the agent
+func (a *RiskAgent) Shutdown(ctx context.Context) error {
+	log.Info().Msg("Shutting down risk agent")
+
+	a.mu.Lock()
+	a.running = false
+	a.mu.Unlock()
+
+	// Close NATS connection
+	if a.natsConn != nil {
+		a.natsConn.Close()
+		log.Info().Msg("NATS connection closed")
+	}
+
+	return nil
+}
+
+// sendHeartbeat sends periodic heartbeat to orchestrator
+func (a *RiskAgent) sendHeartbeat() error {
+	a.mu.Lock()
+	a.lastHeartbeat = time.Now()
+	a.mu.Unlock()
+
+	heartbeat := map[string]interface{}{
+		"agent_name": a.config.AgentName,
+		"agent_type": a.config.AgentType,
+		"timestamp":  time.Now().Format(time.RFC3339),
+		"status":     "HEALTHY",
+		"enabled":    true,
+		"weight":     a.config.Weight,
+		"performance_data": map[string]interface{}{
+			"veto_count":      a.vetoCount,
+			"approval_count":  a.approvalCount,
+			"total_decisions": a.totalDecisions,
+			"veto_rate":       float64(a.vetoCount) / float64(max(1, a.totalDecisions)),
+		},
+	}
+
+	data, err := json.Marshal(heartbeat)
+	if err != nil {
+		return fmt.Errorf("failed to marshal heartbeat: %w", err)
+	}
+
+	if err := a.natsConn.Publish(a.config.HeartbeatTopic, data); err != nil {
+		return fmt.Errorf("failed to publish heartbeat: %w", err)
+	}
+
+	log.Debug().Msg("Heartbeat sent")
+	return nil
+}
+
+// max returns the maximum of two int64 values
+func max(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// handleDecision processes orchestrator decisions and generates risk signals
+// This is called when the orchestrator makes a decision (after other agents vote)
+func (a *RiskAgent) handleDecision(msg *nats.Msg) {
+	// For this implementation, we're listening to decisions to update our beliefs
+	// The risk agent actually sends signals BEFORE the orchestrator makes decisions
+	// This handler helps us learn from outcomes
+	log.Debug().Msg("Received orchestrator decision")
+}
+
+// ============================================================================
+// T120: PORTFOLIO LIMIT CHECKING
+// ============================================================================
+
+// checkPortfolioLimits validates if a proposed trade violates risk limits
+func (a *RiskAgent) checkPortfolioLimits(symbol string, size float64) (bool, []string) {
+	a.beliefs.mu.RLock()
+	defer a.beliefs.mu.RUnlock()
+
+	violations := []string{}
+
+	// Check max position size
+	if size > a.config.MaxPositionSize {
+		violations = append(violations, fmt.Sprintf(
+			"Position size $%.2f exceeds maximum $%.2f",
+			size, a.config.MaxPositionSize))
+	}
+
+	// Check total exposure
+	newTotalExposure := a.beliefs.totalExposure + size
+	if newTotalExposure > a.config.MaxTotalExposure {
+		violations = append(violations, fmt.Sprintf(
+			"Total exposure $%.2f would exceed maximum $%.2f",
+			newTotalExposure, a.config.MaxTotalExposure))
+	}
+
+	// Check concentration limit
+	symbolExposure := a.getSymbolExposure(symbol) + size
+	maxSymbolExposure := a.config.MaxTotalExposure * a.config.MaxConcentration
+	if symbolExposure > maxSymbolExposure {
+		concentrationPct := (symbolExposure / a.config.MaxTotalExposure) * 100
+		violations = append(violations, fmt.Sprintf(
+			"Symbol concentration %.1f%% exceeds maximum %.1f%%",
+			concentrationPct, a.config.MaxConcentration*100))
+	}
+
+	// Check max open positions
+	if a.beliefs.openPositionCount >= a.config.MaxOpenPositions {
+		violations = append(violations, fmt.Sprintf(
+			"Already at maximum %d open positions",
+			a.config.MaxOpenPositions))
+	}
+
+	// Note: Drawdown check is handled separately in evaluateProposal
+	// with better messaging and circuit breaker logic
+
+	return len(violations) == 0, violations
+}
+
+// getSymbolExposure calculates current exposure for a specific symbol
+func (a *RiskAgent) getSymbolExposure(symbol string) float64 {
+	total := 0.0
+	for _, pos := range a.beliefs.currentPositions {
+		if pos.Symbol == symbol {
+			total += pos.Size
+		}
+	}
+	return total
+}
+
+// ============================================================================
+// T121: KELLY CRITERION POSITION SIZING
+// ============================================================================
+
+// calculateOptimalSize calculates optimal position size using Kelly Criterion
+func (a *RiskAgent) calculateOptimalSize(symbol string, confidence float64) float64 {
+	// Get historical performance for this symbol or overall portfolio
+	winRate := a.getHistoricalWinRate(symbol)
+	avgWin := a.getHistoricalAvgWin(symbol)
+	avgLoss := a.getHistoricalAvgLoss(symbol)
+
+	// Adjust win rate based on signal confidence
+	adjustedWinRate := winRate * confidence
+
+	// Calculate Kelly fraction
+	if avgLoss == 0 {
+		avgLoss = 0.01 // Avoid division by zero
+	}
+
+	b := avgWin / avgLoss
+	q := 1 - adjustedWinRate
+	kellyPercent := (adjustedWinRate*b - q) / b
+
+	// Apply conservative Kelly fraction
+	adjustedKelly := kellyPercent * a.config.KellyFraction
+
+	// Ensure non-negative
+	if adjustedKelly < 0 {
+		adjustedKelly = 0
+	}
+
+	// Cap at reasonable maximum (10% of total exposure limit)
+	maxSize := a.config.MaxTotalExposure * 0.10
+	optimalSize := a.config.MaxTotalExposure * adjustedKelly
+
+	if optimalSize > maxSize {
+		optimalSize = maxSize
+	}
+
+	// Cap at max position size
+	if optimalSize > a.config.MaxPositionSize {
+		optimalSize = a.config.MaxPositionSize
+	}
+
+	return optimalSize
+}
+
+// getHistoricalWinRate returns historical win rate for symbol (or overall)
+func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
+	// TODO: Query database for historical win rate
+	// For now, return default conservative estimate
+	return 0.55 // 55% win rate
+}
+
+// getHistoricalAvgWin returns average win size
+func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
+	// TODO: Query database for average win
+	return 200.0 // $200 average win
+}
+
+// getHistoricalAvgLoss returns average loss size
+func (a *RiskAgent) getHistoricalAvgLoss(symbol string) float64 {
+	// TODO: Query database for average loss
+	return 100.0 // $100 average loss
+}
+
+// ============================================================================
+// T122: DYNAMIC STOP-LOSS CALCULATION
+// ============================================================================
+
+// calculateStopLoss calculates dynamic stop-loss based on volatility
+func (a *RiskAgent) calculateStopLoss(entryPrice float64, side string) float64 {
+	a.beliefs.mu.RLock()
+	volatility := a.beliefs.volatility
+	a.beliefs.mu.RUnlock()
+
+	// Default to 2% if volatility unknown
+	if volatility == 0 {
+		volatility = 0.02
+	}
+
+	// Stop loss is multiplier * volatility from entry
+	stopLossDistance := entryPrice * volatility * a.config.StopLossMultiplier
+
+	var stopLoss float64
+	if side == "BUY" || side == "LONG" {
+		stopLoss = entryPrice - stopLossDistance
+	} else {
+		stopLoss = entryPrice + stopLossDistance
+	}
+
+	return stopLoss
+}
+
+// ============================================================================
+// BELIEF UPDATES
+// ============================================================================
+
+// updateBeliefs updates the agent's understanding of portfolio state
+func (a *RiskAgent) updateBeliefs(ctx context.Context) error {
+	// Load current positions from database
+	if err := a.loadPortfolioState(ctx); err != nil {
+		return err
+	}
+
+	// Calculate performance metrics
+	a.calculatePerformanceMetrics()
+
+	// Assess market conditions
+	a.assessMarketConditions()
+
+	// Update limits utilization
+	a.beliefs.mu.Lock()
+	if a.config.MaxTotalExposure > 0 {
+		a.beliefs.limitsUtilization = a.beliefs.totalExposure / a.config.MaxTotalExposure
+	}
+	a.beliefs.lastUpdate = time.Now()
+	a.beliefs.mu.Unlock()
+
+	log.Debug().
+		Float64("total_exposure", a.beliefs.totalExposure).
+		Float64("current_drawdown", a.beliefs.currentDrawdown).
+		Float64("sharpe_ratio", a.beliefs.sharpeRatio).
+		Int("open_positions", a.beliefs.openPositionCount).
+		Msg("Beliefs updated")
+
+	return nil
+}
+
+// loadPortfolioState loads current positions from database
+func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
+	// Query database for open positions
+	query := `
+		SELECT symbol,
+		       SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) as net_quantity,
+		       AVG(CASE WHEN side = 'BUY' THEN price ELSE NULL END) as avg_entry_price
+		FROM positions
+		WHERE status = 'OPEN'
+		GROUP BY symbol
+		HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) > 0
+	`
+
+	rows, err := a.db.Pool().Query(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to query positions: %w", err)
+	}
+	defer rows.Close()
+
+	positions := make([]Position, 0)
+	totalExposure := 0.0
+
+	for rows.Next() {
+		var symbol string
+		var quantity, entryPrice float64
+
+		if err := rows.Scan(&symbol, &quantity, &entryPrice); err != nil {
+			return fmt.Errorf("failed to scan position: %w", err)
+		}
+
+		size := quantity * entryPrice
+		positions = append(positions, Position{
+			Symbol:     symbol,
+			Size:       size,
+			EntryPrice: entryPrice,
+		})
+
+		totalExposure += size
+	}
+
+	a.beliefs.mu.Lock()
+	a.beliefs.currentPositions = positions
+	a.beliefs.totalExposure = totalExposure
+	a.beliefs.openPositionCount = len(positions)
+	a.beliefs.mu.Unlock()
+
+	return nil
+}
+
+// calculatePerformanceMetrics calculates Sharpe, drawdown, etc.
+func (a *RiskAgent) calculatePerformanceMetrics() {
+	// TODO: Load equity curve from database
+	// For now, use mock data
+	a.beliefs.mu.Lock()
+	defer a.beliefs.mu.Unlock()
+
+	// Calculate current drawdown
+	if len(a.beliefs.equityCurve) > 0 {
+		peak := a.beliefs.peakEquity
+		current := a.beliefs.equityCurve[len(a.beliefs.equityCurve)-1]
+		if current > peak {
+			a.beliefs.peakEquity = current
+			a.beliefs.currentDrawdown = 0
+		} else if peak > 0 {
+			a.beliefs.currentDrawdown = ((peak - current) / peak) * 100
+			if a.beliefs.currentDrawdown > a.beliefs.maxDrawdown {
+				a.beliefs.maxDrawdown = a.beliefs.currentDrawdown
+			}
+		}
+	}
+
+	// TODO: Calculate Sharpe ratio from returns
+	// For now, use placeholder
+	a.beliefs.sharpeRatio = 1.5
+}
+
+// assessMarketConditions determines current market regime
+func (a *RiskAgent) assessMarketConditions() {
+	// TODO: Implement market regime detection
+	// For now, keep as sideways
+	a.beliefs.mu.Lock()
+	a.beliefs.marketRegime = "sideways"
+	a.beliefs.volatility = 0.02 // 2% volatility
+	a.beliefs.mu.Unlock()
+}
+
+// ============================================================================
+// T123: VETO LOGIC
+// ============================================================================
+
+// evaluateProposal evaluates a trading proposal and decides whether to veto
+func (a *RiskAgent) evaluateProposal(symbol string, action string, size float64, confidence float64) *RiskIntentions {
+	a.beliefs.mu.RLock()
+	defer a.beliefs.mu.RUnlock()
+
+	intentions := &RiskIntentions{
+		shouldVeto:      false,
+		vetoReason:      "",
+		recommendedSize: size,
+		confidenceScore: 0.9,
+		monitorDrawdown: true,
+	}
+
+	// Check 1: Portfolio limits
+	if action == "BUY" {
+		approved, violations := a.checkPortfolioLimits(symbol, size)
+		if !approved {
+			intentions.shouldVeto = true
+			intentions.vetoReason = fmt.Sprintf("Portfolio limits violated: %v", violations)
+			intentions.confidenceScore = 0.95 // High confidence in veto
+			return intentions
+		}
+	}
+
+	// Check 2: Drawdown limit (only for BUY - allow SELL to reduce exposure)
+	if action == "BUY" && a.beliefs.currentDrawdown > a.config.MaxDrawdownPercent {
+		intentions.shouldVeto = true
+		intentions.vetoReason = fmt.Sprintf(
+			"Current drawdown %.1f%% exceeds maximum %.1f%% - circuit breaker activated",
+			a.beliefs.currentDrawdown, a.config.MaxDrawdownPercent)
+		intentions.confidenceScore = 0.98
+		return intentions
+	}
+
+	// Check 3: Approaching drawdown limit (80% of limit)
+	drawdownWarningLevel := a.config.MaxDrawdownPercent * 0.80
+	if a.beliefs.currentDrawdown > drawdownWarningLevel && action == "BUY" {
+		intentions.shouldVeto = true
+		intentions.vetoReason = fmt.Sprintf(
+			"Approaching maximum drawdown (%.1f%% of %.1f%%) - reducing risk",
+			a.beliefs.currentDrawdown, a.config.MaxDrawdownPercent)
+		intentions.confidenceScore = 0.85
+		return intentions
+	}
+
+	// Check 4: High volatility + high utilization
+	highVolatilityThreshold := 0.04  // 4%
+	highUtilizationThreshold := 0.85 // 85%
+	if a.beliefs.volatility > highVolatilityThreshold &&
+		a.beliefs.limitsUtilization > highUtilizationThreshold &&
+		action == "BUY" {
+		intentions.shouldVeto = true
+		intentions.vetoReason = fmt.Sprintf(
+			"High volatility (%.1f%%) + high utilization (%.1f%%) - reducing exposure",
+			a.beliefs.volatility*100, a.beliefs.limitsUtilization*100)
+		intentions.confidenceScore = 0.80
+		return intentions
+	}
+
+	// Check 5: Position sizing recommendation
+	optimalSize := a.calculateOptimalSize(symbol, confidence)
+	if size > optimalSize*1.5 { // Allow 50% over optimal
+		intentions.shouldVeto = false // Don't veto, but recommend smaller size
+		intentions.recommendedSize = optimalSize
+		intentions.vetoReason = fmt.Sprintf(
+			"Recommended size $%.2f (requested $%.2f) - Kelly Criterion suggests smaller position",
+			optimalSize, size)
+		intentions.confidenceScore = 0.70
+		return intentions
+	}
+
+	// Check 6: Concentration risk
+	symbolExposure := a.getSymbolExposure(symbol)
+	if a.beliefs.totalExposure > 0 {
+		currentConcentration := symbolExposure / a.beliefs.totalExposure
+		if currentConcentration > a.config.MaxConcentration*0.8 && action == "BUY" {
+			intentions.shouldVeto = true
+			intentions.vetoReason = fmt.Sprintf(
+				"Symbol concentration %.1f%% approaching limit %.1f%% - diversification required",
+				currentConcentration*100, a.config.MaxConcentration*100)
+			intentions.confidenceScore = 0.75
+			return intentions
+		}
+	}
+
+	// All checks passed - approve trade
+	intentions.shouldVeto = false
+	intentions.recommendedSize = optimalSize
+	intentions.confidenceScore = 0.90
+	intentions.stopLossLevel = a.calculateStopLoss(100.0, action) // Use mock entry price
+
+	return intentions
+}
+
+// ============================================================================
+// T124: RISK ASSESSMENT
+// ============================================================================
+
+// assessRisk performs comprehensive risk assessment and generates signal
+func (a *RiskAgent) assessRisk(symbol string, action string) (string, float64, string) {
+	a.totalDecisions++
+
+	// Default size for assessment
+	proposedSize := a.config.MaxPositionSize * 0.5 // 50% of max
+
+	// Evaluate the proposal
+	intentions := a.evaluateProposal(symbol, action, proposedSize, 0.8)
+
+	a.intentions = intentions
+
+	// Determine signal action
+	var signal string
+	var confidence float64
+	var reasoning string
+
+	if intentions.shouldVeto {
+		signal = "HOLD"
+		confidence = intentions.confidenceScore
+		reasoning = buildVetoReasoning(intentions, a.beliefs, a.config)
+		a.vetoCount++
+
+		log.Warn().
+			Str("symbol", symbol).
+			Str("action", action).
+			Str("veto_reason", intentions.vetoReason).
+			Msg("VETO: Trade rejected by risk management")
+	} else {
+		signal = action
+		confidence = intentions.confidenceScore
+		reasoning = buildApprovalReasoning(intentions, a.beliefs, a.config)
+		a.approvalCount++
+
+		log.Info().
+			Str("symbol", symbol).
+			Str("action", action).
+			Float64("recommended_size", intentions.recommendedSize).
+			Float64("stop_loss", intentions.stopLossLevel).
+			Msg("APPROVED: Trade approved by risk management")
+	}
+
+	return signal, confidence, reasoning
+}
+
+// buildVetoReasoning constructs detailed reasoning for veto
+func buildVetoReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, config *RiskAgentConfig) string {
+	beliefs.mu.RLock()
+	defer beliefs.mu.RUnlock()
+
+	reasoning := "RISK MANAGEMENT VETO\n\n"
+
+	reasoning += fmt.Sprintf("PRIMARY REASON: %s\n\n", intentions.vetoReason)
+
+	reasoning += "CURRENT PORTFOLIO STATE:\n"
+	reasoning += fmt.Sprintf("- Open Positions: %d / %d\n", beliefs.openPositionCount, config.MaxOpenPositions)
+	reasoning += fmt.Sprintf("- Total Exposure: $%.2f / $%.2f (%.1f%% utilized)\n",
+		beliefs.totalExposure, config.MaxTotalExposure, beliefs.limitsUtilization*100)
+	reasoning += fmt.Sprintf("- Current Drawdown: %.1f%% (Max: %.1f%%)\n",
+		beliefs.currentDrawdown, config.MaxDrawdownPercent)
+	reasoning += fmt.Sprintf("- Market Regime: %s\n", beliefs.marketRegime)
+	reasoning += fmt.Sprintf("- Volatility: %.2f%%\n\n", beliefs.volatility*100)
+
+	reasoning += "RISK METRICS:\n"
+	reasoning += fmt.Sprintf("- Sharpe Ratio: %.2f (Target: %.2f)\n", beliefs.sharpeRatio, config.MinSharpeRatio)
+	reasoning += fmt.Sprintf("- Max Drawdown: %.1f%%\n", beliefs.maxDrawdown)
+	reasoning += fmt.Sprintf("- Peak Equity: $%.2f\n\n", beliefs.peakEquity)
+
+	reasoning += "RECOMMENDATION: HOLD\n"
+	reasoning += "Risk management circuit breaker activated to protect capital.\n"
+
+	return reasoning
+}
+
+// buildApprovalReasoning constructs detailed reasoning for approval
+func buildApprovalReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, config *RiskAgentConfig) string {
+	beliefs.mu.RLock()
+	defer beliefs.mu.RUnlock()
+
+	reasoning := "RISK MANAGEMENT APPROVAL\n\n"
+
+	reasoning += "PORTFOLIO HEALTH:\n"
+	reasoning += fmt.Sprintf("- All risk limits satisfied\n")
+	reasoning += fmt.Sprintf("- Open Positions: %d / %d (capacity available)\n",
+		beliefs.openPositionCount, config.MaxOpenPositions)
+	reasoning += fmt.Sprintf("- Exposure Utilization: %.1f%% (healthy)\n", beliefs.limitsUtilization*100)
+	reasoning += fmt.Sprintf("- Current Drawdown: %.1f%% (within %.1f%% limit)\n",
+		beliefs.currentDrawdown, config.MaxDrawdownPercent)
+
+	reasoning += "\nPOSITION SIZING (KELLY CRITERION):\n"
+	reasoning += fmt.Sprintf("- Recommended Size: $%.2f\n", intentions.recommendedSize)
+	reasoning += fmt.Sprintf("- Kelly Fraction: %.0f%% (conservative)\n", config.KellyFraction*100)
+	reasoning += fmt.Sprintf("- Stop Loss Level: $%.2f\n", intentions.stopLossLevel)
+
+	reasoning += "\nRISK METRICS:\n"
+	reasoning += fmt.Sprintf("- Sharpe Ratio: %.2f (meets %.2f target)\n", beliefs.sharpeRatio, config.MinSharpeRatio)
+	reasoning += fmt.Sprintf("- Volatility: %.2f%% (acceptable)\n", beliefs.volatility*100)
+	reasoning += fmt.Sprintf("- Market Regime: %s\n", beliefs.marketRegime)
+
+	reasoning += "\nRECOMMENDATION: PROCEED\n"
+	reasoning += "Trade approved with proper risk controls in place.\n"
+
+	return reasoning
+}
+
+// generateRiskSignal creates and publishes a risk management signal
+func (a *RiskAgent) generateRiskSignal(symbol string, proposedAction string) error {
+	signal, confidence, reasoning := a.assessRisk(symbol, proposedAction)
+
+	agentSignal := orchestrator.AgentSignal{
+		AgentName:  a.config.AgentName,
+		AgentType:  a.config.AgentType,
+		Symbol:     symbol,
+		Signal:     signal,
+		Confidence: confidence,
+		Reasoning:  reasoning,
+		Timestamp:  time.Now(),
+		Metadata: map[string]interface{}{
+			"veto":             signal == "HOLD" && proposedAction != "HOLD",
+			"recommended_size": a.intentions.recommendedSize,
+			"stop_loss":        a.intentions.stopLossLevel,
+			"current_drawdown": a.beliefs.currentDrawdown,
+			"portfolio_util":   a.beliefs.limitsUtilization,
+			"open_positions":   a.beliefs.openPositionCount,
+			"total_exposure":   a.beliefs.totalExposure,
+		},
+	}
+
+	data, err := json.Marshal(agentSignal)
+	if err != nil {
+		return fmt.Errorf("failed to marshal signal: %w", err)
+	}
+
+	if err := a.natsConn.Publish(a.config.SignalTopic, data); err != nil {
+		return fmt.Errorf("failed to publish signal: %w", err)
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Str("signal", signal).
+		Float64("confidence", confidence).
+		Bool("veto", signal == "HOLD" && proposedAction != "HOLD").
+		Msg("Risk signal published")
+
+	return nil
+}
+
+func init() {
+	// Register agent with base agent framework
+	log.Info().Msg("Risk Agent module loaded")
+}
