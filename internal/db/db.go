@@ -70,3 +70,8 @@ func (db *DB) Pool() *pgxpool.Pool {
 func (db *DB) Health(ctx context.Context) error {
 	return db.pool.Ping(ctx)
 }
+
+// Ping checks database connectivity (alias for Health)
+func (db *DB) Ping(ctx context.Context) error {
+	return db.Health(ctx)
+}
