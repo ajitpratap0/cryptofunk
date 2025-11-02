@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
 )
 
@@ -34,9 +35,10 @@ type TechnicalAgent struct {
 	natsTopic string
 
 	// LLM client for AI-powered analysis
-	llmClient     *llm.Client
-	promptBuilder *llm.PromptBuilder
-	useLLM        bool // Enable/disable LLM reasoning
+	llmClient       *llm.Client
+	promptBuilder   *llm.PromptBuilder
+	useLLM          bool // Enable/disable LLM reasoning
+	decisionTracker *llm.DecisionTracker // Track LLM decisions (optional)
 
 	// Technical analysis configuration
 	symbols           []string
