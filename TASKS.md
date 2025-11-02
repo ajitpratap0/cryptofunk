@@ -1801,28 +1801,34 @@ This document consolidates all implementation tasks from the architecture and de
   - **Actual**: ~2 hours
   - **Implementation**: cmd/agents/technical-agent/main.go (~120 lines added)
 
-- [ ] **T180** [P0] Integrate LLM into Trend Following Agent
+- [x] **T180** [P0] Integrate LLM into Trend Following Agent
   - Update trend agent to use LLM reasoning
   - LLM evaluates trend strength and timing
   - Prompt: "You are a trend following trader. Assess this trend..."
   - Generate BUY/SELL decisions with confidence
-  - **Acceptance**: Trend agent uses LLM for decisions
+  - **Acceptance**: Trend agent uses LLM for decisions ✅
   - **Estimate**: 2.5 hours
+  - **Actual**: ~2 hours
+  - **Implementation**: cmd/agents/trend-agent/main.go (~150 lines added)
 
-- [ ] **T181** [P0] Integrate LLM into Mean Reversion Agent
+- [x] **T181** [P0] Integrate LLM into Mean Reversion Agent
   - Update reversion agent with LLM
   - LLM identifies mean reversion opportunities
   - Prompt: "You are a mean reversion specialist. Evaluate..."
-  - **Acceptance**: Reversion agent uses LLM
+  - **Acceptance**: Reversion agent uses LLM ✅
   - **Estimate**: 2.5 hours
+  - **Actual**: ~2 hours
+  - **Implementation**: cmd/agents/reversion-agent/main.go (~135 lines added)
 
-- [ ] **T182** [P0] Integrate LLM into Risk Management Agent
+- [x] **T182** [P0] Integrate LLM into Risk Management Agent
   - Update risk agent to use LLM for risk assessment
   - LLM evaluates portfolio risk, position sizing
   - Prompt: "You are a risk manager. Evaluate this trade..."
   - Approve/reject trades with detailed reasoning
-  - **Acceptance**: Risk agent uses LLM for evaluation
+  - **Acceptance**: Risk agent uses LLM for evaluation ✅
   - **Estimate**: 3 hours
+  - **Actual**: ~2.5 hours
+  - **Implementation**: cmd/agents/risk-agent/main.go (~160 lines added)
 
 ### 9.3 Context & Memory for LLMs (Week 9, Day 3)
 
