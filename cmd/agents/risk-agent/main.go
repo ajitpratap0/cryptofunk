@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/llm"
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
@@ -60,6 +61,11 @@ type RiskAgent struct {
 	db          *db.DB
 	riskService *risk.Service
 	natsConn    *nats.Conn
+
+	// LLM client for AI-powered risk analysis
+	llmClient     *llm.Client
+	promptBuilder *llm.PromptBuilder
+	useLLM        bool
 
 	// BDI Components
 	beliefs    *RiskBeliefs
@@ -258,10 +264,34 @@ func main() {
 
 // NewRiskAgent creates a new risk management agent
 func NewRiskAgent(config *RiskAgentConfig, database *db.DB, riskService *risk.Service) (*RiskAgent, error) {
+	// Initialize LLM client if enabled
+	var llmClient *llm.Client
+	var promptBuilder *llm.PromptBuilder
+	useLLM := viper.GetBool("llm.enabled")
+
+	if useLLM {
+		llmConfig := llm.ClientConfig{
+			Endpoint:    viper.GetString("llm.endpoint"),
+			APIKey:      viper.GetString("llm.api_key"),
+			Model:       viper.GetString("llm.primary_model"),
+			Temperature: viper.GetFloat64("llm.temperature"),
+			MaxTokens:   viper.GetInt("llm.max_tokens"),
+			Timeout:     viper.GetDuration("llm.timeout"),
+		}
+		llmClient = llm.NewClient(llmConfig)
+		promptBuilder = llm.NewPromptBuilder(llm.AgentTypeRisk)
+		log.Info().Msg("LLM-powered risk analysis enabled")
+	} else {
+		log.Info().Msg("Using rule-based risk analysis")
+	}
+
 	return &RiskAgent{
-		config:      config,
-		db:          database,
-		riskService: riskService,
+		config:        config,
+		db:            database,
+		riskService:   riskService,
+		llmClient:     llmClient,
+		promptBuilder: promptBuilder,
+		useLLM:        useLLM,
 		beliefs: &RiskBeliefs{
 			currentPositions: make([]Position, 0),
 			equityCurve:      make([]float64, 0),
@@ -702,7 +732,119 @@ func (a *RiskAgent) assessMarketConditions() {
 // ============================================================================
 
 // evaluateProposal evaluates a trading proposal and decides whether to veto
-func (a *RiskAgent) evaluateProposal(symbol string, action string, size float64, confidence float64) *RiskIntentions {
+// evaluateProposal routes to LLM or rule-based proposal evaluation
+func (a *RiskAgent) evaluateProposal(ctx context.Context, symbol string, action string, size float64, confidence float64) *RiskIntentions {
+	if a.useLLM && a.llmClient != nil {
+		intentions, err := a.evaluateProposalWithLLM(ctx, symbol, action, size, confidence)
+		if err != nil {
+			log.Warn().Err(err).Msg("LLM risk assessment failed, falling back to rule-based analysis")
+			return a.evaluateProposalRuleBased(symbol, action, size, confidence)
+		}
+		return intentions
+	}
+	return a.evaluateProposalRuleBased(symbol, action, size, confidence)
+}
+
+// evaluateProposalWithLLM performs LLM-powered risk assessment
+func (a *RiskAgent) evaluateProposalWithLLM(ctx context.Context, symbol string, action string, size float64, confidence float64) (*RiskIntentions, error) {
+	log.Debug().Str("symbol", symbol).Str("action", action).Msg("Evaluating proposal with LLM")
+
+	a.beliefs.mu.RLock()
+	currentPrice := 100.0                             // Mock price for now - should get from market data
+	portfolioValue := a.config.MaxPositionSize * 10.0 // Estimate portfolio as 10x max position
+	if a.beliefs.totalExposure > 0 {
+		portfolioValue = a.beliefs.totalExposure / 0.8 // Assume 80% utilization
+	}
+	a.beliefs.mu.RUnlock()
+
+	// Build signal for the prompt
+	signal := llm.Signal{
+		Symbol:     symbol,
+		Side:       action,
+		Confidence: confidence,
+		Reasoning:  fmt.Sprintf("Proposed %s trade for %s", action, symbol),
+	}
+
+	// Build market context
+	marketCtx := llm.MarketContext{
+		Symbol:       symbol,
+		CurrentPrice: currentPrice,
+		Timestamp:    time.Now(),
+	}
+
+	// Build positions context (simplified for now)
+	positions := make([]llm.PositionContext, 0)
+
+	// Build risk assessment prompt
+	maxPositionSize := a.config.MaxPositionSize
+	userPrompt := a.promptBuilder.BuildRiskAssessmentPrompt(signal, marketCtx, positions, portfolioValue, maxPositionSize)
+	systemPrompt := a.promptBuilder.GetSystemPrompt()
+
+	// Call LLM with retry logic
+	response, err := a.llmClient.CompleteWithRetry(ctx, []llm.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}, 2) // 2 retries
+
+	if err != nil {
+		return nil, fmt.Errorf("LLM request failed: %w", err)
+	}
+
+	// Parse LLM response
+	if len(response.Choices) == 0 {
+		return nil, fmt.Errorf("LLM returned no choices")
+	}
+
+	content := response.Choices[0].Message.Content
+
+	// Parse JSON response into a risk assessment structure
+	var riskAssessment struct {
+		Approved     bool     `json:"approved"`
+		PositionSize float64  `json:"position_size"`
+		StopLoss     *float64 `json:"stop_loss"`
+		TakeProfit   *float64 `json:"take_profit"`
+		RiskScore    float64  `json:"risk_score"`
+		Reasoning    string   `json:"reasoning"`
+		Concerns     []string `json:"concerns"`
+	}
+
+	if err := a.llmClient.ParseJSONResponse(content, &riskAssessment); err != nil {
+		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
+	}
+
+	// Convert LLM response to RiskIntentions
+	intentions := &RiskIntentions{
+		shouldVeto:      !riskAssessment.Approved,
+		recommendedSize: riskAssessment.PositionSize * portfolioValue,
+		confidenceScore: 1.0 - riskAssessment.RiskScore, // Convert risk score to confidence
+		monitorDrawdown: true,
+	}
+
+	if !riskAssessment.Approved {
+		intentions.vetoReason = riskAssessment.Reasoning
+		if len(riskAssessment.Concerns) > 0 {
+			intentions.vetoReason += fmt.Sprintf(" Concerns: %v", riskAssessment.Concerns)
+		}
+	}
+
+	if riskAssessment.StopLoss != nil {
+		intentions.stopLossLevel = *riskAssessment.StopLoss
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Str("action", action).
+		Bool("approved", riskAssessment.Approved).
+		Float64("position_size", riskAssessment.PositionSize).
+		Float64("risk_score", riskAssessment.RiskScore).
+		Str("reasoning", riskAssessment.Reasoning).
+		Msg("LLM risk assessment completed")
+
+	return intentions, nil
+}
+
+// evaluateProposalRuleBased performs rule-based risk assessment
+func (a *RiskAgent) evaluateProposalRuleBased(symbol string, action string, size float64, confidence float64) *RiskIntentions {
 	a.beliefs.mu.RLock()
 	defer a.beliefs.mu.RUnlock()
 
@@ -800,14 +942,14 @@ func (a *RiskAgent) evaluateProposal(symbol string, action string, size float64,
 // ============================================================================
 
 // assessRisk performs comprehensive risk assessment and generates signal
-func (a *RiskAgent) assessRisk(symbol string, action string) (string, float64, string) {
+func (a *RiskAgent) assessRisk(ctx context.Context, symbol string, action string) (string, float64, string) {
 	a.totalDecisions++
 
 	// Default size for assessment
 	proposedSize := a.config.MaxPositionSize * 0.5 // 50% of max
 
 	// Evaluate the proposal
-	intentions := a.evaluateProposal(symbol, action, proposedSize, 0.8)
+	intentions := a.evaluateProposal(ctx, symbol, action, proposedSize, 0.8)
 
 	a.intentions = intentions
 
@@ -905,8 +1047,8 @@ func buildApprovalReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, co
 }
 
 // generateRiskSignal creates and publishes a risk management signal
-func (a *RiskAgent) generateRiskSignal(symbol string, proposedAction string) error {
-	signal, confidence, reasoning := a.assessRisk(symbol, proposedAction)
+func (a *RiskAgent) generateRiskSignal(ctx context.Context, symbol string, proposedAction string) error {
+	signal, confidence, reasoning := a.assessRisk(ctx, symbol, proposedAction)
 
 	agentSignal := orchestrator.AgentSignal{
 		AgentName:  a.config.AgentName,

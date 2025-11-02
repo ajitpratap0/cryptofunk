@@ -327,7 +327,7 @@ func TestDetectRSIExtreme_Neutral(t *testing.T) {
 func TestCombineSignals_BothBuy(t *testing.T) {
 	agent := &ReversionAgent{}
 
-	signal, confidence, reasoning := agent.combineSignals(
+	signal, confidence, reasoning := agent.combineSignalsRuleBased(
 		"BUY", 0.8, "Bollinger says BUY",
 		"BUY", 0.7, "RSI says BUY",
 	)
@@ -341,7 +341,7 @@ func TestCombineSignals_BothBuy(t *testing.T) {
 func TestCombineSignals_BothSell(t *testing.T) {
 	agent := &ReversionAgent{}
 
-	signal, confidence, reasoning := agent.combineSignals(
+	signal, confidence, reasoning := agent.combineSignalsRuleBased(
 		"SELL", 0.8, "Bollinger says SELL",
 		"SELL", 0.7, "RSI says SELL",
 	)
@@ -355,7 +355,7 @@ func TestCombineSignals_BothSell(t *testing.T) {
 func TestCombineSignals_Conflict(t *testing.T) {
 	agent := &ReversionAgent{}
 
-	signal, confidence, reasoning := agent.combineSignals(
+	signal, confidence, reasoning := agent.combineSignalsRuleBased(
 		"BUY", 0.8, "Bollinger says BUY",
 		"SELL", 0.7, "RSI says SELL",
 	)
@@ -368,7 +368,7 @@ func TestCombineSignals_Conflict(t *testing.T) {
 func TestCombineSignals_OneHold(t *testing.T) {
 	agent := &ReversionAgent{}
 
-	signal, confidence, _ := agent.combineSignals(
+	signal, confidence, _ := agent.combineSignalsRuleBased(
 		"BUY", 0.8, "Bollinger says BUY",
 		"HOLD", 0.5, "RSI neutral",
 	)
@@ -608,7 +608,7 @@ func TestFilterSignalByRegime_HoldSignal(t *testing.T) {
 func TestCombineSignals_BothHold(t *testing.T) {
 	agent := &ReversionAgent{}
 
-	signal, confidence, reasoning := agent.combineSignals(
+	signal, confidence, reasoning := agent.combineSignalsRuleBased(
 		"HOLD", 0.5, "Bollinger neutral",
 		"HOLD", 0.5, "RSI neutral",
 	)

@@ -21,6 +21,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/llm"
 )
 
 // ============================================================================
@@ -113,6 +114,11 @@ type ReversionAgent struct {
 	// NATS connection for signal publishing
 	natsConn  *nats.Conn
 	natsTopic string
+
+	// LLM client for AI-powered analysis
+	llmClient     *llm.Client
+	promptBuilder *llm.PromptBuilder
+	useLLM        bool
 
 	// Strategy configuration
 	symbols              []string
@@ -225,10 +231,34 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 	// Extract symbols to analyze
 	symbols := getStringSliceFromConfig(agentConfig, "symbols", []string{"bitcoin", "ethereum"})
 
+	// Initialize LLM client if enabled
+	var llmClient *llm.Client
+	var promptBuilder *llm.PromptBuilder
+	useLLM := viper.GetBool("llm.enabled")
+
+	if useLLM {
+		llmConfig := llm.ClientConfig{
+			Endpoint:    viper.GetString("llm.endpoint"),
+			APIKey:      viper.GetString("llm.api_key"),
+			Model:       viper.GetString("llm.primary_model"),
+			Temperature: viper.GetFloat64("llm.temperature"),
+			MaxTokens:   viper.GetInt("llm.max_tokens"),
+			Timeout:     viper.GetDuration("llm.timeout"),
+		}
+		llmClient = llm.NewClient(llmConfig)
+		promptBuilder = llm.NewPromptBuilder(llm.AgentTypeReversion)
+		log.Info().Msg("LLM-powered mean reversion analysis enabled")
+	} else {
+		log.Info().Msg("Using rule-based mean reversion analysis")
+	}
+
 	return &ReversionAgent{
 		BaseAgent:            baseAgent,
 		natsConn:             nc,
 		natsTopic:            natsTopic,
+		llmClient:            llmClient,
+		promptBuilder:        promptBuilder,
+		useLLM:               useLLM,
 		symbols:              symbols,
 		rsiPeriod:            rsiPeriod,
 		rsiOversold:          rsiOversold,
@@ -326,8 +356,9 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Str("reasoning", rsiReasoning).
 		Msg("RSI signal detected")
 
-	// Step 4: Combine Bollinger and RSI signals for confirmation
-	finalSignal, finalConfidence, finalReasoning := a.combineSignals(
+	// Step 4: Generate final signal (LLM or rule-based)
+	finalSignal, finalConfidence, finalReasoning := a.generateMeanReversionSignal(
+		ctx, symbol, currentPrice, bollinger, rsi,
 		bbSignal, bbConfidence, bbReasoning,
 		rsiSignal, rsiConfidence, rsiReasoning,
 	)
@@ -336,7 +367,7 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Str("final_signal", finalSignal).
 		Float64("final_confidence", finalConfidence).
 		Str("reasoning", finalReasoning).
-		Msg("Combined signal generated")
+		Msg("Mean reversion signal generated")
 
 	// Step 4.5: Detect market regime and filter signal (T087)
 	adx, err := a.calculateADX(ctx, symbol, prices)
@@ -777,9 +808,103 @@ func (a *ReversionAgent) detectRSIExtreme(rsi float64) (string, float64, string)
 	}
 }
 
-// combineSignals combines Bollinger Band and RSI signals for confirmation
+// generateMeanReversionSignal routes to LLM or rule-based signal generation
+func (a *ReversionAgent) generateMeanReversionSignal(
+	ctx context.Context,
+	symbol string,
+	currentPrice float64,
+	bollinger *BollingerIndicators,
+	rsi float64,
+	bbSignal string,
+	bbConfidence float64,
+	bbReasoning string,
+	rsiSignal string,
+	rsiConfidence float64,
+	rsiReasoning string,
+) (string, float64, string) {
+	if a.useLLM && a.llmClient != nil {
+		signal, confidence, reasoning, err := a.generateSignalWithLLM(
+			ctx, symbol, currentPrice, bollinger, rsi,
+		)
+		if err != nil {
+			log.Warn().Err(err).Msg("LLM request failed, falling back to rule-based analysis")
+			return a.combineSignalsRuleBased(bbSignal, bbConfidence, bbReasoning, rsiSignal, rsiConfidence, rsiReasoning)
+		}
+		return signal, confidence, reasoning
+	}
+	return a.combineSignalsRuleBased(bbSignal, bbConfidence, bbReasoning, rsiSignal, rsiConfidence, rsiReasoning)
+}
+
+// generateSignalWithLLM generates a signal using LLM-powered analysis
+func (a *ReversionAgent) generateSignalWithLLM(
+	ctx context.Context,
+	symbol string,
+	currentPrice float64,
+	bollinger *BollingerIndicators,
+	rsi float64,
+) (string, float64, string, error) {
+	log.Debug().Str("symbol", symbol).Msg("Generating mean reversion signal (LLM-powered)")
+
+	// Build market context for LLM
+	indicatorMap := make(map[string]float64)
+	indicatorMap["rsi"] = rsi
+	indicatorMap["bollinger_upper"] = bollinger.UpperBand
+	indicatorMap["bollinger_middle"] = bollinger.MiddleBand
+	indicatorMap["bollinger_lower"] = bollinger.LowerBand
+	indicatorMap["bollinger_bandwidth"] = bollinger.Bandwidth
+
+	marketCtx := llm.MarketContext{
+		Symbol:       symbol,
+		CurrentPrice: currentPrice,
+		Indicators:   indicatorMap,
+		Timestamp:    time.Now(),
+	}
+
+	// Build LLM prompt
+	userPrompt := a.promptBuilder.BuildMeanReversionPrompt(marketCtx, nil) // No positions yet
+	systemPrompt := a.promptBuilder.GetSystemPrompt()
+
+	// Call LLM with retry logic
+	response, err := a.llmClient.CompleteWithRetry(ctx, []llm.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}, 2) // 2 retries
+
+	if err != nil {
+		return "", 0, "", fmt.Errorf("LLM request failed: %w", err)
+	}
+
+	// Parse LLM response
+	if len(response.Choices) == 0 {
+		return "", 0, "", fmt.Errorf("LLM returned no choices")
+	}
+
+	content := response.Choices[0].Message.Content
+
+	// Parse JSON response
+	var llmSignal llm.Signal
+	if err := a.llmClient.ParseJSONResponse(content, &llmSignal); err != nil {
+		return "", 0, "", fmt.Errorf("failed to parse LLM response: %w", err)
+	}
+
+	// Validate signal
+	if llmSignal.Side != "BUY" && llmSignal.Side != "SELL" && llmSignal.Side != "HOLD" {
+		return "", 0, "", fmt.Errorf("invalid signal from LLM: %s", llmSignal.Side)
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Str("signal", llmSignal.Side).
+		Float64("confidence", llmSignal.Confidence).
+		Str("reasoning", llmSignal.Reasoning).
+		Msg("Generated LLM-powered mean reversion signal")
+
+	return llmSignal.Side, llmSignal.Confidence, llmSignal.Reasoning, nil
+}
+
+// combineSignalsRuleBased combines Bollinger Band and RSI signals for confirmation (rule-based)
 // Returns: final signal, combined confidence, reasoning
-func (a *ReversionAgent) combineSignals(bbSignal string, bbConfidence float64, bbReasoning string,
+func (a *ReversionAgent) combineSignalsRuleBased(bbSignal string, bbConfidence float64, bbReasoning string,
 	rsiSignal string, rsiConfidence float64, rsiReasoning string) (string, float64, string) {
 
 	// Case 1: Both signals agree (strong confirmation)

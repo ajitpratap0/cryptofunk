@@ -61,6 +61,14 @@ func (db *DB) Close() {
 	}
 }
 
+// Ping checks the database connection
+func (db *DB) Ping(ctx context.Context) error {
+	if db.pool == nil {
+		return fmt.Errorf("database connection pool is nil")
+	}
+	return db.pool.Ping(ctx)
+}
+
 // Pool returns the underlying connection pool
 func (db *DB) Pool() *pgxpool.Pool {
 	return db.pool

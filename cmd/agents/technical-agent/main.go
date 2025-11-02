@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/llm"
 )
 
 // TechnicalAgent performs technical analysis and generates trading signals
@@ -31,6 +32,11 @@ type TechnicalAgent struct {
 	// NATS connection for signal publishing
 	natsConn  *nats.Conn
 	natsTopic string
+
+	// LLM client for AI-powered analysis
+	llmClient     *llm.Client
+	promptBuilder *llm.PromptBuilder
+	useLLM        bool // Enable/disable LLM reasoning
 
 	// Technical analysis configuration
 	symbols           []string
@@ -210,10 +216,38 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	log.Info().Msg("Successfully connected to NATS")
 
+	// Initialize LLM client if enabled
+	var llmClient *llm.Client
+	var promptBuilder *llm.PromptBuilder
+	useLLM := viper.GetBool("llm.enabled")
+
+	if useLLM {
+		llmConfig := llm.ClientConfig{
+			Endpoint:    viper.GetString("llm.endpoint"),
+			APIKey:      viper.GetString("llm.api_key"),
+			Model:       viper.GetString("llm.primary_model"),
+			Temperature: viper.GetFloat64("llm.temperature"),
+			MaxTokens:   viper.GetInt("llm.max_tokens"),
+			Timeout:     viper.GetDuration("llm.timeout"),
+		}
+
+		llmClient = llm.NewClient(llmConfig)
+		promptBuilder = llm.NewPromptBuilder(llm.AgentTypeTechnical)
+		log.Info().
+			Str("endpoint", llmConfig.Endpoint).
+			Str("model", llmConfig.Model).
+			Msg("LLM client initialized for technical analysis")
+	} else {
+		log.Info().Msg("LLM reasoning disabled - using rule-based analysis only")
+	}
+
 	return &TechnicalAgent{
 		BaseAgent:         baseAgent,
 		natsConn:          nc,
 		natsTopic:         natsTopic,
+		llmClient:         llmClient,
+		promptBuilder:     promptBuilder,
+		useLLM:            useLLM,
 		rsiConfig:         getMapConfig(agentConfig, "indicators.rsi"),
 		macdConfig:        getMapConfig(agentConfig, "indicators.macd"),
 		bollingerConfig:   getMapConfig(agentConfig, "indicators.bollinger"),
@@ -650,9 +684,120 @@ func (a *TechnicalAgent) calculateEMA(ctx context.Context, prices []float64, per
 	return emaValue, nil
 }
 
+// generateSignalWithLLM uses LLM to analyze indicators and generate a trading signal
+func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol string, indicators *IndicatorValues, currentPrice float64) (*TechnicalSignal, error) {
+	log.Debug().Str("symbol", symbol).Msg("Generating LLM-powered trading signal")
+
+	// Build market context for LLM
+	indicatorMap := make(map[string]float64)
+	if indicators.RSI != nil {
+		indicatorMap["RSI"] = indicators.RSI.Value
+	}
+	if indicators.MACD != nil {
+		indicatorMap["MACD"] = indicators.MACD.MACD
+		indicatorMap["MACD_Signal"] = indicators.MACD.Signal
+		indicatorMap["MACD_Histogram"] = indicators.MACD.Histogram
+	}
+	if indicators.BollingerBands != nil {
+		indicatorMap["Bollinger_Upper"] = indicators.BollingerBands.Upper
+		indicatorMap["Bollinger_Middle"] = indicators.BollingerBands.Middle
+		indicatorMap["Bollinger_Lower"] = indicators.BollingerBands.Lower
+		indicatorMap["Bollinger_Width"] = indicators.BollingerBands.Width
+	}
+	for period, value := range indicators.EMA {
+		indicatorMap[fmt.Sprintf("EMA_%d", period)] = value
+	}
+
+	marketCtx := llm.MarketContext{
+		Symbol:         symbol,
+		CurrentPrice:   currentPrice,
+		PriceChange24h: 0, // Could be calculated from historical data
+		Volume24h:      0, // Could be fetched from market data
+		Indicators:     indicatorMap,
+		Timestamp:      time.Now(),
+	}
+
+	// Build prompt
+	userPrompt := a.promptBuilder.BuildTechnicalAnalysisPrompt(marketCtx)
+	systemPrompt := a.promptBuilder.GetSystemPrompt()
+
+	// Call LLM with retry
+	response, err := a.llmClient.CompleteWithRetry(ctx, []llm.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}, 2) // Max 2 retries
+
+	if err != nil {
+		log.Error().Err(err).Msg("LLM call failed")
+		// Fall back to rule-based signal generation
+		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	if len(response.Choices) == 0 {
+		log.Warn().Msg("No choices in LLM response, falling back to rule-based")
+		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	// Parse LLM response
+	content := response.Choices[0].Message.Content
+	var llmSignal llm.Signal
+	if err := a.llmClient.ParseJSONResponse(content, &llmSignal); err != nil {
+		log.Error().Err(err).Str("content", content).Msg("Failed to parse LLM response")
+		// Fall back to rule-based signal generation
+		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	// Convert LLM signal to TechnicalSignal
+	signal := &TechnicalSignal{
+		Timestamp:  time.Now(),
+		Symbol:     symbol,
+		Signal:     llmSignal.Side, // "BUY", "SELL", or use action field
+		Confidence: llmSignal.Confidence,
+		Indicators: indicators,
+		Reasoning:  llmSignal.Reasoning,
+		Price:      currentPrice,
+	}
+
+	// Normalize signal if needed
+	if signal.Signal != "BUY" && signal.Signal != "SELL" && signal.Signal != "HOLD" {
+		// Check if it's in the action field instead
+		if llmSignal.Metadata != nil {
+			if action, ok := llmSignal.Metadata["action"].(string); ok {
+				signal.Signal = action
+			}
+		}
+	}
+
+	// Ensure signal is valid
+	if signal.Signal != "BUY" && signal.Signal != "SELL" && signal.Signal != "HOLD" {
+		log.Warn().Str("signal", signal.Signal).Msg("Invalid signal from LLM, defaulting to HOLD")
+		signal.Signal = "HOLD"
+	}
+
+	log.Info().
+		Str("signal", signal.Signal).
+		Float64("confidence", signal.Confidence).
+		Str("reasoning", signal.Reasoning).
+		Msg("LLM signal generated successfully")
+
+	return signal, nil
+}
+
 // generateSignal combines indicator signals with confidence weights to produce a trading signal
+// This method now routes to LLM or rule-based generation depending on configuration
 func (a *TechnicalAgent) generateSignal(ctx context.Context, symbol string, indicators *IndicatorValues, currentPrice float64) (*TechnicalSignal, error) {
-	log.Debug().Str("symbol", symbol).Msg("Generating trading signal from indicators")
+	// Use LLM if enabled
+	if a.useLLM && a.llmClient != nil {
+		return a.generateSignalWithLLM(ctx, symbol, indicators, currentPrice)
+	}
+
+	// Fall back to rule-based generation
+	return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+}
+
+// generateSignalRuleBased is the original rule-based signal generation logic
+func (a *TechnicalAgent) generateSignalRuleBased(ctx context.Context, symbol string, indicators *IndicatorValues, currentPrice float64) (*TechnicalSignal, error) {
+	log.Debug().Str("symbol", symbol).Msg("Generating rule-based trading signal from indicators")
 
 	// Get confidence weights from agent's stored config
 	confidenceWeights := a.confidenceWeights

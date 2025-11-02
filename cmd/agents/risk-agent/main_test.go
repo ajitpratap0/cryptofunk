@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -278,7 +279,7 @@ func TestCalculateStopLoss_DefaultVolatility(t *testing.T) {
 func TestEvaluateProposal_ApproveNormalTrade(t *testing.T) {
 	agent := createTestRiskAgent()
 
-	intentions := agent.evaluateProposal("BTC/USDT", "BUY", 5000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "BUY", 5000.0, 0.8)
 
 	assert.False(t, intentions.shouldVeto)
 	assert.GreaterOrEqual(t, intentions.confidenceScore, 0.7)
@@ -289,7 +290,7 @@ func TestEvaluateProposal_VetoOnPortfolioLimits(t *testing.T) {
 	agent := createTestRiskAgent()
 	agent.beliefs.openPositionCount = 5 // At max
 
-	intentions := agent.evaluateProposal("SOL/USDT", "BUY", 5000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "SOL/USDT", "BUY", 5000.0, 0.8)
 
 	assert.True(t, intentions.shouldVeto)
 	assert.Contains(t, intentions.vetoReason, "Portfolio limits")
@@ -300,7 +301,7 @@ func TestEvaluateProposal_VetoOnDrawdownLimit(t *testing.T) {
 	agent := createTestRiskAgent()
 	agent.beliefs.currentDrawdown = 22.0 // Exceeds 20% limit
 
-	intentions := agent.evaluateProposal("BTC/USDT", "BUY", 5000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "BUY", 5000.0, 0.8)
 
 	assert.True(t, intentions.shouldVeto)
 	assert.Contains(t, intentions.vetoReason, "drawdown")
@@ -312,7 +313,7 @@ func TestEvaluateProposal_VetoOnApproachingDrawdown(t *testing.T) {
 	agent := createTestRiskAgent()
 	agent.beliefs.currentDrawdown = 17.0 // 85% of 20% limit
 
-	intentions := agent.evaluateProposal("BTC/USDT", "BUY", 5000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "BUY", 5000.0, 0.8)
 
 	assert.True(t, intentions.shouldVeto)
 	assert.Contains(t, intentions.vetoReason, "Approaching maximum drawdown")
@@ -324,7 +325,7 @@ func TestEvaluateProposal_VetoOnHighVolatilityAndUtilization(t *testing.T) {
 	agent.beliefs.volatility = 0.05        // 5% volatility (high)
 	agent.beliefs.limitsUtilization = 0.90 // 90% utilization (high)
 
-	intentions := agent.evaluateProposal("BTC/USDT", "BUY", 5000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "BUY", 5000.0, 0.8)
 
 	assert.True(t, intentions.shouldVeto)
 	assert.Contains(t, intentions.vetoReason, "High volatility")
@@ -336,7 +337,7 @@ func TestEvaluateProposal_RecommendSmallerSize(t *testing.T) {
 
 	// Request size larger than optimal but within max limits
 	// Optimal size is ~2000, so request 4000 (2x optimal)
-	intentions := agent.evaluateProposal("BTC/USDT", "BUY", 4000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "BUY", 4000.0, 0.8)
 
 	// Should not veto but recommend smaller size
 	assert.False(t, intentions.shouldVeto)
@@ -353,7 +354,7 @@ func TestEvaluateProposal_VetoOnConcentration(t *testing.T) {
 	}
 
 	// Try to add more BTC (approaching 25% concentration limit)
-	intentions := agent.evaluateProposal("BTC/USDT", "BUY", 3000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "BUY", 3000.0, 0.8)
 
 	assert.True(t, intentions.shouldVeto)
 	assert.Contains(t, intentions.vetoReason, "concentration")
@@ -365,7 +366,7 @@ func TestEvaluateProposal_NoVetoOnSell(t *testing.T) {
 	agent.beliefs.currentDrawdown = 17.0 // Would veto BUY
 
 	// SELL should not be vetoed even with high drawdown
-	intentions := agent.evaluateProposal("BTC/USDT", "SELL", 5000.0, 0.8)
+	intentions := agent.evaluateProposal(context.Background(), "BTC/USDT", "SELL", 5000.0, 0.8)
 
 	assert.False(t, intentions.shouldVeto)
 }
@@ -377,7 +378,7 @@ func TestEvaluateProposal_NoVetoOnSell(t *testing.T) {
 func TestAssessRisk_ApprovalFlow(t *testing.T) {
 	agent := createTestRiskAgent()
 
-	signal, confidence, reasoning := agent.assessRisk("BTC/USDT", "BUY")
+	signal, confidence, reasoning := agent.assessRisk(context.Background(), "BTC/USDT", "BUY")
 
 	assert.Equal(t, "BUY", signal)
 	assert.GreaterOrEqual(t, confidence, 0.7)
@@ -391,7 +392,7 @@ func TestAssessRisk_VetoFlow(t *testing.T) {
 	agent := createTestRiskAgent()
 	agent.beliefs.currentDrawdown = 22.0 // Exceeds limit
 
-	signal, confidence, reasoning := agent.assessRisk("BTC/USDT", "BUY")
+	signal, confidence, reasoning := agent.assessRisk(context.Background(), "BTC/USDT", "BUY")
 
 	assert.Equal(t, "HOLD", signal)
 	assert.Greater(t, confidence, 0.9)
@@ -405,13 +406,13 @@ func TestAssessRisk_CountersIncrement(t *testing.T) {
 	agent := createTestRiskAgent()
 
 	// Approval
-	agent.assessRisk("BTC/USDT", "BUY")
+	agent.assessRisk(context.Background(), "BTC/USDT", "BUY")
 	assert.Equal(t, int64(1), agent.approvalCount)
 	assert.Equal(t, int64(1), agent.totalDecisions)
 
 	// Veto
 	agent.beliefs.currentDrawdown = 22.0
-	agent.assessRisk("ETH/USDT", "BUY")
+	agent.assessRisk(context.Background(), "ETH/USDT", "BUY")
 	assert.Equal(t, int64(1), agent.vetoCount)
 	assert.Equal(t, int64(2), agent.totalDecisions)
 }
@@ -497,20 +498,20 @@ func TestRiskAgent_CompleteWorkflow(t *testing.T) {
 	agent := createTestRiskAgent()
 
 	// Scenario 1: Normal trading conditions - should approve
-	signal1, conf1, reason1 := agent.assessRisk("BTC/USDT", "BUY")
+	signal1, conf1, reason1 := agent.assessRisk(context.Background(), "BTC/USDT", "BUY")
 	assert.Equal(t, "BUY", signal1)
 	assert.GreaterOrEqual(t, conf1, 0.7)
 	assert.Contains(t, reason1, "APPROVAL")
 
 	// Scenario 2: High drawdown - should veto BUY
 	agent.beliefs.currentDrawdown = 22.0
-	signal2, conf2, reason2 := agent.assessRisk("ETH/USDT", "BUY")
+	signal2, conf2, reason2 := agent.assessRisk(context.Background(), "ETH/USDT", "BUY")
 	assert.Equal(t, "HOLD", signal2)
 	assert.GreaterOrEqual(t, conf2, 0.9)
 	assert.Contains(t, reason2, "VETO")
 
 	// Scenario 3: SELL in high drawdown - should allow (to reduce exposure)
-	signal3, conf3, reason3 := agent.assessRisk("BTC/USDT", "SELL")
+	signal3, conf3, reason3 := agent.assessRisk(context.Background(), "BTC/USDT", "SELL")
 	assert.Equal(t, "SELL", signal3)
 	assert.GreaterOrEqual(t, conf3, 0.7)
 	assert.Contains(t, reason3, "APPROVAL")

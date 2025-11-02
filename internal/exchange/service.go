@@ -540,6 +540,48 @@ func (s *Service) ClosePositionBySymbol(args map[string]interface{}) (interface{
 	}, nil
 }
 
+// StartWebSocketUpdates starts real-time WebSocket updates (Binance only)
+// This enables real-time order and position updates via WebSocket
+func (s *Service) StartWebSocketUpdates(ctx context.Context) error {
+	if s.mode != TradingModeLive {
+		log.Debug().Msg("WebSocket updates only available in LIVE mode")
+		return nil // Not an error, just not applicable
+	}
+
+	// Type assert to BinanceExchange
+	binanceExchange, ok := s.exchange.(*BinanceExchange)
+	if !ok {
+		return fmt.Errorf("WebSocket updates only supported for Binance exchange")
+	}
+
+	if err := binanceExchange.StartUserDataStream(ctx); err != nil {
+		return fmt.Errorf("failed to start WebSocket updates: %w", err)
+	}
+
+	log.Info().Msg("WebSocket position updates started")
+	return nil
+}
+
+// StopWebSocketUpdates stops WebSocket updates (Binance only)
+func (s *Service) StopWebSocketUpdates(ctx context.Context) error {
+	if s.mode != TradingModeLive {
+		return nil // Not applicable in paper mode
+	}
+
+	// Type assert to BinanceExchange
+	binanceExchange, ok := s.exchange.(*BinanceExchange)
+	if !ok {
+		return fmt.Errorf("WebSocket updates only supported for Binance exchange")
+	}
+
+	if err := binanceExchange.StopUserDataStream(ctx); err != nil {
+		return fmt.Errorf("failed to stop WebSocket updates: %w", err)
+	}
+
+	log.Info().Msg("WebSocket position updates stopped")
+	return nil
+}
+
 // extractFloat extracts a float64 from the args map
 func extractFloat(args map[string]interface{}, key string) (float64, error) {
 	value, ok := args[key]

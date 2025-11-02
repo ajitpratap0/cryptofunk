@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	binance "github.com/adshao/go-binance/v2"
+	"github.com/ajitpratap0/cryptofunk/internal/alerts"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -28,6 +30,14 @@ type BinanceExchange struct {
 
 	// Configuration
 	testnet bool
+
+	// WebSocket
+	wsClient      *binance.Client
+	listenKey     string
+	wsStopChan    chan struct{}
+	wsErrChan     chan error
+	positionMgr   *PositionManager
+	wsConnected   bool
 }
 
 // BinanceConfig contains configuration for Binance exchange
@@ -50,13 +60,18 @@ func NewBinanceExchange(config BinanceConfig, database *db.DB) (*BinanceExchange
 		log.Warn().Msg("Binance exchange initialized (LIVE TRADING mode)")
 	}
 
-	return &BinanceExchange{
-		client:  client,
-		db:      database,
-		orders:  make(map[string]*Order),
-		fills:   make(map[string][]Fill),
-		testnet: config.Testnet,
-	}, nil
+	exchange := &BinanceExchange{
+		client:      client,
+		db:          database,
+		orders:      make(map[string]*Order),
+		fills:       make(map[string][]Fill),
+		testnet:     config.Testnet,
+		wsStopChan:  make(chan struct{}),
+		wsErrChan:   make(chan error, 10),
+		positionMgr: NewPositionManager(database),
+	}
+
+	return exchange, nil
 }
 
 // PlaceOrder places a new order on Binance
@@ -78,7 +93,7 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 		}, nil
 	}
 
-	// Create Binance order
+	// Create Binance order with retry logic
 	var binanceOrder *binance.CreateOrderResponse
 	var err error
 
@@ -88,32 +103,40 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 		side = binance.SideTypeSell
 	}
 
-	if req.Type == OrderTypeMarket {
-		// Market order
-		binanceOrder, err = b.client.NewCreateOrderService().
-			Symbol(req.Symbol).
-			Side(side).
-			Type(binance.OrderTypeMarket).
-			Quantity(fmt.Sprintf("%.8f", req.Quantity)).
-			Do(ctx)
-	} else {
-		// Limit order
-		binanceOrder, err = b.client.NewCreateOrderService().
-			Symbol(req.Symbol).
-			Side(side).
-			Type(binance.OrderTypeLimit).
-			TimeInForce(binance.TimeInForceTypeGTC).
-			Quantity(fmt.Sprintf("%.8f", req.Quantity)).
-			Price(fmt.Sprintf("%.8f", req.Price)).
-			Do(ctx)
-	}
+	// Wrap order placement in retry logic
+	operationName := fmt.Sprintf("place_%s_order_%s", req.Type, req.Symbol)
+	err = retryWithBackoff(func() error {
+		if req.Type == OrderTypeMarket {
+			// Market order
+			binanceOrder, err = b.client.NewCreateOrderService().
+				Symbol(req.Symbol).
+				Side(side).
+				Type(binance.OrderTypeMarket).
+				Quantity(fmt.Sprintf("%.8f", req.Quantity)).
+				Do(ctx)
+		} else {
+			// Limit order
+			binanceOrder, err = b.client.NewCreateOrderService().
+				Symbol(req.Symbol).
+				Side(side).
+				Type(binance.OrderTypeLimit).
+				TimeInForce(binance.TimeInForceTypeGTC).
+				Quantity(fmt.Sprintf("%.8f", req.Quantity)).
+				Price(fmt.Sprintf("%.8f", req.Price)).
+				Do(ctx)
+		}
+		return err
+	}, operationName)
 
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("symbol", req.Symbol).
 			Str("side", string(req.Side)).
-			Msg("Failed to place order on Binance")
+			Msg("Failed to place order on Binance after retries")
+
+		// Send critical alert for order failure
+		alerts.AlertOrderFailed(ctx, req.Symbol, string(req.Side), req.Quantity, err)
 
 		return &PlaceOrderResponse{
 			Status:  OrderStatusRejected,
@@ -175,18 +198,26 @@ func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
 		return nil, fmt.Errorf("invalid order ID format: %w", err)
 	}
 
-	// Cancel order on Binance
+	// Cancel order on Binance with retry logic
 	ctx := context.Background()
-	_, err = b.client.NewCancelOrderService().
-		Symbol(order.Symbol).
-		OrderID(binanceOrderID).
-		Do(ctx)
+	operationName := fmt.Sprintf("cancel_order_%s", order.Symbol)
+	err = retryWithBackoff(func() error {
+		_, err = b.client.NewCancelOrderService().
+			Symbol(order.Symbol).
+			OrderID(binanceOrderID).
+			Do(ctx)
+		return err
+	}, operationName)
 
 	if err != nil {
 		log.Error().
 			Err(err).
 			Str("order_id", orderID).
-			Msg("Failed to cancel order on Binance")
+			Msg("Failed to cancel order on Binance after retries")
+
+		// Send warning alert for cancel failure
+		alerts.AlertOrderCancelFailed(ctx, orderID, order.Symbol, err)
+
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
 
@@ -240,17 +271,23 @@ func (b *BinanceExchange) GetOrder(orderID string) (*Order, error) {
 		return order, nil // Return cached order if ID parsing fails
 	}
 
+	// Query Binance with retry logic
 	ctx := context.Background()
-	binanceOrder, err := b.client.NewGetOrderService().
-		Symbol(order.Symbol).
-		OrderID(binanceOrderID).
-		Do(ctx)
+	var binanceOrder *binance.Order
+	operationName := fmt.Sprintf("get_order_%s", order.Symbol)
+	err = retryWithBackoff(func() error {
+		binanceOrder, err = b.client.NewGetOrderService().
+			Symbol(order.Symbol).
+			OrderID(binanceOrderID).
+			Do(ctx)
+		return err
+	}, operationName)
 
 	if err != nil {
 		log.Warn().
 			Err(err).
 			Str("order_id", orderID).
-			Msg("Failed to query order status from Binance, returning cached")
+			Msg("Failed to query order status from Binance after retries, returning cached")
 		return order, nil
 	}
 
@@ -309,6 +346,103 @@ func (b *BinanceExchange) GetSession() *uuid.UUID {
 }
 
 // Helper methods
+
+// retryConfig holds retry configuration
+const (
+	maxRetries     = 3
+	baseRetryDelay = 100 * time.Millisecond
+)
+
+// isRetryableError determines if an error should be retried
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+
+	// Network errors
+	if strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "temporary failure") ||
+		strings.Contains(errStr, "network is unreachable") {
+		return true
+	}
+
+	// Binance API rate limit
+	if strings.Contains(errStr, "429") ||
+		strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "too many requests") {
+		return true
+	}
+
+	// Server errors (5xx)
+	if strings.Contains(errStr, "500") ||
+		strings.Contains(errStr, "502") ||
+		strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "504") ||
+		strings.Contains(errStr, "internal server error") ||
+		strings.Contains(errStr, "service unavailable") {
+		return true
+	}
+
+	return false
+}
+
+// retryWithBackoff executes a function with exponential backoff
+func retryWithBackoff(operation func() error, operationName string) error {
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Try the operation
+		err := operation()
+		if err == nil {
+			if attempt > 0 {
+				log.Info().
+					Str("operation", operationName).
+					Int("attempts", attempt+1).
+					Msg("Operation succeeded after retry")
+			}
+			return nil
+		}
+
+		lastErr = err
+
+		// Check if we should retry
+		if !isRetryableError(err) {
+			log.Debug().
+				Err(err).
+				Str("operation", operationName).
+				Msg("Error is not retryable")
+			return err
+		}
+
+		// Don't sleep after the last attempt
+		if attempt < maxRetries {
+			// Calculate exponential backoff: baseDelay * 2^attempt
+			delay := baseRetryDelay * time.Duration(1<<uint(attempt))
+
+			log.Warn().
+				Err(err).
+				Str("operation", operationName).
+				Int("attempt", attempt+1).
+				Int("max_attempts", maxRetries+1).
+				Dur("retry_after", delay).
+				Msg("Retrying operation after error")
+
+			time.Sleep(delay)
+		}
+	}
+
+	log.Error().
+		Err(lastErr).
+		Str("operation", operationName).
+		Int("attempts", maxRetries+1).
+		Msg("Operation failed after all retries")
+
+	return fmt.Errorf("operation failed after %d attempts: %w", maxRetries+1, lastErr)
+}
 
 func (b *BinanceExchange) validateOrder(req PlaceOrderRequest) error {
 	if req.Symbol == "" {
@@ -451,5 +585,329 @@ func (b *BinanceExchange) convertToDBOrder(order *Order) *db.Order {
 		Metadata:              nil,
 		CreatedAt:             order.CreatedAt,
 		UpdatedAt:             order.UpdatedAt,
+	}
+}
+
+// WebSocket Methods (T147)
+
+// StartUserDataStream starts the WebSocket connection to receive real-time updates
+func (b *BinanceExchange) StartUserDataStream(ctx context.Context) error {
+	b.mu.Lock()
+	if b.wsConnected {
+		b.mu.Unlock()
+		log.Info().Msg("User data stream already connected")
+		return nil
+	}
+	b.mu.Unlock()
+
+	// Create listen key for user data stream
+	listenKey, err := b.client.NewStartUserStreamService().Do(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create listen key: %w", err)
+	}
+
+	b.mu.Lock()
+	b.listenKey = listenKey
+	b.wsConnected = true
+	b.mu.Unlock()
+
+	log.Info().
+		Str("listen_key", listenKey[:10]+"...").
+		Msg("User data stream listen key created")
+
+	// Start WebSocket handler
+	go b.runUserDataStream(ctx, listenKey)
+
+	// Start listen key keep-alive goroutine
+	go b.keepAliveListenKey(ctx)
+
+	return nil
+}
+
+// StopUserDataStream stops the WebSocket connection
+func (b *BinanceExchange) StopUserDataStream(ctx context.Context) error {
+	b.mu.Lock()
+	if !b.wsConnected {
+		b.mu.Unlock()
+		return nil
+	}
+
+	listenKey := b.listenKey
+	b.wsConnected = false
+	b.mu.Unlock()
+
+	// Signal stop
+	close(b.wsStopChan)
+
+	// Close listen key
+	if listenKey != "" {
+		err := b.client.NewCloseUserStreamService().ListenKey(listenKey).Do(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to close listen key")
+		}
+	}
+
+	log.Info().Msg("User data stream stopped")
+	return nil
+}
+
+// runUserDataStream handles the WebSocket connection
+func (b *BinanceExchange) runUserDataStream(ctx context.Context, listenKey string) {
+	defer func() {
+		b.mu.Lock()
+		b.wsConnected = false
+		b.mu.Unlock()
+	}()
+
+	// Create WebSocket handler
+	wsHandler := func(event *binance.WsUserDataEvent) {
+		b.handleUserDataEvent(event)
+	}
+
+	errHandler := func(err error) {
+		log.Error().Err(err).Msg("WebSocket error")
+
+		// Send alert for WebSocket errors
+		alerts.AlertConnectionError(context.Background(), "Binance WebSocket", err)
+
+		select {
+		case b.wsErrChan <- err:
+		default:
+			// Channel full, drop error
+		}
+	}
+
+	// Start WebSocket
+	doneC, stopC, err := binance.WsUserDataServe(listenKey, wsHandler, errHandler)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to start user data WebSocket")
+
+		// Send alert for WebSocket startup failure
+		alerts.AlertConnectionError(ctx, "Binance WebSocket", err)
+
+		return
+	}
+
+	log.Info().Msg("User data WebSocket connected")
+
+	// Wait for stop signal or context cancellation
+	select {
+	case <-b.wsStopChan:
+		log.Info().Msg("Stop signal received, closing WebSocket")
+		stopC <- struct{}{}
+	case <-ctx.Done():
+		log.Info().Msg("Context cancelled, closing WebSocket")
+		stopC <- struct{}{}
+	case <-doneC:
+		log.Info().Msg("WebSocket connection closed")
+	}
+}
+
+// handleUserDataEvent processes user data events from WebSocket
+func (b *BinanceExchange) handleUserDataEvent(event *binance.WsUserDataEvent) {
+	switch event.Event {
+	case binance.UserDataEventTypeOutboundAccountPosition:
+		// Account balance update
+		log.Debug().
+			Int("balance_count", len(event.AccountUpdate.WsAccountUpdates)).
+			Msg("Account position update received")
+
+	case binance.UserDataEventTypeExecutionReport:
+		// Order update
+		b.handleOrderUpdate(event)
+
+	case binance.UserDataEventTypeBalanceUpdate:
+		// Balance update
+		log.Debug().
+			Str("asset", event.BalanceUpdate.Asset).
+			Str("change", event.BalanceUpdate.Change).
+			Msg("Balance update received")
+
+	default:
+		log.Debug().
+			Str("event_type", string(event.Event)).
+			Msg("Unknown user data event received")
+	}
+}
+
+// handleOrderUpdate processes order execution reports
+func (b *BinanceExchange) handleOrderUpdate(event *binance.WsUserDataEvent) {
+	orderUpdate := event.OrderUpdate
+
+	orderID := strconv.FormatInt(orderUpdate.Id, 10)
+
+	log.Info().
+		Str("order_id", orderID).
+		Str("symbol", orderUpdate.Symbol).
+		Str("side", orderUpdate.Side).
+		Str("status", orderUpdate.Status).
+		Str("filled_volume", orderUpdate.FilledVolume).
+		Msg("Order update received via WebSocket")
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Update or create order
+	order, exists := b.orders[orderID]
+	if !exists {
+		// Create new order from WebSocket update
+		executedQty, _ := strconv.ParseFloat(orderUpdate.FilledVolume, 64)
+		filledQuoteVolume, _ := strconv.ParseFloat(orderUpdate.FilledQuoteVolume, 64)
+		qty, _ := strconv.ParseFloat(orderUpdate.Volume, 64)
+		price, _ := strconv.ParseFloat(orderUpdate.Price, 64)
+
+		var avgFillPrice float64
+		if executedQty > 0 {
+			avgFillPrice = filledQuoteVolume / executedQty
+		}
+
+		var orderSide OrderSide
+		if orderUpdate.Side == string(binance.SideTypeBuy) {
+			orderSide = OrderSideBuy
+		} else {
+			orderSide = OrderSideSell
+		}
+
+		var orderType OrderType
+		if orderUpdate.Type == string(binance.OrderTypeMarket) {
+			orderType = OrderTypeMarket
+		} else {
+			orderType = OrderTypeLimit
+		}
+
+		order = &Order{
+			ID:           orderID,
+			Symbol:       orderUpdate.Symbol,
+			Side:         orderSide,
+			Type:         orderType,
+			Quantity:     qty,
+			Price:        price,
+			FilledQty:    executedQty,
+			AvgFillPrice: avgFillPrice,
+			CreatedAt:    time.Unix(0, orderUpdate.CreateTime*int64(time.Millisecond)),
+			UpdatedAt:    time.Unix(0, orderUpdate.TransactionTime*int64(time.Millisecond)),
+		}
+
+		b.orders[orderID] = order
+	}
+
+	// Update order status
+	executedQty, _ := strconv.ParseFloat(orderUpdate.FilledVolume, 64)
+	filledQuoteVolume, _ := strconv.ParseFloat(orderUpdate.FilledQuoteVolume, 64)
+
+	order.FilledQty = executedQty
+	if executedQty > 0 {
+		order.AvgFillPrice = filledQuoteVolume / executedQty
+	}
+	order.UpdatedAt = time.Unix(0, orderUpdate.TransactionTime*int64(time.Millisecond))
+
+	switch orderUpdate.Status {
+	case string(binance.OrderStatusTypeFilled):
+		order.Status = OrderStatusFilled
+		now := time.Now()
+		order.FilledAt = &now
+
+		// Create fills and update positions
+		b.handleOrderFilled(order, &orderUpdate)
+
+	case string(binance.OrderStatusTypePartiallyFilled):
+		order.Status = OrderStatusOpen
+
+	case string(binance.OrderStatusTypeCanceled):
+		order.Status = OrderStatusCancelled
+
+	case string(binance.OrderStatusTypeRejected):
+		order.Status = OrderStatusRejected
+
+	case string(binance.OrderStatusTypeNew):
+		order.Status = OrderStatusOpen
+	}
+
+	// Update database
+	if b.db != nil {
+		dbOrder := b.convertToDBOrder(order)
+		ctx := context.Background()
+		err := b.db.UpdateOrderStatus(
+			ctx,
+			dbOrder.ID,
+			dbOrder.Status,
+			dbOrder.ExecutedQuantity,
+			dbOrder.ExecutedQuoteQuantity,
+			dbOrder.FilledAt,
+			dbOrder.CanceledAt,
+			dbOrder.ErrorMessage,
+		)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("order_id", orderID).
+				Msg("Failed to update order status in database")
+		}
+	}
+}
+
+// handleOrderFilled processes filled orders and updates positions
+func (b *BinanceExchange) handleOrderFilled(order *Order, orderUpdate *binance.WsOrderUpdate) {
+	// Create fill records
+	lastQty, _ := strconv.ParseFloat(orderUpdate.LatestVolume, 64)
+	lastPrice, _ := strconv.ParseFloat(orderUpdate.LatestPrice, 64)
+
+	if lastQty > 0 && lastPrice > 0 {
+		fill := Fill{
+			OrderID:   order.ID,
+			Quantity:  lastQty,
+			Price:     lastPrice,
+			Timestamp: time.Unix(0, orderUpdate.TransactionTime*int64(time.Millisecond)),
+		}
+
+		b.fills[order.ID] = append(b.fills[order.ID], fill)
+
+		// Update positions through PositionManager
+		if b.positionMgr != nil && b.currentSessionID != nil {
+			ctx := context.Background()
+			err := b.positionMgr.OnOrderFilled(ctx, order, []Fill{fill})
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str("order_id", order.ID).
+					Msg("Failed to update position after order fill")
+			}
+		}
+	}
+}
+
+// keepAliveListenKey keeps the listen key alive by pinging every 30 minutes
+func (b *BinanceExchange) keepAliveListenKey(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			b.mu.RLock()
+			listenKey := b.listenKey
+			connected := b.wsConnected
+			b.mu.RUnlock()
+
+			if !connected {
+				log.Debug().Msg("WebSocket disconnected, stopping keep-alive")
+				return
+			}
+
+			err := b.client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to keep alive listen key")
+			} else {
+				log.Debug().Msg("Listen key kept alive")
+			}
+
+		case <-b.wsStopChan:
+			log.Debug().Msg("Stop signal received, stopping keep-alive")
+			return
+
+		case <-ctx.Done():
+			log.Debug().Msg("Context cancelled, stopping keep-alive")
+			return
+		}
 	}
 }

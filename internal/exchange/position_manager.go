@@ -34,8 +34,8 @@ func (pm *PositionManager) SetSession(sessionID *uuid.UUID) {
 
 	pm.currentSessionID = sessionID
 
-	// Load open positions for this session
-	if sessionID != nil {
+	// Load open positions for this session (only if database is available)
+	if sessionID != nil && pm.db != nil {
 		pm.loadOpenPositions(*sessionID)
 	} else {
 		pm.openPositions = make(map[string]*db.Position)
@@ -180,15 +180,17 @@ func (pm *PositionManager) openPosition(ctx context.Context, symbol string, side
 		EntryReason: &reason,
 	}
 
-	// Create in database
-	err := pm.db.CreatePosition(ctx, position)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to create position in database")
-		return err
-	}
-
 	// Store in memory
 	pm.openPositions[symbol] = position
+
+	// Create in database (if available)
+	if pm.db != nil {
+		err := pm.db.CreatePosition(ctx, position)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create position in database")
+			return err
+		}
+	}
 
 	log.Info().
 		Str("position_id", position.ID.String()).
@@ -203,15 +205,17 @@ func (pm *PositionManager) openPosition(ctx context.Context, symbol string, side
 
 // closePosition closes an existing position
 func (pm *PositionManager) closePosition(ctx context.Context, position *db.Position, exitPrice float64, reason string, fees float64) error {
-	// Close in database (calculates realized P&L)
-	err := pm.db.ClosePosition(ctx, position.ID, exitPrice, reason, fees)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to close position in database")
-		return err
-	}
-
 	// Remove from memory
 	delete(pm.openPositions, position.Symbol)
+
+	// Close in database (if available)
+	if pm.db != nil {
+		err := pm.db.ClosePosition(ctx, position.ID, exitPrice, reason, fees)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to close position in database")
+			return err
+		}
+	}
 
 	// Calculate realized P&L for logging
 	var realizedPnL float64
@@ -245,13 +249,16 @@ func (pm *PositionManager) UpdateUnrealizedPnL(ctx context.Context, prices map[s
 			continue
 		}
 
-		err := pm.db.UpdateUnrealizedPnL(ctx, position.ID, currentPrice)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("symbol", symbol).
-				Msg("Failed to update unrealized P&L")
-			continue
+		// Update in database (if available)
+		if pm.db != nil {
+			err := pm.db.UpdateUnrealizedPnL(ctx, position.ID, currentPrice)
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str("symbol", symbol).
+					Msg("Failed to update unrealized P&L")
+				continue
+			}
 		}
 
 		// Update in-memory position

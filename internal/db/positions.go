@@ -331,6 +331,178 @@ func (db *DB) UpdateUnrealizedPnL(ctx context.Context, id uuid.UUID, currentPric
 	return nil
 }
 
+// GetAllOpenPositions retrieves all open positions (no session filter)
+func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE exit_time IS NULL
+		ORDER BY entry_time DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all open positions: %w", err)
+	}
+	defer rows.Close()
+
+	return scanPositions(rows)
+}
+
+// GetPositionsBySession retrieves all positions (including closed) for a session
+func (db *DB) GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE session_id = $1
+		ORDER BY entry_time DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query positions by session: %w", err)
+	}
+	defer rows.Close()
+
+	return scanPositions(rows)
+}
+
+// GetPositionBySymbolAndSession retrieves a position by symbol and session
+func (db *DB) GetPositionBySymbolAndSession(ctx context.Context, symbol string, sessionID uuid.UUID) (*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE symbol = $1 AND session_id = $2 AND exit_time IS NULL
+		ORDER BY entry_time DESC
+		LIMIT 1
+	`
+
+	var position Position
+	err := db.pool.QueryRow(ctx, query, symbol, sessionID).Scan(
+		&position.ID,
+		&position.SessionID,
+		&position.Symbol,
+		&position.Exchange,
+		&position.Side,
+		&position.EntryPrice,
+		&position.ExitPrice,
+		&position.Quantity,
+		&position.EntryTime,
+		&position.ExitTime,
+		&position.StopLoss,
+		&position.TakeProfit,
+		&position.RealizedPnL,
+		&position.UnrealizedPnL,
+		&position.Fees,
+		&position.EntryReason,
+		&position.ExitReason,
+		&position.Metadata,
+		&position.CreatedAt,
+		&position.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get position by symbol and session: %w", err)
+	}
+
+	return &position, nil
+}
+
+// GetLatestPositionBySymbol retrieves the latest position for a symbol (any session)
+func (db *DB) GetLatestPositionBySymbol(ctx context.Context, symbol string) (*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE symbol = $1 AND exit_time IS NULL
+		ORDER BY entry_time DESC
+		LIMIT 1
+	`
+
+	var position Position
+	err := db.pool.QueryRow(ctx, query, symbol).Scan(
+		&position.ID,
+		&position.SessionID,
+		&position.Symbol,
+		&position.Exchange,
+		&position.Side,
+		&position.EntryPrice,
+		&position.ExitPrice,
+		&position.Quantity,
+		&position.EntryTime,
+		&position.ExitTime,
+		&position.StopLoss,
+		&position.TakeProfit,
+		&position.RealizedPnL,
+		&position.UnrealizedPnL,
+		&position.Fees,
+		&position.EntryReason,
+		&position.ExitReason,
+		&position.Metadata,
+		&position.CreatedAt,
+		&position.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest position by symbol: %w", err)
+	}
+
+	return &position, nil
+}
+
+// scanPositions is a helper to scan multiple position rows
+func scanPositions(rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) ([]*Position, error) {
+	var positions []*Position
+	for rows.Next() {
+		var position Position
+		err := rows.Scan(
+			&position.ID,
+			&position.SessionID,
+			&position.Symbol,
+			&position.Exchange,
+			&position.Side,
+			&position.EntryPrice,
+			&position.ExitPrice,
+			&position.Quantity,
+			&position.EntryTime,
+			&position.ExitTime,
+			&position.StopLoss,
+			&position.TakeProfit,
+			&position.RealizedPnL,
+			&position.UnrealizedPnL,
+			&position.Fees,
+			&position.EntryReason,
+			&position.ExitReason,
+			&position.Metadata,
+			&position.CreatedAt,
+			&position.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan position: %w", err)
+		}
+		positions = append(positions, &position)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating positions: %w", err)
+	}
+
+	return positions, nil
+}
+
 // ConvertPositionSide converts a string to PositionSide
 func ConvertPositionSide(side string) PositionSide {
 	switch side {

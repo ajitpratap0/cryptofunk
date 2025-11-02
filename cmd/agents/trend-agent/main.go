@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/llm"
 )
 
 // TrendAgent performs trend following strategy using EMA crossovers and ADX
@@ -29,6 +30,11 @@ type TrendAgent struct {
 	// NATS connection for signal publishing
 	natsConn  *nats.Conn
 	natsTopic string
+
+	// LLM client for AI-powered analysis
+	llmClient     *llm.Client
+	promptBuilder *llm.PromptBuilder
+	useLLM        bool // Enable/disable LLM reasoning
 
 	// Strategy configuration
 	symbols         []string
@@ -188,6 +194,31 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 
 	log.Info().Msg("Successfully connected to NATS")
 
+	// Initialize LLM client if enabled
+	var llmClient *llm.Client
+	var promptBuilder *llm.PromptBuilder
+	useLLM := viper.GetBool("llm.enabled")
+
+	if useLLM {
+		llmConfig := llm.ClientConfig{
+			Endpoint:    viper.GetString("llm.endpoint"),
+			APIKey:      viper.GetString("llm.api_key"),
+			Model:       viper.GetString("llm.primary_model"),
+			Temperature: viper.GetFloat64("llm.temperature"),
+			MaxTokens:   viper.GetInt("llm.max_tokens"),
+			Timeout:     viper.GetDuration("llm.timeout"),
+		}
+
+		llmClient = llm.NewClient(llmConfig)
+		promptBuilder = llm.NewPromptBuilder(llm.AgentTypeTrend)
+		log.Info().
+			Str("endpoint", llmConfig.Endpoint).
+			Str("model", llmConfig.Model).
+			Msg("LLM client initialized for trend following")
+	} else {
+		log.Info().Msg("LLM reasoning disabled - using rule-based analysis only")
+	}
+
 	// Extract EMA periods from config
 	fastEMA := getIntFromConfig(agentConfig, "fast_ema_period", 9)
 	slowEMA := getIntFromConfig(agentConfig, "slow_ema_period", 21)
@@ -213,6 +244,9 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 		BaseAgent:       baseAgent,
 		natsConn:        nc,
 		natsTopic:       natsTopic,
+		llmClient:       llmClient,
+		promptBuilder:   promptBuilder,
+		useLLM:          useLLM,
 		fastEMAPeriod:   fastEMA,
 		slowEMAPeriod:   slowEMA,
 		adxPeriod:       adxPeriod,
@@ -371,8 +405,120 @@ func (a *TrendAgent) calculateTrendIndicators(ctx context.Context, prices []floa
 }
 
 // generateTrendSignal generates a trading signal based on trend indicators
+// Routes to LLM-powered or rule-based analysis depending on configuration
 func (a *TrendAgent) generateTrendSignal(ctx context.Context, symbol string, indicators *TrendIndicators, currentPrice float64) (*TrendSignal, error) {
-	log.Debug().Str("symbol", symbol).Msg("Generating trend following signal")
+	if a.useLLM && a.llmClient != nil {
+		return a.generateSignalWithLLM(ctx, symbol, indicators, currentPrice)
+	}
+	return a.generateTrendSignalRuleBased(ctx, symbol, indicators, currentPrice)
+}
+
+// generateSignalWithLLM generates a trading signal using LLM-powered analysis
+func (a *TrendAgent) generateSignalWithLLM(ctx context.Context, symbol string, indicators *TrendIndicators, currentPrice float64) (*TrendSignal, error) {
+	log.Debug().Str("symbol", symbol).Msg("Generating trend following signal (LLM-powered)")
+
+	// Build market context for LLM
+	indicatorMap := make(map[string]float64)
+	indicatorMap["fast_ema"] = indicators.FastEMA
+	indicatorMap["slow_ema"] = indicators.SlowEMA
+	indicatorMap["adx"] = indicators.ADX
+
+	marketCtx := llm.MarketContext{
+		Symbol:       symbol,
+		CurrentPrice: currentPrice,
+		Indicators:   indicatorMap,
+		Timestamp:    time.Now(),
+	}
+
+	// Build LLM prompt
+	userPrompt := a.promptBuilder.BuildTrendFollowingPrompt(marketCtx, nil) // No historical data yet
+	systemPrompt := a.promptBuilder.GetSystemPrompt()
+
+	// Call LLM with retry logic
+	response, err := a.llmClient.CompleteWithRetry(ctx, []llm.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}, 2) // 2 retries
+
+	if err != nil {
+		log.Warn().Err(err).Msg("LLM request failed, falling back to rule-based analysis")
+		return a.generateTrendSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	// Parse LLM response
+	if len(response.Choices) == 0 {
+		log.Warn().Msg("LLM returned no choices, falling back to rule-based analysis")
+		return a.generateTrendSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	content := response.Choices[0].Message.Content
+
+	// Parse JSON response
+	var llmSignal llm.Signal
+	if err := a.llmClient.ParseJSONResponse(content, &llmSignal); err != nil {
+		log.Warn().Err(err).Msg("Failed to parse LLM response, falling back to rule-based analysis")
+		return a.generateTrendSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	// Validate signal
+	if llmSignal.Side != "BUY" && llmSignal.Side != "SELL" && llmSignal.Side != "HOLD" {
+		log.Warn().Str("signal", llmSignal.Side).Msg("Invalid signal from LLM, falling back to rule-based analysis")
+		return a.generateTrendSignalRuleBased(ctx, symbol, indicators, currentPrice)
+	}
+
+	// Calculate risk management levels
+	var stopLoss, takeProfit, riskReward, trailingStop float64
+	if llmSignal.Side == "BUY" || llmSignal.Side == "SELL" {
+		stopLoss = a.calculateStopLoss(currentPrice, llmSignal.Side)
+		takeProfit = a.calculateTakeProfit(currentPrice, llmSignal.Side)
+		riskReward = a.calculateRiskReward(currentPrice, stopLoss, takeProfit)
+
+		// Verify risk/reward ratio
+		if riskReward < a.riskRewardRatio {
+			log.Debug().
+				Float64("risk_reward", riskReward).
+				Float64("min_required", a.riskRewardRatio).
+				Msg("Risk/reward ratio too low - converting to HOLD")
+			llmSignal.Side = "HOLD"
+			llmSignal.Confidence = 0.3
+			llmSignal.Reasoning = fmt.Sprintf("%s (but risk/reward %.2f < %.2f required)", llmSignal.Reasoning, riskReward, a.riskRewardRatio)
+			stopLoss = 0
+			takeProfit = 0
+			riskReward = 0
+		} else {
+			trailingStop = a.updateTrailingStop(currentPrice, llmSignal.Side)
+		}
+	}
+
+	// Create trend signal from LLM response
+	trendSignal := &TrendSignal{
+		Timestamp:    time.Now(),
+		Symbol:       symbol,
+		Signal:       llmSignal.Side,
+		Confidence:   llmSignal.Confidence,
+		Indicators:   indicators,
+		Reasoning:    llmSignal.Reasoning,
+		Price:        currentPrice,
+		StopLoss:     stopLoss,
+		TakeProfit:   takeProfit,
+		TrailingStop: trailingStop,
+		RiskReward:   riskReward,
+		Beliefs:      a.beliefs.GetAllBeliefs(),
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Str("signal", llmSignal.Side).
+		Float64("confidence", llmSignal.Confidence).
+		Str("reasoning", llmSignal.Reasoning).
+		Msg("Generated LLM-powered trend signal")
+
+	return trendSignal, nil
+}
+
+// generateTrendSignalRuleBased generates a trading signal using rule-based analysis
+func (a *TrendAgent) generateTrendSignalRuleBased(ctx context.Context, symbol string, indicators *TrendIndicators, currentPrice float64) (*TrendSignal, error) {
+	log.Debug().Str("symbol", symbol).Msg("Generating trend following signal (rule-based)")
 
 	var signal string
 	var confidence float64

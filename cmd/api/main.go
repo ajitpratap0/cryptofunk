@@ -1,0 +1,1170 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+)
+
+const version = "1.0.0"
+
+type APIServer struct {
+	router *gin.Engine
+	db     *db.DB
+	config *config.Config
+	hub    *Hub
+	port   string
+}
+
+func main() {
+	// Setup logging
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	// Load configuration
+	configPath := os.Getenv("CONFIG_PATH")
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load configuration")
+	}
+
+	// Initialize database
+	ctx := context.Background()
+	database, err := db.New(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize database")
+	}
+	defer database.Close()
+
+	// Set Gin mode based on environment
+	if cfg.App.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// Create WebSocket hub
+	hub := NewHub()
+	go hub.Run()
+
+	// Create API server
+	server := &APIServer{
+		router: gin.Default(),
+		db:     database,
+		config: cfg,
+		hub:    hub,
+		port:   getPort(),
+	}
+
+	// Setup middleware
+	server.setupMiddleware()
+
+	// Setup routes
+	server.setupRoutes()
+
+	// Start server
+	server.start()
+}
+
+func (s *APIServer) setupMiddleware() {
+	// CORS configuration
+	config := cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8080"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}
+
+	// Add CORS middleware
+	s.router.Use(cors.New(config))
+
+	// Request logging middleware
+	s.router.Use(requestLogger())
+
+	// Recovery middleware
+	s.router.Use(gin.Recovery())
+}
+
+func (s *APIServer) setupRoutes() {
+	// API v1 routes
+	v1 := s.router.Group("/api/v1")
+	{
+		// Health and status
+		v1.GET("/health", s.handleHealth)
+		v1.GET("/status", s.handleStatus)
+
+		// WebSocket endpoint
+		v1.GET("/ws", s.handleWebSocket)
+
+		// Agent routes
+		agents := v1.Group("/agents")
+		{
+			agents.GET("", s.handleListAgents)
+			agents.GET("/:name", s.handleGetAgent)
+			agents.GET("/:name/status", s.handleGetAgentStatus)
+		}
+
+		// Position routes
+		positions := v1.Group("/positions")
+		{
+			positions.GET("", s.handleListPositions)
+			positions.GET("/:symbol", s.handleGetPosition)
+		}
+
+		// Order routes
+		orders := v1.Group("/orders")
+		{
+			orders.GET("", s.handleListOrders)
+			orders.GET("/:id", s.handleGetOrder)
+			orders.POST("", s.handlePlaceOrder)
+			orders.DELETE("/:id", s.handleCancelOrder)
+		}
+
+		// Trading control routes
+		trade := v1.Group("/trade")
+		{
+			trade.POST("/start", s.handleStartTrading)
+			trade.POST("/stop", s.handleStopTrading)
+			trade.POST("/pause", s.handlePauseTrading)
+		}
+
+		// Configuration routes
+		config := v1.Group("/config")
+		{
+			config.GET("", s.handleGetConfig)
+			config.PATCH("", s.handleUpdateConfig)
+		}
+	}
+
+	// Root endpoint
+	s.router.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"name":    "CryptoFunk Trading API",
+			"version": version,
+			"status":  "running",
+		})
+	})
+}
+
+func (s *APIServer) start() {
+	// Create HTTP server
+	srv := &http.Server{
+		Addr:         ":" + s.port,
+		Handler:      s.router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Info().
+			Str("port", s.port).
+			Str("version", version).
+			Msg("Starting API server")
+
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Failed to start API server")
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Info().Msg("Shutting down API server...")
+
+	// Graceful shutdown with 5 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal().Err(err).Msg("Server forced to shutdown")
+	}
+
+	log.Info().Msg("API server stopped")
+}
+
+// Health check handler
+func (s *APIServer) handleHealth(c *gin.Context) {
+	// Check database connection
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := s.db.Ping(ctx); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "unhealthy",
+			"error":   "database connection failed",
+			"version": version,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "healthy",
+		"version": version,
+		"uptime":  time.Since(startTime).String(),
+	})
+}
+
+// System status handler
+func (s *APIServer) handleStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "operational",
+		"version": version,
+		"uptime":  time.Since(startTime).String(),
+		"components": gin.H{
+			"database":  "healthy",
+			"api":       "healthy",
+			"websocket": "healthy",
+		},
+		"websocket": gin.H{
+			"connected_clients": s.hub.ClientCount(),
+		},
+	})
+}
+
+// Agent handlers
+func (s *APIServer) handleListAgents(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Query agent status from database
+	agents, err := s.db.GetAllAgentStatuses(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve agents",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"agents": agents,
+		"count":  len(agents),
+	})
+}
+
+func (s *APIServer) handleGetAgent(c *gin.Context) {
+	name := c.Param("name")
+	ctx := c.Request.Context()
+
+	// Query specific agent
+	agent, err := s.db.GetAgentStatus(ctx, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "agent not found",
+			"name":  name,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"agent": agent,
+	})
+}
+
+func (s *APIServer) handleGetAgentStatus(c *gin.Context) {
+	name := c.Param("name")
+	ctx := c.Request.Context()
+
+	// Query agent status
+	agent, err := s.db.GetAgentStatus(ctx, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "agent not found",
+			"name":  name,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"name":         agent.Name,
+		"status":       agent.Status,
+		"last_seen_at": agent.LastSeenAt,
+		"healthy":      agent.IsHealthy,
+	})
+}
+// Position handlers
+func (s *APIServer) handleListPositions(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Optional: filter by session_id query param
+	sessionIDStr := c.Query("session_id")
+
+	var positions []*db.Position
+	var err error
+
+	if sessionIDStr != "" {
+		// Parse session ID
+		sessionID, parseErr := parseUUID(sessionIDStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid session_id format",
+			})
+			return
+		}
+		positions, err = s.db.GetPositionsBySession(ctx, sessionID)
+	} else {
+		// Get all open positions (no session filter)
+		positions, err = s.db.GetAllOpenPositions(ctx)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve positions",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"positions": positions,
+		"count":     len(positions),
+	})
+}
+
+func (s *APIServer) handleGetPosition(c *gin.Context) {
+	symbol := c.Param("symbol")
+	ctx := c.Request.Context()
+
+	// Optional: filter by session_id
+	sessionIDStr := c.Query("session_id")
+
+	var position *db.Position
+	var err error
+
+	if sessionIDStr != "" {
+		sessionID, parseErr := parseUUID(sessionIDStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid session_id format",
+			})
+			return
+		}
+		position, err = s.db.GetPositionBySymbolAndSession(ctx, symbol, sessionID)
+	} else {
+		// Get latest position for symbol
+		position, err = s.db.GetLatestPositionBySymbol(ctx, symbol)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":  "position not found",
+			"symbol": symbol,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"position": position,
+	})
+}
+// Order handlers
+func (s *APIServer) handleListOrders(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Optional filters
+	sessionIDStr := c.Query("session_id")
+	symbol := c.Query("symbol")
+	status := c.Query("status")
+
+	var orders []*db.Order
+	var err error
+
+	if sessionIDStr != "" {
+		sessionID, parseErr := parseUUID(sessionIDStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid session_id format",
+			})
+			return
+		}
+		orders, err = s.db.GetOrdersBySession(ctx, sessionID)
+	} else if symbol != "" {
+		orders, err = s.db.GetOrdersBySymbol(ctx, symbol)
+	} else if status != "" {
+		orders, err = s.db.GetOrdersByStatus(ctx, db.ConvertOrderStatus(status))
+	} else {
+		// Get recent orders (limit 100)
+		orders, err = s.db.GetRecentOrders(ctx, 100)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve orders",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"orders": orders,
+		"count":  len(orders),
+	})
+}
+
+func (s *APIServer) handleGetOrder(c *gin.Context) {
+	orderIDStr := c.Param("id")
+	ctx := c.Request.Context()
+
+	orderID, err := parseUUID(orderIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid order_id format",
+		})
+		return
+	}
+
+	order, err := s.db.GetOrderByID(ctx, orderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":    "order not found",
+			"order_id": orderIDStr,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"order": order,
+	})
+}
+
+func (s *APIServer) handlePlaceOrder(c *gin.Context) {
+	var req struct {
+		Symbol   string  `json:"symbol" binding:"required"`
+		Side     string  `json:"side" binding:"required,oneof=buy sell BUY SELL"`
+		Type     string  `json:"type" binding:"required,oneof=market limit MARKET LIMIT"`
+		Quantity float64 `json:"quantity" binding:"required,gt=0"`
+		Price    float64 `json:"price"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate price for limit orders
+	if (req.Type == "limit" || req.Type == "LIMIT") && req.Price <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "price is required for limit orders",
+		})
+		return
+	}
+
+	// Create order in database
+	price := &req.Price
+	if req.Price == 0 {
+		price = nil
+	}
+
+	order := &db.Order{
+		ID:       uuid.New(),
+		Symbol:   req.Symbol,
+		Exchange: "API", // Manual order via API
+		Side:     db.ConvertOrderSide(req.Side),
+		Type:     db.ConvertOrderType(req.Type),
+		Quantity: req.Quantity,
+		Price:    price,
+		Status:   db.OrderStatusNew,
+		PlacedAt: time.Now(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	ctx := c.Request.Context()
+	if err := s.db.InsertOrder(ctx, order); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to create order",
+		})
+		return
+	}
+
+	// Broadcast order update to WebSocket clients
+	if err := s.BroadcastOrderUpdate(order); err != nil {
+		log.Warn().Err(err).Msg("Failed to broadcast order update")
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"order":   order,
+		"message": "Order created successfully",
+	})
+}
+
+func (s *APIServer) handleCancelOrder(c *gin.Context) {
+	orderIDStr := c.Param("id")
+	ctx := c.Request.Context()
+
+	orderID, err := parseUUID(orderIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid order_id format",
+		})
+		return
+	}
+
+	// Get the order first
+	order, err := s.db.GetOrderByID(ctx, orderID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":    "order not found",
+			"order_id": orderIDStr,
+		})
+		return
+	}
+
+	// Check if order can be cancelled
+	if order.Status != db.OrderStatusNew && order.Status != db.OrderStatusPartiallyFilled {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "order cannot be cancelled",
+			"status": order.Status,
+		})
+		return
+	}
+
+	// Update order status to cancelled
+	cancelledAt := time.Now()
+	err = s.db.UpdateOrderStatus(ctx, orderID, db.OrderStatusCanceled, order.ExecutedQuantity, order.ExecutedQuoteQuantity, order.FilledAt, &cancelledAt, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to cancel order",
+		})
+		return
+	}
+
+	// Get updated order
+	order, _ = s.db.GetOrderByID(ctx, orderID)
+
+	// Broadcast order update to WebSocket clients
+	if err := s.BroadcastOrderUpdate(order); err != nil {
+		log.Warn().Err(err).Msg("Failed to broadcast order cancellation")
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"order":   order,
+		"message": "Order cancelled successfully",
+	})
+}
+// Trading control handlers
+func (s *APIServer) handleStartTrading(c *gin.Context) {
+	var req struct {
+		Symbol         string  `json:"symbol" binding:"required"`
+		InitialCapital float64 `json:"initial_capital" binding:"required,gt=0"`
+		Mode           string  `json:"mode" binding:"oneof=paper live PAPER LIVE"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Default to paper trading if not specified
+	if req.Mode == "" {
+		req.Mode = "paper"
+	}
+
+	// Create a new trading session
+	session := &db.TradingSession{
+		Mode:           db.TradingMode(req.Mode),
+		Symbol:         req.Symbol,
+		Exchange:       "PAPER", // TODO: Make configurable
+		StartedAt:      time.Now(),
+		InitialCapital: req.InitialCapital,
+	}
+
+	ctx := c.Request.Context()
+	if err := s.db.CreateSession(ctx, session); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to create trading session",
+		})
+		return
+	}
+
+	// Broadcast system status update
+	metadata := map[string]interface{}{
+		"session_id": session.ID.String(),
+		"symbol":     session.Symbol,
+		"mode":       session.Mode,
+		"event":      "trading_started",
+	}
+	if err := s.BroadcastSystemStatus("trading_started", "Trading session started", metadata); err != nil {
+		log.Warn().Err(err).Msg("Failed to broadcast trading start")
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Trading started successfully",
+		"session_id": session.ID.String(),
+		"symbol":     session.Symbol,
+		"mode":       session.Mode,
+		"started_at": session.StartedAt,
+	})
+}
+
+func (s *APIServer) handleStopTrading(c *gin.Context) {
+	var req struct {
+		SessionID    string  `json:"session_id" binding:"required"`
+		FinalCapital float64 `json:"final_capital" binding:"required,gte=0"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	sessionID, err := parseUUID(req.SessionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid session_id format",
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := s.db.StopSession(ctx, sessionID, req.FinalCapital); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to stop trading session",
+		})
+		return
+	}
+
+	// Get updated session
+	session, _ := s.db.GetSession(ctx, sessionID)
+
+	// Broadcast system status update
+	metadata := map[string]interface{}{
+		"session_id":    session.ID.String(),
+		"final_capital": req.FinalCapital,
+		"total_pnl":     session.TotalPnL,
+		"total_trades":  session.TotalTrades,
+		"event":         "trading_stopped",
+	}
+	if err := s.BroadcastSystemStatus("trading_stopped", "Trading session stopped", metadata); err != nil {
+		log.Warn().Err(err).Msg("Failed to broadcast trading stop")
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Trading stopped successfully",
+		"session_id":    session.ID.String(),
+		"final_capital": req.FinalCapital,
+		"total_pnl":     session.TotalPnL,
+		"total_trades":  session.TotalTrades,
+		"stopped_at":    session.StoppedAt,
+	})
+}
+
+func (s *APIServer) handlePauseTrading(c *gin.Context) {
+	var req struct {
+		SessionID string `json:"session_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	sessionID, err := parseUUID(req.SessionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid session_id format",
+		})
+		return
+	}
+
+	// Get session to verify it exists
+	ctx := c.Request.Context()
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":      "session not found",
+			"session_id": req.SessionID,
+		})
+		return
+	}
+
+	// For now, just return success
+	// TODO: Implement actual pause logic in orchestrator
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Trading paused successfully",
+		"session_id": session.ID.String(),
+		"symbol":     session.Symbol,
+		"note":       "Pause logic to be implemented in orchestrator",
+	})
+}
+// Config handlers
+func (s *APIServer) handleGetConfig(c *gin.Context) {
+	// Return sanitized configuration (no API keys, passwords, or secrets)
+	sanitized := s.sanitizeConfig(s.config)
+
+	c.JSON(http.StatusOK, gin.H{
+		"config": sanitized,
+	})
+}
+
+func (s *APIServer) handleUpdateConfig(c *gin.Context) {
+	var req map[string]interface{}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Apply updates to safe configuration fields
+	updates := make(map[string]interface{})
+	errors := []string{}
+
+	// Allow updating trading configuration
+	if tradingMode, ok := req["trading_mode"].(string); ok {
+		if tradingMode == "paper" || tradingMode == "live" {
+			s.config.Trading.Mode = tradingMode
+			updates["trading_mode"] = tradingMode
+		} else {
+			errors = append(errors, "trading_mode must be 'paper' or 'live'")
+		}
+	}
+
+	if initialCapital, ok := req["initial_capital"].(float64); ok {
+		if initialCapital > 0 {
+			s.config.Trading.InitialCapital = initialCapital
+			updates["initial_capital"] = initialCapital
+		} else {
+			errors = append(errors, "initial_capital must be positive")
+		}
+	}
+
+	if maxPositions, ok := req["max_positions"].(float64); ok {
+		if maxPositions > 0 {
+			s.config.Trading.MaxPositions = int(maxPositions)
+			updates["max_positions"] = int(maxPositions)
+		} else {
+			errors = append(errors, "max_positions must be positive")
+		}
+	}
+
+	// Allow updating risk configuration
+	if maxPositionSize, ok := req["max_position_size"].(float64); ok {
+		if maxPositionSize > 0 && maxPositionSize <= 1 {
+			s.config.Risk.MaxPositionSize = maxPositionSize
+			updates["max_position_size"] = maxPositionSize
+		} else {
+			errors = append(errors, "max_position_size must be between 0 and 1")
+		}
+	}
+
+	if maxDailyLoss, ok := req["max_daily_loss"].(float64); ok {
+		if maxDailyLoss > 0 && maxDailyLoss <= 1 {
+			s.config.Risk.MaxDailyLoss = maxDailyLoss
+			updates["max_daily_loss"] = maxDailyLoss
+		} else {
+			errors = append(errors, "max_daily_loss must be between 0 and 1")
+		}
+	}
+
+	if maxDrawdown, ok := req["max_drawdown"].(float64); ok {
+		if maxDrawdown > 0 && maxDrawdown <= 1 {
+			s.config.Risk.MaxDrawdown = maxDrawdown
+			updates["max_drawdown"] = maxDrawdown
+		} else {
+			errors = append(errors, "max_drawdown must be between 0 and 1")
+		}
+	}
+
+	if defaultStopLoss, ok := req["default_stop_loss"].(float64); ok {
+		if defaultStopLoss > 0 && defaultStopLoss <= 1 {
+			s.config.Risk.DefaultStopLoss = defaultStopLoss
+			updates["default_stop_loss"] = defaultStopLoss
+		} else {
+			errors = append(errors, "default_stop_loss must be between 0 and 1")
+		}
+	}
+
+	if defaultTakeProfit, ok := req["default_take_profit"].(float64); ok {
+		if defaultTakeProfit > 0 {
+			s.config.Risk.DefaultTakeProfit = defaultTakeProfit
+			updates["default_take_profit"] = defaultTakeProfit
+		} else {
+			errors = append(errors, "default_take_profit must be positive")
+		}
+	}
+
+	if minConfidence, ok := req["min_confidence"].(float64); ok {
+		if minConfidence >= 0 && minConfidence <= 1 {
+			s.config.Risk.MinConfidence = minConfidence
+			updates["min_confidence"] = minConfidence
+		} else {
+			errors = append(errors, "min_confidence must be between 0 and 1")
+		}
+	}
+
+	if llmApprovalRequired, ok := req["llm_approval_required"].(bool); ok {
+		s.config.Risk.LLMApprovalRequired = llmApprovalRequired
+		updates["llm_approval_required"] = llmApprovalRequired
+	}
+
+	// Allow updating LLM configuration (safe fields only)
+	if temperature, ok := req["llm_temperature"].(float64); ok {
+		if temperature >= 0 && temperature <= 2 {
+			s.config.LLM.Temperature = temperature
+			updates["llm_temperature"] = temperature
+		} else {
+			errors = append(errors, "llm_temperature must be between 0 and 2")
+		}
+	}
+
+	if maxTokens, ok := req["llm_max_tokens"].(float64); ok {
+		if maxTokens > 0 {
+			s.config.LLM.MaxTokens = int(maxTokens)
+			updates["llm_max_tokens"] = int(maxTokens)
+		} else {
+			errors = append(errors, "llm_max_tokens must be positive")
+		}
+	}
+
+	// Check for any validation errors
+	if len(errors) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "validation failed",
+			"errors": errors,
+		})
+		return
+	}
+
+	// If no updates were made
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "no valid configuration fields to update",
+			"message": "See documentation for updatable fields",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Configuration updated successfully",
+		"updates": updates,
+		"note":    "Changes are in-memory only and will reset on server restart",
+	})
+}
+
+// sanitizeConfig removes sensitive information from config
+func (s *APIServer) sanitizeConfig(cfg *config.Config) map[string]interface{} {
+	return map[string]interface{}{
+		"app": map[string]interface{}{
+			"name":        cfg.App.Name,
+			"version":     cfg.App.Version,
+			"environment": cfg.App.Environment,
+			"log_level":   cfg.App.LogLevel,
+		},
+		"database": map[string]interface{}{
+			"host":      cfg.Database.Host,
+			"port":      cfg.Database.Port,
+			"database":  cfg.Database.Database,
+			"ssl_mode":  cfg.Database.SSLMode,
+			"pool_size": cfg.Database.PoolSize,
+			// Omit: user, password
+		},
+		"redis": map[string]interface{}{
+			"host": cfg.Redis.Host,
+			"port": cfg.Redis.Port,
+			"db":   cfg.Redis.DB,
+			// Omit: password
+		},
+		"nats": map[string]interface{}{
+			"url":               cfg.NATS.URL,
+			"enable_jetstream":  cfg.NATS.EnableJetStream,
+		},
+		"llm": map[string]interface{}{
+			"gateway":        cfg.LLM.Gateway,
+			"endpoint":       cfg.LLM.Endpoint,
+			"primary_model":  cfg.LLM.PrimaryModel,
+			"fallback_model": cfg.LLM.FallbackModel,
+			"temperature":    cfg.LLM.Temperature,
+			"max_tokens":     cfg.LLM.MaxTokens,
+			"enable_caching": cfg.LLM.EnableCaching,
+			"timeout":        cfg.LLM.Timeout,
+		},
+		"trading": map[string]interface{}{
+			"mode":             cfg.Trading.Mode,
+			"symbols":          cfg.Trading.Symbols,
+			"exchange":         cfg.Trading.Exchange,
+			"initial_capital":  cfg.Trading.InitialCapital,
+			"max_positions":    cfg.Trading.MaxPositions,
+			"default_quantity": cfg.Trading.DefaultQuantity,
+		},
+		"risk": map[string]interface{}{
+			"max_position_size":      cfg.Risk.MaxPositionSize,
+			"max_daily_loss":         cfg.Risk.MaxDailyLoss,
+			"max_drawdown":           cfg.Risk.MaxDrawdown,
+			"default_stop_loss":      cfg.Risk.DefaultStopLoss,
+			"default_take_profit":    cfg.Risk.DefaultTakeProfit,
+			"llm_approval_required":  cfg.Risk.LLMApprovalRequired,
+			"min_confidence":         cfg.Risk.MinConfidence,
+		},
+		"api": map[string]interface{}{
+			"host": cfg.API.Host,
+			"port": cfg.API.Port,
+		},
+		"monitoring": map[string]interface{}{
+			"prometheus_port": cfg.Monitoring.PrometheusPort,
+			"enable_metrics":  cfg.Monitoring.EnableMetrics,
+		},
+		"mcp": map[string]interface{}{
+			"external": map[string]interface{}{
+				"coingecko": map[string]interface{}{
+					"enabled":   cfg.MCP.External.CoinGecko.Enabled,
+					"name":      cfg.MCP.External.CoinGecko.Name,
+					"transport": cfg.MCP.External.CoinGecko.Transport,
+					"cache_ttl": cfg.MCP.External.CoinGecko.CacheTTL,
+				},
+			},
+			"internal": map[string]interface{}{
+				"order_executor": map[string]interface{}{
+					"enabled":   cfg.MCP.Internal.OrderExecutor.Enabled,
+					"name":      cfg.MCP.Internal.OrderExecutor.Name,
+					"transport": cfg.MCP.Internal.OrderExecutor.Transport,
+				},
+				"risk_analyzer": map[string]interface{}{
+					"enabled":   cfg.MCP.Internal.RiskAnalyzer.Enabled,
+					"name":      cfg.MCP.Internal.RiskAnalyzer.Name,
+					"transport": cfg.MCP.Internal.RiskAnalyzer.Transport,
+				},
+				"technical_indicators": map[string]interface{}{
+					"enabled":   cfg.MCP.Internal.TechnicalIndicators.Enabled,
+					"name":      cfg.MCP.Internal.TechnicalIndicators.Name,
+					"transport": cfg.MCP.Internal.TechnicalIndicators.Transport,
+				},
+				"market_data": map[string]interface{}{
+					"enabled":   cfg.MCP.Internal.MarketData.Enabled,
+					"name":      cfg.MCP.Internal.MarketData.Name,
+					"transport": cfg.MCP.Internal.MarketData.Transport,
+				},
+			},
+		},
+		// Omit exchanges entirely (contains API keys and secrets)
+	}
+}
+
+// WebSocket broadcast helpers
+
+// BroadcastPositionUpdate broadcasts a position update to all WebSocket clients
+func (s *APIServer) BroadcastPositionUpdate(position *db.Position) error {
+	data := map[string]interface{}{
+		"position_id":     position.ID.String(),
+		"session_id":      position.SessionID,
+		"symbol":          position.Symbol,
+		"exchange":        position.Exchange,
+		"side":            position.Side,
+		"entry_price":     position.EntryPrice,
+		"exit_price":      position.ExitPrice,
+		"quantity":        position.Quantity,
+		"entry_time":      position.EntryTime,
+		"exit_time":       position.ExitTime,
+		"stop_loss":       position.StopLoss,
+		"take_profit":     position.TakeProfit,
+		"realized_pnl":    position.RealizedPnL,
+		"unrealized_pnl":  position.UnrealizedPnL,
+		"fees":            position.Fees,
+		"entry_reason":    position.EntryReason,
+		"exit_reason":     position.ExitReason,
+	}
+
+	return s.hub.Broadcast(MessageTypePositionUpdate, data)
+}
+
+// BroadcastPnLUpdate broadcasts a P&L update to all WebSocket clients
+func (s *APIServer) BroadcastPnLUpdate(sessionID uuid.UUID, totalPnL, realizedPnL, unrealizedPnL float64, positions []*db.Position) error {
+	data := map[string]interface{}{
+		"session_id":     sessionID.String(),
+		"total_pnl":      totalPnL,
+		"realized_pnl":   realizedPnL,
+		"unrealized_pnl": unrealizedPnL,
+		"position_count": len(positions),
+		"timestamp":      time.Now(),
+	}
+
+	return s.hub.Broadcast(MessageTypePositionUpdate, data)
+}
+
+// BroadcastTradeNotification broadcasts a trade (fill) notification
+func (s *APIServer) BroadcastTradeNotification(trade *db.Trade) error {
+	data := map[string]interface{}{
+		"trade_id":         trade.ID.String(),
+		"order_id":         trade.OrderID.String(),
+		"exchange_trade_id": trade.ExchangeTradeID,
+		"symbol":           trade.Symbol,
+		"exchange":         trade.Exchange,
+		"side":             trade.Side,
+		"price":            trade.Price,
+		"quantity":         trade.Quantity,
+		"quote_quantity":   trade.QuoteQuantity,
+		"commission":       trade.Commission,
+		"commission_asset": trade.CommissionAsset,
+		"executed_at":      trade.ExecutedAt,
+		"is_maker":         trade.IsMaker,
+	}
+
+	return s.hub.Broadcast(MessageTypeTrade, data)
+}
+
+// BroadcastOrderUpdate broadcasts an order status update
+func (s *APIServer) BroadcastOrderUpdate(order *db.Order) error {
+	data := map[string]interface{}{
+		"order_id":                order.ID.String(),
+		"session_id":              order.SessionID,
+		"position_id":             order.PositionID,
+		"exchange_order_id":       order.ExchangeOrderID,
+		"symbol":                  order.Symbol,
+		"exchange":                order.Exchange,
+		"side":                    order.Side,
+		"type":                    order.Type,
+		"status":                  order.Status,
+		"price":                   order.Price,
+		"stop_price":              order.StopPrice,
+		"quantity":                order.Quantity,
+		"executed_quantity":       order.ExecutedQuantity,
+		"executed_quote_quantity": order.ExecutedQuoteQuantity,
+		"time_in_force":           order.TimeInForce,
+		"placed_at":               order.PlacedAt,
+		"filled_at":               order.FilledAt,
+		"canceled_at":             order.CanceledAt,
+		"error_message":           order.ErrorMessage,
+	}
+
+	return s.hub.Broadcast(MessageTypeOrderUpdate, data)
+}
+
+// BroadcastAgentStatus broadcasts agent status change
+func (s *APIServer) BroadcastAgentStatus(agent *db.AgentStatus) error {
+	data := map[string]interface{}{
+		"name":         agent.Name,
+		"status":       agent.Status,
+		"last_seen_at": agent.LastSeenAt,
+		"is_healthy":   agent.IsHealthy,
+		"metadata":     agent.Metadata,
+	}
+
+	return s.hub.Broadcast(MessageTypeAgentStatus, data)
+}
+
+// BroadcastSystemStatus broadcasts system status update
+func (s *APIServer) BroadcastSystemStatus(status string, message string, metadata map[string]interface{}) error {
+	data := map[string]interface{}{
+		"status":    status,
+		"message":   message,
+		"metadata":  metadata,
+		"timestamp": time.Now(),
+	}
+
+	return s.hub.Broadcast(MessageTypeSystemStatus, data)
+}
+
+// WebSocket handler
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		// Allow all origins for now (configure properly in production)
+		return true
+	},
+}
+
+func (s *APIServer) handleWebSocket(c *gin.Context) {
+	// Upgrade HTTP connection to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to upgrade WebSocket connection")
+		return
+	}
+
+	// Create new client
+	client := &Client{
+		hub:  s.hub,
+		conn: conn,
+		send: make(chan []byte, 256),
+	}
+
+	// Register client with hub
+	client.hub.register <- client
+
+	// Start client's goroutines
+	go client.writePump()
+	go client.readPump()
+
+	log.Info().
+		Str("remote_addr", c.Request.RemoteAddr).
+		Msg("WebSocket client connected")
+}
+
+// Helper functions
+
+var startTime = time.Now()
+
+func parseUUID(s string) (uuid.UUID, error) {
+	return uuid.Parse(s)
+}
+
+func getPort() string {
+	// Try environment variable first
+	if port := os.Getenv("API_PORT"); port != "" {
+		return port
+	}
+
+	// Default port
+	return "8080"
+}
+
+// requestLogger logs each HTTP request
+func requestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		query := c.Request.URL.RawQuery
+
+		// Process request
+		c.Next()
+
+		// Log after request
+		latency := time.Since(start)
+		statusCode := c.Writer.Status()
+
+		logEvent := log.Info()
+		if statusCode >= 400 {
+			logEvent = log.Warn()
+		}
+		if statusCode >= 500 {
+			logEvent = log.Error()
+		}
+
+		logEvent.
+			Str("method", c.Request.Method).
+			Str("path", path).
+			Str("query", query).
+			Int("status", statusCode).
+			Dur("latency", latency).
+			Str("ip", c.ClientIP()).
+			Msg("HTTP request")
+	}
+}
