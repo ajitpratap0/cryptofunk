@@ -2101,10 +2101,16 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### 10.3 Advanced Orchestrator Features (Week 11, Days 3-4)
 
-- [ ] **T207** [P2] Implement agent hot-swapping
-  - Replace agent without downtime
-  - Transfer state
-  - **Acceptance**: Agents can be swapped
+- [x] **T207** [P2] Implement agent hot-swapping
+  - internal/orchestrator/hotswap.go (723 lines)
+  - internal/orchestrator/hotswap_test.go (648 lines)
+  - Zero-downtime agent replacement with state transfer
+  - 6-step swap process: capture state, pause old, transfer, start new, verify, terminate old
+  - Automatic rollback on failure
+  - State serialization/deserialization with deep copy
+  - Agent registry with heartbeat monitoring
+  - Swap session tracking with detailed step logging
+  - **✅ COMPLETE**: Full hot-swap system with comprehensive tests
   - **Estimate**: 4 hours
 
 - [ ] **T208** [P2] Implement agent cloning
