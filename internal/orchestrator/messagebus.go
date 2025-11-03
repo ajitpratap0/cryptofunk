@@ -99,6 +99,18 @@ func NewMessageBus(config MessageBusConfig) (*MessageBus, error) {
 
 // Send sends a message to a specific agent
 func (mb *MessageBus) Send(ctx context.Context, msg *AgentMessage) error {
+	// Check context cancellation
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Check connection health
+	if !mb.nc.IsConnected() {
+		return fmt.Errorf("message bus not connected")
+	}
+
 	// Set defaults
 	if msg.ID == uuid.Nil {
 		msg.ID = uuid.New()
@@ -139,6 +151,18 @@ func (mb *MessageBus) Send(ctx context.Context, msg *AgentMessage) error {
 
 // Broadcast sends a message to all agents
 func (mb *MessageBus) Broadcast(ctx context.Context, msg *AgentMessage) error {
+	// Check context cancellation
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Check connection health
+	if !mb.nc.IsConnected() {
+		return fmt.Errorf("message bus not connected")
+	}
+
 	msg.To = "*" // Broadcast marker
 	msg.Type = MessageTypeBroadcast
 
@@ -177,6 +201,18 @@ func (mb *MessageBus) Broadcast(ctx context.Context, msg *AgentMessage) error {
 
 // Request sends a request and waits for a reply
 func (mb *MessageBus) Request(ctx context.Context, msg *AgentMessage, timeout time.Duration) (*AgentMessage, error) {
+	// Check context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Check connection health
+	if !mb.nc.IsConnected() {
+		return nil, fmt.Errorf("message bus not connected")
+	}
+
 	msg.Type = MessageTypeRequest
 
 	// Set defaults
@@ -220,13 +256,9 @@ func (mb *MessageBus) Request(ctx context.Context, msg *AgentMessage, timeout ti
 	return &reply, nil
 }
 
-// Subscribe subscribes to messages for a specific agent and topic
-func (mb *MessageBus) Subscribe(agentName, topic string, handler MessageHandler) (*Subscription, error) {
-	// Subject pattern: agents.{agentName}.{topic}
-	subject := fmt.Sprintf("%s%s.%s", mb.prefix, agentName, topic)
-
-	// Subscribe
-	sub, err := mb.nc.Subscribe(subject, func(natsMsg *nats.Msg) {
+// createSubscriptionHandler creates a common message handler for subscriptions
+func (mb *MessageBus) createSubscriptionHandler(agentName string, handler MessageHandler) func(*nats.Msg) {
+	return func(natsMsg *nats.Msg) {
 		// Parse message
 		var msg AgentMessage
 		if err := json.Unmarshal(natsMsg.Data, &msg); err != nil {
@@ -251,45 +283,61 @@ func (mb *MessageBus) Subscribe(agentName, topic string, handler MessageHandler)
 
 		// Handle message
 		if err := handler(&msg); err != nil {
-			log.Error().
-				Err(err).
-				Str("message_id", msg.ID.String()).
-				Str("from", msg.From).
-				Str("to", msg.To).
-				Str("topic", msg.Topic).
-				Msg("Message handler error")
-
-			// If this is a request, send error reply
-			if msg.Type == MessageTypeRequest && natsMsg.Reply != "" {
-				errorReply := &AgentMessage{
-					ID:        uuid.New(),
-					From:      agentName,
-					To:        msg.From,
-					Type:      MessageTypeReply,
-					Topic:     msg.Topic,
-					Timestamp: time.Now(),
-					Metadata: map[string]interface{}{
-						"error":      err.Error(),
-						"request_id": msg.ID.String(),
-					},
-				}
-				replyData, _ := json.Marshal(errorReply)
-				natsMsg.Respond(replyData)
-			}
+			mb.handleSubscriptionError(&msg, agentName, natsMsg, err)
 			return
 		}
-
-		// For requests, the handler should send a reply explicitly
-		// (we don't auto-reply on success)
 
 		log.Debug().
 			Str("message_id", msg.ID.String()).
 			Str("from", msg.From).
-			Str("to", agentName).
+			Str("to", msg.To).
 			Str("topic", msg.Topic).
 			Msg("Message handled successfully")
-	})
+	}
+}
 
+// handleSubscriptionError handles errors from message handlers
+func (mb *MessageBus) handleSubscriptionError(msg *AgentMessage, agentName string, natsMsg *nats.Msg, handlerErr error) {
+	log.Error().
+		Err(handlerErr).
+		Str("message_id", msg.ID.String()).
+		Str("from", msg.From).
+		Str("to", msg.To).
+		Str("topic", msg.Topic).
+		Msg("Message handler error")
+
+	// If this is a request, send error reply
+	if msg.Type == MessageTypeRequest && natsMsg.Reply != "" {
+		errorReply := &AgentMessage{
+			ID:        uuid.New(),
+			From:      agentName,
+			To:        msg.From,
+			Type:      MessageTypeReply,
+			Topic:     msg.Topic,
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"error":      handlerErr.Error(),
+				"request_id": msg.ID.String(),
+			},
+		}
+		replyData, err := json.Marshal(errorReply)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to marshal error reply")
+			return
+		}
+		if err := natsMsg.Respond(replyData); err != nil {
+			log.Error().Err(err).Msg("Failed to send error reply")
+		}
+	}
+}
+
+// Subscribe subscribes to messages for a specific agent and topic
+func (mb *MessageBus) Subscribe(agentName, topic string, handler MessageHandler) (*Subscription, error) {
+	// Subject pattern: agents.{agentName}.{topic}
+	subject := fmt.Sprintf("%s%s.%s", mb.prefix, agentName, topic)
+
+	// Subscribe with common handler
+	sub, err := mb.nc.Subscribe(subject, mb.createSubscriptionHandler(agentName, handler))
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe: %w", err)
 	}
@@ -313,68 +361,8 @@ func (mb *MessageBus) SubscribeAll(agentName string, handler MessageHandler) (*S
 	// Subject pattern: agents.{agentName}.>
 	subject := fmt.Sprintf("%s%s.>", mb.prefix, agentName)
 
-	// Subscribe
-	sub, err := mb.nc.Subscribe(subject, func(natsMsg *nats.Msg) {
-		// Parse message
-		var msg AgentMessage
-		if err := json.Unmarshal(natsMsg.Data, &msg); err != nil {
-			log.Warn().Err(err).Msg("Failed to unmarshal message")
-			return
-		}
-
-		// Set reply address from NATS message (for request-reply pattern)
-		if natsMsg.Reply != "" {
-			msg.ReplyTo = natsMsg.Reply
-		}
-
-		// Check TTL
-		if msg.TTL > 0 && time.Since(msg.Timestamp) > msg.TTL {
-			log.Debug().
-				Str("message_id", msg.ID.String()).
-				Dur("age", time.Since(msg.Timestamp)).
-				Dur("ttl", msg.TTL).
-				Msg("Message expired, skipping")
-			return
-		}
-
-		// Handle message
-		if err := handler(&msg); err != nil {
-			log.Error().
-				Err(err).
-				Str("message_id", msg.ID.String()).
-				Str("from", msg.From).
-				Str("to", msg.To).
-				Str("topic", msg.Topic).
-				Msg("Message handler error")
-
-			// If this is a request, send error reply
-			if msg.Type == MessageTypeRequest && natsMsg.Reply != "" {
-				errorReply := &AgentMessage{
-					ID:        uuid.New(),
-					From:      agentName,
-					To:        msg.From,
-					Type:      MessageTypeReply,
-					Topic:     msg.Topic,
-					Timestamp: time.Now(),
-					Metadata: map[string]interface{}{
-						"error":      err.Error(),
-						"request_id": msg.ID.String(),
-					},
-				}
-				replyData, _ := json.Marshal(errorReply)
-				natsMsg.Respond(replyData)
-			}
-			return
-		}
-
-		log.Debug().
-			Str("message_id", msg.ID.String()).
-			Str("from", msg.From).
-			Str("to", agentName).
-			Str("topic", msg.Topic).
-			Msg("Message handled successfully")
-	})
-
+	// Subscribe with common handler
+	sub, err := mb.nc.Subscribe(subject, mb.createSubscriptionHandler(agentName, handler))
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe: %w", err)
 	}
@@ -397,48 +385,8 @@ func (mb *MessageBus) SubscribeBroadcasts(topic string, handler MessageHandler) 
 	// Subject pattern: agents.*.{topic}
 	subject := fmt.Sprintf("%s*.%s", mb.prefix, topic)
 
-	// Subscribe
-	sub, err := mb.nc.Subscribe(subject, func(natsMsg *nats.Msg) {
-		// Parse message
-		var msg AgentMessage
-		if err := json.Unmarshal(natsMsg.Data, &msg); err != nil {
-			log.Warn().Err(err).Msg("Failed to unmarshal message")
-			return
-		}
-
-		// Set reply address from NATS message (for request-reply pattern)
-		if natsMsg.Reply != "" {
-			msg.ReplyTo = natsMsg.Reply
-		}
-
-		// Check TTL
-		if msg.TTL > 0 && time.Since(msg.Timestamp) > msg.TTL {
-			log.Debug().
-				Str("message_id", msg.ID.String()).
-				Dur("age", time.Since(msg.Timestamp)).
-				Dur("ttl", msg.TTL).
-				Msg("Broadcast expired, skipping")
-			return
-		}
-
-		// Handle message
-		if err := handler(&msg); err != nil {
-			log.Error().
-				Err(err).
-				Str("message_id", msg.ID.String()).
-				Str("from", msg.From).
-				Str("topic", msg.Topic).
-				Msg("Broadcast handler error")
-			return
-		}
-
-		log.Debug().
-			Str("message_id", msg.ID.String()).
-			Str("from", msg.From).
-			Str("topic", msg.Topic).
-			Msg("Broadcast handled successfully")
-	})
-
+	// Subscribe with common handler (empty agentName for broadcasts)
+	sub, err := mb.nc.Subscribe(subject, mb.createSubscriptionHandler("", handler))
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to broadcasts: %w", err)
 	}

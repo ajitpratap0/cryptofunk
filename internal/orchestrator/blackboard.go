@@ -129,28 +129,30 @@ func (bb *Blackboard) Post(ctx context.Context, msg *BlackboardMessage) error {
 		ttl = 0 // No expiration
 	}
 
+	// Use pipeline for atomic operations
+	pipe := bb.client.Pipeline()
+
 	// Store message
-	if err := bb.client.Set(ctx, key, data, ttl).Err(); err != nil {
-		return fmt.Errorf("failed to store message: %w", err)
-	}
+	pipe.Set(ctx, key, data, ttl)
 
 	// Add to topic index (sorted set by timestamp for range queries)
 	indexKey := fmt.Sprintf("%sindex:%s", bb.prefix, msg.Topic)
 	score := float64(msg.CreatedAt.UnixNano())
-	if err := bb.client.ZAdd(ctx, indexKey, redis.Z{
+	pipe.ZAdd(ctx, indexKey, redis.Z{
 		Score:  score,
 		Member: key,
-	}).Err(); err != nil {
-		return fmt.Errorf("failed to add to index: %w", err)
-	}
+	})
 
 	// Add to agent index (for querying by agent)
 	agentIndexKey := fmt.Sprintf("%sagent:%s", bb.prefix, msg.AgentName)
-	if err := bb.client.ZAdd(ctx, agentIndexKey, redis.Z{
+	pipe.ZAdd(ctx, agentIndexKey, redis.Z{
 		Score:  score,
 		Member: key,
-	}).Err(); err != nil {
-		return fmt.Errorf("failed to add to agent index: %w", err)
+	})
+
+	// Execute pipeline atomically
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to store message and indices: %w", err)
 	}
 
 	// Publish notification to subscribers
@@ -319,16 +321,47 @@ func (bb *Blackboard) Clear(ctx context.Context, topic string) error {
 		return fmt.Errorf("failed to get keys: %w", err)
 	}
 
+	if len(keys) == 0 {
+		return nil
+	}
+
+	// Fetch messages to get agent names for index cleanup
+	messages, err := bb.getMessagesByKeys(ctx, keys)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to fetch messages for agent index cleanup")
+		// Continue with deletion even if we can't fetch messages
+	}
+
+	// Use pipeline for atomic deletion
+	pipe := bb.client.Pipeline()
+
 	// Delete all messages
-	if len(keys) > 0 {
-		if err := bb.client.Del(ctx, keys...).Err(); err != nil {
-			return fmt.Errorf("failed to delete messages: %w", err)
+	pipe.Del(ctx, keys...)
+
+	// Delete topic index
+	pipe.Del(ctx, indexKey)
+
+	// Remove from agent indices
+	if messages != nil {
+		agentKeys := make(map[string]bool)
+		for _, msg := range messages {
+			if msg != nil && msg.AgentName != "" {
+				agentKeys[msg.AgentName] = true
+			}
+		}
+
+		// For each agent, remove all keys from their index
+		for agentName := range agentKeys {
+			agentIndexKey := fmt.Sprintf("%sagent:%s", bb.prefix, agentName)
+			for _, key := range keys {
+				pipe.ZRem(ctx, agentIndexKey, key)
+			}
 		}
 	}
 
-	// Delete index
-	if err := bb.client.Del(ctx, indexKey).Err(); err != nil {
-		return fmt.Errorf("failed to delete index: %w", err)
+	// Execute pipeline
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to clear topic: %w", err)
 	}
 
 	log.Info().
@@ -380,19 +413,21 @@ func (bb *Blackboard) ClearExpired(ctx context.Context, topic string) (int, erro
 // GetTopics returns all active topics
 func (bb *Blackboard) GetTopics(ctx context.Context) ([]string, error) {
 	pattern := fmt.Sprintf("%sindex:*", bb.prefix)
-	keys, err := bb.client.Keys(ctx, pattern).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get topics: %w", err)
-	}
-
-	// Extract topic names from keys
-	topics := make([]string, 0, len(keys))
+	topics := make([]string, 0)
 	prefixLen := len(bb.prefix) + len("index:")
-	for _, key := range keys {
+
+	// Use SCAN instead of KEYS for non-blocking operation
+	iter := bb.client.Scan(ctx, 0, pattern, 0).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val()
 		if len(key) > prefixLen {
 			topic := key[prefixLen:]
 			topics = append(topics, topic)
 		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan topics: %w", err)
 	}
 
 	return topics, nil
