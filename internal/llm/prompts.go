@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -203,9 +204,16 @@ func formatIndicators(indicators map[string]float64) string {
 		return "No indicators available"
 	}
 
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(indicators))
+	for name := range indicators {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+
 	var lines []string
-	for name, value := range indicators {
-		lines = append(lines, fmt.Sprintf("  %s: %.4f", name, value))
+	for _, name := range keys {
+		lines = append(lines, fmt.Sprintf("  %s: %.4f", name, indicators[name]))
 	}
 	return strings.Join(lines, "\n")
 }

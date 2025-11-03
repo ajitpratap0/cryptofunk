@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -262,12 +263,18 @@ func (db *DB) GetLLMDecisionStats(ctx context.Context, agentName string, since t
 		return nil, err
 	}
 
+	// Calculate success rate with zero check
+	successRate := 0.0
+	if totalDecisions > 0 {
+		successRate = float64(successful) / float64(totalDecisions) * 100.0
+	}
+
 	stats = map[string]interface{}{
 		"total_decisions": totalDecisions,
 		"successful":      successful,
 		"failed":          failed,
 		"pending":         pending,
-		"success_rate":    float64(successful) / float64(totalDecisions) * 100.0,
+		"success_rate":    successRate,
 	}
 
 	if avgPnl != nil {
@@ -292,6 +299,18 @@ func (db *DB) GetLLMDecisionStats(ctx context.Context, agentName string, since t
 // FindSimilarDecisions finds decisions with similar market conditions (for T185)
 // This uses the context JSONB field to find similar situations
 func (db *DB) FindSimilarDecisions(ctx context.Context, symbol string, contextJSON []byte, limit int) ([]*LLMDecision, error) {
+	// Input validation
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol cannot be empty")
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be positive, got %d", limit)
+	}
+	if limit > 1000 {
+		// Cap at reasonable maximum to prevent excessive memory usage
+		limit = 1000
+	}
+
 	// Parse the context to extract indicators for similarity matching
 	var currentContext map[string]interface{}
 	if len(contextJSON) > 0 {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -111,9 +112,9 @@ func (c *Client) Complete(ctx context.Context, messages []ChatMessage) (*ChatRes
 	if resp.StatusCode != http.StatusOK {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(body, &errResp); err != nil {
-			return nil, fmt.Errorf("LLM API error (status %d): %s", resp.StatusCode, string(body))
+			return nil, classifyHTTPError(resp.StatusCode, string(body))
 		}
-		return nil, fmt.Errorf("LLM API error: %s", errResp.Error.Message)
+		return nil, classifyHTTPError(resp.StatusCode, errResp.Error.Message)
 	}
 
 	var chatResp ChatResponse
@@ -177,6 +178,12 @@ func (c *Client) CompleteWithRetry(ctx context.Context, messages []ChatMessage, 
 		}
 
 		lastErr = err
+
+		// Check if error is retryable
+		if llmErr, ok := err.(*LLMError); ok && !llmErr.IsRetryable() {
+			// Non-retryable error, fail immediately
+			return nil, fmt.Errorf("LLM request failed with non-retryable error: %w", err)
+		}
 	}
 
 	return nil, fmt.Errorf("LLM request failed after %d attempts: %w", maxRetries, lastErr)
@@ -184,37 +191,158 @@ func (c *Client) CompleteWithRetry(ctx context.Context, messages []ChatMessage, 
 
 // ParseJSONResponse parses a JSON response from the LLM
 func (c *Client) ParseJSONResponse(content string, target interface{}) error {
-	// Try to extract JSON from markdown code blocks if present
-	content = extractJSONFromMarkdown(content)
-
-	if err := json.Unmarshal([]byte(content), target); err != nil {
-		return fmt.Errorf("failed to parse JSON response: %w", err)
+	// Try multiple extraction methods in order of preference
+	jsonCandidates := []string{
+		extractJSONFromMarkdown(content), // Try markdown extraction first
+		extractFirstJSONObject(content),  // Try finding first JSON object
+		strings.TrimSpace(content),       // Try raw content
 	}
 
-	return nil
+	var lastErr error
+	for _, candidate := range jsonCandidates {
+		if candidate == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(candidate), target); err == nil {
+			return nil // Success
+		} else {
+			lastErr = err
+		}
+	}
+
+	return fmt.Errorf("failed to parse JSON response after multiple attempts: %w", lastErr)
 }
 
 // extractJSONFromMarkdown extracts JSON from markdown code blocks
 func extractJSONFromMarkdown(content string) string {
-	// Look for ```json ... ``` or ``` ... ```
-	start := -1
-	end := -1
-
-	// Find ```json or ```
 	contentBytes := []byte(content)
-	if idx := bytes.Index(contentBytes, []byte("```json")); idx >= 0 {
-		start = idx + 7
-	} else if idx := bytes.Index(contentBytes, []byte("```")); idx >= 0 {
-		start = idx + 3
+
+	// Try all possible markdown code block formats
+	patterns := []struct {
+		prefix []byte
+		offset int
+	}{
+		{[]byte("```json\n"), 8},
+		{[]byte("```json"), 7},
+		{[]byte("```\n"), 4},
+		{[]byte("```"), 3},
 	}
 
-	if start >= 0 {
-		// Find closing ```
-		if idx := bytes.Index(contentBytes[start:], []byte("```")); idx >= 0 {
-			end = start + idx
-			content = content[start:end]
+	for _, pattern := range patterns {
+		if idx := bytes.Index(contentBytes, pattern.prefix); idx >= 0 {
+			start := idx + pattern.offset
+
+			// Find closing ```
+			if endIdx := bytes.Index(contentBytes[start:], []byte("```")); endIdx >= 0 {
+				end := start + endIdx
+				extracted := string(bytes.TrimSpace(contentBytes[start:end]))
+
+				// Validate it looks like JSON before returning
+				if len(extracted) > 0 && (extracted[0] == '{' || extracted[0] == '[') {
+					return extracted
+				}
+			}
 		}
 	}
 
-	return string(bytes.TrimSpace([]byte(content)))
+	return ""
+}
+
+// extractFirstJSONObject finds the first complete JSON object or array in the content
+func extractFirstJSONObject(content string) string {
+	content = strings.TrimSpace(content)
+	if len(content) == 0 {
+		return ""
+	}
+
+	// Find first { or [
+	startIdx := -1
+	isArray := false
+	for i, ch := range content {
+		if ch == '{' {
+			startIdx = i
+			break
+		} else if ch == '[' {
+			startIdx = i
+			isArray = true
+			break
+		}
+	}
+
+	if startIdx == -1 {
+		return ""
+	}
+
+	// Find matching closing bracket
+	depth := 0
+	openChar := '{'
+	closeChar := '}'
+	if isArray {
+		openChar = '['
+		closeChar = ']'
+	}
+
+	for i := startIdx; i < len(content); i++ {
+		ch := rune(content[i])
+		if ch == openChar {
+			depth++
+		} else if ch == closeChar {
+			depth--
+			if depth == 0 {
+				return content[startIdx : i+1]
+			}
+		}
+	}
+
+	return ""
+}
+
+// LLMError represents different types of LLM API errors with retry semantics
+type LLMError struct {
+	StatusCode int
+	Message    string
+	Retryable  bool
+}
+
+func (e *LLMError) Error() string {
+	return fmt.Sprintf("LLM API error (status %d): %s", e.StatusCode, e.Message)
+}
+
+// IsRetryable returns whether the error should be retried
+func (e *LLMError) IsRetryable() bool {
+	return e.Retryable
+}
+
+// classifyHTTPError classifies HTTP errors and determines retry strategy
+func classifyHTTPError(statusCode int, message string) error {
+	retryable := false
+
+	switch {
+	case statusCode == http.StatusTooManyRequests: // 429
+		retryable = true // Rate limiting - should retry with backoff
+	case statusCode >= 500 && statusCode < 600: // 5xx
+		retryable = true // Server errors - should retry
+	case statusCode == http.StatusBadGateway: // 502
+		retryable = true // Bad gateway - should retry
+	case statusCode == http.StatusServiceUnavailable: // 503
+		retryable = true // Service unavailable - should retry
+	case statusCode == http.StatusGatewayTimeout: // 504
+		retryable = true // Gateway timeout - should retry
+	case statusCode == http.StatusBadRequest: // 400
+		retryable = false // Bad request - don't retry
+	case statusCode == http.StatusUnauthorized: // 401
+		retryable = false // Unauthorized - don't retry
+	case statusCode == http.StatusForbidden: // 403
+		retryable = false // Forbidden - don't retry
+	case statusCode == http.StatusNotFound: // 404
+		retryable = false // Not found - don't retry
+	default:
+		retryable = false // Unknown - don't retry by default
+	}
+
+	return &LLMError{
+		StatusCode: statusCode,
+		Message:    message,
+		Retryable:  retryable,
+	}
 }
