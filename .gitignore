@@ -5,6 +5,12 @@ bin/
 *.so
 *.dylib
 
+# Go binaries (agents, servers, orchestrator)
+*-agent
+*-server
+orchestrator
+migrate
+
 # Test binary, built with `go test -c`
 *.test
 
