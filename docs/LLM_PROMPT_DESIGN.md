@@ -952,10 +952,201 @@ curl -X POST http://localhost:8080/admin/circuit-breaker/reset/0
 4. **Cost by model**: Claude vs GPT-4 vs GPT-3.5 usage
 5. **Latency by model**: Which model is fastest?
 
+## Using Fallback in Agents
+
+All trading agents (technical, trend, reversion, risk) support automatic model fallback through the `LLMClient` interface.
+
+### Agent Integration Pattern
+
+Agents use the `LLMClient` interface which is implemented by both `Client` and `FallbackClient`:
+
+```go
+type LLMClient interface {
+    Complete(ctx context.Context, messages []ChatMessage) (*ChatResponse, error)
+    CompleteWithRetry(ctx context.Context, messages []ChatMessage, maxRetries int) (*ChatResponse, error)
+    CompleteWithSystem(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+    ParseJSONResponse(content string, target interface{}) error
+}
+```
+
+**Agent struct** (example from technical-agent):
+```go
+type TechnicalAgent struct {
+    *agents.BaseAgent
+
+    // LLM client - interface supports both Client and FallbackClient
+    llmClient llm.LLMClient
+    promptBuilder *llm.PromptBuilder
+    useLLM bool
+}
+```
+
+### Configuration-Driven Fallback
+
+Agents automatically use `FallbackClient` when `llm.fallback_models` is configured in `configs/config.yaml`:
+
+```yaml
+llm:
+  enabled: true
+  endpoint: "http://localhost:8080/v1/chat/completions"
+  primary_model: "claude-sonnet-4-20250514"
+
+  # Enable fallback by listing fallback models
+  fallback_models:
+    - "gpt-4-turbo"
+    - "gpt-3.5-turbo"
+
+  # Circuit breaker settings
+  circuit_breaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 60s
+    time_window: 5m
+```
+
+**Without fallback models**:
+- Agents use basic `Client`
+- Single model, no automatic failover
+- Simpler, lower overhead
+
+**With fallback models**:
+- Agents use `FallbackClient`
+- Automatic cascading failover (Claude → GPT-4 → GPT-3.5)
+- Circuit breaker protection
+- Zero code changes required
+
+### Agent Initialization (Automatic)
+
+All agents follow this initialization pattern:
+
+```go
+// Initialize LLM client if enabled
+var llmClient llm.LLMClient
+useLLM := viper.GetBool("llm.enabled")
+
+if useLLM {
+    primaryConfig := llm.ClientConfig{
+        Endpoint:    viper.GetString("llm.endpoint"),
+        APIKey:      viper.GetString("llm.api_key"),
+        Model:       viper.GetString("llm.primary_model"),
+        Temperature: viper.GetFloat64("llm.temperature"),
+        MaxTokens:   viper.GetInt("llm.max_tokens"),
+        Timeout:     viper.GetDuration("llm.timeout"),
+    }
+
+    // Check if fallback models are configured
+    fallbackModels := viper.GetStringSlice("llm.fallback_models")
+    if len(fallbackModels) > 0 {
+        // Create FallbackClient
+        llmClient = llm.NewFallbackClient(fallbackConfig)
+        log.Info().
+            Str("primary_model", primaryConfig.Model).
+            Strs("fallback_models", fallbackModels).
+            Msg("LLM fallback client initialized")
+    } else {
+        // Create basic Client
+        llmClient = llm.NewClient(primaryConfig)
+        log.Info().Msg("LLM client initialized")
+    }
+}
+```
+
+### Agent Usage (No Changes Needed)
+
+Agents use `llmClient` the same way regardless of whether it's a `Client` or `FallbackClient`:
+
+```go
+// Build market context
+marketCtx := llm.MarketContext{
+    Symbol:       symbol,
+    CurrentPrice: currentPrice,
+    Indicators:   indicatorMap,
+}
+
+// Generate prompt
+userPrompt := a.promptBuilder.BuildTechnicalAnalysisPrompt(marketCtx)
+systemPrompt := a.promptBuilder.GetSystemPrompt()
+
+// Call LLM (automatically handles fallback if configured)
+response, err := a.llmClient.CompleteWithRetry(ctx, []llm.ChatMessage{
+    {Role: "system", Content: systemPrompt},
+    {Role: "user", Content: userPrompt},
+}, 2)
+
+if err != nil {
+    // All models failed (primary + all fallbacks)
+    log.Error().Err(err).Msg("LLM completion failed after fallbacks")
+    return ruleBasedAnalysis() // Fall back to rule-based
+}
+
+// Parse response
+var signal llm.Signal
+if err := a.llmClient.ParseJSONResponse(response.Choices[0].Message.Content, &signal); err != nil {
+    log.Error().Err(err).Msg("Failed to parse LLM response")
+    return ruleBasedAnalysis()
+}
+```
+
+### Benefits for Agents
+
+1. **Zero-downtime resilience**: If Claude is down, automatically use GPT-4
+2. **Cost optimization**: Use cheaper fallback models during high-volume periods
+3. **Performance**: Fast-fail with circuit breaker prevents wasted retries
+4. **Transparent**: Agent code unchanged, purely configuration-driven
+5. **Monitoring**: Track which models are being used and their success rates
+
+### Production Deployment
+
+**Recommended configuration for production**:
+
+```yaml
+llm:
+  enabled: true
+  primary_model: "claude-sonnet-4-20250514"  # Best quality
+  fallback_models:
+    - "gpt-4-turbo"        # High quality fallback
+    - "gpt-3.5-turbo"      # Cost-effective backup
+
+  circuit_breaker:
+    failure_threshold: 5   # Open circuit after 5 failures
+    success_threshold: 2   # Require 2 successes to close
+    timeout: 60s           # Test recovery after 60s
+    time_window: 5m        # Track failures over 5min window
+```
+
+**For high-frequency trading** (minimize latency):
+```yaml
+llm:
+  primary_model: "gpt-3.5-turbo"  # Fastest model
+  fallback_models:
+    - "claude-sonnet-4-20250514"  # Quality fallback
+
+  circuit_breaker:
+    failure_threshold: 3
+    timeout: 30s
+    time_window: 2m
+```
+
+### Testing Agent Fallback
+
+Run integration tests to verify agent behavior with fallback:
+
+```bash
+# Run all LLM tests including agent integration
+go test -v -race ./internal/llm/...
+
+# Run only agent integration tests
+go test -v -race -run TestAgent ./internal/llm/
+
+# Test output shows fallback in action:
+# {"level":"warn","model":"claude-sonnet-4","message":"LLM completion failed, trying fallback"}
+# {"level":"info","model":"gpt-4","message":"LLM completion succeeded"}
+```
+
 ---
 
-**Last Updated**: Phase 9 (T187, T189 completion)
-**Test Coverage**: 71.6% (internal/llm package)
+**Last Updated**: Phase 9 (T187, T189 completion + agent integration)
+**Test Coverage**: 71.3% (internal/llm package)
 **Related Files**:
 - `internal/llm/prompts.go` - Prompt templates
 - `internal/llm/prompts_test.go` - Unit tests
@@ -963,3 +1154,10 @@ curl -X POST http://localhost:8080/admin/circuit-breaker/reset/0
 - `internal/llm/client_test.go` - Integration tests
 - `internal/llm/fallback.go` - Fallback client and circuit breaker
 - `internal/llm/fallback_test.go` - Fallback and circuit breaker tests
+- `internal/llm/interface.go` - LLMClient interface
+- `internal/llm/agent_integration_test.go` - Agent integration tests
+- `configs/config.yaml` - LLM and fallback configuration
+- `cmd/agents/technical-agent/main.go` - Example agent implementation
+- `cmd/agents/trend-agent/main.go` - Trend following agent
+- `cmd/agents/reversion-agent/main.go` - Mean reversion agent
+- `cmd/agents/risk-agent/main.go` - Risk management agent
