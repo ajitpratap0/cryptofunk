@@ -2113,17 +2113,27 @@ This document consolidates all implementation tasks from the architecture and de
   - **✅ COMPLETE**: Full hot-swap system with comprehensive tests
   - **Estimate**: 4 hours
 
-- [ ] **T208** [P2] Implement agent cloning
-  - Clone agents for A/B testing
-  - Run variants in parallel
-  - **Acceptance**: Cloning works
+- [x] **T208** [P2] Implement agent cloning
+  - internal/orchestrator/cloning.go (699 lines)
+  - internal/orchestrator/cloning_test.go (651 lines)
+  - Clone agents with state inheritance
+  - Configuration overrides for variants
+  - Deep state copying with JSON serialization
+  - **✅ COMPLETE**: Full cloning system with tests
   - **Estimate**: 3 hours
 
-- [ ] **T209** [P2] Implement A/B testing framework
-  - Run control vs variant
-  - Compare performance
-  - Auto-select winner
-  - **Acceptance**: A/B testing works
+- [x] **T209** [P2] Implement A/B testing framework
+  - internal/orchestrator/cloning.go (same file)
+  - internal/orchestrator/cloning_test.go (same file)
+  - Control vs variant comparison with statistical analysis
+  - Performance metrics: latency, error rate, throughput
+  - Automatic winner selection based on weighted scoring
+  - Traffic splitting and variant management
+  - Experiment lifecycle: setup, running, completed, failed, cancelled
+  - Auto-promotion of winners via hot-swap
+  - Percentile calculations (P50, P95, P99)
+  - Real-time metric recording and aggregation
+  - **✅ COMPLETE**: Full A/B testing framework with 19 tests
   - **Estimate**: 4 hours
 
 - [ ] **T210** [P2] Implement hierarchical agents
