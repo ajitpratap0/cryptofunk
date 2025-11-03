@@ -2,6 +2,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -289,8 +292,179 @@ func (db *DB) GetLLMDecisionStats(ctx context.Context, agentName string, since t
 // FindSimilarDecisions finds decisions with similar market conditions (for T185)
 // This uses the context JSONB field to find similar situations
 func (db *DB) FindSimilarDecisions(ctx context.Context, symbol string, contextJSON []byte, limit int) ([]*LLMDecision, error) {
-	// For now, simple approach: find recent decisions for the same symbol
-	// TODO: Implement proper similarity search using pgvector embeddings
+	// Parse the context to extract indicators for similarity matching
+	var currentContext map[string]interface{}
+	if len(contextJSON) > 0 {
+		if err := json.Unmarshal(contextJSON, &currentContext); err != nil {
+			// If parsing fails, fall back to simple query
+			return db.findRecentDecisions(ctx, symbol, limit)
+		}
+	}
+
+	// Extract indicators from context for similarity matching
+	currentIndicators, ok := currentContext["indicators"].(map[string]interface{})
+	if !ok || len(currentIndicators) == 0 {
+		// No indicators available, use recent decisions
+		return db.findRecentDecisions(ctx, symbol, limit)
+	}
+
+	// Fetch recent decisions with context for the same symbol (last 30 days)
+	// We'll calculate similarity in Go code
+	query := `
+		SELECT
+			id, session_id, decision_type, symbol, prompt,
+			response, model, tokens_used, latency_ms, outcome, pnl,
+			context, agent_name, confidence, created_at
+		FROM llm_decisions
+		WHERE symbol = $1
+		  AND outcome IS NOT NULL
+		  AND context IS NOT NULL
+		  AND created_at > NOW() - INTERVAL '30 days'
+		ORDER BY created_at DESC
+		LIMIT $2
+	`
+
+	rows, err := db.pool.Query(ctx, query, symbol, limit*3) // Fetch more to allow filtering
+	if err != nil {
+		return db.findRecentDecisions(ctx, symbol, limit)
+	}
+	defer rows.Close()
+
+	type scoredDecision struct {
+		decision *LLMDecision
+		score    float64
+	}
+
+	var candidates []scoredDecision
+
+	for rows.Next() {
+		var d LLMDecision
+		err := rows.Scan(
+			&d.ID,
+			&d.SessionID,
+			&d.DecisionType,
+			&d.Symbol,
+			&d.Prompt,
+			&d.Response,
+			&d.Model,
+			&d.TokensUsed,
+			&d.LatencyMs,
+			&d.Outcome,
+			&d.PnL,
+			&d.Context,
+			&d.AgentName,
+			&d.Confidence,
+			&d.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+
+		// Calculate similarity score
+		score := calculateIndicatorSimilarity(currentIndicators, d.Context)
+		if score > 0 {
+			candidates = append(candidates, scoredDecision{
+				decision: &d,
+				score:    score,
+			})
+		}
+	}
+
+	// Sort by similarity score (descending), then by success, then by recency
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		// Prefer successful outcomes
+		iSuccess := candidates[i].decision.Outcome != nil && *candidates[i].decision.Outcome == "SUCCESS"
+		jSuccess := candidates[j].decision.Outcome != nil && *candidates[j].decision.Outcome == "SUCCESS"
+		if iSuccess != jSuccess {
+			return iSuccess
+		}
+		return candidates[i].decision.CreatedAt.After(candidates[j].decision.CreatedAt)
+	})
+
+	// Return top N similar decisions
+	var decisions []*LLMDecision
+	for i := 0; i < len(candidates) && i < limit; i++ {
+		decisions = append(decisions, candidates[i].decision)
+	}
+
+	// If no similar decisions found, fall back to recent decisions
+	if len(decisions) == 0 {
+		return db.findRecentDecisions(ctx, symbol, limit)
+	}
+
+	return decisions, nil
+}
+
+// calculateIndicatorSimilarity calculates similarity score between current indicators
+// and a decision's context. Returns a score from 0-100 (number of matching indicators).
+func calculateIndicatorSimilarity(currentIndicators map[string]interface{}, contextJSON []byte) float64 {
+	if len(contextJSON) == 0 {
+		return 0
+	}
+
+	var decisionContext map[string]interface{}
+	if err := json.Unmarshal(contextJSON, &decisionContext); err != nil {
+		return 0
+	}
+
+	decisionIndicators, ok := decisionContext["indicators"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+
+	// Count matching indicators (within 15% tolerance)
+	matchCount := 0
+	tolerance := 0.15 // 15% tolerance
+
+	for key, currentValue := range currentIndicators {
+		if pastValue, exists := decisionIndicators[key]; exists {
+			currentFloat := toFloat64(currentValue)
+			pastFloat := toFloat64(pastValue)
+
+			if currentFloat == 0 && pastFloat == 0 {
+				matchCount++
+				continue
+			}
+
+			// Calculate percentage difference
+			avgValue := (math.Abs(currentFloat) + math.Abs(pastFloat)) / 2
+			if avgValue == 0 {
+				continue
+			}
+
+			percentDiff := math.Abs(currentFloat-pastFloat) / avgValue
+			if percentDiff <= tolerance {
+				matchCount++
+			}
+		}
+	}
+
+	return float64(matchCount)
+}
+
+// toFloat64 converts interface{} to float64, handling various numeric types
+func toFloat64(val interface{}) float64 {
+	switch v := val.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case int32:
+		return float64(v)
+	default:
+		return 0
+	}
+}
+
+// findRecentDecisions is a fallback that finds recent decisions for the same symbol
+func (db *DB) findRecentDecisions(ctx context.Context, symbol string, limit int) ([]*LLMDecision, error) {
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt,

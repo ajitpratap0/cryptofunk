@@ -1862,13 +1862,21 @@ This document consolidates all implementation tasks from the architecture and de
     - Position limiting (5 shown, rest summarized)
     - Minimal context builder for tight token limits
 
-- [ ] **T185** [P1] Add "similar situations" retrieval
+- [x] **T185** [P1] Add "similar situations" retrieval
   - Query past decisions with similar market conditions
   - Use TimescaleDB time-series queries
   - Include past outcomes in LLM context
   - "In similar situations, we did X and got Y result"
-  - **Acceptance**: LLMs can learn from past decisions
-  - **Estimate**: 3 hours
+  - **Acceptance**: LLMs can learn from past decisions ✅
+  - **Actual**: ~2.5 hours
+  - **Implementation**:
+    - Enhanced FindSimilarDecisions() in internal/db/llm_decisions.go
+    - Indicator-based similarity matching with 15% tolerance
+    - Scores decisions by number of matching indicators
+    - Falls back to recent decisions if no similar situations found
+    - Comprehensive test suite (internal/db/llm_decisions_similarity_test.go)
+    - Prefers successful outcomes when similarity scores are equal
+    - Already integrated with ContextBuilder from T184
 
 - [ ] **T186** [P2] Implement conversation memory (optional)
   - Store agent "thoughts" and reasoning chains
