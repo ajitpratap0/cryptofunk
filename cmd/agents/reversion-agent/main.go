@@ -116,7 +116,7 @@ type ReversionAgent struct {
 	natsTopic string
 
 	// LLM client for AI-powered analysis
-	llmClient     *llm.Client
+	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
 	promptBuilder *llm.PromptBuilder
 	useLLM        bool
 
@@ -232,12 +232,12 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 	symbols := getStringSliceFromConfig(agentConfig, "symbols", []string{"bitcoin", "ethereum"})
 
 	// Initialize LLM client if enabled
-	var llmClient *llm.Client
+	var llmClient llm.LLMClient
 	var promptBuilder *llm.PromptBuilder
 	useLLM := viper.GetBool("llm.enabled")
 
 	if useLLM {
-		llmConfig := llm.ClientConfig{
+		primaryConfig := llm.ClientConfig{
 			Endpoint:    viper.GetString("llm.endpoint"),
 			APIKey:      viper.GetString("llm.api_key"),
 			Model:       viper.GetString("llm.primary_model"),
@@ -245,9 +245,53 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 			MaxTokens:   viper.GetInt("llm.max_tokens"),
 			Timeout:     viper.GetDuration("llm.timeout"),
 		}
-		llmClient = llm.NewClient(llmConfig)
+
+		// Check if fallback models are configured
+		fallbackModels := viper.GetStringSlice("llm.fallback_models")
+		if len(fallbackModels) > 0 {
+			// Create FallbackClient with primary + fallback models
+			fallbackConfigs := make([]llm.ClientConfig, len(fallbackModels))
+			for i, model := range fallbackModels {
+				fallbackConfigs[i] = llm.ClientConfig{
+					Endpoint:    viper.GetString("llm.endpoint"),
+					APIKey:      viper.GetString("llm.api_key"),
+					Model:       model,
+					Temperature: viper.GetFloat64("llm.temperature"),
+					MaxTokens:   viper.GetInt("llm.max_tokens"),
+					Timeout:     viper.GetDuration("llm.timeout"),
+				}
+			}
+
+			fallbackConfig := llm.FallbackConfig{
+				PrimaryConfig:   primaryConfig,
+				PrimaryName:     viper.GetString("llm.primary_model"),
+				FallbackConfigs: fallbackConfigs,
+				FallbackNames:   fallbackModels,
+				CircuitBreakerConfig: llm.CircuitBreakerConfig{
+					FailureThreshold: viper.GetInt("llm.circuit_breaker.failure_threshold"),
+					SuccessThreshold: viper.GetInt("llm.circuit_breaker.success_threshold"),
+					Timeout:          viper.GetDuration("llm.circuit_breaker.timeout"),
+					TimeWindow:       viper.GetDuration("llm.circuit_breaker.time_window"),
+				},
+			}
+
+			// Apply defaults if not set
+			if fallbackConfig.CircuitBreakerConfig.FailureThreshold == 0 {
+				fallbackConfig.CircuitBreakerConfig = llm.DefaultCircuitBreakerConfig()
+			}
+
+			llmClient = llm.NewFallbackClient(fallbackConfig)
+			log.Info().
+				Str("primary_model", fallbackConfig.PrimaryName).
+				Strs("fallback_models", fallbackModels).
+				Msg("LLM fallback client initialized for mean reversion")
+		} else {
+			// Create basic Client
+			llmClient = llm.NewClient(primaryConfig)
+			log.Info().Msg("LLM-powered mean reversion analysis enabled")
+		}
+
 		promptBuilder = llm.NewPromptBuilder(llm.AgentTypeReversion)
-		log.Info().Msg("LLM-powered mean reversion analysis enabled")
 	} else {
 		log.Info().Msg("Using rule-based mean reversion analysis")
 	}

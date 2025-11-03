@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/api"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
@@ -146,6 +147,11 @@ func (s *APIServer) setupRoutes() {
 			config.GET("", s.handleGetConfig)
 			config.PATCH("", s.handleUpdateConfig)
 		}
+
+		// Decision explainability routes
+		decisionRepo := api.NewDecisionRepository(s.db.Pool())
+		decisionHandler := api.NewDecisionHandler(decisionRepo)
+		decisionHandler.RegisterRoutes(v1)
 	}
 
 	// Root endpoint
