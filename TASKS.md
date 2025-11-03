@@ -2199,12 +2199,30 @@ This document consolidates all implementation tasks from the architecture and de
       - All objective function tests
       - Integration tests with full backtest runs
 
-- [ ] **T214** [P1] Implement report generation
+- [x] **T214** [P1] Implement report generation
   - HTML reports
   - Equity curve charts
   - Trade analysis
   - **Acceptance**: Reports generated
   - **Estimate**: 4 hours
+  - **✅ COMPLETE**: Comprehensive HTML report generator with interactive charts
+  - Implementation:
+    - pkg/backtest/report.go (750+ lines)
+      - ReportGenerator with HTML template engine
+      - Interactive Chart.js visualizations
+      - Equity curve, drawdown, monthly returns, trade distribution charts
+      - Win/loss pie chart
+      - Performance metrics summary
+      - Trade breakdown section
+      - Recent trades table
+      - Optimization results (optional)
+      - Responsive CSS design
+    - pkg/backtest/report_test.go (500+ lines)
+      - 20+ comprehensive test cases
+      - Chart data formatting tests
+      - Template rendering tests
+      - File save/load tests
+      - All tests passing
 
 - [ ] **T215** [P1] Create CLI tool for backtesting
   - Command-line interface
