@@ -24,54 +24,54 @@ type ExperimentManager struct {
 
 // Experiment defines an A/B test comparing different LLM configurations
 type Experiment struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Control     *Variant        `json:"control"`
-	Variants    []*Variant      `json:"variants"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	Control      *Variant           `json:"control"`
+	Variants     []*Variant         `json:"variants"`
 	TrafficSplit map[string]float64 `json:"traffic_split"` // variant_id -> percentage (0-1)
-	StartTime   time.Time       `json:"start_time"`
-	EndTime     *time.Time      `json:"end_time,omitempty"`
-	Active      bool            `json:"active"`
-	Tags        []string        `json:"tags,omitempty"`
+	StartTime    time.Time          `json:"start_time"`
+	EndTime      *time.Time         `json:"end_time,omitempty"`
+	Active       bool               `json:"active"`
+	Tags         []string           `json:"tags,omitempty"`
 }
 
 // Variant represents a configuration variant to test
 type Variant struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Model       string  `json:"model"`         // e.g., "claude-sonnet-4", "gpt-4"
-	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
-	SystemPrompt string `json:"system_prompt,omitempty"` // Optional custom system prompt
-	UserPromptTemplate string `json:"user_prompt_template,omitempty"` // Optional template
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	Model              string  `json:"model"` // e.g., "claude-sonnet-4", "gpt-4"
+	Temperature        float64 `json:"temperature"`
+	MaxTokens          int     `json:"max_tokens"`
+	SystemPrompt       string  `json:"system_prompt,omitempty"`        // Optional custom system prompt
+	UserPromptTemplate string  `json:"user_prompt_template,omitempty"` // Optional template
 }
 
 // ExperimentResult contains results for a specific variant
 type ExperimentResult struct {
-	VariantID       string  `json:"variant_id"`
-	VariantName     string  `json:"variant_name"`
-	TotalDecisions  int     `json:"total_decisions"`
-	SuccessCount    int     `json:"success_count"`
-	FailureCount    int     `json:"failure_count"`
-	PendingCount    int     `json:"pending_count"`
-	SuccessRate     float64 `json:"success_rate"`
-	AvgPnL          float64 `json:"avg_pnl"`
-	TotalPnL        float64 `json:"total_pnl"`
-	AvgLatency      float64 `json:"avg_latency_ms"`
-	AvgTokens       float64 `json:"avg_tokens"`
-	AvgConfidence   float64 `json:"avg_confidence"`
+	VariantID      string  `json:"variant_id"`
+	VariantName    string  `json:"variant_name"`
+	TotalDecisions int     `json:"total_decisions"`
+	SuccessCount   int     `json:"success_count"`
+	FailureCount   int     `json:"failure_count"`
+	PendingCount   int     `json:"pending_count"`
+	SuccessRate    float64 `json:"success_rate"`
+	AvgPnL         float64 `json:"avg_pnl"`
+	TotalPnL       float64 `json:"total_pnl"`
+	AvgLatency     float64 `json:"avg_latency_ms"`
+	AvgTokens      float64 `json:"avg_tokens"`
+	AvgConfidence  float64 `json:"avg_confidence"`
 }
 
 // ExperimentComparison compares results across variants
 type ExperimentComparison struct {
-	ExperimentID    string              `json:"experiment_id"`
-	ExperimentName  string              `json:"experiment_name"`
-	Control         *ExperimentResult   `json:"control"`
-	Variants        []*ExperimentResult `json:"variants"`
-	WinningVariant  string              `json:"winning_variant,omitempty"`
-	StatSigWinner   bool                `json:"statistically_significant"`
-	GeneratedAt     time.Time           `json:"generated_at"`
+	ExperimentID   string              `json:"experiment_id"`
+	ExperimentName string              `json:"experiment_name"`
+	Control        *ExperimentResult   `json:"control"`
+	Variants       []*ExperimentResult `json:"variants"`
+	WinningVariant string              `json:"winning_variant,omitempty"`
+	StatSigWinner  bool                `json:"statistically_significant"`
+	GeneratedAt    time.Time           `json:"generated_at"`
 }
 
 // NewExperimentManager creates a new experiment manager

@@ -11,9 +11,9 @@ import (
 
 // ContextBuilder builds rich context for LLM prompts with token limiting
 type ContextBuilder struct {
-	tracker      *DecisionTracker
-	maxTokens    int // Maximum tokens for context (default 4000)
-	agentName    string
+	tracker        *DecisionTracker
+	maxTokens      int // Maximum tokens for context (default 4000)
+	agentName      string
 	includeHistory bool // Include past decisions
 }
 
@@ -40,23 +40,23 @@ func NewContextBuilder(tracker *DecisionTracker, config ContextBuilderConfig) *C
 
 // EnhancedMarketContext includes historical and portfolio data
 type EnhancedMarketContext struct {
-	CurrentMarket    MarketContext              `json:"current_market"`
-	Positions        []PositionContext          `json:"positions,omitempty"`
-	RecentDecisions  []HistoricalDecision       `json:"recent_decisions,omitempty"`
-	SimilarSituations []HistoricalDecision      `json:"similar_situations,omitempty"`
-	PortfolioSummary *PortfolioSummary          `json:"portfolio_summary,omitempty"`
-	MarketRegime     string                     `json:"market_regime,omitempty"`
+	CurrentMarket     MarketContext        `json:"current_market"`
+	Positions         []PositionContext    `json:"positions,omitempty"`
+	RecentDecisions   []HistoricalDecision `json:"recent_decisions,omitempty"`
+	SimilarSituations []HistoricalDecision `json:"similar_situations,omitempty"`
+	PortfolioSummary  *PortfolioSummary    `json:"portfolio_summary,omitempty"`
+	MarketRegime      string               `json:"market_regime,omitempty"`
 }
 
 // PortfolioSummary provides high-level portfolio metrics
 type PortfolioSummary struct {
-	TotalValue       float64 `json:"total_value"`
-	TotalPnL         float64 `json:"total_pnl"`
-	OpenPositions    int     `json:"open_positions"`
-	DayPnL           float64 `json:"day_pnl"`
-	WeekPnL          float64 `json:"week_pnl"`
-	SuccessRate      float64 `json:"success_rate"`      // Last 24h
-	AvgConfidence    float64 `json:"avg_confidence"`    // Last 24h
+	TotalValue    float64 `json:"total_value"`
+	TotalPnL      float64 `json:"total_pnl"`
+	OpenPositions int     `json:"open_positions"`
+	DayPnL        float64 `json:"day_pnl"`
+	WeekPnL       float64 `json:"week_pnl"`
+	SuccessRate   float64 `json:"success_rate"`   // Last 24h
+	AvgConfidence float64 `json:"avg_confidence"` // Last 24h
 }
 
 // BuildContext creates an enhanced context for LLM prompts

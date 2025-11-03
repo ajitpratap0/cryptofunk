@@ -9,11 +9,11 @@ import (
 
 func TestCalculateIndicatorSimilarity(t *testing.T) {
 	tests := []struct {
-		name               string
-		currentIndicators  map[string]interface{}
-		decisionContext    map[string]interface{}
-		expectedMinScore   float64
-		expectedMaxScore   float64
+		name              string
+		currentIndicators map[string]interface{}
+		decisionContext   map[string]interface{}
+		expectedMinScore  float64
+		expectedMaxScore  float64
 	}{
 		{
 			name: "Exact match - all indicators",
@@ -198,9 +198,9 @@ func TestCalculateIndicatorSimilarity_MultipleIndicators(t *testing.T) {
 	// Test with varying degrees of similarity
 	decisionContext := map[string]interface{}{
 		"indicators": map[string]interface{}{
-			"RSI":  67.0,   // Match (3% diff)
-			"MACD": 130.0,  // Match (4% diff)
-			"ADX":  35.0,   // No match (22% diff)
+			"RSI":  67.0,    // Match (3% diff)
+			"MACD": 130.0,   // Match (4% diff)
+			"ADX":  35.0,    // No match (22% diff)
 			"EMA":  51000.0, // Match (2% diff)
 			"SMA":  49500.0, // Not in current indicators
 		},

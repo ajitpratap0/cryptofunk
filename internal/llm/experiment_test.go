@@ -169,9 +169,9 @@ func TestSelectVariant_ConsistentHashing(t *testing.T) {
 	}
 
 	exp := &Experiment{
-		ID:      "test-exp",
-		Name:    "Test",
-		Control: control,
+		ID:       "test-exp",
+		Name:     "Test",
+		Control:  control,
 		Variants: []*Variant{variant1},
 		TrafficSplit: map[string]float64{
 			"control":   0.5,
@@ -232,9 +232,9 @@ func TestSelectVariant_TrafficDistribution(t *testing.T) {
 	}
 
 	exp := &Experiment{
-		ID:      "test-exp",
-		Name:    "Test",
-		Control: control,
+		ID:       "test-exp",
+		Name:     "Test",
+		Control:  control,
 		Variants: []*Variant{variant1},
 		TrafficSplit: map[string]float64{
 			"control":   0.7, // 70% control

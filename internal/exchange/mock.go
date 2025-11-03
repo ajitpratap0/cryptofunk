@@ -51,7 +51,7 @@ func NewMockExchange(database *db.DB) *MockExchange {
 }
 
 // PlaceOrder places a new order in the mock exchange
-func (m *MockExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse, error) {
+func (m *MockExchange) PlaceOrder(ctx context.Context, req PlaceOrderRequest) (*PlaceOrderResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -90,7 +90,7 @@ func (m *MockExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse, e
 	// Persist to database if available
 	if m.db != nil {
 		dbOrder := m.convertToDBOrder(order)
-		if err := m.db.InsertOrder(context.Background(), dbOrder); err != nil {
+		if err := m.db.InsertOrder(ctx, dbOrder); err != nil {
 			log.Error().
 				Err(err).
 				Str("order_id", order.ID).
@@ -109,14 +109,14 @@ func (m *MockExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse, e
 
 	// Simulate immediate fill for market orders
 	if req.Type == OrderTypeMarket {
-		m.simulateMarketFill(order)
+		m.simulateMarketFill(ctx, order)
 	} else {
 		order.Status = OrderStatusOpen
 		order.UpdatedAt = time.Now()
 
 		// Update status in database
 		if m.db != nil {
-			m.updateOrderStatusInDB(order)
+			m.updateOrderStatusInDB(ctx, order)
 		}
 	}
 
@@ -128,7 +128,7 @@ func (m *MockExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse, e
 }
 
 // CancelOrder cancels an open order
-func (m *MockExchange) CancelOrder(orderID string) (*Order, error) {
+func (m *MockExchange) CancelOrder(ctx context.Context, orderID string) (*Order, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -150,7 +150,7 @@ func (m *MockExchange) CancelOrder(orderID string) (*Order, error) {
 		orderUUID, _ := uuid.Parse(orderID)
 		status := db.ConvertOrderStatus(string(order.Status))
 		err := m.db.UpdateOrderStatus(
-			context.Background(),
+			ctx,
 			orderUUID,
 			status,
 			order.FilledQty,
@@ -175,7 +175,7 @@ func (m *MockExchange) CancelOrder(orderID string) (*Order, error) {
 }
 
 // GetOrder retrieves order details
-func (m *MockExchange) GetOrder(orderID string) (*Order, error) {
+func (m *MockExchange) GetOrder(ctx context.Context, orderID string) (*Order, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -188,7 +188,7 @@ func (m *MockExchange) GetOrder(orderID string) (*Order, error) {
 }
 
 // GetOrderFills retrieves all fills for an order
-func (m *MockExchange) GetOrderFills(orderID string) ([]Fill, error) {
+func (m *MockExchange) GetOrderFills(ctx context.Context, orderID string) ([]Fill, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -234,7 +234,7 @@ func (m *MockExchange) validateOrder(req PlaceOrderRequest) error {
 }
 
 // simulateMarketFill simulates realistic fill for market orders with slippage and market impact
-func (m *MockExchange) simulateMarketFill(order *Order) {
+func (m *MockExchange) simulateMarketFill(ctx context.Context, order *Order) {
 	now := time.Now()
 
 	// Use stored market price or simulate one
@@ -282,10 +282,10 @@ func (m *MockExchange) simulateMarketFill(order *Order) {
 	// Persist fills to database
 	if m.db != nil {
 		for _, fill := range fills {
-			m.persistTradeInDB(order.ID, fill)
+			m.persistTradeInDB(ctx, order.ID, fill)
 		}
 		// Update order status in database
-		m.updateOrderStatusInDB(order)
+		m.updateOrderStatusInDB(ctx, order)
 	}
 
 	log.Info().
@@ -416,7 +416,7 @@ func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
 }
 
 // updateOrderStatusInDB updates order status in database
-func (m *MockExchange) updateOrderStatusInDB(order *Order) {
+func (m *MockExchange) updateOrderStatusInDB(ctx context.Context, order *Order) {
 	if m.db == nil {
 		return
 	}
@@ -426,7 +426,7 @@ func (m *MockExchange) updateOrderStatusInDB(order *Order) {
 	quoteQty := order.FilledQty * order.AvgFillPrice
 
 	err := m.db.UpdateOrderStatus(
-		context.Background(),
+		ctx,
 		orderID,
 		status,
 		order.FilledQty,
@@ -445,7 +445,7 @@ func (m *MockExchange) updateOrderStatusInDB(order *Order) {
 }
 
 // persistTradeInDB persists a trade (fill) to database
-func (m *MockExchange) persistTradeInDB(orderID string, fill Fill) {
+func (m *MockExchange) persistTradeInDB(ctx context.Context, orderID string, fill Fill) {
 	if m.db == nil {
 		return
 	}
@@ -471,7 +471,7 @@ func (m *MockExchange) persistTradeInDB(orderID string, fill Fill) {
 		CreatedAt:       fill.Timestamp,
 	}
 
-	if err := m.db.InsertTrade(context.Background(), dbTrade); err != nil {
+	if err := m.db.InsertTrade(ctx, dbTrade); err != nil {
 		log.Error().
 			Err(err).
 			Str("order_id", orderID).

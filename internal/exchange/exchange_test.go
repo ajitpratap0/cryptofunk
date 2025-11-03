@@ -31,7 +31,7 @@ func TestMockExchangeOrderLifecycle(t *testing.T) {
 			Quantity: 0.1,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.OrderID)
 		assert.Equal(t, OrderStatusFilled, resp.Status)
@@ -46,18 +46,18 @@ func TestMockExchangeOrderLifecycle(t *testing.T) {
 			Price:    51000.0,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.OrderID)
 		assert.Equal(t, OrderStatusOpen, resp.Status)
 
 		// Get order
-		order, err := exchange.GetOrder(resp.OrderID)
+		order, err := exchange.GetOrder(context.Background(), resp.OrderID)
 		require.NoError(t, err)
 		assert.Equal(t, OrderStatusOpen, order.Status)
 
 		// Cancel order
-		cancelledOrder, err := exchange.CancelOrder(resp.OrderID)
+		cancelledOrder, err := exchange.CancelOrder(context.Background(), resp.OrderID)
 		require.NoError(t, err)
 		assert.Equal(t, OrderStatusCancelled, cancelledOrder.Status)
 	})
@@ -70,13 +70,13 @@ func TestMockExchangeOrderLifecycle(t *testing.T) {
 			Quantity: 0.02,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.OrderID)
 		assert.Equal(t, OrderStatusFilled, resp.Status)
 
 		// Get fills
-		fills, err := exchange.GetOrderFills(resp.OrderID)
+		fills, err := exchange.GetOrderFills(context.Background(), resp.OrderID)
 		require.NoError(t, err)
 		assert.NotEmpty(t, fills)
 
@@ -101,7 +101,7 @@ func TestMockExchangeValidation(t *testing.T) {
 			Quantity: 0.1,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err) // No error, but status is rejected
 		assert.Equal(t, OrderStatusRejected, resp.Status)
 	})
@@ -114,7 +114,7 @@ func TestMockExchangeValidation(t *testing.T) {
 			Quantity: 0.1,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 		assert.Equal(t, OrderStatusRejected, resp.Status)
 	})
@@ -127,7 +127,7 @@ func TestMockExchangeValidation(t *testing.T) {
 			Quantity: 0,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 		assert.Equal(t, OrderStatusRejected, resp.Status)
 	})
@@ -141,7 +141,7 @@ func TestMockExchangeValidation(t *testing.T) {
 			Price:    0,
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 		assert.Equal(t, OrderStatusRejected, resp.Status)
 	})
@@ -160,10 +160,10 @@ func TestMockExchangeSlippage(t *testing.T) {
 			Quantity: 0.01, // Small quantity
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 
-		order, err := exchange.GetOrder(resp.OrderID)
+		order, err := exchange.GetOrder(context.Background(), resp.OrderID)
 		require.NoError(t, err)
 
 		// Slippage should be minimal (< 0.1%)
@@ -179,10 +179,10 @@ func TestMockExchangeSlippage(t *testing.T) {
 			Quantity: 5.0, // Large quantity
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 
-		order, err := exchange.GetOrder(resp.OrderID)
+		order, err := exchange.GetOrder(context.Background(), resp.OrderID)
 		require.NoError(t, err)
 
 		// Large orders should have more slippage than small orders
@@ -204,11 +204,11 @@ func TestMockExchangePartialFills(t *testing.T) {
 			Quantity: 10.0, // Very large quantity
 		}
 
-		resp, err := exchange.PlaceOrder(req)
+		resp, err := exchange.PlaceOrder(context.Background(), req)
 		require.NoError(t, err)
 
 		// Get fills
-		fills, err := exchange.GetOrderFills(resp.OrderID)
+		fills, err := exchange.GetOrderFills(context.Background(), resp.OrderID)
 		require.NoError(t, err)
 
 		// Should have multiple fills
@@ -356,7 +356,7 @@ func TestPositionManagerShortPosition(t *testing.T) {
 		// Check position
 		position, exists := pm.GetPosition("ETHUSDT")
 		require.True(t, exists)
-		assert.Equal(t, 1.0, position.Quantity) // Quantity is always positive
+		assert.Equal(t, 1.0, position.Quantity)              // Quantity is always positive
 		assert.Equal(t, db.PositionSideShort, position.Side) // Side indicates SHORT
 		assert.Equal(t, 3000.0, position.EntryPrice)
 	})

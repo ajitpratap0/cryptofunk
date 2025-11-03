@@ -81,6 +81,8 @@ func NewServicePaper(database *db.DB) *Service {
 func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceMarketOrder called")
 
+	ctx := context.Background()
+
 	// Extract symbol
 	symbol, ok := args["symbol"].(string)
 	if !ok || symbol == "" {
@@ -115,13 +117,13 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 	}
 
 	// Place order
-	resp, err := s.exchange.PlaceOrder(req)
+	resp, err := s.exchange.PlaceOrder(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
 
 	// Get order details
-	order, err := s.exchange.GetOrder(resp.OrderID)
+	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil // Still return the response even if we can't get details
@@ -129,9 +131,8 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 
 	// Update positions if order was filled
 	if order.Status == OrderStatusFilled {
-		fills, err := s.exchange.GetOrderFills(order.ID)
+		fills, err := s.exchange.GetOrderFills(ctx, order.ID)
 		if err == nil && len(fills) > 0 {
-			ctx := context.Background()
 			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
 				log.Error().Err(err).Msg("Failed to update positions after order fill")
 			}
@@ -144,6 +145,8 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 // PlaceLimitOrder places a limit order
 func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceLimitOrder called")
+
+	ctx := context.Background()
 
 	// Extract symbol
 	symbol, ok := args["symbol"].(string)
@@ -189,13 +192,13 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 	}
 
 	// Place order
-	resp, err := s.exchange.PlaceOrder(req)
+	resp, err := s.exchange.PlaceOrder(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
 
 	// Get order details
-	order, err := s.exchange.GetOrder(resp.OrderID)
+	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil
@@ -203,9 +206,8 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 
 	// Update positions if order was filled (limit orders may fill immediately in some cases)
 	if order.Status == OrderStatusFilled {
-		fills, err := s.exchange.GetOrderFills(order.ID)
+		fills, err := s.exchange.GetOrderFills(ctx, order.ID)
 		if err == nil && len(fills) > 0 {
-			ctx := context.Background()
 			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
 				log.Error().Err(err).Msg("Failed to update positions after order fill")
 			}
@@ -219,6 +221,8 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("CancelOrder called")
 
+	ctx := context.Background()
+
 	// Extract order_id
 	orderID, ok := args["order_id"].(string)
 	if !ok || orderID == "" {
@@ -226,7 +230,7 @@ func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) 
 	}
 
 	// Cancel order
-	order, err := s.exchange.CancelOrder(orderID)
+	order, err := s.exchange.CancelOrder(ctx, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
@@ -238,6 +242,8 @@ func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) 
 func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetOrderStatus called")
 
+	ctx := context.Background()
+
 	// Extract order_id
 	orderID, ok := args["order_id"].(string)
 	if !ok || orderID == "" {
@@ -245,13 +251,13 @@ func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, erro
 	}
 
 	// Get order
-	order, err := s.exchange.GetOrder(orderID)
+	order, err := s.exchange.GetOrder(ctx, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
 
 	// Get fills
-	fills, err := s.exchange.GetOrderFills(orderID)
+	fills, err := s.exchange.GetOrderFills(ctx, orderID)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", orderID).Msg("Failed to get order fills")
 		// Continue even if we can't get fills

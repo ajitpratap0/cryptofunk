@@ -296,6 +296,7 @@ func (s *APIServer) handleGetAgentStatus(c *gin.Context) {
 		"healthy":      agent.IsHealthy,
 	})
 }
+
 // Position handlers
 func (s *APIServer) handleListPositions(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -370,6 +371,7 @@ func (s *APIServer) handleGetPosition(c *gin.Context) {
 		"position": position,
 	})
 }
+
 // Order handlers
 func (s *APIServer) handleListOrders(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -471,15 +473,15 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	}
 
 	order := &db.Order{
-		ID:       uuid.New(),
-		Symbol:   req.Symbol,
-		Exchange: "API", // Manual order via API
-		Side:     db.ConvertOrderSide(req.Side),
-		Type:     db.ConvertOrderType(req.Type),
-		Quantity: req.Quantity,
-		Price:    price,
-		Status:   db.OrderStatusNew,
-		PlacedAt: time.Now(),
+		ID:        uuid.New(),
+		Symbol:    req.Symbol,
+		Exchange:  "API", // Manual order via API
+		Side:      db.ConvertOrderSide(req.Side),
+		Type:      db.ConvertOrderType(req.Type),
+		Quantity:  req.Quantity,
+		Price:     price,
+		Status:    db.OrderStatusNew,
+		PlacedAt:  time.Now(),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -557,6 +559,7 @@ func (s *APIServer) handleCancelOrder(c *gin.Context) {
 		"message": "Order cancelled successfully",
 	})
 }
+
 // Trading control handlers
 func (s *APIServer) handleStartTrading(c *gin.Context) {
 	var req struct {
@@ -711,6 +714,7 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		"note":       "Pause logic to be implemented in orchestrator",
 	})
 }
+
 // Config handlers
 func (s *APIServer) handleGetConfig(c *gin.Context) {
 	// Return sanitized configuration (no API keys, passwords, or secrets)
@@ -892,8 +896,8 @@ func (s *APIServer) sanitizeConfig(cfg *config.Config) map[string]interface{} {
 			// Omit: password
 		},
 		"nats": map[string]interface{}{
-			"url":               cfg.NATS.URL,
-			"enable_jetstream":  cfg.NATS.EnableJetStream,
+			"url":              cfg.NATS.URL,
+			"enable_jetstream": cfg.NATS.EnableJetStream,
 		},
 		"llm": map[string]interface{}{
 			"gateway":        cfg.LLM.Gateway,
@@ -914,13 +918,13 @@ func (s *APIServer) sanitizeConfig(cfg *config.Config) map[string]interface{} {
 			"default_quantity": cfg.Trading.DefaultQuantity,
 		},
 		"risk": map[string]interface{}{
-			"max_position_size":      cfg.Risk.MaxPositionSize,
-			"max_daily_loss":         cfg.Risk.MaxDailyLoss,
-			"max_drawdown":           cfg.Risk.MaxDrawdown,
-			"default_stop_loss":      cfg.Risk.DefaultStopLoss,
-			"default_take_profit":    cfg.Risk.DefaultTakeProfit,
-			"llm_approval_required":  cfg.Risk.LLMApprovalRequired,
-			"min_confidence":         cfg.Risk.MinConfidence,
+			"max_position_size":     cfg.Risk.MaxPositionSize,
+			"max_daily_loss":        cfg.Risk.MaxDailyLoss,
+			"max_drawdown":          cfg.Risk.MaxDrawdown,
+			"default_stop_loss":     cfg.Risk.DefaultStopLoss,
+			"default_take_profit":   cfg.Risk.DefaultTakeProfit,
+			"llm_approval_required": cfg.Risk.LLMApprovalRequired,
+			"min_confidence":        cfg.Risk.MinConfidence,
 		},
 		"api": map[string]interface{}{
 			"host": cfg.API.Host,
@@ -971,23 +975,23 @@ func (s *APIServer) sanitizeConfig(cfg *config.Config) map[string]interface{} {
 // BroadcastPositionUpdate broadcasts a position update to all WebSocket clients
 func (s *APIServer) BroadcastPositionUpdate(position *db.Position) error {
 	data := map[string]interface{}{
-		"position_id":     position.ID.String(),
-		"session_id":      position.SessionID,
-		"symbol":          position.Symbol,
-		"exchange":        position.Exchange,
-		"side":            position.Side,
-		"entry_price":     position.EntryPrice,
-		"exit_price":      position.ExitPrice,
-		"quantity":        position.Quantity,
-		"entry_time":      position.EntryTime,
-		"exit_time":       position.ExitTime,
-		"stop_loss":       position.StopLoss,
-		"take_profit":     position.TakeProfit,
-		"realized_pnl":    position.RealizedPnL,
-		"unrealized_pnl":  position.UnrealizedPnL,
-		"fees":            position.Fees,
-		"entry_reason":    position.EntryReason,
-		"exit_reason":     position.ExitReason,
+		"position_id":    position.ID.String(),
+		"session_id":     position.SessionID,
+		"symbol":         position.Symbol,
+		"exchange":       position.Exchange,
+		"side":           position.Side,
+		"entry_price":    position.EntryPrice,
+		"exit_price":     position.ExitPrice,
+		"quantity":       position.Quantity,
+		"entry_time":     position.EntryTime,
+		"exit_time":      position.ExitTime,
+		"stop_loss":      position.StopLoss,
+		"take_profit":    position.TakeProfit,
+		"realized_pnl":   position.RealizedPnL,
+		"unrealized_pnl": position.UnrealizedPnL,
+		"fees":           position.Fees,
+		"entry_reason":   position.EntryReason,
+		"exit_reason":    position.ExitReason,
 	}
 
 	return s.hub.Broadcast(MessageTypePositionUpdate, data)
@@ -1010,19 +1014,19 @@ func (s *APIServer) BroadcastPnLUpdate(sessionID uuid.UUID, totalPnL, realizedPn
 // BroadcastTradeNotification broadcasts a trade (fill) notification
 func (s *APIServer) BroadcastTradeNotification(trade *db.Trade) error {
 	data := map[string]interface{}{
-		"trade_id":         trade.ID.String(),
-		"order_id":         trade.OrderID.String(),
+		"trade_id":          trade.ID.String(),
+		"order_id":          trade.OrderID.String(),
 		"exchange_trade_id": trade.ExchangeTradeID,
-		"symbol":           trade.Symbol,
-		"exchange":         trade.Exchange,
-		"side":             trade.Side,
-		"price":            trade.Price,
-		"quantity":         trade.Quantity,
-		"quote_quantity":   trade.QuoteQuantity,
-		"commission":       trade.Commission,
-		"commission_asset": trade.CommissionAsset,
-		"executed_at":      trade.ExecutedAt,
-		"is_maker":         trade.IsMaker,
+		"symbol":            trade.Symbol,
+		"exchange":          trade.Exchange,
+		"side":              trade.Side,
+		"price":             trade.Price,
+		"quantity":          trade.Quantity,
+		"quote_quantity":    trade.QuoteQuantity,
+		"commission":        trade.Commission,
+		"commission_asset":  trade.CommissionAsset,
+		"executed_at":       trade.ExecutedAt,
+		"is_maker":          trade.IsMaker,
 	}
 
 	return s.hub.Broadcast(MessageTypeTrade, data)

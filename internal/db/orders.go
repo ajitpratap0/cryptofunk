@@ -458,7 +458,11 @@ func (db *DB) GetRecentOrders(ctx context.Context, limit int) ([]*Order, error) 
 }
 
 // scanOrders is a helper to scan multiple order rows
-func scanOrders(rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) ([]*Order, error) {
+func scanOrders(rows interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}) ([]*Order, error) {
 	var orders []*Order
 	for rows.Next() {
 		var order Order

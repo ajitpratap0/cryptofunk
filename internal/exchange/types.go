@@ -31,19 +31,20 @@ const (
 
 // Order represents a trading order
 type Order struct {
-	ID           string      `json:"id"`
-	Symbol       string      `json:"symbol"`
-	Side         OrderSide   `json:"side"`
-	Type         OrderType   `json:"type"`
-	Quantity     float64     `json:"quantity"`
-	Price        float64     `json:"price,omitempty"` // For limit orders
-	FilledQty    float64     `json:"filled_qty"`
-	AvgFillPrice float64     `json:"avg_fill_price,omitempty"`
-	Status       OrderStatus `json:"status"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
-	FilledAt     *time.Time  `json:"filled_at,omitempty"`
-	RejectReason string      `json:"reject_reason,omitempty"`
+	ID              string      `json:"id"`
+	ExchangeOrderID string      `json:"exchange_order_id,omitempty"` // Exchange-specific order ID (e.g., Binance int64 as string)
+	Symbol          string      `json:"symbol"`
+	Side            OrderSide   `json:"side"`
+	Type            OrderType   `json:"type"`
+	Quantity        float64     `json:"quantity"`
+	Price           float64     `json:"price,omitempty"` // For limit orders
+	FilledQty       float64     `json:"filled_qty"`
+	AvgFillPrice    float64     `json:"avg_fill_price,omitempty"`
+	Status          OrderStatus `json:"status"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
+	FilledAt        *time.Time  `json:"filled_at,omitempty"`
+	RejectReason    string      `json:"reject_reason,omitempty"`
 }
 
 // Fill represents a partial or complete order fill

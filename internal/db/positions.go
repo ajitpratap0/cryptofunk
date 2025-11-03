@@ -464,7 +464,11 @@ func (db *DB) GetLatestPositionBySymbol(ctx context.Context, symbol string) (*Po
 }
 
 // scanPositions is a helper to scan multiple position rows
-func scanPositions(rows interface{ Next() bool; Scan(...interface{}) error; Err() error }) ([]*Position, error) {
+func scanPositions(rows interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}) ([]*Position, error) {
 	var positions []*Position
 	for rows.Next() {
 		var position Position

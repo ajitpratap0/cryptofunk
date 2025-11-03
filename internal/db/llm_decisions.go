@@ -12,22 +12,22 @@ import (
 
 // LLMDecision represents a decision made by an LLM
 type LLMDecision struct {
-	ID               uuid.UUID  `json:"id"`
-	SessionID        *uuid.UUID `json:"session_id,omitempty"`
-	DecisionType     string     `json:"decision_type"` // 'signal', 'risk_approval', 'position_sizing', etc.
-	Symbol           string     `json:"symbol"`
-	Prompt           string     `json:"prompt"`
-	PromptEmbedding  []float32  `json:"prompt_embedding,omitempty"` // 1536-dim OpenAI embeddings
-	Response         string     `json:"response"`
-	Model            string     `json:"model"`
-	TokensUsed       int        `json:"tokens_used"`
-	LatencyMs        int        `json:"latency_ms"`
-	Outcome          *string    `json:"outcome,omitempty"`          // 'SUCCESS', 'FAILURE', 'PENDING'
-	PnL              *float64   `json:"pnl,omitempty"`              // Profit/Loss if outcome is known
-	Context          []byte     `json:"context,omitempty"`          // JSONB - market conditions, indicators, etc.
-	AgentName        string     `json:"agent_name"`
-	Confidence       float64    `json:"confidence"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	SessionID       *uuid.UUID `json:"session_id,omitempty"`
+	DecisionType    string     `json:"decision_type"` // 'signal', 'risk_approval', 'position_sizing', etc.
+	Symbol          string     `json:"symbol"`
+	Prompt          string     `json:"prompt"`
+	PromptEmbedding []float32  `json:"prompt_embedding,omitempty"` // 1536-dim OpenAI embeddings
+	Response        string     `json:"response"`
+	Model           string     `json:"model"`
+	TokensUsed      int        `json:"tokens_used"`
+	LatencyMs       int        `json:"latency_ms"`
+	Outcome         *string    `json:"outcome,omitempty"` // 'SUCCESS', 'FAILURE', 'PENDING'
+	PnL             *float64   `json:"pnl,omitempty"`     // Profit/Loss if outcome is known
+	Context         []byte     `json:"context,omitempty"` // JSONB - market conditions, indicators, etc.
+	AgentName       string     `json:"agent_name"`
+	Confidence      float64    `json:"confidence"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // InsertLLMDecision records an LLM decision in the database

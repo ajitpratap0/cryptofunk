@@ -22,8 +22,9 @@ type BinanceExchange struct {
 	mu     sync.RWMutex
 
 	// Order tracking
-	orders map[string]*Order
-	fills  map[string][]Fill
+	orders                  map[string]*Order // Internal UUID -> Order
+	fills                   map[string][]Fill // Internal UUID -> Fills
+	exchangeOrderToInternal map[string]string // Exchange OrderID -> Internal UUID
 
 	// Session tracking
 	currentSessionID *uuid.UUID
@@ -32,12 +33,12 @@ type BinanceExchange struct {
 	testnet bool
 
 	// WebSocket
-	wsClient      *binance.Client
-	listenKey     string
-	wsStopChan    chan struct{}
-	wsErrChan     chan error
-	positionMgr   *PositionManager
-	wsConnected   bool
+	wsClient    *binance.Client
+	listenKey   string
+	wsStopChan  chan struct{}
+	wsErrChan   chan error
+	positionMgr *PositionManager
+	wsConnected bool
 }
 
 // BinanceConfig contains configuration for Binance exchange
@@ -61,21 +62,22 @@ func NewBinanceExchange(config BinanceConfig, database *db.DB) (*BinanceExchange
 	}
 
 	exchange := &BinanceExchange{
-		client:      client,
-		db:          database,
-		orders:      make(map[string]*Order),
-		fills:       make(map[string][]Fill),
-		testnet:     config.Testnet,
-		wsStopChan:  make(chan struct{}),
-		wsErrChan:   make(chan error, 10),
-		positionMgr: NewPositionManager(database),
+		client:                  client,
+		db:                      database,
+		orders:                  make(map[string]*Order),
+		fills:                   make(map[string][]Fill),
+		exchangeOrderToInternal: make(map[string]string),
+		testnet:                 config.Testnet,
+		wsStopChan:              make(chan struct{}),
+		wsErrChan:               make(chan error, 10),
+		positionMgr:             NewPositionManager(database),
 	}
 
 	return exchange, nil
 }
 
 // PlaceOrder places a new order on Binance
-func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse, error) {
+func (b *BinanceExchange) PlaceOrder(ctx context.Context, req PlaceOrderRequest) (*PlaceOrderResponse, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -96,8 +98,6 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 	// Create Binance order with retry logic
 	var binanceOrder *binance.CreateOrderResponse
 	var err error
-
-	ctx := context.Background()
 	side := binance.SideTypeBuy
 	if req.Side == OrderSideSell {
 		side = binance.SideTypeSell
@@ -147,13 +147,14 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 	// Convert Binance order to internal Order struct
 	order := b.convertBinanceOrder(binanceOrder, req)
 
-	// Store order
+	// Store order and reverse mapping
 	b.orders[order.ID] = order
+	b.exchangeOrderToInternal[order.ExchangeOrderID] = order.ID
 
 	// Persist to database
 	if b.db != nil {
 		dbOrder := b.convertToDBOrder(order)
-		if err := b.db.InsertOrder(context.Background(), dbOrder); err != nil {
+		if err := b.db.InsertOrder(ctx, dbOrder); err != nil {
 			log.Error().
 				Err(err).
 				Str("order_id", order.ID).
@@ -178,7 +179,7 @@ func (b *BinanceExchange) PlaceOrder(req PlaceOrderRequest) (*PlaceOrderResponse
 }
 
 // CancelOrder cancels an open order on Binance
-func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
+func (b *BinanceExchange) CancelOrder(ctx context.Context, orderID string) (*Order, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -191,15 +192,13 @@ func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
 		return nil, fmt.Errorf("cannot cancel order in status: %s", order.Status)
 	}
 
-	// Parse Binance order ID from our internal ID
-	// In production, would store mapping between internal ID and exchange ID
-	binanceOrderID, err := strconv.ParseInt(orderID, 10, 64)
+	// Use the stored exchange order ID
+	binanceOrderID, err := strconv.ParseInt(order.ExchangeOrderID, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("invalid order ID format: %w", err)
+		return nil, fmt.Errorf("invalid exchange order ID format: %w", err)
 	}
 
 	// Cancel order on Binance with retry logic
-	ctx := context.Background()
 	operationName := fmt.Sprintf("cancel_order_%s", order.Symbol)
 	err = retryWithBackoff(func() error {
 		_, err = b.client.NewCancelOrderService().
@@ -231,7 +230,7 @@ func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
 		orderUUID, _ := uuid.Parse(orderID)
 		status := db.ConvertOrderStatus(string(order.Status))
 		err := b.db.UpdateOrderStatus(
-			context.Background(),
+			ctx,
 			orderUUID,
 			status,
 			order.FilledQty,
@@ -256,7 +255,7 @@ func (b *BinanceExchange) CancelOrder(orderID string) (*Order, error) {
 }
 
 // GetOrder retrieves order details from Binance
-func (b *BinanceExchange) GetOrder(orderID string) (*Order, error) {
+func (b *BinanceExchange) GetOrder(ctx context.Context, orderID string) (*Order, error) {
 	b.mu.RLock()
 	order, exists := b.orders[orderID]
 	b.mu.RUnlock()
@@ -266,13 +265,12 @@ func (b *BinanceExchange) GetOrder(orderID string) (*Order, error) {
 	}
 
 	// Query Binance for latest order status
-	binanceOrderID, err := strconv.ParseInt(orderID, 10, 64)
+	binanceOrderID, err := strconv.ParseInt(order.ExchangeOrderID, 10, 64)
 	if err != nil {
-		return order, nil // Return cached order if ID parsing fails
+		return order, nil // Return cached order if exchange ID parsing fails
 	}
 
 	// Query Binance with retry logic
-	ctx := context.Background()
 	var binanceOrder *binance.Order
 	operationName := fmt.Sprintf("get_order_%s", order.Symbol)
 	err = retryWithBackoff(func() error {
@@ -300,7 +298,7 @@ func (b *BinanceExchange) GetOrder(orderID string) (*Order, error) {
 }
 
 // GetOrderFills retrieves all fills for an order
-func (b *BinanceExchange) GetOrderFills(orderID string) ([]Fill, error) {
+func (b *BinanceExchange) GetOrderFills(ctx context.Context, orderID string) ([]Fill, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -498,21 +496,23 @@ func (b *BinanceExchange) convertBinanceOrder(binanceOrder *binance.CreateOrderR
 		status = OrderStatusPending
 	}
 
-	// Use Binance order ID as our internal ID
-	orderID := strconv.FormatInt(binanceOrder.OrderID, 10)
+	// Generate UUID for internal ID, store Binance OrderID separately
+	internalID := uuid.New().String()
+	exchangeOrderID := strconv.FormatInt(binanceOrder.OrderID, 10)
 
 	return &Order{
-		ID:           orderID,
-		Symbol:       binanceOrder.Symbol,
-		Side:         req.Side,
-		Type:         req.Type,
-		Quantity:     req.Quantity,
-		Price:        req.Price,
-		FilledQty:    executedQty,
-		AvgFillPrice: avgFillPrice,
-		Status:       status,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:              internalID,
+		ExchangeOrderID: exchangeOrderID,
+		Symbol:          binanceOrder.Symbol,
+		Side:            req.Side,
+		Type:            req.Type,
+		Quantity:        req.Quantity,
+		Price:           req.Price,
+		FilledQty:       executedQty,
+		AvgFillPrice:    avgFillPrice,
+		Status:          status,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 }
 
@@ -566,7 +566,7 @@ func (b *BinanceExchange) convertToDBOrder(order *Order) *db.Order {
 		ID:                    orderID,
 		SessionID:             b.currentSessionID,
 		PositionID:            nil,
-		ExchangeOrderID:       &order.ID,
+		ExchangeOrderID:       &order.ExchangeOrderID,
 		Symbol:                order.Symbol,
 		Exchange:              exchangeName,
 		Side:                  db.ConvertOrderSide(string(order.Side)),
@@ -598,17 +598,24 @@ func (b *BinanceExchange) StartUserDataStream(ctx context.Context) error {
 		log.Info().Msg("User data stream already connected")
 		return nil
 	}
+	// Set wsConnected immediately to prevent race
+	b.wsConnected = true
+	// Recreate stop channel for this new stream
+	b.wsStopChan = make(chan struct{})
 	b.mu.Unlock()
 
 	// Create listen key for user data stream
 	listenKey, err := b.client.NewStartUserStreamService().Do(ctx)
 	if err != nil {
+		// Revert wsConnected on error
+		b.mu.Lock()
+		b.wsConnected = false
+		b.mu.Unlock()
 		return fmt.Errorf("failed to create listen key: %w", err)
 	}
 
 	b.mu.Lock()
 	b.listenKey = listenKey
-	b.wsConnected = true
 	b.mu.Unlock()
 
 	log.Info().
@@ -734,10 +741,10 @@ func (b *BinanceExchange) handleUserDataEvent(event *binance.WsUserDataEvent) {
 func (b *BinanceExchange) handleOrderUpdate(event *binance.WsUserDataEvent) {
 	orderUpdate := event.OrderUpdate
 
-	orderID := strconv.FormatInt(orderUpdate.Id, 10)
+	exchangeOrderID := strconv.FormatInt(orderUpdate.Id, 10)
 
 	log.Info().
-		Str("order_id", orderID).
+		Str("exchange_order_id", exchangeOrderID).
 		Str("symbol", orderUpdate.Symbol).
 		Str("side", orderUpdate.Side).
 		Str("status", orderUpdate.Status).
@@ -747,8 +754,18 @@ func (b *BinanceExchange) handleOrderUpdate(event *binance.WsUserDataEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Look up internal order ID from exchange order ID
+	internalID, mapped := b.exchangeOrderToInternal[exchangeOrderID]
+	if !mapped {
+		// Order not found in mapping - might be from a different session
+		log.Warn().
+			Str("exchange_order_id", exchangeOrderID).
+			Msg("Received order update for unknown exchange order ID")
+		return
+	}
+
 	// Update or create order
-	order, exists := b.orders[orderID]
+	order, exists := b.orders[internalID]
 	if !exists {
 		// Create new order from WebSocket update
 		executedQty, _ := strconv.ParseFloat(orderUpdate.FilledVolume, 64)
@@ -776,19 +793,20 @@ func (b *BinanceExchange) handleOrderUpdate(event *binance.WsUserDataEvent) {
 		}
 
 		order = &Order{
-			ID:           orderID,
-			Symbol:       orderUpdate.Symbol,
-			Side:         orderSide,
-			Type:         orderType,
-			Quantity:     qty,
-			Price:        price,
-			FilledQty:    executedQty,
-			AvgFillPrice: avgFillPrice,
-			CreatedAt:    time.Unix(0, orderUpdate.CreateTime*int64(time.Millisecond)),
-			UpdatedAt:    time.Unix(0, orderUpdate.TransactionTime*int64(time.Millisecond)),
+			ID:              internalID,
+			ExchangeOrderID: exchangeOrderID,
+			Symbol:          orderUpdate.Symbol,
+			Side:            orderSide,
+			Type:            orderType,
+			Quantity:        qty,
+			Price:           price,
+			FilledQty:       executedQty,
+			AvgFillPrice:    avgFillPrice,
+			CreatedAt:       time.Unix(0, orderUpdate.CreateTime*int64(time.Millisecond)),
+			UpdatedAt:       time.Unix(0, orderUpdate.TransactionTime*int64(time.Millisecond)),
 		}
 
-		b.orders[orderID] = order
+		b.orders[internalID] = order
 	}
 
 	// Update order status
@@ -840,7 +858,7 @@ func (b *BinanceExchange) handleOrderUpdate(event *binance.WsUserDataEvent) {
 		if err != nil {
 			log.Error().
 				Err(err).
-				Str("order_id", orderID).
+				Str("order_id", order.ID).
 				Msg("Failed to update order status in database")
 		}
 	}
