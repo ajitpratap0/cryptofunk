@@ -367,3 +367,138 @@ func ConvertOrderStatus(status string) OrderStatus {
 		return OrderStatusNew // Default to new if unknown
 	}
 }
+
+// GetOrderByID is an alias for GetOrder
+func (db *DB) GetOrderByID(ctx context.Context, orderID uuid.UUID) (*Order, error) {
+	return db.GetOrder(ctx, orderID)
+}
+
+// GetOrdersBySession retrieves all orders for a specific session
+func (db *DB) GetOrdersBySession(ctx context.Context, sessionID uuid.UUID) ([]*Order, error) {
+	query := `
+		SELECT id, session_id, position_id, exchange_order_id, symbol, exchange,
+		       side, type, status, price, stop_price, quantity, executed_quantity,
+		       executed_quote_quantity, time_in_force, placed_at, filled_at,
+		       canceled_at, error_message, metadata, created_at, updated_at
+		FROM orders
+		WHERE session_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query orders by session: %w", err)
+	}
+	defer rows.Close()
+
+	return scanOrders(rows)
+}
+
+// GetOrdersBySymbol retrieves all orders for a specific symbol
+func (db *DB) GetOrdersBySymbol(ctx context.Context, symbol string) ([]*Order, error) {
+	query := `
+		SELECT id, session_id, position_id, exchange_order_id, symbol, exchange,
+		       side, type, status, price, stop_price, quantity, executed_quantity,
+		       executed_quote_quantity, time_in_force, placed_at, filled_at,
+		       canceled_at, error_message, metadata, created_at, updated_at
+		FROM orders
+		WHERE symbol = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query, symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query orders by symbol: %w", err)
+	}
+	defer rows.Close()
+
+	return scanOrders(rows)
+}
+
+// GetOrdersByStatus retrieves all orders with a specific status
+func (db *DB) GetOrdersByStatus(ctx context.Context, status OrderStatus) ([]*Order, error) {
+	query := `
+		SELECT id, session_id, position_id, exchange_order_id, symbol, exchange,
+		       side, type, status, price, stop_price, quantity, executed_quantity,
+		       executed_quote_quantity, time_in_force, placed_at, filled_at,
+		       canceled_at, error_message, metadata, created_at, updated_at
+		FROM orders
+		WHERE status = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query orders by status: %w", err)
+	}
+	defer rows.Close()
+
+	return scanOrders(rows)
+}
+
+// GetRecentOrders retrieves recent orders (limited)
+func (db *DB) GetRecentOrders(ctx context.Context, limit int) ([]*Order, error) {
+	query := `
+		SELECT id, session_id, position_id, exchange_order_id, symbol, exchange,
+		       side, type, status, price, stop_price, quantity, executed_quantity,
+		       executed_quote_quantity, time_in_force, placed_at, filled_at,
+		       canceled_at, error_message, metadata, created_at, updated_at
+		FROM orders
+		ORDER BY created_at DESC
+		LIMIT $1
+	`
+
+	rows, err := db.pool.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent orders: %w", err)
+	}
+	defer rows.Close()
+
+	return scanOrders(rows)
+}
+
+// scanOrders is a helper to scan multiple order rows
+func scanOrders(rows interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}) ([]*Order, error) {
+	var orders []*Order
+	for rows.Next() {
+		var order Order
+		err := rows.Scan(
+			&order.ID,
+			&order.SessionID,
+			&order.PositionID,
+			&order.ExchangeOrderID,
+			&order.Symbol,
+			&order.Exchange,
+			&order.Side,
+			&order.Type,
+			&order.Status,
+			&order.Price,
+			&order.StopPrice,
+			&order.Quantity,
+			&order.ExecutedQuantity,
+			&order.ExecutedQuoteQuantity,
+			&order.TimeInForce,
+			&order.PlacedAt,
+			&order.FilledAt,
+			&order.CanceledAt,
+			&order.ErrorMessage,
+			&order.Metadata,
+			&order.CreatedAt,
+			&order.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan order: %w", err)
+		}
+		orders = append(orders, &order)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating orders: %w", err)
+	}
+
+	return orders, nil
+}

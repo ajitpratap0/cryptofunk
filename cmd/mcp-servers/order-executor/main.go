@@ -16,7 +16,20 @@ func main() {
 	// Setup logging to stderr (stdout is reserved for MCP protocol)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	log.Info().Msg("Order Executor MCP Server starting (Paper Trading Mode)...")
+	// Read configuration from environment
+	tradingMode := os.Getenv("TRADING_MODE")
+	if tradingMode == "" {
+		tradingMode = "paper" // Default to paper trading
+	}
+
+	binanceAPIKey := os.Getenv("BINANCE_API_KEY")
+	binanceSecret := os.Getenv("BINANCE_SECRET_KEY")
+	binanceTestnet := os.Getenv("BINANCE_TESTNET") == "true"
+
+	log.Info().
+		Str("mode", tradingMode).
+		Bool("testnet", binanceTestnet).
+		Msg("Order Executor MCP Server starting...")
 
 	// Initialize database connection
 	ctx := context.Background()
@@ -28,8 +41,18 @@ func main() {
 
 	log.Info().Msg("Database connection established")
 
-	// Create exchange service
-	exchangeService := exchange.NewService(database)
+	// Create exchange service with configuration
+	config := exchange.ServiceConfig{
+		Mode:           exchange.TradingMode(tradingMode),
+		BinanceAPIKey:  binanceAPIKey,
+		BinanceSecret:  binanceSecret,
+		BinanceTestnet: binanceTestnet,
+	}
+
+	exchangeService, err := exchange.NewService(database, config)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create exchange service")
+	}
 
 	// Start MCP server with stdio transport
 	server := &MCPServer{

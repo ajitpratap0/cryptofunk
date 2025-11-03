@@ -9,25 +9,79 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// TradingMode represents the trading mode (paper or live)
+type TradingMode string
+
+const (
+	TradingModePaper TradingMode = "paper"
+	TradingModeLive  TradingMode = "live"
+)
+
 // Service provides order execution functionality
 type Service struct {
-	exchange *MockExchange
-	db       *db.DB
+	exchange        Exchange // Interface - can be MockExchange or BinanceExchange
+	db              *db.DB
+	mode            TradingMode
+	positionManager *PositionManager
 }
 
-// NewService creates a new exchange service
-func NewService(database *db.DB) *Service {
-	log.Info().Msg("Exchange service initialized")
+// ServiceConfig contains configuration for the exchange service
+type ServiceConfig struct {
+	Mode           TradingMode
+	BinanceAPIKey  string
+	BinanceSecret  string
+	BinanceTestnet bool
+}
+
+// NewService creates a new exchange service with specified trading mode
+func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
+	var exchange Exchange
+	var err error
+
+	switch config.Mode {
+	case TradingModeLive:
+		// Create Binance exchange for live trading
+		binanceConfig := BinanceConfig{
+			APIKey:    config.BinanceAPIKey,
+			SecretKey: config.BinanceSecret,
+			Testnet:   config.BinanceTestnet,
+		}
+		exchange, err = NewBinanceExchange(binanceConfig, database)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Binance exchange: %w", err)
+		}
+		log.Info().Bool("testnet", config.BinanceTestnet).Msg("Exchange service initialized (LIVE trading)")
+
+	case TradingModePaper:
+		fallthrough
+	default:
+		// Create mock exchange for paper trading
+		exchange = NewMockExchange(database)
+		log.Info().Msg("Exchange service initialized (PAPER trading)")
+	}
+
+	// Create position manager
+	positionManager := NewPositionManager(database)
 
 	return &Service{
-		exchange: NewMockExchange(database),
-		db:       database,
-	}
+		exchange:        exchange,
+		db:              database,
+		mode:            config.Mode,
+		positionManager: positionManager,
+	}, nil
+}
+
+// NewServicePaper creates a service in paper trading mode (for backward compatibility)
+func NewServicePaper(database *db.DB) *Service {
+	service, _ := NewService(database, ServiceConfig{Mode: TradingModePaper})
+	return service
 }
 
 // PlaceMarketOrder places a market order
 func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceMarketOrder called")
+
+	ctx := context.Background()
 
 	// Extract symbol
 	symbol, ok := args["symbol"].(string)
@@ -63,16 +117,26 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 	}
 
 	// Place order
-	resp, err := s.exchange.PlaceOrder(req)
+	resp, err := s.exchange.PlaceOrder(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
 
 	// Get order details
-	order, err := s.exchange.GetOrder(resp.OrderID)
+	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil // Still return the response even if we can't get details
+	}
+
+	// Update positions if order was filled
+	if order.Status == OrderStatusFilled {
+		fills, err := s.exchange.GetOrderFills(ctx, order.ID)
+		if err == nil && len(fills) > 0 {
+			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
+				log.Error().Err(err).Msg("Failed to update positions after order fill")
+			}
+		}
 	}
 
 	return order, nil
@@ -81,6 +145,8 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 // PlaceLimitOrder places a limit order
 func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceLimitOrder called")
+
+	ctx := context.Background()
 
 	// Extract symbol
 	symbol, ok := args["symbol"].(string)
@@ -126,16 +192,26 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 	}
 
 	// Place order
-	resp, err := s.exchange.PlaceOrder(req)
+	resp, err := s.exchange.PlaceOrder(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
 
 	// Get order details
-	order, err := s.exchange.GetOrder(resp.OrderID)
+	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil
+	}
+
+	// Update positions if order was filled (limit orders may fill immediately in some cases)
+	if order.Status == OrderStatusFilled {
+		fills, err := s.exchange.GetOrderFills(ctx, order.ID)
+		if err == nil && len(fills) > 0 {
+			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
+				log.Error().Err(err).Msg("Failed to update positions after order fill")
+			}
+		}
 	}
 
 	return order, nil
@@ -145,6 +221,8 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("CancelOrder called")
 
+	ctx := context.Background()
+
 	// Extract order_id
 	orderID, ok := args["order_id"].(string)
 	if !ok || orderID == "" {
@@ -152,7 +230,7 @@ func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) 
 	}
 
 	// Cancel order
-	order, err := s.exchange.CancelOrder(orderID)
+	order, err := s.exchange.CancelOrder(ctx, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
@@ -164,6 +242,8 @@ func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) 
 func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetOrderStatus called")
 
+	ctx := context.Background()
+
 	// Extract order_id
 	orderID, ok := args["order_id"].(string)
 	if !ok || orderID == "" {
@@ -171,13 +251,13 @@ func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, erro
 	}
 
 	// Get order
-	order, err := s.exchange.GetOrder(orderID)
+	order, err := s.exchange.GetOrder(ctx, orderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
 
 	// Get fills
-	fills, err := s.exchange.GetOrderFills(orderID)
+	fills, err := s.exchange.GetOrderFills(ctx, orderID)
 	if err != nil {
 		log.Error().Err(err).Str("order_id", orderID).Msg("Failed to get order fills")
 		// Continue even if we can't get fills
@@ -232,6 +312,9 @@ func (s *Service) StartSession(args map[string]interface{}) (interface{}, error)
 	// Set session in exchange
 	s.exchange.SetSession(&session.ID)
 
+	// Set session in position manager
+	s.positionManager.SetSession(&session.ID)
+
 	log.Info().
 		Str("session_id", session.ID.String()).
 		Str("symbol", symbol).
@@ -275,6 +358,9 @@ func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) 
 
 	// Clear session from exchange
 	s.exchange.SetSession(nil)
+
+	// Clear session from position manager
+	s.positionManager.SetSession(nil)
 
 	// Get final session data
 	session, err := s.db.GetSession(ctx, *sessionID)
@@ -342,6 +428,164 @@ func (s *Service) GetSessionStats(args map[string]interface{}) (interface{}, err
 		"max_drawdown":    session.MaxDrawdown,
 		"sharpe_ratio":    session.SharpeRatio,
 	}, nil
+}
+
+// GetPositions retrieves current open positions
+func (s *Service) GetPositions(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("GetPositions called")
+
+	positions := s.positionManager.GetOpenPositions()
+
+	return map[string]interface{}{
+		"positions": positions,
+		"count":     len(positions),
+	}, nil
+}
+
+// GetPositionBySymbol retrieves a specific position by symbol
+func (s *Service) GetPositionBySymbol(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("GetPositionBySymbol called")
+
+	symbol, ok := args["symbol"].(string)
+	if !ok || symbol == "" {
+		return nil, fmt.Errorf("symbol is required and must be a string")
+	}
+
+	position, exists := s.positionManager.GetPosition(symbol)
+	if !exists {
+		return map[string]interface{}{
+			"position": nil,
+			"exists":   false,
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"position": position,
+		"exists":   true,
+	}, nil
+}
+
+// UpdatePositionPnL updates unrealized P&L for positions based on current prices
+func (s *Service) UpdatePositionPnL(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("UpdatePositionPnL called")
+
+	// Extract prices map
+	pricesArg, ok := args["prices"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("prices must be a map of symbol -> price")
+	}
+
+	// Convert to map[string]float64
+	prices := make(map[string]float64)
+	for symbol, priceVal := range pricesArg {
+		switch v := priceVal.(type) {
+		case float64:
+			prices[symbol] = v
+		case int:
+			prices[symbol] = float64(v)
+		case int64:
+			prices[symbol] = float64(v)
+		default:
+			return nil, fmt.Errorf("invalid price for symbol %s", symbol)
+		}
+	}
+
+	ctx := context.Background()
+	err := s.positionManager.UpdateUnrealizedPnL(ctx, prices)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update P&L: %w", err)
+	}
+
+	totalUnrealizedPnL := s.positionManager.GetTotalUnrealizedPnL()
+
+	return map[string]interface{}{
+		"total_unrealized_pnl": totalUnrealizedPnL,
+		"success":              true,
+	}, nil
+}
+
+// ClosePositionBySymbol closes a position for a specific symbol
+func (s *Service) ClosePositionBySymbol(args map[string]interface{}) (interface{}, error) {
+	log.Debug().Interface("args", args).Msg("ClosePositionBySymbol called")
+
+	symbol, ok := args["symbol"].(string)
+	if !ok || symbol == "" {
+		return nil, fmt.Errorf("symbol is required and must be a string")
+	}
+
+	exitPrice, err := extractFloat(args, "exit_price")
+	if err != nil {
+		return nil, fmt.Errorf("exit_price error: %w", err)
+	}
+
+	exitReason, ok := args["exit_reason"].(string)
+	if !ok {
+		exitReason = "Manual close"
+	}
+
+	position, exists := s.positionManager.GetPosition(symbol)
+	if !exists {
+		return nil, fmt.Errorf("no open position for symbol: %s", symbol)
+	}
+
+	ctx := context.Background()
+	err = s.db.ClosePosition(ctx, position.ID, exitPrice, exitReason, 0.0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to close position: %w", err)
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Float64("exit_price", exitPrice).
+		Msg("Position closed via ClosePositionBySymbol")
+
+	return map[string]interface{}{
+		"position_id": position.ID.String(),
+		"symbol":      symbol,
+		"closed":      true,
+	}, nil
+}
+
+// StartWebSocketUpdates starts real-time WebSocket updates (Binance only)
+// This enables real-time order and position updates via WebSocket
+func (s *Service) StartWebSocketUpdates(ctx context.Context) error {
+	if s.mode != TradingModeLive {
+		log.Debug().Msg("WebSocket updates only available in LIVE mode")
+		return nil // Not an error, just not applicable
+	}
+
+	// Type assert to BinanceExchange
+	binanceExchange, ok := s.exchange.(*BinanceExchange)
+	if !ok {
+		return fmt.Errorf("WebSocket updates only supported for Binance exchange")
+	}
+
+	if err := binanceExchange.StartUserDataStream(ctx); err != nil {
+		return fmt.Errorf("failed to start WebSocket updates: %w", err)
+	}
+
+	log.Info().Msg("WebSocket position updates started")
+	return nil
+}
+
+// StopWebSocketUpdates stops WebSocket updates (Binance only)
+func (s *Service) StopWebSocketUpdates(ctx context.Context) error {
+	if s.mode != TradingModeLive {
+		return nil // Not applicable in paper mode
+	}
+
+	// Type assert to BinanceExchange
+	binanceExchange, ok := s.exchange.(*BinanceExchange)
+	if !ok {
+		return fmt.Errorf("WebSocket updates only supported for Binance exchange")
+	}
+
+	if err := binanceExchange.StopUserDataStream(ctx); err != nil {
+		return fmt.Errorf("failed to stop WebSocket updates: %w", err)
+	}
+
+	log.Info().Msg("WebSocket position updates stopped")
+	return nil
 }
 
 // extractFloat extracts a float64 from the args map

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key Innovation**: Instead of a monolithic trading bot, CryptoFunk orchestrates multiple AI agents - each with specialized expertise (technical analysis, order book analysis, sentiment, trend following, mean reversion, risk management) - that collaborate through MCP to make trading decisions via weighted voting and consensus.
 
-**Current Status**: Phase 2.4 complete (Order Executor Server with paper trading). See TASKS.md for detailed implementation progress across all 10 phases.
+**Current Status**: Phase 7 in progress (Position Tracking & Real Exchange Integration). Phases 1-6 complete. See TASKS.md for detailed implementation progress across all 10 phases.
 
 ## Build System
 
@@ -311,6 +311,8 @@ func (s *MCPServer) handleToolCall(method string, params map[string]interface{})
 - **Parameter extraction** - Support multiple numeric types (float64, int, string)
 - **Error handling** - Return proper MCP error responses
 
+**CRITICAL DEBUGGING TIP**: If you add any `fmt.Printf()`, `log.Println()`, `println()`, or similar output to stdout in MCP servers, the protocol will break immediately. ALL debugging output must use zerolog configured to stderr. Never print to stdout except for MCP protocol JSON-RPC messages. This is the #1 cause of "MCP server not responding" errors.
+
 ## Paper Trading vs Live Trading
 
 The Order Executor Server supports both modes:
@@ -361,6 +363,37 @@ nats:
 
 **Environment Variables**: See `.env.example` for required variables. Priority: env vars > config.yaml > defaults.
 
+## Git Workflow
+
+**Branch Strategy**: Feature branches are typically named after phases (e.g., `feature/phase-1-foundation`) but may contain work from multiple phases as development progresses. The main branch (`main`) contains stable releases.
+
+**Commit Style**: Commits follow conventional format with phase tracking:
+```
+feat: Phase 7 Position Tracking & P&L Calculation (T144-T146) - Part 2
+feat: Phase 6 Risk Management Agent (T119-T124)
+fix: Correct slippage calculation in mock exchange
+```
+
+**Common Git Commands**:
+```bash
+# Check current status
+git status
+
+# Create feature branch
+git checkout -b feature/phase-X-description
+
+# Commit changes
+git add .
+git commit -m "feat: Phase X Description (TXXX)"
+
+# Push to remote
+git push origin feature/phase-X-description
+
+# Merge to main (after PR approval)
+git checkout main
+git merge feature/phase-X-description
+```
+
 ## Common Development Workflows
 
 ### Starting Fresh Development Environment
@@ -402,6 +435,33 @@ task run-agent-risk &
 task run-paper
 ```
 
+### Running Individual MCP Servers (for Testing/Debugging)
+
+MCP servers communicate via JSON-RPC 2.0 over stdio. You can test them individually:
+
+```bash
+# Run server directly (will wait for stdin input)
+./bin/market-data-server
+./bin/technical-indicators-server
+./bin/risk-analyzer-server
+./bin/order-executor-server
+
+# Test with sample initialize request
+echo '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}' | ./bin/market-data-server
+
+# Test with sample tool call (after initialize)
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_price","arguments":{"symbol":"BTC"}},"id":2}' | ./bin/market-data-server
+
+# For interactive testing, use a JSON-RPC client or build a test harness
+# Note: Remember that logs go to stderr, protocol messages to stdout
+```
+
+**Debugging MCP Servers**:
+- All logs appear on stderr (use `2> debug.log` to capture)
+- Protocol messages on stdout (pipe to `jq` for formatting: `| jq`)
+- Use `MCP_TRACE=1` environment variable for detailed tracing (if implemented)
+- Never add `fmt.Printf()` or similar - it breaks the protocol!
+
 ### Adding a Database Migration
 
 ```bash
@@ -427,6 +487,15 @@ task test-unit         # Unit tests only
 task test-integration  # Integration tests
 task lint              # golangci-lint
 task check             # Pre-commit checks (fmt, lint, test)
+
+# Run tests for a specific package
+go test -v ./internal/exchange/...
+
+# Run a specific test function
+go test -v -run TestPlaceMarketOrder ./internal/exchange/...
+
+# Run tests with verbose output and race detection
+go test -v -race ./internal/orchestrator/...
 ```
 
 **Test Patterns**:
@@ -439,14 +508,18 @@ task check             # Pre-commit checks (fmt, lint, test)
 
 **Completed**:
 - ✅ Phase 1: Foundation (project structure, Docker, database)
-- ✅ Phase 2.1: CoinGecko MCP Integration (market data + caching + sync)
-- ✅ Phase 2.2: Technical Indicators Server (RSI, MACD, Bollinger, EMA, ADX)
-- ✅ Phase 2.3: Risk Analyzer Server (Kelly, VaR, limits, Sharpe, drawdown)
-- ✅ Phase 2.4: Order Executor Server (paper trading mode)
+- ✅ Phase 2: MCP Servers (market data, technical indicators, risk analyzer, order executor)
+- ✅ Phase 3: Analysis Agents (technical, orderbook, sentiment)
+- ✅ Phase 4: Strategy Agents & Backtesting (trend, mean reversion, backtesting framework)
+- ✅ Phase 5: Orchestrator (coordination, weighted voting, consensus)
+- ✅ Phase 6: Risk Management Agent (circuit breakers, position sizing, veto power)
 
-**Current Focus**: Phase 3 - Analysis Agents (technical, orderbook, sentiment)
+**Current Focus**: Phase 7 - Real Exchange Integration & Position Tracking
+- Exchange connectivity via CCXT
+- Position tracking and P&L calculation
+- Real-time portfolio management
 
-**Remaining**: Phases 3-10 (see TASKS.md for detailed task breakdown)
+**Remaining**: Phases 8-10 (monitoring, optimization, production deployment - see TASKS.md)
 
 ## Important Conventions
 
