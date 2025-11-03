@@ -2136,10 +2136,18 @@ This document consolidates all implementation tasks from the architecture and de
   - **✅ COMPLETE**: Full A/B testing framework with 19 tests
   - **Estimate**: 4 hours
 
-- [ ] **T210** [P2] Implement hierarchical agents
-  - Meta-agent structure
-  - Sub-agent coordination
-  - **Acceptance**: Hierarchy works
+- [x] **T210** [P2] Implement hierarchical agents
+  - internal/orchestrator/hierarchy.go (970 lines)
+  - internal/orchestrator/hierarchy_test.go (735 lines)
+  - Meta-agent structure with sub-agent management
+  - Multiple delegation policies: BestFit, All, Weighted, RoundRobin, Auction
+  - Multiple aggregation policies: Voting, Weighted, Consensus, BestScore, Ensemble
+  - Activation conditions for dynamic sub-agent selection
+  - Situation assessment from blackboard data
+  - Resource limits and task allocation
+  - Complete hierarchy tracking with levels and parent-child relationships
+  - Performance metrics for both meta-agents and sub-agents
+  - **✅ COMPLETE**: Full hierarchical agent system with 16 tests
   - **Estimate**: 4 hours
 
 ### 10.4 Backtesting Engine (Week 11, Day 4 - Week 12, Day 1)
