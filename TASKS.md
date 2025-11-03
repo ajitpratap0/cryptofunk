@@ -2024,26 +2024,35 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### 10.1 Semantic & Procedural Memory (Week 11, Days 1-2)
 
-- [ ] **T200** [P2] Setup pgvector extension
+- [x] **T200** [P2] Setup pgvector extension
   - **Use pgvector** PostgreSQL extension (no separate DB needed)
   - Enable extension: `CREATE EXTENSION vector;`
   - Already integrated with existing PostgreSQL + TimescaleDB
   - **Acceptance**: pgvector extension enabled and tested
   - **Estimate**: 0.5 hours (reduced from 2 hours - just enable extension)
+  - **✅ COMPLETE**: pgvector was already enabled in migration 001_initial_schema.sql (line 13)
 
-- [ ] **T201** [P2] Implement SemanticMemory
-  - internal/memory/semantic.go
-  - Store knowledge as embeddings
-  - Vector similarity search
+- [x] **T201** [P2] Implement SemanticMemory
+  - internal/memory/semantic.go (670 lines)
+  - Store knowledge as embeddings with vector similarity search
+  - 5 knowledge types: fact, pattern, experience, strategy, risk
+  - Relevance scoring: confidence, importance, success rate, recency
+  - Database migration: migrations/002_semantic_memory.sql
+  - Comprehensive tests: internal/memory/semantic_test.go (390 lines)
   - **Acceptance**: Semantic memory works
   - **Estimate**: 4 hours
+  - **✅ COMPLETE**: Full semantic memory system with vector search, filters, validation tracking, and quality pruning
 
-- [ ] **T202** [P2] Implement ProceduralMemory
-  - internal/memory/procedural.go
-  - Store learned policies
-  - Skill management
+- [x] **T202** [P2] Implement ProceduralMemory
+  - internal/memory/procedural.go (550 lines)
+  - Store learned policies (entry, exit, sizing, risk, hedging, rebalancing)
+  - Skill management (technical_analysis, orderbook_analysis, etc.)
+  - Performance tracking: success rates, P&L, Sharpe, win rate
+  - Database migration: migrations/003_procedural_memory.sql
+  - Comprehensive tests: internal/memory/procedural_test.go (370 lines)
   - **Acceptance**: Procedural memory works
   - **Estimate**: 3 hours
+  - **✅ COMPLETE**: Full procedural memory with policies, skills, performance tracking, and proficiency scoring
 
 - [ ] **T203** [P2] Implement knowledge extraction
   - Extract patterns from episodes
