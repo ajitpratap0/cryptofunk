@@ -2079,10 +2079,15 @@ This document consolidates all implementation tasks from the architecture and de
   - **✅ COMPLETE**: Full blackboard system with comprehensive tests
   - **Estimate**: 3 hours
 
-- [ ] **T205** [P2] Implement agent-to-agent messaging
-  - Message bus via NATS
-  - Direct agent communication
-  - **Acceptance**: Agents can message each other
+- [x] **T205** [P2] Implement agent-to-agent messaging
+  - internal/orchestrator/messagebus.go (640 lines)
+  - internal/orchestrator/messagebus_test.go (615 lines)
+  - NATS-based message bus with agent-to-agent communication
+  - Direct messaging, broadcast, request-reply patterns
+  - Message types: request, reply, notification, broadcast, command, event
+  - Priority levels (0-9), TTL support
+  - Automatic reconnection and health monitoring
+  - **✅ COMPLETE**: Full message bus with comprehensive tests
   - **Estimate**: 3 hours
 
 - [ ] **T206** [P2] Implement consensus mechanisms
