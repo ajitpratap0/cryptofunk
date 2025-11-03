@@ -221,6 +221,16 @@ func (fc *FallbackClient) CompleteWithSystem(ctx context.Context, systemPrompt, 
 	return resp.Choices[0].Message.Content, nil
 }
 
+// ParseJSONResponse parses a JSON response from the LLM
+// Delegates to the primary client's JSON parsing logic
+func (fc *FallbackClient) ParseJSONResponse(content string, target interface{}) error {
+	if len(fc.clients) == 0 {
+		return fmt.Errorf("no clients available for JSON parsing")
+	}
+	// Use primary client's JSON parsing logic
+	return fc.clients[0].ParseJSONResponse(content, target)
+}
+
 // GetCircuitBreakerStatus returns the status of all model circuit breakers
 func (fc *FallbackClient) GetCircuitBreakerStatus() []CircuitBreakerStatus {
 	return fc.circuitBreaker.GetAllStatus()

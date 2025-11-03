@@ -28,14 +28,31 @@ nats:
   enable_jetstream: true
 
 llm:
+  enabled: true  # Enable/disable LLM reasoning (falls back to rule-based)
   gateway: "bifrost"
   endpoint: "http://localhost:8080/v1/chat/completions"
+  api_key: "${LLM_API_KEY}"  # Optional for Bifrost, required for direct OpenAI/Anthropic
+
+  # Model Configuration
   primary_model: "claude-sonnet-4-20250514"
-  fallback_model: "gpt-4-turbo"
+  fallback_models:  # Optional: List of fallback models (automatic failover)
+    - "gpt-4-turbo"
+    - "gpt-3.5-turbo"
+
+  # Request Settings
   temperature: 0.7
   max_tokens: 2000
+  timeout: 30s
+
+  # Caching (Bifrost feature)
   enable_caching: true
-  timeout: 30000  # milliseconds
+
+  # Circuit Breaker Configuration (resilience for model failures)
+  circuit_breaker:
+    failure_threshold: 5      # Open circuit after N consecutive failures
+    success_threshold: 2      # Close circuit after N consecutive successes
+    timeout: 60s              # Time before attempting recovery (half-open state)
+    time_window: 5m           # Sliding window for failure tracking
 
 # MCP Server Configuration (Hybrid Architecture)
 # External and internal MCP servers for market data, analysis, and execution
