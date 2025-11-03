@@ -13,17 +13,19 @@ import (
 
 // HotSwapConfig configures hot-swap behavior
 type HotSwapConfig struct {
-	PauseWaitTime time.Duration // Time to wait for agent to pause (default: 100ms)
-	StartWaitTime time.Duration // Time to wait for new agent to initialize (default: 200ms)
-	VerifyTimeout time.Duration // Timeout for agent verification (default: 5s)
+	PauseWaitTime    time.Duration // Time to wait for agent to pause (default: 100ms)
+	StartWaitTime    time.Duration // Time to wait for new agent to initialize (default: 200ms)
+	VerifyTimeout    time.Duration // Timeout for agent verification (default: 5s)
+	MaxHistorySize   int           // Maximum state snapshots to keep in history (default: 100)
 }
 
 // DefaultHotSwapConfig returns default configuration
 func DefaultHotSwapConfig() *HotSwapConfig {
 	return &HotSwapConfig{
-		PauseWaitTime: 100 * time.Millisecond,
-		StartWaitTime: 200 * time.Millisecond,
-		VerifyTimeout: 5 * time.Second,
+		PauseWaitTime:  100 * time.Millisecond,
+		StartWaitTime:  200 * time.Millisecond,
+		VerifyTimeout:  5 * time.Second,
+		MaxHistorySize: 100, // Prevent memory leak
 	}
 }
 
@@ -375,6 +377,13 @@ func (hsc *HotSwapCoordinator) captureState(ctx context.Context, session *SwapSe
 		},
 	}
 	stateCopy.History = append(stateCopy.History, snapshot)
+
+	// Trim history if it exceeds max size (prevent memory leak)
+	if len(stateCopy.History) > hsc.config.MaxHistorySize {
+		// Keep only the most recent snapshots
+		excess := len(stateCopy.History) - hsc.config.MaxHistorySize
+		stateCopy.History = stateCopy.History[excess:]
+	}
 
 	session.StateSnapshot = &stateCopy
 

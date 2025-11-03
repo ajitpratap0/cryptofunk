@@ -27,6 +27,7 @@ const (
 type ConsensusManager struct {
 	blackboard *Blackboard
 	messageBus *MessageBus
+	config     *ConsensusConfig
 	sessions   map[uuid.UUID]*ConsensusSession
 	mu         sync.RWMutex
 }
@@ -102,11 +103,13 @@ type ConsensusResult struct {
 
 // ConsensusConfig configures consensus behavior
 type ConsensusConfig struct {
-	MaxRounds            int           `json:"max_rounds"`            // Maximum iterations
-	ConvergenceThreshold float64       `json:"convergence_threshold"` // Agreement threshold (0.0-1.0)
-	RoundTimeout         time.Duration `json:"round_timeout"`         // Time to wait for responses
-	SessionTTL           time.Duration `json:"session_ttl"`           // Session expiration
-	MinParticipants      int           `json:"min_participants"`      // Minimum agents required
+	MaxRounds            int           `json:"max_rounds"`             // Maximum iterations per session
+	ConvergenceThreshold float64       `json:"convergence_threshold"`  // Agreement threshold (0.0-1.0)
+	RoundTimeout         time.Duration `json:"round_timeout"`          // Time to wait for responses
+	SessionTTL           time.Duration `json:"session_ttl"`            // Session expiration
+	MinParticipants      int           `json:"min_participants"`       // Minimum agents required
+	MaxActiveSessions    int           `json:"max_active_sessions"`    // Maximum concurrent sessions (resource limit)
+	MaxParticipants      int           `json:"max_participants"`       // Maximum participants per session (resource limit)
 }
 
 // DefaultConsensusConfig returns default configuration
@@ -117,20 +120,46 @@ func DefaultConsensusConfig() ConsensusConfig {
 		RoundTimeout:         30 * time.Second,
 		SessionTTL:           5 * time.Minute,
 		MinParticipants:      2,
+		MaxActiveSessions:    10,  // Resource limit: prevent DoS
+		MaxParticipants:      50,  // Resource limit: prevent exhaustion
 	}
 }
 
-// NewConsensusManager creates a new consensus manager
+// NewConsensusManager creates a new consensus manager with default config
 func NewConsensusManager(blackboard *Blackboard, messageBus *MessageBus) *ConsensusManager {
+	config := DefaultConsensusConfig()
+	return NewConsensusManagerWithConfig(blackboard, messageBus, &config)
+}
+
+// NewConsensusManagerWithConfig creates a new consensus manager with custom config
+func NewConsensusManagerWithConfig(blackboard *Blackboard, messageBus *MessageBus, config *ConsensusConfig) *ConsensusManager {
+	if config == nil {
+		defaultConfig := DefaultConsensusConfig()
+		config = &defaultConfig
+	}
 	return &ConsensusManager{
 		blackboard: blackboard,
 		messageBus: messageBus,
+		config:     config,
 		sessions:   make(map[uuid.UUID]*ConsensusSession),
 	}
 }
 
 // StartDelphiConsensus initiates a Delphi method consensus session
 func (cm *ConsensusManager) StartDelphiConsensus(ctx context.Context, topic, question string, participants []string, config ConsensusConfig) (*ConsensusSession, error) {
+	// Resource limit checks
+	cm.mu.RLock()
+	activeCount := cm.countActiveSessions()
+	cm.mu.RUnlock()
+
+	if activeCount >= cm.config.MaxActiveSessions {
+		return nil, fmt.Errorf("max active sessions reached: %d/%d", activeCount, cm.config.MaxActiveSessions)
+	}
+
+	if len(participants) > cm.config.MaxParticipants {
+		return nil, fmt.Errorf("too many participants: got %d, max %d", len(participants), cm.config.MaxParticipants)
+	}
+
 	if len(participants) < config.MinParticipants {
 		return nil, fmt.Errorf("insufficient participants: got %d, need %d", len(participants), config.MinParticipants)
 	}
@@ -580,6 +609,11 @@ func (cm *ConsensusManager) StartContractNet(ctx context.Context, task *Contract
 		return nil, fmt.Errorf("no eligible agents for task")
 	}
 
+	// Resource limit check: prevent excessive participants
+	if len(eligibleAgents) > cm.config.MaxParticipants {
+		return nil, fmt.Errorf("too many eligible agents: got %d, max %d", len(eligibleAgents), cm.config.MaxParticipants)
+	}
+
 	task.ID = uuid.New()
 
 	log.Info().
@@ -843,4 +877,18 @@ func (r *Response) MarshalJSON() ([]byte, error) {
 	}{
 		Alias: (*Alias)(r),
 	})
+}
+
+// countActiveSessions counts non-expired, non-failed sessions (must be called with lock held)
+func (cm *ConsensusManager) countActiveSessions() int {
+	count := 0
+	now := time.Now()
+	for _, session := range cm.sessions {
+		if session.Status != ConsensusStatusFailed &&
+			session.Status != ConsensusStatusExpired &&
+			session.ExpiresAt.After(now) {
+			count++
+		}
+	}
+	return count
 }

@@ -11,11 +11,28 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// CloningConfig configures resource limits for cloning operations
+type CloningConfig struct {
+	MaxActiveExperiments int           // Maximum concurrent experiments (default: 5)
+	MaxVariantsPerTest   int           // Maximum variants per A/B test (default: 10)
+	ExperimentTimeout    time.Duration // Experiment expiration (default: 7 days)
+}
+
+// DefaultCloningConfig returns default configuration
+func DefaultCloningConfig() *CloningConfig {
+	return &CloningConfig{
+		MaxActiveExperiments: 5,
+		MaxVariantsPerTest:   10,
+		ExperimentTimeout:    7 * 24 * time.Hour, // 7 days
+	}
+}
+
 // CloningCoordinator manages agent cloning and A/B testing
 type CloningCoordinator struct {
 	hotSwap     *HotSwapCoordinator
 	blackboard  *Blackboard
 	messageBus  *MessageBus
+	config      *CloningConfig
 	experiments map[uuid.UUID]*ABTestExperiment // Experiment ID -> experiment
 	mu          sync.RWMutex
 }
@@ -116,12 +133,21 @@ type CloneConfig struct {
 	Metadata        map[string]interface{} `json:"metadata"`
 }
 
-// NewCloningCoordinator creates a new cloning coordinator
+// NewCloningCoordinator creates a new cloning coordinator with default config
 func NewCloningCoordinator(hotSwap *HotSwapCoordinator, blackboard *Blackboard, messageBus *MessageBus) *CloningCoordinator {
+	return NewCloningCoordinatorWithConfig(hotSwap, blackboard, messageBus, DefaultCloningConfig())
+}
+
+// NewCloningCoordinatorWithConfig creates a new cloning coordinator with custom config
+func NewCloningCoordinatorWithConfig(hotSwap *HotSwapCoordinator, blackboard *Blackboard, messageBus *MessageBus, config *CloningConfig) *CloningCoordinator {
+	if config == nil {
+		config = DefaultCloningConfig()
+	}
 	return &CloningCoordinator{
 		hotSwap:     hotSwap,
 		blackboard:  blackboard,
 		messageBus:  messageBus,
+		config:      config,
 		experiments: make(map[uuid.UUID]*ABTestExperiment),
 	}
 }
@@ -193,6 +219,19 @@ func (cc *CloningCoordinator) CloneAgent(ctx context.Context, config *CloneConfi
 
 // StartABTest initiates an A/B testing experiment
 func (cc *CloningCoordinator) StartABTest(ctx context.Context, name, controlAgent string, numVariants int, config *ExperimentConfig) (*ABTestExperiment, error) {
+	// Resource limit checks
+	cc.mu.RLock()
+	activeCount := cc.countActiveExperiments()
+	cc.mu.RUnlock()
+
+	if activeCount >= cc.config.MaxActiveExperiments {
+		return nil, fmt.Errorf("max active experiments reached: %d/%d", activeCount, cc.config.MaxActiveExperiments)
+	}
+
+	if numVariants > cc.config.MaxVariantsPerTest {
+		return nil, fmt.Errorf("too many variants: got %d, max %d", numVariants, cc.config.MaxVariantsPerTest)
+	}
+
 	// Validate control agent exists
 	_, err := cc.hotSwap.GetAgent(controlAgent)
 	if err != nil {
@@ -659,4 +698,17 @@ func (cc *CloningCoordinator) CancelExperiment(ctx context.Context, experimentID
 		Msg("Experiment cancelled")
 
 	return nil
+}
+
+// countActiveExperiments counts non-completed, non-failed experiments (must be called with lock held)
+func (cc *CloningCoordinator) countActiveExperiments() int {
+	count := 0
+	for _, exp := range cc.experiments {
+		if exp.Status != ExperimentStatusCompleted &&
+			exp.Status != ExperimentStatusFailed &&
+			exp.Status != ExperimentStatusCancelled {
+			count++
+		}
+	}
+	return count
 }
