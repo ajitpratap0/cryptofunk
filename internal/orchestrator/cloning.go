@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -398,24 +399,25 @@ func (cc *CloningCoordinator) updateAggregateMetrics(metrics *VariantMetrics) {
 
 	metrics.AverageLatency = totalLatency / time.Duration(len(metrics.Samples))
 
-	// Calculate percentiles (simple implementation)
-	// For production, use a proper percentile algorithm
+	// Calculate percentiles (production-grade implementation)
 	if len(latencies) > 0 {
-		// Sort latencies for percentile calculation
-		// Using simple indexing for approximation
-		p50Index := int(float64(len(latencies)) * 0.5)
-		p95Index := int(float64(len(latencies)) * 0.95)
-		p99Index := int(float64(len(latencies)) * 0.99)
+		// CRITICAL: Must sort latencies for accurate percentile calculation
+		sort.Slice(latencies, func(i, j int) bool {
+			return latencies[i] < latencies[j]
+		})
 
-		if p50Index < len(latencies) {
-			metrics.P50Latency = latencies[p50Index]
-		}
-		if p95Index < len(latencies) {
-			metrics.P95Latency = latencies[p95Index]
-		}
-		if p99Index < len(latencies) {
-			metrics.P99Latency = latencies[p99Index]
-		}
+		// Calculate percentiles using proper indexing
+		// P50 (median)
+		p50Index := int(float64(len(latencies)-1) * 0.50)
+		metrics.P50Latency = latencies[p50Index]
+
+		// P95
+		p95Index := int(float64(len(latencies)-1) * 0.95)
+		metrics.P95Latency = latencies[p95Index]
+
+		// P99
+		p99Index := int(float64(len(latencies)-1) * 0.99)
+		metrics.P99Latency = latencies[p99Index]
 	}
 
 	// Calculate error rate

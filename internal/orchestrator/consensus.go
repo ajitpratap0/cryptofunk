@@ -29,6 +29,7 @@ type ConsensusManager struct {
 	messageBus *MessageBus
 	config     *ConsensusConfig
 	sessions   map[uuid.UUID]*ConsensusSession
+	timeoutSem chan struct{} // Semaphore for limiting concurrent timeout handlers
 	mu         sync.RWMutex
 }
 
@@ -103,25 +104,27 @@ type ConsensusResult struct {
 
 // ConsensusConfig configures consensus behavior
 type ConsensusConfig struct {
-	MaxRounds            int           `json:"max_rounds"`             // Maximum iterations per session
-	ConvergenceThreshold float64       `json:"convergence_threshold"`  // Agreement threshold (0.0-1.0)
-	RoundTimeout         time.Duration `json:"round_timeout"`          // Time to wait for responses
-	SessionTTL           time.Duration `json:"session_ttl"`            // Session expiration
-	MinParticipants      int           `json:"min_participants"`       // Minimum agents required
-	MaxActiveSessions    int           `json:"max_active_sessions"`    // Maximum concurrent sessions (resource limit)
-	MaxParticipants      int           `json:"max_participants"`       // Maximum participants per session (resource limit)
+	MaxRounds             int           `json:"max_rounds"`               // Maximum iterations per session
+	ConvergenceThreshold  float64       `json:"convergence_threshold"`    // Agreement threshold (0.0-1.0)
+	RoundTimeout          time.Duration `json:"round_timeout"`            // Time to wait for responses
+	SessionTTL            time.Duration `json:"session_ttl"`              // Session expiration
+	MinParticipants       int           `json:"min_participants"`         // Minimum agents required
+	MaxActiveSessions     int           `json:"max_active_sessions"`      // Maximum concurrent sessions (resource limit)
+	MaxParticipants       int           `json:"max_participants"`         // Maximum participants per session (resource limit)
+	MaxConcurrentTimeouts int           `json:"max_concurrent_timeouts"`  // Maximum concurrent timeout handlers (resource limit)
 }
 
 // DefaultConsensusConfig returns default configuration
 func DefaultConsensusConfig() ConsensusConfig {
 	return ConsensusConfig{
-		MaxRounds:            5,
-		ConvergenceThreshold: 0.8, // 80% agreement
-		RoundTimeout:         30 * time.Second,
-		SessionTTL:           5 * time.Minute,
-		MinParticipants:      2,
-		MaxActiveSessions:    10,  // Resource limit: prevent DoS
-		MaxParticipants:      50,  // Resource limit: prevent exhaustion
+		MaxRounds:             5,
+		ConvergenceThreshold:  0.8, // 80% agreement
+		RoundTimeout:          30 * time.Second,
+		SessionTTL:            5 * time.Minute,
+		MinParticipants:       2,
+		MaxActiveSessions:     10,  // Resource limit: prevent DoS
+		MaxParticipants:       50,  // Resource limit: prevent exhaustion
+		MaxConcurrentTimeouts: 100, // Resource limit: prevent goroutine exhaustion
 	}
 }
 
@@ -142,6 +145,7 @@ func NewConsensusManagerWithConfig(blackboard *Blackboard, messageBus *MessageBu
 		messageBus: messageBus,
 		config:     config,
 		sessions:   make(map[uuid.UUID]*ConsensusSession),
+		timeoutSem: make(chan struct{}, config.MaxConcurrentTimeouts),
 	}
 }
 
@@ -458,6 +462,16 @@ func (cm *ConsensusManager) calculateOverallConfidence(round *ConsensusRound) fl
 
 // roundTimeoutHandler handles round timeout
 func (cm *ConsensusManager) roundTimeoutHandler(ctx context.Context, sessionID uuid.UUID, roundNum int, timeout time.Duration) {
+	// Acquire semaphore to limit concurrent timeout handlers (prevent goroutine exhaustion)
+	select {
+	case cm.timeoutSem <- struct{}{}:
+		// Semaphore acquired
+		defer func() { <-cm.timeoutSem }() // Release on exit
+	case <-ctx.Done():
+		// Context cancelled before acquiring semaphore
+		return
+	}
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
