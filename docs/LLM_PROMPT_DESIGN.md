@@ -768,12 +768,198 @@ Effective prompt engineering is critical to CryptoFunk's multi-agent architectur
 
 By following these patterns, agents can make high-quality trading decisions with transparency and accountability.
 
+## Model Fallback and Resilience (T189)
+
+### FallbackClient Architecture
+
+The `FallbackClient` provides automatic failover between multiple LLM models with circuit breaker protection.
+
+**Design**:
+```
+Primary (Claude Sonnet 4)
+    ↓ [fails]
+Fallback 1 (GPT-4)
+    ↓ [fails]
+Fallback 2 (GPT-3.5-turbo)
+    ↓ [fails]
+Error returned
+```
+
+**Usage Example**:
+```go
+import "github.com/ajitpratap0/cryptofunk/internal/llm"
+
+// Create fallback client with 3 models
+fc := llm.NewFallbackClient(llm.FallbackConfig{
+    // Primary: Claude Sonnet 4
+    PrimaryConfig: llm.ClientConfig{
+        Endpoint: "http://localhost:8080/v1/chat/completions",
+        Model:    "claude-sonnet-4-20250514",
+        Timeout:  30 * time.Second,
+    },
+    PrimaryName: "claude-sonnet-4",
+
+    // Fallbacks: GPT-4, then GPT-3.5-turbo
+    FallbackConfigs: []llm.ClientConfig{
+        {
+            Endpoint: "http://localhost:8080/v1/chat/completions",
+            Model:    "gpt-4",
+            Timeout:  30 * time.Second,
+        },
+        {
+            Endpoint: "http://localhost:8080/v1/chat/completions",
+            Model:    "gpt-3.5-turbo",
+            Timeout:  20 * time.Second,
+        },
+    },
+    FallbackNames: []string{"gpt-4", "gpt-3.5-turbo"},
+
+    // Circuit breaker configuration
+    CircuitBreakerConfig: llm.CircuitBreakerConfig{
+        FailureThreshold: 5,  // Open after 5 consecutive failures
+        SuccessThreshold: 2,  // Close after 2 consecutive successes
+        Timeout:          60 * time.Second,  // Try half-open after 60s
+        TimeWindow:       5 * time.Minute,   // Track failures in 5min window
+    },
+})
+
+// Use just like regular client
+messages := []llm.ChatMessage{
+    {Role: "system", Content: systemPrompt},
+    {Role: "user", Content: userPrompt},
+}
+
+resp, err := fc.Complete(ctx, messages)
+if err != nil {
+    // All models failed
+    log.Error().Err(err).Msg("All LLM models failed")
+    return err
+}
+
+// Success (from whichever model succeeded first)
+content := resp.Choices[0].Message.Content
+```
+
+### Circuit Breaker Pattern
+
+**States**:
+- **CLOSED**: Normal operation, requests flow through
+- **OPEN**: Too many failures, requests blocked (fails fast)
+- **HALF_OPEN**: Testing recovery, allow one request through
+
+**State Transitions**:
+```
+CLOSED --[5 failures]--> OPEN
+OPEN --[60s timeout]--> HALF_OPEN
+HALF_OPEN --[2 successes]--> CLOSED
+HALF_OPEN --[1 failure]--> OPEN
+```
+
+**Benefits**:
+1. **Fail fast**: Don't waste time on consistently failing models
+2. **Automatic recovery**: Test if model is back online after timeout
+3. **Resource protection**: Prevent cascade failures
+4. **Cost reduction**: Skip expensive calls to unavailable models
+
+**Monitoring Circuit Breaker**:
+```go
+// Get status of all model circuits
+statuses := fc.GetCircuitBreakerStatus()
+
+for _, status := range statuses {
+    log.Info().
+        Int("model_index", status.ModelIndex).
+        Str("state", string(status.State)).
+        Int("consecutive_failures", status.ConsecutiveFailures).
+        Time("last_failure", status.LastFailure).
+        Msg("Circuit breaker status")
+}
+
+// Manually reset a circuit (e.g., after deployment)
+fc.ResetCircuitBreaker(0) // Reset primary model
+```
+
+### Fallback Strategies
+
+**1. Non-retryable errors skip immediately**:
+```go
+// 400 Bad Request - skip to next model immediately
+// Don't waste retries on validation errors
+```
+
+**2. Retryable errors use exponential backoff**:
+```go
+// 429 Rate Limit - retry with backoff on same model
+// Then try next model if all retries fail
+fc.CompleteWithRetry(ctx, messages, 3) // Max 3 retries per model
+```
+
+**3. Circuit breaker prevents repeated failures**:
+```go
+// If model fails 5 times consecutively, circuit opens
+// Skip that model for 60 seconds
+// Prevents wasting time on broken endpoints
+```
+
+### Configuration Recommendations
+
+**Production Configuration**:
+```go
+llm.CircuitBreakerConfig{
+    FailureThreshold: 5,              // Open after 5 failures
+    SuccessThreshold: 2,              // Close after 2 successes
+    Timeout:          60 * time.Second,  // Test recovery after 1min
+    TimeWindow:       5 * time.Minute,   // 5min failure window
+}
+```
+
+**Development Configuration**:
+```go
+llm.CircuitBreakerConfig{
+    FailureThreshold: 3,              // Open faster in dev
+    SuccessThreshold: 1,              // Close faster in dev
+    Timeout:          10 * time.Second,  // Test recovery sooner
+    TimeWindow:       2 * time.Minute,   // Shorter window
+}
+```
+
+### Testing Fallback
+
+**Simulate primary failure**:
+```bash
+# Kill primary model endpoint
+curl -X POST http://localhost:8080/admin/kill/claude-sonnet-4
+
+# Requests automatically fallback to GPT-4
+# Circuit opens after 5 failures
+# All subsequent requests skip primary
+```
+
+**Reset circuit after fix**:
+```bash
+# Fix and restart primary endpoint
+curl -X POST http://localhost:8080/admin/start/claude-sonnet-4
+
+# Reset circuit breaker via API
+curl -X POST http://localhost:8080/admin/circuit-breaker/reset/0
+```
+
+### Metrics to Track
+
+1. **Fallback rate**: % of requests using fallback models
+2. **Circuit state changes**: CLOSED → OPEN → HALF_OPEN transitions
+3. **Model-specific success rates**: Track each model independently
+4. **Cost by model**: Claude vs GPT-4 vs GPT-3.5 usage
+5. **Latency by model**: Which model is fastest?
+
 ---
 
-**Last Updated**: Phase 9 (T187 completion)
-**Test Coverage**: 67.2% (internal/llm package)
+**Last Updated**: Phase 9 (T187, T189 completion)
+**Test Coverage**: 71.6% (internal/llm package)
 **Related Files**:
 - `internal/llm/prompts.go` - Prompt templates
 - `internal/llm/prompts_test.go` - Unit tests
 - `internal/llm/client.go` - JSON parsing and HTTP client
 - `internal/llm/client_test.go` - Integration tests
+- `internal/llm/fallback.go` - Fallback client and circuit breaker
+- `internal/llm/fallback_test.go` - Fallback and circuit breaker tests
