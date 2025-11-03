@@ -150,6 +150,13 @@ func (bb *Blackboard) Post(ctx context.Context, msg *BlackboardMessage) error {
 		Member: key,
 	})
 
+	// Add to priority index (for efficient priority-based queries)
+	priorityIndexKey := fmt.Sprintf("%spriority:%s:%d", bb.prefix, msg.Topic, msg.Priority)
+	pipe.ZAdd(ctx, priorityIndexKey, redis.Z{
+		Score:  score,
+		Member: key,
+	})
+
 	// Execute pipeline atomically
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("failed to store message and indices: %w", err)
@@ -158,14 +165,18 @@ func (bb *Blackboard) Post(ctx context.Context, msg *BlackboardMessage) error {
 	// Publish notification to subscribers
 	notifyKey := fmt.Sprintf("%snotify:%s", bb.prefix, msg.Topic)
 	notification := map[string]interface{}{
-		"message_id": msg.ID.String(),
-		"topic":      msg.Topic,
-		"agent":      msg.AgentName,
-		"priority":   msg.Priority,
-		"timestamp":  msg.CreatedAt.Unix(),
+		"message_id":  msg.ID.String(),
+		"message_key": key, // Include key for direct message retrieval
+		"topic":       msg.Topic,
+		"agent":       msg.AgentName,
+		"priority":    msg.Priority,
+		"timestamp":   msg.CreatedAt.Unix(),
 	}
-	notifyData, _ := json.Marshal(notification)
-	if err := bb.client.Publish(ctx, notifyKey, notifyData).Err(); err != nil {
+	notifyData, err := json.Marshal(notification)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to marshal notification")
+		// Continue without notification - not fatal
+	} else if err := bb.client.Publish(ctx, notifyKey, notifyData).Err(); err != nil {
 		log.Warn().Err(err).Msg("Failed to publish notification")
 		// Don't fail the post if notification fails
 	}
@@ -225,23 +236,33 @@ func (bb *Blackboard) GetByAgent(ctx context.Context, agentName string, limit in
 
 // GetByPriority retrieves messages above a certain priority
 func (bb *Blackboard) GetByPriority(ctx context.Context, topic string, minPriority MessagePriority, limit int) ([]*BlackboardMessage, error) {
-	messages, err := bb.GetByTopic(ctx, topic, limit*2) // Fetch more to filter
-	if err != nil {
-		return nil, err
-	}
+	// Query priority indices for all priorities >= minPriority
+	var allKeys []string
 
-	// Filter by priority
-	var filtered []*BlackboardMessage
-	for _, msg := range messages {
-		if msg.Priority >= minPriority {
-			filtered = append(filtered, msg)
-			if len(filtered) >= limit {
-				break
-			}
+	// Iterate through priority levels from highest to lowest
+	for priority := PriorityUrgent; priority >= minPriority; priority-- {
+		priorityIndexKey := fmt.Sprintf("%spriority:%s:%d", bb.prefix, topic, priority)
+
+		// Get keys from this priority level (most recent first)
+		keys, err := bb.client.ZRevRange(ctx, priorityIndexKey, 0, int64(limit-1)).Result()
+		if err != nil && err != redis.Nil {
+			return nil, fmt.Errorf("failed to query priority index: %w", err)
+		}
+
+		allKeys = append(allKeys, keys...)
+
+		// Stop if we have enough keys
+		if len(allKeys) >= limit {
+			allKeys = allKeys[:limit]
+			break
 		}
 	}
 
-	return filtered, nil
+	if len(allKeys) == 0 {
+		return []*BlackboardMessage{}, nil
+	}
+
+	return bb.getMessagesByKeys(ctx, allKeys)
 }
 
 // Subscribe subscribes to topic notifications
@@ -274,31 +295,37 @@ func (bb *Blackboard) Subscribe(ctx context.Context, topic string) (<-chan *Blac
 
 				// Parse notification
 				var notification struct {
-					MessageID string `json:"message_id"`
-					Topic     string `json:"topic"`
+					MessageID  string `json:"message_id"`
+					MessageKey string `json:"message_key"`
+					Topic      string `json:"topic"`
 				}
 				if err := json.Unmarshal([]byte(redisMsg.Payload), &notification); err != nil {
 					log.Warn().Err(err).Msg("Failed to parse notification")
 					continue
 				}
 
-				// Fetch full message
-				messages, err := bb.GetByTopic(ctx, notification.Topic, 100)
+				// Fetch message directly using key (more efficient than fetching 100 messages)
+				data, err := bb.client.Get(ctx, notification.MessageKey).Result()
 				if err != nil {
-					log.Warn().Err(err).Msg("Failed to fetch message")
+					log.Warn().
+						Err(err).
+						Str("message_key", notification.MessageKey).
+						Msg("Failed to fetch message")
 					continue
 				}
 
-				// Find the message by ID
-				for _, msg := range messages {
-					if msg.ID.String() == notification.MessageID {
-						select {
-						case ch <- msg:
-						case <-ctx.Done():
-							return
-						}
-						break
-					}
+				// Unmarshal message
+				var msg BlackboardMessage
+				if err := json.Unmarshal([]byte(data), &msg); err != nil {
+					log.Warn().Err(err).Msg("Failed to parse message")
+					continue
+				}
+
+				// Send to subscriber
+				select {
+				case ch <- &msg:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
@@ -341,12 +368,16 @@ func (bb *Blackboard) Clear(ctx context.Context, topic string) error {
 	// Delete topic index
 	pipe.Del(ctx, indexKey)
 
-	// Remove from agent indices
+	// Remove from agent indices and collect priorities
 	if messages != nil {
 		agentKeys := make(map[string]bool)
+		priorities := make(map[MessagePriority]bool)
 		for _, msg := range messages {
-			if msg != nil && msg.AgentName != "" {
-				agentKeys[msg.AgentName] = true
+			if msg != nil {
+				if msg.AgentName != "" {
+					agentKeys[msg.AgentName] = true
+				}
+				priorities[msg.Priority] = true
 			}
 		}
 
@@ -355,6 +386,22 @@ func (bb *Blackboard) Clear(ctx context.Context, topic string) error {
 			agentIndexKey := fmt.Sprintf("%sagent:%s", bb.prefix, agentName)
 			for _, key := range keys {
 				pipe.ZRem(ctx, agentIndexKey, key)
+			}
+		}
+
+		// Remove from priority indices
+		for priority := range priorities {
+			priorityIndexKey := fmt.Sprintf("%spriority:%s:%d", bb.prefix, topic, priority)
+			for _, key := range keys {
+				pipe.ZRem(ctx, priorityIndexKey, key)
+			}
+		}
+	} else {
+		// If we couldn't fetch messages, clean up all possible priority indices
+		for priority := PriorityLow; priority <= PriorityUrgent; priority++ {
+			priorityIndexKey := fmt.Sprintf("%spriority:%s:%d", bb.prefix, topic, priority)
+			for _, key := range keys {
+				pipe.ZRem(ctx, priorityIndexKey, key)
 			}
 		}
 	}

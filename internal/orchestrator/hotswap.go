@@ -11,10 +11,27 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// HotSwapConfig configures hot-swap behavior
+type HotSwapConfig struct {
+	PauseWaitTime time.Duration // Time to wait for agent to pause (default: 100ms)
+	StartWaitTime time.Duration // Time to wait for new agent to initialize (default: 200ms)
+	VerifyTimeout time.Duration // Timeout for agent verification (default: 5s)
+}
+
+// DefaultHotSwapConfig returns default configuration
+func DefaultHotSwapConfig() *HotSwapConfig {
+	return &HotSwapConfig{
+		PauseWaitTime: 100 * time.Millisecond,
+		StartWaitTime: 200 * time.Millisecond,
+		VerifyTimeout: 5 * time.Second,
+	}
+}
+
 // HotSwapCoordinator manages agent hot-swapping without downtime
 type HotSwapCoordinator struct {
 	blackboard *Blackboard
 	messageBus *MessageBus
+	config     *HotSwapConfig
 	agents     map[string]*AgentRegistration // Agent name -> registration
 	swaps      map[uuid.UUID]*SwapSession    // Swap ID -> session
 	mu         sync.RWMutex
@@ -144,9 +161,18 @@ type SwapStep struct {
 
 // NewHotSwapCoordinator creates a new hot-swap coordinator
 func NewHotSwapCoordinator(blackboard *Blackboard, messageBus *MessageBus) *HotSwapCoordinator {
+	return NewHotSwapCoordinatorWithConfig(blackboard, messageBus, DefaultHotSwapConfig())
+}
+
+// NewHotSwapCoordinatorWithConfig creates a new hot-swap coordinator with custom config
+func NewHotSwapCoordinatorWithConfig(blackboard *Blackboard, messageBus *MessageBus, config *HotSwapConfig) *HotSwapCoordinator {
+	if config == nil {
+		config = DefaultHotSwapConfig()
+	}
 	return &HotSwapCoordinator{
 		blackboard: blackboard,
 		messageBus: messageBus,
+		config:     config,
 		agents:     make(map[string]*AgentRegistration),
 		swaps:      make(map[uuid.UUID]*SwapSession),
 	}
@@ -381,8 +407,8 @@ func (hsc *HotSwapCoordinator) pauseAgent(ctx context.Context, session *SwapSess
 		return fmt.Errorf("failed to send pause message: %w", err)
 	}
 
-	// Wait briefly for agent to pause
-	time.Sleep(100 * time.Millisecond)
+	// Wait for agent to pause
+	time.Sleep(hsc.config.PauseWaitTime)
 
 	hsc.completeStep(step)
 
@@ -441,7 +467,7 @@ func (hsc *HotSwapCoordinator) startNewAgent(ctx context.Context, session *SwapS
 	}
 
 	// Wait for agent to initialize
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(hsc.config.StartWaitTime)
 
 	hsc.completeStep(step)
 
