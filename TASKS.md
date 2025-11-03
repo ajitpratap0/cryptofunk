@@ -1845,14 +1845,22 @@ This document consolidates all implementation tasks from the architecture and de
     - docs/LLM_DECISION_TRACKING.md - Complete integration guide
     - Supports analytics, learning, and similar situations retrieval
 
-- [ ] **T184** [P1] Implement context builder for LLM prompts
+- [x] **T184** [P1] Implement context builder for LLM prompts
   - internal/llm/context.go
   - Format recent market data for prompts
   - Format current positions and P&L
   - Format recent successful/failed trades
   - Keep context under token limits
-  - **Acceptance**: Context formatted for each agent type
-  - **Estimate**: 2 hours
+  - **Acceptance**: Context formatted for each agent type ✅
+  - **Actual**: ~2 hours
+  - **Implementation**:
+    - internal/llm/context.go (400+ lines)
+    - internal/llm/context_test.go (300+ lines)
+    - Token limiting with auto-truncation (4000 token default)
+    - 5 structured sections: Current Market, Portfolio, Positions, Similar Situations, Recent History
+    - Historical decision formatting with success/failure indicators
+    - Position limiting (5 shown, rest summarized)
+    - Minimal context builder for tight token limits
 
 - [ ] **T185** [P1] Add "similar situations" retrieval
   - Query past decisions with similar market conditions
