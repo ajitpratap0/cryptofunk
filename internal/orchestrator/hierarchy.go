@@ -17,7 +17,7 @@ type HierarchyManager struct {
 	hotSwap    *HotSwapCoordinator
 	blackboard *Blackboard
 	messageBus *MessageBus
-	metaAgents map[string]*MetaAgent // Meta-agent name -> meta-agent
+	metaAgents map[string]*MetaAgent     // Meta-agent name -> meta-agent
 	hierarchy  map[string]*HierarchyNode // Agent name -> hierarchy info
 	mu         sync.RWMutex
 }
@@ -25,14 +25,14 @@ type HierarchyManager struct {
 // MetaAgent represents a parent agent that coordinates sub-agents
 type MetaAgent struct {
 	*AgentRegistration
-	SubAgents         []*SubAgentInfo            `json:"sub_agents"`
-	DelegationPolicy  DelegationPolicy           `json:"delegation_policy"`
-	AggregationPolicy AggregationPolicy          `json:"aggregation_policy"`
-	ResourceLimits    *ResourceLimits            `json:"resource_limits"`
-	CurrentSituation  *Situation                 `json:"current_situation,omitempty"`
-	Decisions         []*MetaDecision            `json:"decisions"`
-	Performance       *MetaAgentPerformance      `json:"performance"`
-	Config            map[string]interface{}     `json:"config"`
+	SubAgents         []*SubAgentInfo        `json:"sub_agents"`
+	DelegationPolicy  DelegationPolicy       `json:"delegation_policy"`
+	AggregationPolicy AggregationPolicy      `json:"aggregation_policy"`
+	ResourceLimits    *ResourceLimits        `json:"resource_limits"`
+	CurrentSituation  *Situation             `json:"current_situation,omitempty"`
+	Decisions         []*MetaDecision        `json:"decisions"`
+	Performance       *MetaAgentPerformance  `json:"performance"`
+	Config            map[string]interface{} `json:"config"`
 }
 
 // SubAgentInfo tracks information about a sub-agent
@@ -40,9 +40,9 @@ type SubAgentInfo struct {
 	AgentName    string                 `json:"agent_name"`
 	AgentType    string                 `json:"agent_type"`
 	Active       bool                   `json:"active"`
-	Weight       float64                `json:"weight"`        // Weighting for aggregation
+	Weight       float64                `json:"weight"` // Weighting for aggregation
 	Capabilities []string               `json:"capabilities"`
-	Conditions   []ActivationCondition  `json:"conditions"`    // When to activate
+	Conditions   []ActivationCondition  `json:"conditions"` // When to activate
 	Performance  *SubAgentPerformance   `json:"performance"`
 	AddedAt      time.Time              `json:"added_at"`
 	LastActive   *time.Time             `json:"last_active,omitempty"`
@@ -53,22 +53,22 @@ type SubAgentInfo struct {
 type DelegationPolicy string
 
 const (
-	DelegationRoundRobin  DelegationPolicy = "round_robin"  // Distribute evenly
-	DelegationWeighted    DelegationPolicy = "weighted"     // Delegate based on weights
-	DelegationBestFit     DelegationPolicy = "best_fit"     // Match task to most capable agent
-	DelegationAll         DelegationPolicy = "all"          // All agents handle all tasks
-	DelegationAuction     DelegationPolicy = "auction"      // Agents bid for tasks
+	DelegationRoundRobin DelegationPolicy = "round_robin" // Distribute evenly
+	DelegationWeighted   DelegationPolicy = "weighted"    // Delegate based on weights
+	DelegationBestFit    DelegationPolicy = "best_fit"    // Match task to most capable agent
+	DelegationAll        DelegationPolicy = "all"         // All agents handle all tasks
+	DelegationAuction    DelegationPolicy = "auction"     // Agents bid for tasks
 )
 
 // AggregationPolicy defines how sub-agent results are combined
 type AggregationPolicy string
 
 const (
-	AggregationVoting      AggregationPolicy = "voting"       // Majority vote
-	AggregationWeighted    AggregationPolicy = "weighted"     // Weighted average
-	AggregationConsensus   AggregationPolicy = "consensus"    // Require consensus
-	AggregationBestScore   AggregationPolicy = "best_score"   // Highest scoring result
-	AggregationEnsemble    AggregationPolicy = "ensemble"     // Combine all results
+	AggregationVoting    AggregationPolicy = "voting"     // Majority vote
+	AggregationWeighted  AggregationPolicy = "weighted"   // Weighted average
+	AggregationConsensus AggregationPolicy = "consensus"  // Require consensus
+	AggregationBestScore AggregationPolicy = "best_score" // Highest scoring result
+	AggregationEnsemble  AggregationPolicy = "ensemble"   // Combine all results
 )
 
 // ActivationCondition defines when a sub-agent should be activated
@@ -89,15 +89,15 @@ type ResourceLimits struct {
 
 // Situation represents the current trading situation
 type Situation struct {
-	MarketConditions  map[string]interface{} `json:"market_conditions"`
-	PortfolioState    map[string]interface{} `json:"portfolio_state"`
-	Volatility        float64                `json:"volatility"`
-	TrendStrength     float64                `json:"trend_strength"`
-	LiquidityLevel    string                 `json:"liquidity_level"` // "high", "medium", "low"
-	SentimentScore    float64                `json:"sentiment_score"`
-	TimeOfDay         int                    `json:"time_of_day"` // hour
-	AssessedAt        time.Time              `json:"assessed_at"`
-	Metadata          map[string]interface{} `json:"metadata"`
+	MarketConditions map[string]interface{} `json:"market_conditions"`
+	PortfolioState   map[string]interface{} `json:"portfolio_state"`
+	Volatility       float64                `json:"volatility"`
+	TrendStrength    float64                `json:"trend_strength"`
+	LiquidityLevel   string                 `json:"liquidity_level"` // "high", "medium", "low"
+	SentimentScore   float64                `json:"sentiment_score"`
+	TimeOfDay        int                    `json:"time_of_day"` // hour
+	AssessedAt       time.Time              `json:"assessed_at"`
+	Metadata         map[string]interface{} `json:"metadata"`
 }
 
 // MetaDecision represents a decision made by the meta-agent
@@ -124,13 +124,13 @@ type SubAgentResult struct {
 
 // MetaAgentPerformance tracks meta-agent performance metrics
 type MetaAgentPerformance struct {
-	TotalDecisions      int64         `json:"total_decisions"`
-	SuccessfulDecisions int64         `json:"successful_decisions"`
-	FailedDecisions     int64         `json:"failed_decisions"`
-	AverageConfidence   float64       `json:"average_confidence"`
-	AverageLatency      time.Duration `json:"average_latency"`
+	TotalDecisions      int64            `json:"total_decisions"`
+	SuccessfulDecisions int64            `json:"successful_decisions"`
+	FailedDecisions     int64            `json:"failed_decisions"`
+	AverageConfidence   float64          `json:"average_confidence"`
+	AverageLatency      time.Duration    `json:"average_latency"`
 	SubAgentActivations map[string]int64 `json:"sub_agent_activations"` // Agent name -> count
-	LastUpdated         time.Time     `json:"last_updated"`
+	LastUpdated         time.Time        `json:"last_updated"`
 }
 
 // SubAgentPerformance tracks sub-agent performance under meta-agent
@@ -145,26 +145,26 @@ type SubAgentPerformance struct {
 
 // HierarchyNode represents a node in the agent hierarchy
 type HierarchyNode struct {
-	AgentName  string          `json:"agent_name"`
-	Level      int             `json:"level"`       // 0 = root, 1 = meta-agent, 2 = sub-agent
-	ParentName string          `json:"parent_name"` // Empty for root
-	Children   []string        `json:"children"`    // Child agent names
-	IsMetaAgent bool           `json:"is_meta_agent"`
-	CreatedAt  time.Time       `json:"created_at"`
-	UpdatedAt  time.Time       `json:"updated_at"`
+	AgentName   string    `json:"agent_name"`
+	Level       int       `json:"level"`       // 0 = root, 1 = meta-agent, 2 = sub-agent
+	ParentName  string    `json:"parent_name"` // Empty for root
+	Children    []string  `json:"children"`    // Child agent names
+	IsMetaAgent bool      `json:"is_meta_agent"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // TaskAllocation represents a task allocated to a sub-agent
 type TaskAllocation struct {
-	TaskID       uuid.UUID              `json:"task_id"`
-	MetaAgent    string                 `json:"meta_agent"`
-	SubAgent     string                 `json:"sub_agent"`
-	Task         *AgentTask             `json:"task"`
-	AllocatedAt  time.Time              `json:"allocated_at"`
-	Status       TaskStatus             `json:"status"`
-	Result       *SubAgentResult        `json:"result,omitempty"`
-	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	TaskID      uuid.UUID              `json:"task_id"`
+	MetaAgent   string                 `json:"meta_agent"`
+	SubAgent    string                 `json:"sub_agent"`
+	Task        *AgentTask             `json:"task"`
+	AllocatedAt time.Time              `json:"allocated_at"`
+	Status      TaskStatus             `json:"status"`
+	Result      *SubAgentResult        `json:"result,omitempty"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata"`
 }
 
 // NewHierarchyManager creates a new hierarchy manager
@@ -378,10 +378,10 @@ func (hm *HierarchyManager) AssessSituation(ctx context.Context, metaAgentName s
 
 	// Gather situation data from blackboard
 	situation := &Situation{
-		MarketConditions:  make(map[string]interface{}),
-		PortfolioState:    make(map[string]interface{}),
-		AssessedAt:        time.Now(),
-		Metadata:          make(map[string]interface{}),
+		MarketConditions: make(map[string]interface{}),
+		PortfolioState:   make(map[string]interface{}),
+		AssessedAt:       time.Now(),
+		Metadata:         make(map[string]interface{}),
 	}
 
 	// Read market data from blackboard

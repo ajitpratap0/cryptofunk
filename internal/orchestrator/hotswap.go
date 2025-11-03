@@ -13,10 +13,10 @@ import (
 
 // HotSwapConfig configures hot-swap behavior
 type HotSwapConfig struct {
-	PauseWaitTime    time.Duration // Time to wait for agent to pause (default: 100ms)
-	StartWaitTime    time.Duration // Time to wait for new agent to initialize (default: 200ms)
-	VerifyTimeout    time.Duration // Timeout for agent verification (default: 5s)
-	MaxHistorySize   int           // Maximum state snapshots to keep in history (default: 100)
+	PauseWaitTime  time.Duration // Time to wait for agent to pause (default: 100ms)
+	StartWaitTime  time.Duration // Time to wait for new agent to initialize (default: 200ms)
+	VerifyTimeout  time.Duration // Timeout for agent verification (default: 5s)
+	MaxHistorySize int           // Maximum state snapshots to keep in history (default: 100)
 }
 
 // DefaultHotSwapConfig returns default configuration

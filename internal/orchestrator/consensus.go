@@ -104,14 +104,14 @@ type ConsensusResult struct {
 
 // ConsensusConfig configures consensus behavior
 type ConsensusConfig struct {
-	MaxRounds             int           `json:"max_rounds"`               // Maximum iterations per session
-	ConvergenceThreshold  float64       `json:"convergence_threshold"`    // Agreement threshold (0.0-1.0)
-	RoundTimeout          time.Duration `json:"round_timeout"`            // Time to wait for responses
-	SessionTTL            time.Duration `json:"session_ttl"`              // Session expiration
-	MinParticipants       int           `json:"min_participants"`         // Minimum agents required
-	MaxActiveSessions     int           `json:"max_active_sessions"`      // Maximum concurrent sessions (resource limit)
-	MaxParticipants       int           `json:"max_participants"`         // Maximum participants per session (resource limit)
-	MaxConcurrentTimeouts int           `json:"max_concurrent_timeouts"`  // Maximum concurrent timeout handlers (resource limit)
+	MaxRounds             int           `json:"max_rounds"`              // Maximum iterations per session
+	ConvergenceThreshold  float64       `json:"convergence_threshold"`   // Agreement threshold (0.0-1.0)
+	RoundTimeout          time.Duration `json:"round_timeout"`           // Time to wait for responses
+	SessionTTL            time.Duration `json:"session_ttl"`             // Session expiration
+	MinParticipants       int           `json:"min_participants"`        // Minimum agents required
+	MaxActiveSessions     int           `json:"max_active_sessions"`     // Maximum concurrent sessions (resource limit)
+	MaxParticipants       int           `json:"max_participants"`        // Maximum participants per session (resource limit)
+	MaxConcurrentTimeouts int           `json:"max_concurrent_timeouts"` // Maximum concurrent timeout handlers (resource limit)
 }
 
 // DefaultConsensusConfig returns default configuration
