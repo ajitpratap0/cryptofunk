@@ -1,0 +1,353 @@
+package api
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// DecisionRepository handles database operations for LLM decisions
+type DecisionRepository struct {
+	db *pgxpool.Pool
+}
+
+// NewDecisionRepository creates a new decision repository
+func NewDecisionRepository(db *pgxpool.Pool) *DecisionRepository {
+	return &DecisionRepository{db: db}
+}
+
+// Decision represents an LLM decision record
+type Decision struct {
+	ID           uuid.UUID  `json:"id"`
+	SessionID    *uuid.UUID `json:"session_id,omitempty"`
+	DecisionType string     `json:"decision_type"`
+	Symbol       string     `json:"symbol"`
+	Prompt       string     `json:"prompt"`
+	Response     string     `json:"response"`
+	Model        string     `json:"model"`
+	TokensUsed   *int       `json:"tokens_used,omitempty"`
+	LatencyMs    *int       `json:"latency_ms,omitempty"`
+	Confidence   *float64   `json:"confidence,omitempty"`
+	Outcome      *string    `json:"outcome,omitempty"`
+	PnL          *float64   `json:"pnl,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// DecisionFilter contains filtering options for listing decisions
+type DecisionFilter struct {
+	Symbol       string
+	DecisionType string
+	Outcome      string
+	Model        string
+	FromDate     *time.Time
+	ToDate       *time.Time
+	Limit        int
+	Offset       int
+}
+
+// DecisionStats contains aggregated statistics
+type DecisionStats struct {
+	TotalDecisions int            `json:"total_decisions"`
+	ByType         map[string]int `json:"by_type"`
+	ByOutcome      map[string]int `json:"by_outcome"`
+	ByModel        map[string]int `json:"by_model"`
+	AvgConfidence  float64        `json:"avg_confidence"`
+	AvgLatencyMs   float64        `json:"avg_latency_ms"`
+	AvgTokensUsed  float64        `json:"avg_tokens_used"`
+	SuccessRate    float64        `json:"success_rate"`
+	TotalPnL       float64        `json:"total_pnl"`
+	AvgPnL         float64        `json:"avg_pnl"`
+}
+
+// ListDecisions retrieves decisions with optional filtering
+func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionFilter) ([]Decision, error) {
+	query := `
+		SELECT
+			id, session_id, decision_type, symbol, prompt, response,
+			model, tokens_used, latency_ms, confidence, outcome, pnl,
+			created_at
+		FROM llm_decisions
+		WHERE 1=1
+	`
+	args := make([]interface{}, 0)
+	argPos := 1
+
+	// Add filters
+	if filter.Symbol != "" {
+		query += ` AND symbol = $` + itoa(argPos)
+		args = append(args, filter.Symbol)
+		argPos++
+	}
+	if filter.DecisionType != "" {
+		query += ` AND decision_type = $` + itoa(argPos)
+		args = append(args, filter.DecisionType)
+		argPos++
+	}
+	if filter.Outcome != "" {
+		query += ` AND outcome = $` + itoa(argPos)
+		args = append(args, filter.Outcome)
+		argPos++
+	}
+	if filter.Model != "" {
+		query += ` AND model = $` + itoa(argPos)
+		args = append(args, filter.Model)
+		argPos++
+	}
+	if filter.FromDate != nil {
+		query += ` AND created_at >= $` + itoa(argPos)
+		args = append(args, *filter.FromDate)
+		argPos++
+	}
+	if filter.ToDate != nil {
+		query += ` AND created_at <= $` + itoa(argPos)
+		args = append(args, *filter.ToDate)
+		argPos++
+	}
+
+	// Order and pagination
+	query += ` ORDER BY created_at DESC`
+
+	if filter.Limit > 0 {
+		query += ` LIMIT $` + itoa(argPos)
+		args = append(args, filter.Limit)
+		argPos++
+	}
+	if filter.Offset > 0 {
+		query += ` OFFSET $` + itoa(argPos)
+		args = append(args, filter.Offset)
+		argPos++
+	}
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	decisions := make([]Decision, 0)
+	for rows.Next() {
+		var d Decision
+		err := rows.Scan(
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
+			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
+			&d.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		decisions = append(decisions, d)
+	}
+
+	return decisions, rows.Err()
+}
+
+// GetDecision retrieves a single decision by ID
+func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*Decision, error) {
+	query := `
+		SELECT
+			id, session_id, decision_type, symbol, prompt, response,
+			model, tokens_used, latency_ms, confidence, outcome, pnl,
+			created_at
+		FROM llm_decisions
+		WHERE id = $1
+	`
+
+	var d Decision
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+		&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
+		&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
+		&d.CreatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &d, nil
+}
+
+// GetDecisionStats retrieves aggregated statistics
+func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter DecisionFilter) (*DecisionStats, error) {
+	query := `
+		SELECT
+			COUNT(*) as total,
+			AVG(COALESCE(confidence, 0)) as avg_confidence,
+			AVG(COALESCE(latency_ms, 0)) as avg_latency,
+			AVG(COALESCE(tokens_used, 0)) as avg_tokens,
+			SUM(CASE WHEN outcome = 'SUCCESS' THEN 1 ELSE 0 END)::FLOAT /
+				NULLIF(COUNT(CASE WHEN outcome IS NOT NULL THEN 1 END), 0) as success_rate,
+			SUM(COALESCE(pnl, 0)) as total_pnl,
+			AVG(COALESCE(pnl, 0)) as avg_pnl
+		FROM llm_decisions
+		WHERE 1=1
+	`
+	args := make([]interface{}, 0)
+	argPos := 1
+
+	// Add filters (same as ListDecisions)
+	if filter.Symbol != "" {
+		query += ` AND symbol = $` + itoa(argPos)
+		args = append(args, filter.Symbol)
+		argPos++
+	}
+	if filter.DecisionType != "" {
+		query += ` AND decision_type = $` + itoa(argPos)
+		args = append(args, filter.DecisionType)
+		argPos++
+	}
+	if filter.FromDate != nil {
+		query += ` AND created_at >= $` + itoa(argPos)
+		args = append(args, *filter.FromDate)
+		argPos++
+	}
+	if filter.ToDate != nil {
+		query += ` AND created_at <= $` + itoa(argPos)
+		args = append(args, *filter.ToDate)
+		argPos++
+	}
+
+	var stats DecisionStats
+	err := r.db.QueryRow(ctx, query, args...).Scan(
+		&stats.TotalDecisions,
+		&stats.AvgConfidence,
+		&stats.AvgLatencyMs,
+		&stats.AvgTokensUsed,
+		&stats.SuccessRate,
+		&stats.TotalPnL,
+		&stats.AvgPnL,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get breakdown by type
+	stats.ByType, err = r.getCountsByField(ctx, "decision_type", filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get breakdown by outcome
+	stats.ByOutcome, err = r.getCountsByField(ctx, "outcome", filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get breakdown by model
+	stats.ByModel, err = r.getCountsByField(ctx, "model", filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return &stats, nil
+}
+
+// getCountsByField gets count breakdown by a specific field
+func (r *DecisionRepository) getCountsByField(ctx context.Context, field string, filter DecisionFilter) (map[string]int, error) {
+	query := `
+		SELECT ` + field + `, COUNT(*)
+		FROM llm_decisions
+		WHERE ` + field + ` IS NOT NULL
+	`
+	args := make([]interface{}, 0)
+	argPos := 1
+
+	// Add filters
+	if filter.Symbol != "" {
+		query += ` AND symbol = $` + itoa(argPos)
+		args = append(args, filter.Symbol)
+		argPos++
+	}
+	if filter.DecisionType != "" && field != "decision_type" {
+		query += ` AND decision_type = $` + itoa(argPos)
+		args = append(args, filter.DecisionType)
+		argPos++
+	}
+	if filter.FromDate != nil {
+		query += ` AND created_at >= $` + itoa(argPos)
+		args = append(args, *filter.FromDate)
+		argPos++
+	}
+	if filter.ToDate != nil {
+		query += ` AND created_at <= $` + itoa(argPos)
+		args = append(args, *filter.ToDate)
+		argPos++
+	}
+
+	query += ` GROUP BY ` + field
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var key string
+		var count int
+		if err := rows.Scan(&key, &count); err != nil {
+			return nil, err
+		}
+		result[key] = count
+	}
+
+	return result, rows.Err()
+}
+
+// FindSimilarDecisions finds decisions with similar prompts using vector similarity
+func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error) {
+	query := `
+		WITH target AS (
+			SELECT prompt_embedding
+			FROM llm_decisions
+			WHERE id = $1 AND prompt_embedding IS NOT NULL
+		)
+		SELECT
+			d.id, d.session_id, d.decision_type, d.symbol, d.prompt, d.response,
+			d.model, d.tokens_used, d.latency_ms, d.confidence, d.outcome, d.pnl,
+			d.created_at,
+			d.prompt_embedding <=> t.prompt_embedding as distance
+		FROM llm_decisions d, target t
+		WHERE d.id != $1
+			AND d.prompt_embedding IS NOT NULL
+		ORDER BY d.prompt_embedding <=> t.prompt_embedding
+		LIMIT $2
+	`
+
+	rows, err := r.db.Query(ctx, query, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	decisions := make([]Decision, 0)
+	for rows.Next() {
+		var d Decision
+		var distance float64
+		err := rows.Scan(
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
+			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
+			&d.CreatedAt, &distance,
+		)
+		if err != nil {
+			return nil, err
+		}
+		decisions = append(decisions, d)
+	}
+
+	return decisions, rows.Err()
+}
+
+// Helper function to convert int to string for query building
+func itoa(i int) string {
+	return fmt.Sprintf("%d", i)
+}

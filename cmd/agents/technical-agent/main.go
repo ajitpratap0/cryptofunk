@@ -34,7 +34,7 @@ type TechnicalAgent struct {
 	natsTopic string
 
 	// LLM client for AI-powered analysis
-	llmClient       llm.LLMClient        // Interface supports both Client and FallbackClient
+	llmClient       llm.LLMClient // Interface supports both Client and FallbackClient
 	promptBuilder   *llm.PromptBuilder
 	useLLM          bool                 // Enable/disable LLM reasoning
 	decisionTracker *llm.DecisionTracker // Track LLM decisions (optional)

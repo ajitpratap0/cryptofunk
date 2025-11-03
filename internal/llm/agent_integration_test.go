@@ -274,18 +274,18 @@ func TestAgentWithCircuitBreaker(t *testing.T) {
 func TestAgentConfigParsing(t *testing.T) {
 	// Simulate config values that would come from viper
 	simulatedConfig := map[string]interface{}{
-		"llm.enabled":                               true,
-		"llm.endpoint":                              "http://localhost:8080/v1/chat/completions",
-		"llm.api_key":                               "test-key",
-		"llm.primary_model":                         "claude-sonnet-4",
-		"llm.fallback_models":                       []string{"gpt-4", "gpt-3.5-turbo"},
-		"llm.temperature":                           0.7,
-		"llm.max_tokens":                            2000,
-		"llm.timeout":                               30 * time.Second,
-		"llm.circuit_breaker.failure_threshold":     5,
-		"llm.circuit_breaker.success_threshold":     2,
-		"llm.circuit_breaker.timeout":               60 * time.Second,
-		"llm.circuit_breaker.time_window":           5 * time.Minute,
+		"llm.enabled":                           true,
+		"llm.endpoint":                          "http://localhost:8080/v1/chat/completions",
+		"llm.api_key":                           "test-key",
+		"llm.primary_model":                     "claude-sonnet-4",
+		"llm.fallback_models":                   []string{"gpt-4", "gpt-3.5-turbo"},
+		"llm.temperature":                       0.7,
+		"llm.max_tokens":                        2000,
+		"llm.timeout":                           30 * time.Second,
+		"llm.circuit_breaker.failure_threshold": 5,
+		"llm.circuit_breaker.success_threshold": 2,
+		"llm.circuit_breaker.timeout":           60 * time.Second,
+		"llm.circuit_breaker.time_window":       5 * time.Minute,
 	}
 
 	// Verify all required config keys are present

@@ -257,21 +257,21 @@ type CircuitBreaker struct {
 }
 
 type modelCircuit struct {
-	state            CircuitState
-	consecutiveFails int
+	state                CircuitState
+	consecutiveFails     int
 	consecutiveSuccesses int
-	lastFailure      time.Time
-	lastSuccess      time.Time
-	openedAt         time.Time
-	failures         []time.Time // Sliding window of failures
+	lastFailure          time.Time
+	lastSuccess          time.Time
+	openedAt             time.Time
+	failures             []time.Time // Sliding window of failures
 }
 
 // CircuitState represents the state of a circuit breaker
 type CircuitState string
 
 const (
-	CircuitClosed   CircuitState = "CLOSED"   // Normal operation
-	CircuitOpen     CircuitState = "OPEN"     // Blocking requests
+	CircuitClosed   CircuitState = "CLOSED"    // Normal operation
+	CircuitOpen     CircuitState = "OPEN"      // Blocking requests
 	CircuitHalfOpen CircuitState = "HALF_OPEN" // Testing recovery
 )
 

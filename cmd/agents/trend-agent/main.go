@@ -34,7 +34,7 @@ type TrendAgent struct {
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
 	promptBuilder *llm.PromptBuilder
-	useLLM        bool          // Enable/disable LLM reasoning
+	useLLM        bool // Enable/disable LLM reasoning
 
 	// Strategy configuration
 	symbols         []string

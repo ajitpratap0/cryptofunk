@@ -8,43 +8,43 @@ import (
 
 func TestPromptBuilder_GetSystemPrompt(t *testing.T) {
 	tests := []struct {
-		name      string
-		agentType AgentType
+		name          string
+		agentType     AgentType
 		wantSubstring string
 	}{
 		{
-			name:      "Technical Analysis Agent",
-			agentType: AgentTypeTechnical,
+			name:          "Technical Analysis Agent",
+			agentType:     AgentTypeTechnical,
 			wantSubstring: "technical analysis",
 		},
 		{
-			name:      "Trend Following Agent",
-			agentType: AgentTypeTrend,
+			name:          "Trend Following Agent",
+			agentType:     AgentTypeTrend,
 			wantSubstring: "trend-following",
 		},
 		{
-			name:      "Mean Reversion Agent",
-			agentType: AgentTypeReversion,
+			name:          "Mean Reversion Agent",
+			agentType:     AgentTypeReversion,
 			wantSubstring: "mean reversion",
 		},
 		{
-			name:      "Risk Management Agent",
-			agentType: AgentTypeRisk,
+			name:          "Risk Management Agent",
+			agentType:     AgentTypeRisk,
 			wantSubstring: "risk management",
 		},
 		{
-			name:      "Orderbook Analysis Agent",
-			agentType: AgentTypeOrderbook,
+			name:          "Orderbook Analysis Agent",
+			agentType:     AgentTypeOrderbook,
 			wantSubstring: "order book",
 		},
 		{
-			name:      "Sentiment Analysis Agent",
-			agentType: AgentTypeSentiment,
+			name:          "Sentiment Analysis Agent",
+			agentType:     AgentTypeSentiment,
 			wantSubstring: "sentiment",
 		},
 		{
-			name:      "Default Agent",
-			agentType: "unknown",
+			name:          "Default Agent",
+			agentType:     "unknown",
 			wantSubstring: "trading agent",
 		},
 	}
@@ -79,11 +79,11 @@ func TestPromptBuilder_BuildTechnicalAnalysisPrompt(t *testing.T) {
 		PriceChange24h: 2.5,
 		Volume24h:      1234567890.50,
 		Indicators: map[string]float64{
-			"RSI":        65.5,
-			"MACD":       125.3,
-			"BB_Upper":   46500.0,
-			"BB_Lower":   43500.0,
-			"SMA_20":     44800.0,
+			"RSI":      65.5,
+			"MACD":     125.3,
+			"BB_Upper": 46500.0,
+			"BB_Lower": 43500.0,
+			"SMA_20":   44800.0,
 		},
 	}
 
@@ -129,10 +129,10 @@ func TestPromptBuilder_BuildTrendFollowingPrompt(t *testing.T) {
 		CurrentPrice:   3200.75,
 		PriceChange24h: 5.2,
 		Indicators: map[string]float64{
-			"EMA_12":     3180.0,
-			"EMA_26":     3150.0,
-			"ADX":        35.5,
-			"Trend":      1.0,
+			"EMA_12": 3180.0,
+			"EMA_26": 3150.0,
+			"ADX":    35.5,
+			"Trend":  1.0,
 		},
 	}
 
@@ -179,8 +179,8 @@ func TestPromptBuilder_BuildMeanReversionPrompt(t *testing.T) {
 		CurrentPrice:   125.30,
 		PriceChange24h: -8.5,
 		Indicators: map[string]float64{
-			"RSI":          28.5, // Oversold
-			"BB_Position": -2.1,  // Below lower band
+			"RSI":         28.5, // Oversold
+			"BB_Position": -2.1, // Below lower band
 			"SMA_50":      135.0,
 		},
 	}
@@ -356,13 +356,13 @@ func TestFormatIndicators(t *testing.T) {
 
 func TestFormatPositions(t *testing.T) {
 	tests := []struct {
-		name      string
-		positions []PositionContext
+		name          string
+		positions     []PositionContext
 		wantSubstring string
 	}{
 		{
-			name:      "Empty positions",
-			positions: []PositionContext{},
+			name:          "Empty positions",
+			positions:     []PositionContext{},
 			wantSubstring: "No open positions",
 		},
 		{
@@ -493,8 +493,8 @@ func TestFormatHistoricalDecisions(t *testing.T) {
 
 func TestFormatContextAsJSON(t *testing.T) {
 	tests := []struct {
-		name string
-		data interface{}
+		name      string
+		data      interface{}
 		wantValid bool
 	}{
 		{

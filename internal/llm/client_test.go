@@ -12,11 +12,11 @@ import (
 
 func TestClient_Complete(t *testing.T) {
 	tests := []struct {
-		name           string
-		statusCode     int
-		responseBody   string
-		wantError      bool
-		wantRetryable  bool
+		name          string
+		statusCode    int
+		responseBody  string
+		wantError     bool
+		wantRetryable bool
 	}{
 		{
 			name:       "Successful response",
@@ -136,7 +136,7 @@ func TestClient_Complete(t *testing.T) {
 func TestClient_CompleteWithRetry(t *testing.T) {
 	tests := []struct {
 		name          string
-		attempts      []int  // Status codes for each attempt
+		attempts      []int // Status codes for each attempt
 		maxRetries    int
 		expectSuccess bool
 	}{

@@ -263,6 +263,12 @@ GET  http://localhost:8080/api/v1/positions
 # Orders
 GET  http://localhost:8080/api/v1/orders
 
+# Decisions (Explainability)
+GET  http://localhost:8080/api/v1/decisions
+GET  http://localhost:8080/api/v1/decisions/:id
+GET  http://localhost:8080/api/v1/decisions/:id/similar
+GET  http://localhost:8080/api/v1/decisions/stats
+
 # Control
 POST http://localhost:8080/api/v1/trade/start
 POST http://localhost:8080/api/v1/trade/stop
