@@ -156,7 +156,7 @@ risk:
 exchanges:
   binance:
     api_key: "${BINANCE_API_KEY}"
-    secret_key: "${BINANCE_SECRET_KEY}"
+    secret_key: "${BINANCE_API_SECRET}"
     testnet: true
     rate_limit_ms: 100
 

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bifrost
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: bifrost
+    app.kubernetes.io/component: llm-gateway
+spec:
+  replicas: 2  # Scale for high availability
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bifrost
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bifrost
+        app.kubernetes.io/component: llm-gateway
+    spec:
+      containers:
+      - name: bifrost
+        image: maximhq/bifrost:v0.3.0
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: BIFROST_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: BIFROST_PORT
+        - name: REDIS_URL
+          value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: REDIS_PORT
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: ANTHROPIC_API_KEY
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: OPENAI_API_KEY
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: GEMINI_API_KEY
+              optional: true
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

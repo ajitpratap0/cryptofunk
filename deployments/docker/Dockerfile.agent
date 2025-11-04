@@ -1,0 +1,64 @@
+# Multi-stage Dockerfile for Trading Agents
+# This is a template that can be used for all agents
+# Build with: docker build -f Dockerfile.agent --build-arg AGENT_NAME=technical-agent -t agent-technical .
+
+ARG AGENT_NAME=technical-agent
+
+# Stage 1: Builder
+FROM golang:1.21-alpine AS builder
+
+ARG AGENT_NAME
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the agent binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a \
+    -o agent \
+    ./cmd/agents/${AGENT_NAME}
+
+# Stage 2: Runtime
+FROM alpine:latest
+
+ARG AGENT_NAME
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 1000 appuser && \
+    adduser -D -u 1000 -G appuser appuser
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /build/agent .
+
+# Copy configs
+COPY --from=builder /build/configs ./configs
+
+# Set ownership
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Agents communicate via MCP, no port exposure needed
+
+# Health check (check if process is running)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD pgrep -x agent > /dev/null || exit 1
+
+# Run the binary
+ENTRYPOINT ["/app/agent"]

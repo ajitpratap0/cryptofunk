@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cryptofunk-config
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/component: config
+data:
+  # Application Configuration
+  TRADING_MODE: "PAPER"
+  LOG_LEVEL: "info"
+  CORS_ORIGINS: "*"
+
+  # Database Configuration
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "cryptofunk"
+  POSTGRES_USER: "postgres"
+
+  # Redis Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+  # NATS Configuration
+  NATS_HOST: "nats-service"
+  NATS_PORT: "4222"
+
+  # Bifrost LLM Gateway Configuration
+  BIFROST_HOST: "bifrost-service"
+  BIFROST_PORT: "8080"
+
+  # Orchestrator Configuration
+  ORCHESTRATOR_HOST: "orchestrator-service"
+  ORCHESTRATOR_PORT: "8080"
+
+  # API Configuration
+  API_PORT: "8080"
+
+  # Prometheus Configuration
+  PROMETHEUS_HOST: "prometheus-service"
+  PROMETHEUS_PORT: "9090"

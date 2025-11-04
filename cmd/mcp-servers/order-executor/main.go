@@ -23,7 +23,7 @@ func main() {
 	}
 
 	binanceAPIKey := os.Getenv("BINANCE_API_KEY")
-	binanceSecret := os.Getenv("BINANCE_SECRET_KEY")
+	binanceSecret := os.Getenv("BINANCE_API_SECRET")
 	binanceTestnet := os.Getenv("BINANCE_TESTNET") == "true"
 
 	log.Info().

@@ -323,6 +323,36 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("LLM endpoint must be configured")
 	}
 
+	// Validate production secrets - ensure no placeholder values
+	if cfg.App.Environment == "production" {
+		// List of known placeholder values
+		placeholders := []string{"changeme", "changeme_in_production", "cryptofunk_grafana"}
+
+		// Check database password
+		if cfg.Database.Password == "" {
+			return fmt.Errorf("SECURITY: database password must be set in production")
+		}
+		for _, placeholder := range placeholders {
+			if cfg.Database.Password == placeholder {
+				return fmt.Errorf("SECURITY: database password cannot be '%s' in production - change POSTGRES_PASSWORD", placeholder)
+			}
+		}
+
+		// Check exchange API secrets (if configured)
+		for name, exchange := range cfg.Exchanges {
+			if exchange.SecretKey != "" {
+				for _, placeholder := range placeholders {
+					if exchange.SecretKey == placeholder {
+						return fmt.Errorf("SECURITY: %s API secret cannot be '%s' in production - change BINANCE_API_SECRET", name, placeholder)
+					}
+				}
+			}
+		}
+
+		// Note: Add more secret validations as needed for JWT_SECRET, GRAFANA_ADMIN_PASSWORD, etc.
+		// These should be validated in their respective service startup code
+	}
+
 	return nil
 }
 

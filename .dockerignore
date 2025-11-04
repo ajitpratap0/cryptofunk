@@ -1,0 +1,77 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+testdata/
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Documentation
+README.md
+CLAUDE.md
+docs/
+*.md
+!go.mod
+!go.sum
+
+# Development tools
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Deployment files (not needed in images)
+deployments/k8s/
+deployments/docker/docker-compose*.yml
+Taskfile.yml
+
+# Scripts
+scripts/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+
+# Cache
+.cache/
+
+# Node modules (if any)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml

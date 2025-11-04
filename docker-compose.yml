@@ -129,6 +129,361 @@ services:
       - cryptofunk
     restart: unless-stopped
 
+  # ========================================
+  # Application Services
+  # ========================================
+
+  # Database Migration (one-shot)
+  migrate:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.migrate
+    container_name: cryptofunk-migrate
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cryptofunk
+    command: ["up"]
+    restart: on-failure
+
+  # MCP Orchestrator
+  orchestrator:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.orchestrator
+    container_name: cryptofunk-orchestrator
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # MCP Server: Market Data
+  market-data-server:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.mcp-server
+      args:
+        SERVER_NAME: market-data
+    container_name: cryptofunk-market-data-server
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # MCP Server: Technical Indicators
+  technical-indicators-server:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.mcp-server
+      args:
+        SERVER_NAME: technical-indicators
+    container_name: cryptofunk-technical-indicators-server
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # MCP Server: Risk Analyzer
+  risk-analyzer-server:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.mcp-server
+      args:
+        SERVER_NAME: risk-analyzer
+    container_name: cryptofunk-risk-analyzer-server
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # MCP Server: Order Executor
+  order-executor-server:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.mcp-server
+      args:
+        SERVER_NAME: order-executor
+    container_name: cryptofunk-order-executor-server
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
+      TRADING_MODE: ${TRADING_MODE:-PAPER}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # Trading Agent: Technical Analysis
+  technical-agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+      args:
+        AGENT_NAME: technical-agent
+    container_name: cryptofunk-technical-agent
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # Trading Agent: Order Book Analysis
+  orderbook-agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+      args:
+        AGENT_NAME: orderbook-agent
+    container_name: cryptofunk-orderbook-agent
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # Trading Agent: Sentiment Analysis
+  sentiment-agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+      args:
+        AGENT_NAME: sentiment-agent
+    container_name: cryptofunk-sentiment-agent
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # Trading Agent: Trend Following
+  trend-agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+      args:
+        AGENT_NAME: trend-agent
+    container_name: cryptofunk-trend-agent
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # Trading Agent: Mean Reversion
+  reversion-agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+      args:
+        AGENT_NAME: reversion-agent
+    container_name: cryptofunk-reversion-agent
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # Trading Agent: Risk Management
+  risk-agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+      args:
+        AGENT_NAME: risk-agent
+    container_name: cryptofunk-risk-agent
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      BIFROST_URL: http://bifrost:8080
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
+  # REST/WebSocket API Server
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.api
+    container_name: cryptofunk-api
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      API_PORT: 8080
+      JWT_SECRET: ${JWT_SECRET:-changeme_in_production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
 networks:
   cryptofunk:
     driver: bridge
