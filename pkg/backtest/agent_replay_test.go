@@ -15,14 +15,14 @@ import (
 
 // SimpleMovingAverageAgent is a test agent that uses SMA crossover strategy
 type SimpleMovingAverageAgent struct {
-	name       string
+	name        string
 	shortPeriod int
 	longPeriod  int
 }
 
 func NewSMAAgent(name string) *SimpleMovingAverageAgent {
 	return &SimpleMovingAverageAgent{
-		name:       name,
+		name:        name,
 		shortPeriod: 10,
 		longPeriod:  20,
 	}
@@ -259,7 +259,7 @@ func TestConsensusWeighted(t *testing.T) {
 
 	// BUY has higher total confidence
 	signals := []*Signal{
-		{Side: "BUY", Confidence: 0.9}, // total: 0.9
+		{Side: "BUY", Confidence: 0.9},  // total: 0.9
 		{Side: "SELL", Confidence: 0.5}, // total: 0.8
 		{Side: "SELL", Confidence: 0.3},
 	}

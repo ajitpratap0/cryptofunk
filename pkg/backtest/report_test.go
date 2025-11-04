@@ -306,9 +306,9 @@ func TestOptimizationReportContent(t *testing.T) {
 			Score:      1.8,
 			Parameters: ParameterSet{"short_period": 10, "long_period": 30},
 			Metrics: &Metrics{
-				SharpeRatio:     1.8,
-				TotalReturn:     25.5,
-				MaxDrawdownPct:  -8.2,
+				SharpeRatio:    1.8,
+				TotalReturn:    25.5,
+				MaxDrawdownPct: -8.2,
 			},
 		},
 		TopResults: []*OptimizationResult{
@@ -316,9 +316,9 @@ func TestOptimizationReportContent(t *testing.T) {
 				Score:      1.8,
 				Parameters: ParameterSet{"short_period": 10, "long_period": 30},
 				Metrics: &Metrics{
-					SharpeRatio:     1.8,
-					TotalReturn:     25.5,
-					MaxDrawdownPct:  -8.2,
+					SharpeRatio:    1.8,
+					TotalReturn:    25.5,
+					MaxDrawdownPct: -8.2,
 				},
 			},
 		},
@@ -484,7 +484,7 @@ func createReportTestEngineWithData() *Engine {
 
 	// Add some closed positions
 	for i := 0; i < 5; i++ {
-		pl := float64((i % 2) * 200 - 100) // Alternating +100 and -100
+		pl := float64((i%2)*200 - 100) // Alternating +100 and -100
 		returnPct := pl / 1000 * 100
 
 		engine.ClosedPositions = append(engine.ClosedPositions, &ClosedPosition{

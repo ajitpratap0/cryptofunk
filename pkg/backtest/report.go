@@ -54,13 +54,13 @@ func (r *ReportGenerator) GenerateHTML() (string, error) {
 		"formatTime":    formatTime,
 		"mul":           func(a, b float64) float64 { return a * b },
 		"add":           func(a, b int) int { return a + b },
-		"last":          func(items []*ClosedPosition, n int) []*ClosedPosition {
+		"last": func(items []*ClosedPosition, n int) []*ClosedPosition {
 			if len(items) <= n {
 				return items
 			}
 			return items[len(items)-n:]
 		},
-		"formatParams":  func(params ParameterSet) string {
+		"formatParams": func(params ParameterSet) string {
 			result := ""
 			for k, v := range params {
 				if result != "" {
@@ -114,19 +114,19 @@ func (r *ReportGenerator) prepareTemplateData() map[string]interface{} {
 		"Summary":     r.summary,
 
 		// Chart data
-		"EquityCurveData":     r.prepareEquityCurveData(),
-		"DrawdownData":        r.prepareDrawdownData(),
-		"MonthlyReturnsData":  r.prepareMonthlyReturnsData(),
-		"TradeDistribution":   r.prepareTradeDistributionData(),
-		"WinLossData":         r.prepareWinLossData(),
+		"EquityCurveData":    r.prepareEquityCurveData(),
+		"DrawdownData":       r.prepareDrawdownData(),
+		"MonthlyReturnsData": r.prepareMonthlyReturnsData(),
+		"TradeDistribution":  r.prepareTradeDistributionData(),
+		"WinLossData":        r.prepareWinLossData(),
 
 		// Trade details
-		"ClosedPositions":     r.engine.ClosedPositions,
-		"Trades":             r.engine.Trades,
+		"ClosedPositions": r.engine.ClosedPositions,
+		"Trades":          r.engine.Trades,
 
 		// Optimization data (if available)
-		"HasOptimization":    r.summary != nil,
-		"OptimizationRuns":   r.getTopOptimizationRuns(10),
+		"HasOptimization":  r.summary != nil,
+		"OptimizationRuns": r.getTopOptimizationRuns(10),
 	}
 
 	return data

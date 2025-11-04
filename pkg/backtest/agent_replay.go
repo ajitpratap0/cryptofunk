@@ -38,12 +38,12 @@ type Agent interface {
 
 // MarketData represents market data available to an agent at a point in time
 type MarketData struct {
-	Timestamp    time.Time         `json:"timestamp"`
-	Symbol       string            `json:"symbol"`
-	CurrentPrice float64           `json:"current_price"`
-	OHLCV        *Candlestick      `json:"current_candle"`
-	History      []*Candlestick    `json:"historical_candles"`
-	Indicators   map[string]float64 `json:"indicators,omitempty"`
+	Timestamp    time.Time              `json:"timestamp"`
+	Symbol       string                 `json:"symbol"`
+	CurrentPrice float64                `json:"current_price"`
+	OHLCV        *Candlestick           `json:"current_candle"`
+	History      []*Candlestick         `json:"historical_candles"`
+	Indicators   map[string]float64     `json:"indicators,omitempty"`
 	Context      map[string]interface{} `json:"context,omitempty"`
 }
 

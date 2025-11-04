@@ -18,12 +18,12 @@ import (
 
 // Parameter represents a tunable parameter for strategy optimization
 type Parameter struct {
-	Name   string      `json:"name"`
-	Type   ParamType   `json:"type"`   // int, float, bool, string
-	Min    float64     `json:"min"`    // For numeric types
-	Max    float64     `json:"max"`    // For numeric types
-	Step   float64     `json:"step"`   // Step size for grid search
-	Values []string    `json:"values"` // For string/categorical types
+	Name   string    `json:"name"`
+	Type   ParamType `json:"type"`   // int, float, bool, string
+	Min    float64   `json:"min"`    // For numeric types
+	Max    float64   `json:"max"`    // For numeric types
+	Step   float64   `json:"step"`   // Step size for grid search
+	Values []string  `json:"values"` // For string/categorical types
 }
 
 // ParamType defines the type of parameter
@@ -56,22 +56,22 @@ func (ps ParameterSet) Clone() ParameterSet {
 type OptimizationResult struct {
 	Parameters    ParameterSet `json:"parameters"`
 	Metrics       *Metrics     `json:"metrics"`
-	Score         float64      `json:"score"`          // Fitness score
-	Rank          int          `json:"rank"`           // Rank among all results
-	IsOutOfSample bool         `json:"is_out_sample"`  // Walk-forward out-of-sample flag
+	Score         float64      `json:"score"`         // Fitness score
+	Rank          int          `json:"rank"`          // Rank among all results
+	IsOutOfSample bool         `json:"is_out_sample"` // Walk-forward out-of-sample flag
 }
 
 // OptimizationSummary summarizes an optimization run
 type OptimizationSummary struct {
-	Method           string                `json:"method"`            // grid_search, walk_forward, genetic
-	TotalRuns        int                   `json:"total_runs"`
-	Duration         time.Duration         `json:"duration"`
-	BestResult       *OptimizationResult   `json:"best_result"`
-	TopResults       []*OptimizationResult `json:"top_results"`       // Top 10 results
-	ParameterRanges  []*Parameter          `json:"parameter_ranges"`
-	ObjectiveMetric  string                `json:"objective_metric"`  // What we're optimizing
-	StartDate        time.Time             `json:"start_date"`
-	EndDate          time.Time             `json:"end_date"`
+	Method          string                `json:"method"` // grid_search, walk_forward, genetic
+	TotalRuns       int                   `json:"total_runs"`
+	Duration        time.Duration         `json:"duration"`
+	BestResult      *OptimizationResult   `json:"best_result"`
+	TopResults      []*OptimizationResult `json:"top_results"` // Top 10 results
+	ParameterRanges []*Parameter          `json:"parameter_ranges"`
+	ObjectiveMetric string                `json:"objective_metric"` // What we're optimizing
+	StartDate       time.Time             `json:"start_date"`
+	EndDate         time.Time             `json:"end_date"`
 }
 
 // ============================================================================

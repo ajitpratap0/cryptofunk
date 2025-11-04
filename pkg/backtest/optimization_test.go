@@ -312,7 +312,7 @@ func TestNewWalkForwardOptimizer(t *testing.T) {
 
 func TestWalkForwardOptimizer_GenerateWindows(t *testing.T) {
 	optimizer := &WalkForwardOptimizer{
-		inSamplePeriod:  30 * 24 * time.Hour,  // 30 days
+		inSamplePeriod:  30 * 24 * time.Hour, // 30 days
 		outSamplePeriod: 10 * 24 * time.Hour, // 10 days
 	}
 

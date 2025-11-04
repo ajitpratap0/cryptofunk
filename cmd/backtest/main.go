@@ -47,9 +47,9 @@ var (
 	optimizeMetric = flag.String("optimize-metric", "sharpe", "Optimization metric (sharpe, sortino, calmar, return, profit-factor)")
 
 	// Output
-	outputFile   = flag.String("output", "", "Output file for text report (optional)")
-	htmlReport   = flag.String("html", "", "Generate HTML report to file (optional)")
-	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
+	outputFile = flag.String("output", "", "Output file for text report (optional)")
+	htmlReport = flag.String("html", "", "Generate HTML report to file (optional)")
+	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
 )
 
 // ============================================================================
