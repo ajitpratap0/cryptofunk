@@ -148,8 +148,9 @@ type ExchangeConfig struct {
 
 // APIConfig contains REST API settings
 type APIConfig struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
+	Host            string `mapstructure:"host"`
+	Port            int    `mapstructure:"port"`
+	OrchestratorURL string `mapstructure:"orchestrator_url"`
 }
 
 // MonitoringConfig contains monitoring settings
@@ -286,6 +287,7 @@ func setDefaults(v *viper.Viper) {
 	// API defaults
 	v.SetDefault("api.host", "0.0.0.0")
 	v.SetDefault("api.port", 8081)
+	v.SetDefault("api.orchestrator_url", "http://localhost:8081")
 
 	// Monitoring defaults
 	v.SetDefault("monitoring.prometheus_port", 9100)
@@ -372,6 +374,11 @@ func (c *RedisConfig) GetRedisAddr() string {
 // GetAPIAddr returns the API server address
 func (c *APIConfig) GetAPIAddr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// GetOrchestratorURL returns the orchestrator URL
+func (c *APIConfig) GetOrchestratorURL() string {
+	return c.OrchestratorURL
 }
 
 // GetTimeout returns the LLM timeout as time.Duration

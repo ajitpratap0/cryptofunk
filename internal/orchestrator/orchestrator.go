@@ -17,6 +17,13 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
+const (
+	// MaxSignalBufferSize is the maximum number of signals to keep in memory
+	MaxSignalBufferSize = 10000
+	// SignalBufferEvictionRatio is the fraction of old signals to remove when buffer is full
+	SignalBufferEvictionRatio = 0.5
+)
+
 // AgentSignal represents a signal received from an agent
 type AgentSignal struct {
 	AgentName  string                 `json:"agent_name"`
@@ -308,6 +315,15 @@ func (o *Orchestrator) handleSignal(msg *nats.Msg) {
 
 	// Add to signal buffer
 	o.signalBufferMutex.Lock()
+	// Check buffer size and evict oldest signals if at capacity
+	if len(o.signalBuffer) >= MaxSignalBufferSize {
+		evictCount := int(float64(MaxSignalBufferSize) * SignalBufferEvictionRatio)
+		o.signalBuffer = o.signalBuffer[evictCount:]
+		o.log.Warn().
+			Int("evicted", evictCount).
+			Int("remaining", len(o.signalBuffer)).
+			Msg("Signal buffer at capacity, evicted oldest signals")
+	}
 	o.signalBuffer = append(o.signalBuffer, &signal)
 	o.signalBufferMutex.Unlock()
 
