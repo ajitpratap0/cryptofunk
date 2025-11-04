@@ -27,8 +27,8 @@ var (
 	symbols      = flag.String("symbols", "BTC/USDT", "Comma-separated list of symbols to trade")
 
 	// Data source
-	dataSource = flag.String("data-source", "database", "Data source (database, csv, json)")
-	dataPath   = flag.String("data-path", "", "Path to CSV/JSON data file (required for csv/json sources)")
+	dataSource = flag.String("data-source", "database", "Data source (database, csv [NOT IMPLEMENTED], json [NOT IMPLEMENTED])")
+	dataPath   = flag.String("data-path", "", "Path to CSV/JSON data file (COMING SOON - only database supported currently)")
 
 	// Date range
 	startDate = flag.String("start", "", "Start date (YYYY-MM-DD)")
@@ -75,6 +75,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "\nExample:")
 		fmt.Fprintln(os.Stderr, "  ./backtest -strategy=simple -start=2024-01-01 -end=2024-12-31 -data-source=csv -data-path=data.csv")
 		flag.Usage()
+		os.Exit(1)
+	}
+
+	// IMPORTANT: CSV and JSON loaders are not yet implemented
+	if *dataSource == "csv" || *dataSource == "json" {
+		fmt.Fprintln(os.Stderr, "ERROR: CSV and JSON data sources are not yet implemented.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Currently only 'database' source is supported.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Coming soon in a future release!")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Please use: --data-source=database")
 		os.Exit(1)
 	}
 

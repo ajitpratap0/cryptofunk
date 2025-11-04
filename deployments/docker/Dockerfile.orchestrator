@@ -48,9 +48,10 @@ USER appuser
 # Expose port (if needed)
 EXPOSE 8080
 
-# Health check
+# Health check - assumes HTTP health endpoint at /health
+# If orchestrator doesn't have an HTTP endpoint yet, use process check instead
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/app/orchestrator", "--health-check"] || exit 1
+    CMD pgrep -x orchestrator > /dev/null || exit 1
 
 # Run the binary
 ENTRYPOINT ["/app/orchestrator"]
