@@ -2249,12 +2249,34 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### 10.5 Production Hardening (Week 12, Days 1-3)
 
-- [ ] **T216** [P0] Docker containerization
+- [x] **T216** [P0] Docker containerization
   - Dockerfile for each service
   - Multi-stage builds
   - Optimized images
   - **Acceptance**: All services containerized
   - **Estimate**: 6 hours
+  - **Implementation**:
+    - Created 6 production-ready Dockerfiles in deployments/docker/:
+      - Dockerfile.orchestrator (MCP orchestrator service)
+      - Dockerfile.mcp-server (template for all MCP servers, uses ARG SERVER_NAME)
+      - Dockerfile.agent (template for all trading agents, uses ARG AGENT_NAME)
+      - Dockerfile.api (REST/WebSocket API server)
+      - Dockerfile.migrate (database migration tool)
+      - Dockerfile.backtest (backtest CLI tool)
+    - All follow multi-stage build pattern:
+      - Stage 1 (builder): golang:1.21-alpine with full build toolchain
+      - Stage 2 (runtime): alpine:latest with minimal dependencies
+    - Security best practices:
+      - Non-root user (appuser, uid 1000)
+      - Static binary compilation (CGO_ENABLED=0)
+      - Minimal attack surface (ca-certificates and tzdata only)
+      - chown for proper ownership
+    - Health checks for long-running services
+    - .dockerignore to optimize build context (exclude tests, docs, build artifacts)
+    - Template Dockerfiles use build args for parameterization:
+      - docker build --build-arg SERVER_NAME=market-data -f Dockerfile.mcp-server
+      - docker build --build-arg AGENT_NAME=technical-agent -f Dockerfile.agent
+    - Verified all build paths reference correct cmd/ directories
 
 - [ ] **T217** [P0] Docker Compose for local development
   - Complete docker-compose.yml

@@ -6,10 +6,11 @@ bin/
 *.dylib
 
 # Go binaries (agents, servers, orchestrator)
-*-agent
-*-server
-orchestrator
-migrate
+# Only ignore these at the root level, not in subdirectories like deployments/
+/*-agent
+/*-server
+/orchestrator
+/migrate
 
 # Test binary, built with `go test -c`
 *.test
