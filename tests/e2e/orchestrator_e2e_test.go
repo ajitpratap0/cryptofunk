@@ -1,4 +1,4 @@
-package e2e_test
+package e2e
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -307,27 +306,4 @@ func killProcess(cmd *exec.Cmd) {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait() // Clean up zombie process
 	}
-}
-
-func startEmbeddedNATS(t *testing.T) *natsserver.Server {
-	t.Helper()
-	opts := &natsserver.Options{
-		Host:           "127.0.0.1",
-		Port:           -1, // Random port
-		NoLog:          true,
-		NoSigs:         true,
-		MaxControlLine: 4096,
-	}
-	ns, err := natsserver.NewServer(opts)
-	require.NoError(t, err)
-
-	go ns.Start()
-
-	// Wait for server to be ready
-	if !ns.ReadyForConnections(4 * time.Second) {
-		t.Fatal("NATS server did not start in time")
-	}
-
-	t.Logf("NATS server started on %s", ns.ClientURL())
-	return ns
 }
