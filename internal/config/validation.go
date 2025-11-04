@@ -416,6 +416,10 @@ func (c *Config) validateEnvironmentRequirements() ValidationErrors {
 
 	// Production-specific validations
 	if c.App.Environment == "production" {
+		// Validate production secrets strength
+		secretErrors := ValidateProductionSecrets(c)
+		errors = append(errors, secretErrors...)
+
 		// Ensure no testnet in production
 		for exchangeName, exchangeConfig := range c.Exchanges {
 			if exchangeConfig.Testnet {
