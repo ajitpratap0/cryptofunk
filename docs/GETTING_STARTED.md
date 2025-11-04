@@ -32,7 +32,7 @@ docker-compose --version
 psql --version
 
 # Optional but recommended
-make --version
+task --version
 git --version
 ```
 

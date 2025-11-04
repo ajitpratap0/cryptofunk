@@ -110,12 +110,17 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 					}
 				} else {
 					// Partially closing SHORT position
-					// TODO: Handle partial closes (requires position quantity tracking)
-					log.Warn().Msg("Partial position close not fully implemented")
+					err := pm.partialClosePosition(ctx, existingPos, totalQty, avgFillPrice, "Partially closed by BUY order", totalFees)
+					if err != nil {
+						return err
+					}
 				}
 			} else {
-				// Adding to LONG position (not implemented - would require averaging)
-				log.Warn().Msg("Adding to existing LONG position not implemented")
+				// Adding to LONG position (position averaging)
+				err := pm.averagePosition(ctx, existingPos, avgFillPrice, totalQty, totalFees)
+				if err != nil {
+					return err
+				}
 			}
 		} else {
 			// Opening new LONG position
@@ -147,11 +152,17 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 					}
 				} else {
 					// Partially closing LONG position
-					log.Warn().Msg("Partial position close not fully implemented")
+					err := pm.partialClosePosition(ctx, existingPos, totalQty, avgFillPrice, "Partially closed by SELL order", totalFees)
+					if err != nil {
+						return err
+					}
 				}
 			} else {
-				// Adding to SHORT position
-				log.Warn().Msg("Adding to existing SHORT position not implemented")
+				// Adding to SHORT position (position averaging)
+				err := pm.averagePosition(ctx, existingPos, avgFillPrice, totalQty, totalFees)
+				if err != nil {
+					return err
+				}
 			}
 		} else {
 			// Opening new SHORT position
@@ -234,6 +245,77 @@ func (pm *PositionManager) closePosition(ctx context.Context, position *db.Posit
 		Float64("exit_price", exitPrice).
 		Float64("realized_pnl", realizedPnL).
 		Msg("Position closed")
+
+	return nil
+}
+
+// partialClosePosition partially closes a position
+func (pm *PositionManager) partialClosePosition(ctx context.Context, position *db.Position, closeQuantity, exitPrice float64, reason string, fees float64) error {
+	// Use database method for partial close
+	if pm.db != nil {
+		closedPos, err := pm.db.PartialClosePosition(ctx, position.ID, closeQuantity, exitPrice, reason, fees)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to partial close position in database")
+			return err
+		}
+
+		// Update in-memory position
+		position.Quantity -= closeQuantity
+		position.Fees += fees
+
+		log.Info().
+			Str("position_id", position.ID.String()).
+			Str("closed_position_id", closedPos.ID.String()).
+			Str("symbol", position.Symbol).
+			Str("side", string(position.Side)).
+			Float64("close_quantity", closeQuantity).
+			Float64("remaining_quantity", position.Quantity).
+			Float64("exit_price", exitPrice).
+			Float64("realized_pnl", *closedPos.RealizedPnL).
+			Msg("Position partially closed")
+	}
+
+	return nil
+}
+
+// averagePosition adds to an existing position with price averaging
+func (pm *PositionManager) averagePosition(ctx context.Context, position *db.Position, newPrice, newQuantity, fees float64) error {
+	// Calculate new average entry price
+	totalValue := (position.EntryPrice * position.Quantity) + (newPrice * newQuantity)
+	totalQuantity := position.Quantity + newQuantity
+	newAvgPrice := totalValue / totalQuantity
+
+	// Update in-memory position
+	oldPrice := position.EntryPrice
+	oldQuantity := position.Quantity
+	position.EntryPrice = newAvgPrice
+	position.Quantity = totalQuantity
+	position.Fees += fees
+
+	// Update in database (if available)
+	if pm.db != nil {
+		err := pm.db.UpdatePositionAveraging(ctx, position.ID, newAvgPrice, totalQuantity, fees)
+		if err != nil {
+			// Rollback in-memory changes
+			position.EntryPrice = oldPrice
+			position.Quantity = oldQuantity
+			position.Fees -= fees
+
+			log.Error().Err(err).Msg("Failed to update position averaging in database")
+			return err
+		}
+	}
+
+	log.Info().
+		Str("position_id", position.ID.String()).
+		Str("symbol", position.Symbol).
+		Str("side", string(position.Side)).
+		Float64("old_entry_price", oldPrice).
+		Float64("new_entry_price", newAvgPrice).
+		Float64("old_quantity", oldQuantity).
+		Float64("new_quantity", totalQuantity).
+		Float64("added_quantity", newQuantity).
+		Msg("Position averaged")
 
 	return nil
 }

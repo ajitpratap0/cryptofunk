@@ -20,8 +20,6 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-const version = "1.0.0"
-
 type APIServer struct {
 	router *gin.Engine
 	db     *db.DB
@@ -139,6 +137,7 @@ func (s *APIServer) setupRoutes() {
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
 			trade.POST("/pause", s.handlePauseTrading)
+			trade.POST("/resume", s.handleResumeTrading)
 		}
 
 		// Configuration routes
@@ -158,7 +157,7 @@ func (s *APIServer) setupRoutes() {
 	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"name":    "CryptoFunk Trading API",
-			"version": version,
+			"version": config.Version,
 			"status":  "running",
 		})
 	})
@@ -178,7 +177,7 @@ func (s *APIServer) start() {
 	go func() {
 		log.Info().
 			Str("port", s.port).
-			Str("version", version).
+			Str("version", config.Version).
 			Msg("Starting API server")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -214,14 +213,14 @@ func (s *APIServer) handleHealth(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":  "unhealthy",
 			"error":   "database connection failed",
-			"version": version,
+			"version": config.Version,
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "healthy",
-		"version": version,
+		"version": config.Version,
 		"uptime":  time.Since(startTime).String(),
 	})
 }
@@ -230,7 +229,7 @@ func (s *APIServer) handleHealth(c *gin.Context) {
 func (s *APIServer) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "operational",
-		"version": version,
+		"version": config.Version,
 		"uptime":  time.Since(startTime).String(),
 		"components": gin.H{
 			"database":  "healthy",
@@ -711,13 +710,91 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		return
 	}
 
-	// For now, just return success
-	// TODO: Implement actual pause logic in orchestrator
+	// Call orchestrator to pause trading
+	orchestratorURL := getOrchestratorURL()
+	resp, err := http.Post(orchestratorURL+"/pause", "application/json", nil)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to call orchestrator pause endpoint")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to pause trading",
+			"details": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check orchestrator response
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{
+			"error": "orchestrator failed to pause trading",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Trading paused successfully",
 		"session_id": session.ID.String(),
 		"symbol":     session.Symbol,
-		"note":       "Pause logic to be implemented in orchestrator",
+	})
+}
+
+func (s *APIServer) handleResumeTrading(c *gin.Context) {
+	var req struct {
+		SessionID string `json:"session_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	sessionID, err := parseUUID(req.SessionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid session_id format",
+		})
+		return
+	}
+
+	// Get session to verify it exists
+	ctx := c.Request.Context()
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":      "session not found",
+			"session_id": req.SessionID,
+		})
+		return
+	}
+
+	// Call orchestrator to resume trading
+	orchestratorURL := getOrchestratorURL()
+	resp, err := http.Post(orchestratorURL+"/resume", "application/json", nil)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to call orchestrator resume endpoint")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to resume trading",
+			"details": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check orchestrator response
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{
+			"error": "orchestrator failed to resume trading",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Trading resumed successfully",
+		"session_id": session.ID.String(),
+		"symbol":     session.Symbol,
 	})
 }
 
@@ -1144,6 +1221,16 @@ func getPort() string {
 
 	// Default port
 	return "8080"
+}
+
+func getOrchestratorURL() string {
+	// Try environment variable first
+	if url := os.Getenv("ORCHESTRATOR_URL"); url != "" {
+		return url
+	}
+
+	// Default URL (orchestrator metrics server on port 8081)
+	return "http://localhost:8081"
 }
 
 // requestLogger logs each HTTP request

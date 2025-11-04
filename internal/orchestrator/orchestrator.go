@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -165,6 +166,10 @@ type Orchestrator struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	// Trading control
+	paused      bool
+	pausedMutex sync.RWMutex
+
 	// Metrics
 	metrics       *OrchestratorMetrics
 	metricsServer *metrics.Server
@@ -236,6 +241,12 @@ func (o *Orchestrator) Initialize(ctx context.Context) error {
 			o.log.Error().Err(err).Msg("Failed to start metrics server")
 		} else {
 			o.log.Info().Msg("Metrics server started successfully")
+
+			// Register control endpoints
+			o.metricsServer.RegisterHandler("/pause", o.handlePauseRequest)
+			o.metricsServer.RegisterHandler("/resume", o.handleResumeRequest)
+			o.metricsServer.RegisterHandler("/status", o.handleStatusRequest)
+			o.log.Info().Msg("Control endpoints registered")
 		}
 	}
 
@@ -405,6 +416,16 @@ func (o *Orchestrator) makeDecision(ctx context.Context) error {
 		duration := time.Since(start)
 		o.metrics.DecisionDuration.Observe(duration.Seconds())
 	}()
+
+	// Check if trading is paused
+	o.pausedMutex.RLock()
+	isPaused := o.paused
+	o.pausedMutex.RUnlock()
+
+	if isPaused {
+		o.log.Debug().Msg("Trading is paused, skipping decision making")
+		return nil
+	}
 
 	// Get recent signals grouped by symbol
 	symbolSignals := o.getRecentSignalsBySymbol()
@@ -655,6 +676,167 @@ func (o *Orchestrator) updateActiveAgentsMetricLocked() {
 	}
 
 	o.metrics.ActiveAgents.Set(float64(activeCount))
+}
+
+// Pause pauses all trading decision-making
+func (o *Orchestrator) Pause() error {
+	o.pausedMutex.Lock()
+	defer o.pausedMutex.Unlock()
+
+	if o.paused {
+		return fmt.Errorf("trading is already paused")
+	}
+
+	o.paused = true
+	o.log.Info().Msg("Trading paused")
+
+	// Broadcast pause event to all agents via NATS
+	if o.natsConn != nil {
+		pauseEvent := map[string]interface{}{
+			"event":     "trading_paused",
+			"timestamp": time.Now(),
+			"reason":    "manual_pause",
+		}
+
+		data, err := json.Marshal(pauseEvent)
+		if err != nil {
+			o.log.Error().Err(err).Msg("Failed to marshal pause event")
+			return fmt.Errorf("failed to marshal pause event: %w", err)
+		}
+
+		// Publish to control topic
+		topic := "cryptofunk.orchestrator.control"
+		if err := o.natsConn.Publish(topic, data); err != nil {
+			o.log.Error().Err(err).Str("topic", topic).Msg("Failed to publish pause event")
+			return fmt.Errorf("failed to publish pause event: %w", err)
+		}
+
+		o.log.Info().Str("topic", topic).Msg("Pause event broadcast to agents")
+	}
+
+	return nil
+}
+
+// Resume resumes trading decision-making
+func (o *Orchestrator) Resume() error {
+	o.pausedMutex.Lock()
+	defer o.pausedMutex.Unlock()
+
+	if !o.paused {
+		return fmt.Errorf("trading is not paused")
+	}
+
+	o.paused = false
+	o.log.Info().Msg("Trading resumed")
+
+	// Broadcast resume event to all agents via NATS
+	if o.natsConn != nil {
+		resumeEvent := map[string]interface{}{
+			"event":     "trading_resumed",
+			"timestamp": time.Now(),
+		}
+
+		data, err := json.Marshal(resumeEvent)
+		if err != nil {
+			o.log.Error().Err(err).Msg("Failed to marshal resume event")
+			return fmt.Errorf("failed to marshal resume event: %w", err)
+		}
+
+		// Publish to control topic
+		topic := "cryptofunk.orchestrator.control"
+		if err := o.natsConn.Publish(topic, data); err != nil {
+			o.log.Error().Err(err).Str("topic", topic).Msg("Failed to publish resume event")
+			return fmt.Errorf("failed to publish resume event: %w", err)
+		}
+
+		o.log.Info().Str("topic", topic).Msg("Resume event broadcast to agents")
+	}
+
+	return nil
+}
+
+// IsPaused returns whether trading is currently paused
+func (o *Orchestrator) IsPaused() bool {
+	o.pausedMutex.RLock()
+	defer o.pausedMutex.RUnlock()
+	return o.paused
+}
+
+// HTTP handlers for control endpoints
+
+func (o *Orchestrator) handlePauseRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := o.Pause(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   err.Error(),
+			"success": false,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":   "Trading paused successfully",
+		"paused":    true,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"success":   true,
+	})
+}
+
+func (o *Orchestrator) handleResumeRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := o.Resume(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   err.Error(),
+			"success": false,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":   "Trading resumed successfully",
+		"paused":    false,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"success":   true,
+	})
+}
+
+func (o *Orchestrator) handleStatusRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	o.pausedMutex.RLock()
+	isPaused := o.paused
+	o.pausedMutex.RUnlock()
+
+	o.agentsMutex.RLock()
+	activeAgents := len(o.agents)
+	o.agentsMutex.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"paused":        isPaused,
+		"active_agents": activeAgents,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // Shutdown gracefully stops the orchestrator

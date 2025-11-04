@@ -2,6 +2,8 @@ package backtest
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -451,4 +453,197 @@ func generateAgentTestCandlesticks(symbol string, count int) []*Candlestick {
 	}
 
 	return candles
+}
+
+// ============================================================================
+// DATA LOADER TESTS
+// ============================================================================
+
+func TestLoadFromCSV(t *testing.T) {
+	// Create a temporary CSV file
+	tmpFile, err := os.CreateTemp("", "test_candles_*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	// Write CSV data
+	csvData := `timestamp,symbol,open,high,low,close,volume
+1609459200,BTC/USD,29000.0,29500.0,28800.0,29300.0,1000.5
+1609545600,BTC/USD,29300.0,30000.0,29100.0,29800.0,1200.3
+1609632000,BTC/USD,29800.0,30500.0,29600.0,30200.0,1500.8`
+
+	_, err = tmpFile.WriteString(csvData)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	// Load from CSV
+	candles, err := LoadFromCSV(tmpFile.Name())
+	require.NoError(t, err)
+	assert.Equal(t, 3, len(candles))
+
+	// Verify first candle
+	assert.Equal(t, "BTC/USD", candles[0].Symbol)
+	assert.Equal(t, 29000.0, candles[0].Open)
+	assert.Equal(t, 29500.0, candles[0].High)
+	assert.Equal(t, 28800.0, candles[0].Low)
+	assert.Equal(t, 29300.0, candles[0].Close)
+	assert.Equal(t, 1000.5, candles[0].Volume)
+
+	// Verify timestamp parsing
+	expectedTime := time.Unix(1609459200, 0)
+	assert.Equal(t, expectedTime.Unix(), candles[0].Timestamp.Unix())
+}
+
+func TestLoadFromCSV_RFC3339Timestamp(t *testing.T) {
+	// Create a temporary CSV file with RFC3339 timestamps
+	tmpFile, err := os.CreateTemp("", "test_candles_rfc_*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	// Write CSV data with RFC3339 timestamps
+	csvData := `timestamp,symbol,open,high,low,close,volume
+2021-01-01T00:00:00Z,BTC/USD,29000.0,29500.0,28800.0,29300.0,1000.5
+2021-01-02T00:00:00Z,BTC/USD,29300.0,30000.0,29100.0,29800.0,1200.3`
+
+	_, err = tmpFile.WriteString(csvData)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	// Load from CSV
+	candles, err := LoadFromCSV(tmpFile.Name())
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(candles))
+	assert.Equal(t, "BTC/USD", candles[0].Symbol)
+}
+
+func TestLoadFromJSON_ArrayFormat(t *testing.T) {
+	// Create a temporary JSON file with array format
+	tmpFile, err := os.CreateTemp("", "test_candles_array_*.json")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	// Write JSON data
+	jsonData := `[
+  {
+    "timestamp": "2021-01-01T00:00:00Z",
+    "symbol": "BTC/USD",
+    "open": 29000.0,
+    "high": 29500.0,
+    "low": 28800.0,
+    "close": 29300.0,
+    "volume": 1000.5
+  },
+  {
+    "timestamp": "2021-01-02T00:00:00Z",
+    "symbol": "BTC/USD",
+    "open": 29300.0,
+    "high": 30000.0,
+    "low": 29100.0,
+    "close": 29800.0,
+    "volume": 1200.3
+  }
+]`
+
+	_, err = tmpFile.WriteString(jsonData)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	// Load from JSON
+	candles, err := LoadFromJSON(tmpFile.Name())
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(candles))
+	assert.Equal(t, "BTC/USD", candles[0].Symbol)
+	assert.Equal(t, 29000.0, candles[0].Open)
+}
+
+func TestLoadFromJSON_ObjectFormat(t *testing.T) {
+	// Create a temporary JSON file with object format
+	tmpFile, err := os.CreateTemp("", "test_candles_object_*.json")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	// Write JSON data
+	jsonData := `{
+  "candles": [
+    {
+      "timestamp": "2021-01-01T00:00:00Z",
+      "symbol": "ETH/USD",
+      "open": 730.0,
+      "high": 750.0,
+      "low": 720.0,
+      "close": 745.0,
+      "volume": 500.5
+    }
+  ]
+}`
+
+	_, err = tmpFile.WriteString(jsonData)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	// Load from JSON
+	candles, err := LoadFromJSON(tmpFile.Name())
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(candles))
+	assert.Equal(t, "ETH/USD", candles[0].Symbol)
+	assert.Equal(t, 730.0, candles[0].Open)
+}
+
+func TestExportResults(t *testing.T) {
+	// Create a test engine with some results
+	config := BacktestConfig{
+		InitialCapital: 10000.0,
+		CommissionRate: 0.001,
+		PositionSizing: "fixed",
+		PositionSize:   1000.0,
+		MaxPositions:   5,
+	}
+	engine := NewEngine(config)
+
+	// Add some test data
+	engine.TotalTrades = 10
+	engine.WinningTrades = 6
+	engine.LosingTrades = 4
+	engine.TotalProfit = 500.0
+	engine.TotalLoss = 200.0
+	engine.MaxDrawdown = 100.0
+	engine.MaxDrawdownPct = 1.0
+	engine.PeakEquity = 10500.0
+
+	// Create temporary file
+	tmpFile, err := os.CreateTemp("", "test_results_*.json")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// Export results
+	err = ExportResults(engine, tmpFile.Name())
+	require.NoError(t, err)
+
+	// Verify file was created and contains data
+	data, err := os.ReadFile(tmpFile.Name())
+	require.NoError(t, err)
+	assert.NotEmpty(t, data)
+
+	// Parse JSON to verify structure
+	var results map[string]interface{}
+	err = json.Unmarshal(data, &results)
+	require.NoError(t, err)
+
+	// Verify expected fields
+	assert.Contains(t, results, "config")
+	assert.Contains(t, results, "statistics")
+	assert.Contains(t, results, "trades")
+	assert.Contains(t, results, "closed_positions")
+	assert.Contains(t, results, "equity_curve")
+
+	// Verify statistics
+	stats := results["statistics"].(map[string]interface{})
+	assert.Equal(t, float64(10), stats["total_trades"])
+	assert.Equal(t, float64(6), stats["winning_trades"])
+	assert.Equal(t, float64(4), stats["losing_trades"])
+	assert.Equal(t, 500.0, stats["total_profit"])
+	assert.Equal(t, 200.0, stats["total_loss"])
+	assert.Equal(t, 300.0, stats["net_profit"])
+	assert.InDelta(t, 60.0, stats["win_rate"], 0.01)
+	assert.InDelta(t, 2.5, stats["profit_factor"], 0.01)
 }

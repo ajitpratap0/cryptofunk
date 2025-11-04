@@ -3,18 +3,22 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 // Server provides HTTP server for Prometheus metrics
 type Server struct {
 	port   int
 	server *http.Server
+	mux    *http.ServeMux
 	log    zerolog.Logger
 }
 
@@ -28,20 +32,28 @@ func NewServer(port int, log zerolog.Logger) *Server {
 
 // Start starts the metrics HTTP server
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
+	s.mux = http.NewServeMux()
 
 	// Prometheus metrics endpoint
-	mux.Handle("/metrics", promhttp.Handler())
+	s.mux.Handle("/metrics", promhttp.Handler())
 
-	// Health check endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// Health check endpoint with detailed JSON response
+	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+
+		health := map[string]interface{}{
+			"status":    "healthy",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"version":   config.Version,
+		}
+
+		json.NewEncoder(w).Encode(health)
 	})
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
-		Handler:      mux,
+		Handler:      s.mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -73,4 +85,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	s.log.Info().Msg("Metrics server shutdown complete")
 	return nil
+}
+
+// RegisterHandler registers a custom HTTP handler
+func (s *Server) RegisterHandler(pattern string, handler http.HandlerFunc) {
+	if s.mux != nil {
+		s.mux.HandleFunc(pattern, handler)
+	}
 }

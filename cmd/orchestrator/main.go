@@ -40,7 +40,7 @@ func main() {
 	viper.SetDefault("orchestrator.min_confidence", 0.5)
 	viper.SetDefault("orchestrator.max_signal_age", "5m")
 	viper.SetDefault("orchestrator.health_check_interval", "1m")
-	viper.SetDefault("orchestrator.metrics_port", 9100)
+	viper.SetDefault("orchestrator.metrics_port", 8080)
 
 	if err := viper.ReadInConfig(); err != nil {
 		log.Warn().Err(err).Msg("No config file found, using defaults")
