@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
       - name: technical-agent
-        image: cryptofunk/technical-agent:latest
+        image: cryptofunk/technical-agent:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL
@@ -143,7 +143,7 @@ spec:
     spec:
       containers:
       - name: orderbook-agent
-        image: cryptofunk/orderbook-agent:latest
+        image: cryptofunk/orderbook-agent:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL

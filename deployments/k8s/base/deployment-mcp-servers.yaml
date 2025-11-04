@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
       - name: market-data-server
-        image: cryptofunk/market-data-server:latest
+        image: cryptofunk/market-data-server:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL
@@ -110,7 +110,7 @@ spec:
     spec:
       containers:
       - name: technical-indicators-server
-        image: cryptofunk/technical-indicators-server:latest
+        image: cryptofunk/technical-indicators-server:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL
@@ -191,7 +191,7 @@ spec:
     spec:
       containers:
       - name: risk-analyzer-server
-        image: cryptofunk/risk-analyzer-server:latest
+        image: cryptofunk/risk-analyzer-server:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL
@@ -272,7 +272,7 @@ spec:
     spec:
       containers:
       - name: order-executor-server
-        image: cryptofunk/order-executor-server:latest
+        image: cryptofunk/order-executor-server:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL

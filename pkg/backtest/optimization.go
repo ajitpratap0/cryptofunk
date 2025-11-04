@@ -599,10 +599,14 @@ type GeneticOptimizer struct {
 	eliteRatio     float64 // Percentage of elite individuals to keep
 	parallel       int
 	rng            *rand.Rand
+	seed           int64 // Random seed for reproducibility (0 = use time-based seed)
 }
 
 // NewGeneticOptimizer creates a new genetic algorithm optimizer
+// Random seed is initialized with current time for non-deterministic behavior
+// Use SetSeed() to set a specific seed for reproducible results
 func NewGeneticOptimizer(factory StrategyFactory, params []*Parameter, objective ObjectiveFunction, config BacktestConfig) *GeneticOptimizer {
+	seed := time.Now().UnixNano()
 	return &GeneticOptimizer{
 		factory:        factory,
 		params:         params,
@@ -613,7 +617,8 @@ func NewGeneticOptimizer(factory StrategyFactory, params []*Parameter, objective
 		mutationRate:   0.1,
 		eliteRatio:     0.2, // Keep top 20%
 		parallel:       4,
-		rng:            rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:            rand.New(rand.NewSource(seed)),
+		seed:           seed,
 	}
 }
 
@@ -623,6 +628,13 @@ func (opt *GeneticOptimizer) SetParameters(popSize, gens int, mutRate, eliteRati
 	opt.generations = gens
 	opt.mutationRate = mutRate
 	opt.eliteRatio = eliteRatio
+}
+
+// SetSeed sets a specific random seed for reproducible results
+// This is useful for testing and debugging. If not called, a time-based seed is used.
+func (opt *GeneticOptimizer) SetSeed(seed int64) {
+	opt.seed = seed
+	opt.rng = rand.New(rand.NewSource(seed))
 }
 
 // Optimize performs genetic algorithm optimization

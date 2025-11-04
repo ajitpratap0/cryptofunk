@@ -542,8 +542,8 @@ tasks:
           exit 1
         fi
       - |
-        if [ -z "$BINANCE_SECRET_KEY" ]; then
-          echo "❌ BINANCE_SECRET_KEY not set"
+        if [ -z "$BINANCE_API_SECRET" ]; then
+          echo "❌ BINANCE_API_SECRET not set"
           exit 1
         fi
       - |

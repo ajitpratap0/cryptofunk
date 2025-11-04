@@ -75,7 +75,7 @@ func main() {
 
 	// Get API keys from environment
 	apiKey := os.Getenv("BINANCE_API_KEY")
-	secretKey := os.Getenv("BINANCE_SECRET_KEY")
+	secretKey := os.Getenv("BINANCE_API_SECRET")
 
 	// Initialize Binance client (testnet)
 	binanceClient := binance.NewClient(apiKey, secretKey)

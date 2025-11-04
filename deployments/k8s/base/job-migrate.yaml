@@ -16,7 +16,7 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: migrate
-        image: cryptofunk/migrate:latest
+        image: cryptofunk/migrate:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
         - name: DATABASE_URL

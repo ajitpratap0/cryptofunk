@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"os"
 	"time"
@@ -66,7 +67,10 @@ func (r *ReportGenerator) GenerateHTML() (string, error) {
 				if result != "" {
 					result += ", "
 				}
-				result += fmt.Sprintf("%s=%v", k, v)
+				// Escape HTML to prevent XSS vulnerabilities
+				escapedKey := html.EscapeString(k)
+				escapedValue := html.EscapeString(fmt.Sprintf("%v", v))
+				result += fmt.Sprintf("%s=%s", escapedKey, escapedValue)
 			}
 			return result
 		},
