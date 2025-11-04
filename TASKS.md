@@ -2278,12 +2278,46 @@ This document consolidates all implementation tasks from the architecture and de
       - docker build --build-arg AGENT_NAME=technical-agent -f Dockerfile.agent
     - Verified all build paths reference correct cmd/ directories
 
-- [ ] **T217** [P0] Docker Compose for local development
+- [x] **T217** [P0] Docker Compose for local development
   - Complete docker-compose.yml
   - All services defined
   - Easy local setup
   - **Acceptance**: `task docker-up` works
   - **Estimate**: 3 hours
+  - **Implementation**:
+    - Enhanced docker-compose.yml with all application services:
+      - Infrastructure: postgres, redis, nats, bifrost, prometheus, grafana (already present)
+      - Application: migrate, orchestrator, 4 MCP servers, 6 trading agents, API server
+      - Total: 18 services across infrastructure and application layers
+    - Service orchestration with proper startup order:
+      - Health checks for infrastructure services
+      - Migration runs after postgres is healthy
+      - MCP servers start after migration completes
+      - Orchestrator waits for all infrastructure + migration
+      - Agents start after orchestrator is ready
+      - API starts after orchestrator
+    - Environment configuration:
+      - Updated .env.example with all required variables
+      - Added: TRADING_MODE, LOG_LEVEL, JWT_SECRET, CORS_ORIGINS, COINGECKO_API_KEY
+      - Fixed: BINANCE_API_SECRET (was BINANCE_SECRET_KEY)
+      - Comprehensive defaults and documentation
+    - Template-based Docker builds with build args:
+      - MCP servers use SERVER_NAME arg (market-data, technical-indicators, etc.)
+      - Trading agents use AGENT_NAME arg (technical-agent, trend-agent, etc.)
+      - Shared base configurations reduce duplication
+    - Network isolation:
+      - All services on cryptofunk-network bridge
+      - Named volumes for data persistence
+      - Proper port mappings for external access
+    - Created deployments/docker/README.md:
+      - Quick start guide
+      - Architecture diagram
+      - Complete service reference
+      - Port mapping summary
+      - Scaling instructions
+      - Troubleshooting guide
+      - Production deployment checklist
+    - Ready for local development with: docker-compose up -d
 
 - [ ] **T218** [P1] Kubernetes manifests
   - Deployments for all services
