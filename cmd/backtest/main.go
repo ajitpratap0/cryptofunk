@@ -23,8 +23,12 @@ import (
 
 var (
 	// Strategy parameters
-	strategyName = flag.String("strategy", "", "Strategy name (trend, reversion, arbitrage)")
+	strategyName = flag.String("strategy", "", "Strategy name (simple, buy-and-hold)")
 	symbols      = flag.String("symbols", "BTC/USDT", "Comma-separated list of symbols to trade")
+
+	// Data source
+	dataSource = flag.String("data-source", "database", "Data source (database, csv, json)")
+	dataPath   = flag.String("data-path", "", "Path to CSV/JSON data file (required for csv/json sources)")
 
 	// Date range
 	startDate = flag.String("start", "", "Start date (YYYY-MM-DD)")
@@ -37,9 +41,15 @@ var (
 	positionSize   = flag.Float64("size", 0.1, "Position size (depends on sizing method)")
 	maxPositions   = flag.Int("max-positions", 3, "Maximum concurrent positions")
 
+	// Optimization
+	optimize       = flag.Bool("optimize", false, "Run parameter optimization")
+	optimizeMethod = flag.String("optimize-method", "grid", "Optimization method (grid, walk-forward, genetic)")
+	optimizeMetric = flag.String("optimize-metric", "sharpe", "Optimization metric (sharpe, sortino, calmar, return, profit-factor)")
+
 	// Output
-	outputFile = flag.String("output", "", "Output file for results (optional)")
-	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
+	outputFile   = flag.String("output", "", "Output file for text report (optional)")
+	htmlReport   = flag.String("html", "", "Generate HTML report to file (optional)")
+	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 )
 
 // ============================================================================
@@ -61,25 +71,42 @@ func main() {
 	// Validate required flags
 	if *strategyName == "" {
 		fmt.Fprintln(os.Stderr, "Error: -strategy flag is required")
+		fmt.Fprintln(os.Stderr, "\nAvailable strategies: simple, buy-and-hold")
+		fmt.Fprintln(os.Stderr, "\nExample:")
+		fmt.Fprintln(os.Stderr, "  ./backtest -strategy=simple -start=2024-01-01 -end=2024-12-31 -data-source=csv -data-path=data.csv")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if *startDate == "" || *endDate == "" {
-		fmt.Fprintln(os.Stderr, "Error: -start and -end dates are required")
+	if (*dataSource == "csv" || *dataSource == "json") && *dataPath == "" {
+		fmt.Fprintln(os.Stderr, "Error: -data-path is required when using csv or json data sources")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	// Parse dates
-	start, err := time.Parse("2006-01-02", *startDate)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Invalid start date format (use YYYY-MM-DD)")
+	// Dates are optional for CSV/JSON (can be inferred from data)
+	if *dataSource == "database" && (*startDate == "" || *endDate == "") {
+		fmt.Fprintln(os.Stderr, "Error: -start and -end dates are required when using database source")
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	end, err := time.Parse("2006-01-02", *endDate)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Invalid end date format (use YYYY-MM-DD)")
+	// Parse dates (optional for CSV/JSON)
+	var start, end time.Time
+	var err error
+
+	if *startDate != "" {
+		start, err = time.Parse("2006-01-02", *startDate)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid start date format (use YYYY-MM-DD)")
+		}
+	}
+
+	if *endDate != "" {
+		end, err = time.Parse("2006-01-02", *endDate)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid end date format (use YYYY-MM-DD)")
+		}
 	}
 
 	// Parse symbols
@@ -88,9 +115,9 @@ func main() {
 	log.Info().
 		Str("strategy", *strategyName).
 		Strs("symbols", symbolList).
-		Str("start", start.Format("2006-01-02")).
-		Str("end", end.Format("2006-01-02")).
+		Str("data_source", *dataSource).
 		Float64("capital", *initialCapital).
+		Bool("optimize", *optimize).
 		Msg("Starting backtest")
 
 	// Run backtest
@@ -107,13 +134,6 @@ func main() {
 // ============================================================================
 
 func runBacktest(ctx context.Context, start, end time.Time, symbolList []string) error {
-	// Connect to database
-	database, err := db.New(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer database.Close()
-
 	// Create backtest configuration
 	config := backtest.BacktestConfig{
 		InitialCapital: *initialCapital,
@@ -129,16 +149,22 @@ func runBacktest(ctx context.Context, start, end time.Time, symbolList []string)
 	// Create backtest engine
 	engine := backtest.NewEngine(config)
 
-	// Load historical data
-	for _, symbol := range symbolList {
-		candlesticks, err := loadHistoricalData(ctx, database, symbol, start, end)
-		if err != nil {
-			return fmt.Errorf("failed to load data for %s: %w", symbol, err)
+	// Load historical data based on source
+	switch *dataSource {
+	case "database":
+		if err := loadFromDatabase(ctx, engine, symbolList, start, end); err != nil {
+			return fmt.Errorf("failed to load data from database: %w", err)
 		}
-
-		if err := engine.LoadHistoricalData(symbol, candlesticks); err != nil {
-			return fmt.Errorf("failed to load candlesticks for %s: %w", symbol, err)
+	case "csv":
+		if err := loadFromCSV(engine, *dataPath, symbolList); err != nil {
+			return fmt.Errorf("failed to load data from CSV: %w", err)
 		}
+	case "json":
+		if err := loadFromJSON(engine, *dataPath, symbolList); err != nil {
+			return fmt.Errorf("failed to load data from JSON: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported data source: %s", *dataSource)
 	}
 
 	// Create strategy
@@ -158,19 +184,31 @@ func runBacktest(ctx context.Context, start, end time.Time, symbolList []string)
 		return fmt.Errorf("failed to calculate metrics: %w", err)
 	}
 
-	// Generate report
+	// Generate and display text report
 	report := backtest.GenerateReport(metrics)
-
-	// Display report
 	fmt.Println(report)
 
-	// Write to output file if specified
+	// Write text report to file if specified
 	if *outputFile != "" {
 		if err := os.WriteFile(*outputFile, []byte(report), 0644); err != nil {
 			log.Warn().Err(err).Str("file", *outputFile).Msg("Failed to write output file")
 		} else {
-			log.Info().Str("file", *outputFile).Msg("Report written to file")
+			log.Info().Str("file", *outputFile).Msg("Text report written to file")
 		}
+	}
+
+	// Generate HTML report if specified
+	if *htmlReport != "" {
+		generator, err := backtest.NewReportGenerator(engine)
+		if err != nil {
+			return fmt.Errorf("failed to create report generator: %w", err)
+		}
+
+		if err := generator.SaveToFile(*htmlReport); err != nil {
+			return fmt.Errorf("failed to save HTML report: %w", err)
+		}
+
+		log.Info().Str("file", *htmlReport).Msg("HTML report written to file")
 	}
 
 	return nil
@@ -180,7 +218,29 @@ func runBacktest(ctx context.Context, start, end time.Time, symbolList []string)
 // DATA LOADING
 // ============================================================================
 
-func loadHistoricalData(ctx context.Context, database *db.DB, symbol string, start, end time.Time) ([]*backtest.Candlestick, error) {
+// loadFromDatabase loads data from TimescaleDB
+func loadFromDatabase(ctx context.Context, engine *backtest.Engine, symbols []string, start, end time.Time) error {
+	database, err := db.New(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer database.Close()
+
+	for _, symbol := range symbols {
+		candlesticks, err := queryHistoricalData(ctx, database, symbol, start, end)
+		if err != nil {
+			return fmt.Errorf("failed to load data for %s: %w", symbol, err)
+		}
+
+		if err := engine.LoadHistoricalData(symbol, candlesticks); err != nil {
+			return fmt.Errorf("failed to load candlesticks for %s: %w", symbol, err)
+		}
+	}
+
+	return nil
+}
+
+func queryHistoricalData(ctx context.Context, database *db.DB, symbol string, start, end time.Time) ([]*backtest.Candlestick, error) {
 	query := `
 		SELECT
 			timestamp,
@@ -232,6 +292,23 @@ func loadHistoricalData(ctx context.Context, database *db.DB, symbol string, sta
 		Msg("Loaded historical data from database")
 
 	return candlesticks, nil
+}
+
+// loadFromCSV loads data from CSV file
+// CSV format: timestamp,symbol,open,high,low,close,volume
+func loadFromCSV(engine *backtest.Engine, filepath string, symbols []string) error {
+	log.Info().Str("file", filepath).Msg("Loading data from CSV")
+
+	// For now, return error with instructions
+	return fmt.Errorf("CSV loader not yet implemented - use database source")
+}
+
+// loadFromJSON loads data from JSON file
+func loadFromJSON(engine *backtest.Engine, filepath string, symbols []string) error {
+	log.Info().Str("file", filepath).Msg("Loading data from JSON")
+
+	// For now, return error with instructions
+	return fmt.Errorf("JSON loader not yet implemented - use database source")
 }
 
 // ============================================================================
