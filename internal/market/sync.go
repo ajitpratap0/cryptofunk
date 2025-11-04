@@ -123,8 +123,8 @@ func (s *SyncService) syncSymbol(ctx context.Context, symbol string) error {
 		return fmt.Errorf("failed to fetch market chart: %w", err)
 	}
 
-	// Convert to candlesticks
-	candlesticks := chart.ToCandlesticks()
+	// Convert to candlesticks (15-minute intervals)
+	candlesticks := chart.ToCandlesticks(15)
 	if len(candlesticks) == 0 {
 		log.Debug().
 			Str("symbol", symbol).
