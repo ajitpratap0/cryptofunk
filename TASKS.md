@@ -2,7 +2,7 @@
 
 **Project**: Crypto AI Trading Platform with MCP-Orchestrated Multi-Agent System
 **Version**: 1.0
-**Last Updated**: 2025-10-27
+**Last Updated**: 2025-11-04 (Phase 12 added after comprehensive review)
 
 ---
 
@@ -14,9 +14,11 @@ This document consolidates all implementation tasks from the architecture and de
 
 **Original Estimate**: 12 weeks (650 hours, 3 months)
 **Revised with Open-Source Tools & CoinGecko MCP**: **9.5 weeks** (512 hours, ~2.4 months)
-**Savings**: 2.5 weeks (138 hours, 21% reduction)
+**With Phase 12 Gap Closure**: **13.5 weeks** (697 hours, ~3.4 months)
+**Savings vs Original**: -1.5 weeks but with production readiness
 
 > **📚 See**: [OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md) and [MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md) for detailed analysis
+> **🔍 See**: [REVIEW_FINDINGS.md](REVIEW_FINDINGS.md) for comprehensive architecture and product review that led to Phase 12
 
 **Phase Breakdown**:
 
@@ -27,10 +29,11 @@ This document consolidates all implementation tasks from the architecture and de
 - Phase 5 (Orchestrator): 1 week *(reduced from 1.5 weeks)*
 - Phase 6 (Risk Management): 1 week
 - Phase 7 (Order Execution): 1 week
-- Phase 8 (API Development): **0.5 weeks** *(reduced from 1 week - monitoring moved to Phase 11)*
+- Phase 8 (API Development): **0.5 weeks** *(reduced from 1 week - monitoring moved to Phase 12)*
 - Phase 9 (LLM Intelligence): **0.5 weeks** *(reduced from 2 weeks with Bifrost + public LLMs)*
-- Phase 10 (Advanced Features): 1 week *(reduced from 2 weeks)*
-- Phase 11 (Monitoring & Observability): **0.5 weeks** *(moved from Phase 8, done after production deployment)*
+- Phase 10 (Production Readiness): **4 weeks** *(critical gap closure - MUST DO)*
+- Phase 11 (Advanced Features): **1 week** *(optional enhancements - already complete, can skip)*
+- Phase 12 (Monitoring & Observability): **0.5 weeks** *(final step after production deployment)*
 
 **Key Accelerators**:
 
@@ -2007,247 +2010,404 @@ This document consolidates all implementation tasks from the architecture and de
 
 ---
 
-## Phase 10: Advanced Features (Week 10)
+## Phase 10: Production Readiness & Deployment (Week 10-13)
 
-**Goal**: Production features and hardening
+**Goal**: Address critical gaps identified in comprehensive architecture and product review
+**Duration**: 4 weeks (185 hours)
+**Dependencies**: Phases 1-11 complete
+**Milestone**: Production-ready system with complete documentation, testing, and monitoring
 
-**Duration**: 1 week (reduced from 2 weeks with pgvector + existing infrastructure)
-**Dependencies**: Phases 1-9 complete
-**Milestone**: Production-ready system
+**Context**: This phase addresses gaps identified in November 2025 comprehensive review by Software Architect and Product Manager agents. See REVIEW_FINDINGS.md for detailed analysis.
 
-**Accelerators**:
+**Key Focus Areas**:
+- Legal compliance (LICENSE, CONTRIBUTING)
+- Complete documentation (API, Deployment, MCP guides)
+- Testing infrastructure (E2E tests, CI/CD)
+- Core functionality fixes (CoinGecko MCP, Technical Indicators)
+- Monitoring & observability (Grafana dashboards)
+- Security hardening (secrets management)
+- User experience (explainability dashboard)
 
-- **pgvector** - No separate vector DB needed (saves 8 hours setup)
-- PostgreSQL extension integrates seamlessly with TimescaleDB
-- **TimescaleDB** - Already configured for time-series data compression
-- Kubernetes deployment patterns are well-established
+### 10.1 Legal & Documentation (Week 14, Days 1-2)
 
-### 10.1 Semantic & Procedural Memory (Week 11, Days 1-2)
+- [ ] **T245** [P0] Add LICENSE file (MIT)
+  - Add MIT license to root
+  - Update README with license badge
+  - **Acceptance**: LICENSE file exists, legally compliant
+  - **Estimate**: 1 hour
+  - **Rationale**: Legal blocker for any deployment or open-source usage
 
-- [x] **T200** [P2] Setup pgvector extension
-  - **Use pgvector** PostgreSQL extension (no separate DB needed)
-  - Enable extension: `CREATE EXTENSION vector;`
-  - Already integrated with existing PostgreSQL + TimescaleDB
-  - **Acceptance**: pgvector extension enabled and tested
-  - **Estimate**: 0.5 hours (reduced from 2 hours - just enable extension)
-  - **✅ COMPLETE**: pgvector was already enabled in migration 001_initial_schema.sql (line 13)
-
-- [x] **T201** [P2] Implement SemanticMemory
-  - internal/memory/semantic.go (670 lines)
-  - Store knowledge as embeddings with vector similarity search
-  - 5 knowledge types: fact, pattern, experience, strategy, risk
-  - Relevance scoring: confidence, importance, success rate, recency
-  - Database migration: migrations/002_semantic_memory.sql
-  - Comprehensive tests: internal/memory/semantic_test.go (390 lines)
-  - **Acceptance**: Semantic memory works
+- [ ] **T246** [P0] Create CONTRIBUTING.md
+  - Contribution guidelines
+  - Code style requirements
+  - PR process
+  - Testing requirements
+  - Code of conduct
+  - **Acceptance**: CONTRIBUTING.md complete with clear guidelines
   - **Estimate**: 4 hours
-  - **✅ COMPLETE**: Full semantic memory system with vector search, filters, validation tracking, and quality pruning
+  - **Rationale**: Required to scale development and accept community contributions
 
-- [x] **T202** [P2] Implement ProceduralMemory
-  - internal/memory/procedural.go (550 lines)
-  - Store learned policies (entry, exit, sizing, risk, hedging, rebalancing)
-  - Skill management (technical_analysis, orderbook_analysis, etc.)
-  - Performance tracking: success rates, P&L, Sharpe, win rate
-  - Database migration: migrations/003_procedural_memory.sql
-  - Comprehensive tests: internal/memory/procedural_test.go (370 lines)
-  - **Acceptance**: Procedural memory works
-  - **Estimate**: 3 hours
-  - **✅ COMPLETE**: Full procedural memory with policies, skills, performance tracking, and proficiency scoring
+- [ ] **T247** [P0] Create comprehensive API.md
+  - Document all REST endpoints
+  - WebSocket events and subscriptions
+  - Request/response examples
+  - Authentication methods
+  - Error codes
+  - **Acceptance**: API.md complete, all endpoints documented
+  - **Estimate**: 8 hours
+  - **Rationale**: Currently referenced in README but missing
 
-- [x] **T203** [P2] Implement knowledge extraction
-  - internal/memory/extractor.go (600+ lines)
-  - Extract patterns from LLM decisions (success/failure analysis)
-  - Extract experiences from trading results
-  - Extract facts from market data (volatility, volume patterns)
-  - Pattern detection with confidence scoring
-  - Embedding generation integration via EmbeddingFunc
-  - Comprehensive tests: internal/memory/extractor_test.go (420+ lines)
-  - **Acceptance**: Knowledge extracted
-  - **Estimate**: 4 hours
-  - **✅ COMPLETE**: Full knowledge extraction system with pattern identification, confidence scoring, and automatic storage in semantic memory
+- [ ] **T248** [P0] Create DEPLOYMENT.md
+  - Production deployment guide
+  - Kubernetes deployment steps
+  - Secrets management setup
+  - Database migration procedures
+  - Rollback procedures
+  - Monitoring setup
+  - **Acceptance**: DEPLOYMENT.md enables production deployment
+  - **Estimate**: 8 hours
+  - **Rationale**: Currently referenced in README but missing
 
-### 10.2 Agent Communication (Week 11, Days 2-3)
-
-- [x] **T204** [P2] Implement Blackboard system
-  - internal/orchestrator/blackboard.go (512 lines)
-  - internal/orchestrator/blackboard_test.go (570 lines)
-  - Redis-based shared memory with topic/agent indexing
-  - Pub/sub for real-time notifications
-  - Message priorities (Low, Normal, High, Urgent)
-  - Time-based queries and TTL support
-  - Statistics and topic management
-  - **✅ COMPLETE**: Full blackboard system with comprehensive tests
-  - **Estimate**: 3 hours
-
-- [x] **T205** [P2] Implement agent-to-agent messaging
-  - internal/orchestrator/messagebus.go (640 lines)
-  - internal/orchestrator/messagebus_test.go (615 lines)
-  - NATS-based message bus with agent-to-agent communication
-  - Direct messaging, broadcast, request-reply patterns
-  - Message types: request, reply, notification, broadcast, command, event
-  - Priority levels (0-9), TTL support
-  - Automatic reconnection and health monitoring
-  - **✅ COMPLETE**: Full message bus with comprehensive tests
-  - **Estimate**: 3 hours
-
-- [x] **T206** [P2] Implement consensus mechanisms
-  - internal/orchestrator/consensus.go (847 lines)
-  - internal/orchestrator/consensus_test.go (625 lines)
-  - Delphi method: iterative expert consensus with statistical analysis
-  - Contract Net protocol: task allocation through competitive bidding
-  - Round timeout handling, session management, bid selection algorithm
-  - **✅ COMPLETE**: Full consensus mechanisms with comprehensive tests
-  - **Estimate**: 4 hours
-
-### 10.3 Advanced Orchestrator Features (Week 11, Days 3-4)
-
-- [x] **T207** [P2] Implement agent hot-swapping
-  - internal/orchestrator/hotswap.go (723 lines)
-  - internal/orchestrator/hotswap_test.go (648 lines)
-  - Zero-downtime agent replacement with state transfer
-  - 6-step swap process: capture state, pause old, transfer, start new, verify, terminate old
-  - Automatic rollback on failure
-  - State serialization/deserialization with deep copy
-  - Agent registry with heartbeat monitoring
-  - Swap session tracking with detailed step logging
-  - **✅ COMPLETE**: Full hot-swap system with comprehensive tests
-  - **Estimate**: 4 hours
-
-- [x] **T208** [P2] Implement agent cloning
-  - internal/orchestrator/cloning.go (699 lines)
-  - internal/orchestrator/cloning_test.go (651 lines)
-  - Clone agents with state inheritance
-  - Configuration overrides for variants
-  - Deep state copying with JSON serialization
-  - **✅ COMPLETE**: Full cloning system with tests
-  - **Estimate**: 3 hours
-
-- [x] **T209** [P2] Implement A/B testing framework
-  - internal/orchestrator/cloning.go (same file)
-  - internal/orchestrator/cloning_test.go (same file)
-  - Control vs variant comparison with statistical analysis
-  - Performance metrics: latency, error rate, throughput
-  - Automatic winner selection based on weighted scoring
-  - Traffic splitting and variant management
-  - Experiment lifecycle: setup, running, completed, failed, cancelled
-  - Auto-promotion of winners via hot-swap
-  - Percentile calculations (P50, P95, P99)
-  - Real-time metric recording and aggregation
-  - **✅ COMPLETE**: Full A/B testing framework with 19 tests
-  - **Estimate**: 4 hours
-
-- [x] **T210** [P2] Implement hierarchical agents
-  - internal/orchestrator/hierarchy.go (970 lines)
-  - internal/orchestrator/hierarchy_test.go (735 lines)
-  - Meta-agent structure with sub-agent management
-  - Multiple delegation policies: BestFit, All, Weighted, RoundRobin, Auction
-  - Multiple aggregation policies: Voting, Weighted, Consensus, BestScore, Ensemble
-  - Activation conditions for dynamic sub-agent selection
-  - Situation assessment from blackboard data
-  - Resource limits and task allocation
-  - Complete hierarchy tracking with levels and parent-child relationships
-  - Performance metrics for both meta-agents and sub-agents
-  - **✅ COMPLETE**: Full hierarchical agent system with 16 tests
-  - **Estimate**: 4 hours
-
-### 10.4 Backtesting Engine (Week 11, Day 4 - Week 12, Day 1)
-
-- [x] **T211** [P1] Complete backtesting framework
-  - pkg/backtest/engine.go (663 lines)
-  - pkg/backtest/agent_replay.go (485 lines) - Agent replay adapter
-  - Historical data loader (`LoadHistoricalData`, placeholder for database loader)
-  - Time-step simulator (`Step`, `Run` methods)
-  - Agent replay mode with consensus strategies (Majority, Unanimous, Weighted, First, All)
-  - Agent performance tracking (signals generated, accuracy, confidence)
-  - Comprehensive tests: engine_test.go, agent_replay_test.go (480 lines)
-  - **Acceptance**: Backtesting works
+- [ ] **T249** [P0] Create MCP_GUIDE.md
+  - Building custom MCP servers
+  - Creating new agents
+  - MCP tool registration
+  - Resource patterns
+  - Testing MCP servers
+  - **Acceptance**: MCP_GUIDE.md enables custom agent development
   - **Estimate**: 6 hours
-  - **✅ COMPLETE**: Full backtesting framework with agent integration and performance tracking
+  - **Rationale**: Currently referenced in README but missing
 
-- [x] **T212** [P1] Implement advanced performance metrics
-  - pkg/backtest/metrics.go (382 lines)
-  - Sharpe ratio (risk-adjusted return)
-  - Sortino ratio (downside risk-adjusted return)
-  - Calmar ratio (CAGR / Max Drawdown)
-  - Max drawdown (dollar and percentage)
-  - Win rate, profit factor, expectancy
-  - CAGR, annualized return, volatility
-  - Holding time statistics
-  - Text report generation (`GenerateReport`)
-  - Comprehensive tests: metrics_test.go (302 lines)
-  - **Acceptance**: All metrics calculated
+- [ ] **T250** [P1] Fix all broken documentation links
+  - Scan all .md files for broken links
+  - Fix or remove broken links
+  - Verify all internal references
+  - **Acceptance**: No broken links in documentation
+  - **Estimate**: 2 hours
+
+- [ ] **T251** [P1] Fix command inconsistencies
+  - Replace `make` with `task` in all docs
+  - Verify all commands work
+  - Update examples
+  - **Acceptance**: All documentation uses correct commands
+  - **Estimate**: 2 hours
+
+- [ ] **T252** [P1] Centralize version numbers
+  - Create version.go with canonical version
+  - Update all references to use canonical version
+  - Document versioning strategy
+  - **Acceptance**: Single source of truth for version
+  - **Estimate**: 2 hours
+
+### 10.2 Core Functionality Fixes (Week 14, Days 3-5)
+
+- [ ] **T253** [P0] Implement CoinGecko MCP real integration
+  - Remove placeholder stubs in internal/market/coingecko.go
+  - Implement actual MCP SDK calls
+  - Add error handling
+  - Test with real CoinGecko MCP server
+  - **Acceptance**: Real market data flowing from CoinGecko
+  - **Estimate**: 8 hours
+  - **Rationale**: Currently all methods return zero/empty data, system non-functional
+
+- [ ] **T254** [P0] Wire Technical Indicators MCP server
+  - Connect existing indicator implementations to MCP server
+  - Implement tool handlers for RSI, MACD, Bollinger, etc.
+  - Test all indicators via MCP protocol
+  - **Acceptance**: Technical indicators accessible via MCP
+  - **Estimate**: 8 hours
+  - **Rationale**: Server is placeholder, agents cannot calculate indicators
+
+- [ ] **T255** [P0] Add orchestrator HTTP server
+  - Add HTTP server on port 8080
+  - Implement /health endpoint
+  - Implement /metrics endpoint for Prometheus
+  - **Acceptance**: K8s health checks pass, metrics scraped
   - **Estimate**: 4 hours
-  - **✅ COMPLETE**: All advanced performance metrics with report generation
+  - **Rationale**: K8s deployment expects health endpoint, currently missing
 
-- [x] **T213** [P1] Implement parameter optimization
-  - Grid search
-  - Walk-forward analysis
-  - Genetic algorithms
-  - **Acceptance**: Optimization works
+- [ ] **T256** [P0] Fix Risk Agent database integration
+  - Replace mock prices with database queries
+  - Implement historical win rate calculation
+  - Implement equity curve loading
+  - Calculate Sharpe ratio from real returns
+  - Implement market regime detection
+  - **Acceptance**: Risk calculations use real data
+  - **Estimate**: 12 hours
+  - **Rationale**: Currently uses hardcoded data, risk calculations inaccurate
+
+- [ ] **T257** [P0] Wire API pause trading to orchestrator
+  - Implement actual pause logic in orchestrator
+  - Add resume endpoint
+  - Persist pause state
+  - Broadcast pause events to agents
+  - **Acceptance**: Pause/resume trading via API works
+  - **Estimate**: 4 hours
+  - **Rationale**: Endpoint exists but not connected, cannot emergency-stop
+
+- [ ] **T258** [P1] Complete Position Manager features
+  - Implement partial position closes
+  - Implement position averaging (adding to existing)
+  - Handle multi-leg positions
+  - **Acceptance**: All position management scenarios work
+  - **Estimate**: 12 hours
+  - **Rationale**: Missing critical features with TODO comments
+
+- [ ] **T259** [P1] Implement Backtest Agent Replay
+  - Database query implementation
+  - CSV loader for historical data
+  - JSON loader for historical data
+  - File writing for replay results
+  - **Acceptance**: Can replay historical agent decisions
+  - **Estimate**: 8 hours
+  - **Rationale**: Critical for strategy optimization, currently stubbed
+
+### 10.3 Testing Infrastructure (Week 15, Days 1-3)
+
+- [ ] **T260** [P0] Create /tests directory structure
+  - Create tests/unit, tests/integration, tests/e2e
+  - Create tests/fixtures for test data
+  - Move existing tests to appropriate directories
+  - Add tests/README.md
+  - **Acceptance**: Organized test structure
+  - **Estimate**: 2 hours
+
+- [ ] **T261** [P0] Add comprehensive E2E test suite
+  - Test full trading cycle (market data → decision → execution)
+  - Test agent coordination
+  - Test paper trading workflow
+  - Test error recovery
+  - Test circuit breakers
+  - **Acceptance**: E2E tests cover happy path + error scenarios
+  - **Estimate**: 16 hours
+
+- [ ] **T262** [P0] Fix failing E2E tests
+  - Debug orchestrator_e2e_test.go timeout
+  - Fix market event → agent signal flow
+  - Fix decision aggregation
+  - **Acceptance**: All E2E tests pass
+  - **Estimate**: 8 hours
+  - **Rationale**: Currently failing with timeout errors
+
+- [ ] **T263** [P1] Organize existing tests
+  - Move tests to new structure
+  - Fix import paths
+  - Ensure all tests still pass
+  - **Acceptance**: All existing tests organized and passing
+  - **Estimate**: 4 hours
+
+- [ ] **T264** [P1] Increase test coverage to >80%
+  - Add tests for uncovered packages
+  - Focus on critical trading logic
+  - Add edge case tests
+  - **Acceptance**: Coverage >80% overall
+  - **Estimate**: 16 hours
+  - **Rationale**: Current coverage ~40-50%
+
+- [ ] **T265** [P1] Add load testing suite
+  - Create load tests for agents
+  - Create load tests for database
+  - Create load tests for API
+  - Document performance baselines
+  - **Acceptance**: Load tests exist, performance benchmarked
+  - **Estimate**: 8 hours
+
+### 10.4 CI/CD Pipeline (Week 15, Day 4)
+
+- [ ] **T266** [P0] Create GitHub Actions CI workflow
+  - Create .github/workflows/ci.yml
+  - Run tests on PR
+  - Run linting
+  - Check test coverage
+  - **Acceptance**: CI runs on all PRs
+  - **Estimate**: 4 hours
+  - **Rationale**: No CI currently exists
+
+- [ ] **T267** [P0] Add automated testing on PR
+  - Block merge if tests fail
+  - Block merge if coverage drops
+  - Require code review
+  - **Acceptance**: Quality gates enforced
+  - **Estimate**: 2 hours
+
+- [ ] **T268** [P0] Add Docker image builds
+  - Build images on merge to main
+  - Push to container registry
+  - Tag with version and git SHA
+  - **Acceptance**: Docker images automatically built
+  - **Estimate**: 4 hours
+
+- [ ] **T269** [P1] Add deployment workflows
+  - Auto-deploy to staging on develop branch
+  - Manual trigger for production
+  - Deployment smoke tests
+  - **Acceptance**: Automated deployments work
   - **Estimate**: 6 hours
-  - **✅ COMPLETE**: Three optimization methods implemented
-  - Implementation:
-    - pkg/backtest/optimization.go (958 lines)
-      - GridSearchOptimizer: Exhaustive parameter space search
-      - WalkForwardOptimizer: Rolling window with in/out-of-sample testing
-      - GeneticOptimizer: Evolutionary optimization with tournament selection
-      - 7 predefined objective functions (Sharpe, Sortino, Calmar, etc.)
-      - Parallel execution with configurable worker pools
-    - pkg/backtest/optimization_test.go (600+ lines)
-      - Comprehensive tests for all three optimizers
-      - Parameter combination generation tests
-      - All objective function tests
-      - Integration tests with full backtest runs
 
-- [x] **T214** [P1] Implement report generation
-  - HTML reports
-  - Equity curve charts
-  - Trade analysis
-  - **Acceptance**: Reports generated
+### 10.5 Configuration & Security (Week 15, Day 5)
+
+- [ ] **T270** [P0] Add configuration validation on startup
+  - Validate required environment variables
+  - Check API keys are present
+  - Validate configuration consistency
+  - Fail fast with clear error messages
+  - **Acceptance**: Invalid config prevents startup with helpful errors
   - **Estimate**: 4 hours
-  - **✅ COMPLETE**: Comprehensive HTML report generator with interactive charts
-  - Implementation:
-    - pkg/backtest/report.go (750+ lines)
-      - ReportGenerator with HTML template engine
-      - Interactive Chart.js visualizations
-      - Equity curve, drawdown, monthly returns, trade distribution charts
-      - Win/loss pie chart
-      - Performance metrics summary
-      - Trade breakdown section
-      - Recent trades table
-      - Optimization results (optional)
-      - Responsive CSS design
-    - pkg/backtest/report_test.go (500+ lines)
-      - 20+ comprehensive test cases
-      - Chart data formatting tests
-      - Template rendering tests
-      - File save/load tests
-      - All tests passing
 
-- [x] **T215** [P1] Create CLI tool for backtesting
-  - Command-line interface
-  - Configuration via flags
-  - **Acceptance**: CLI works
-  - **Estimate**: 3 hours
-  - **✅ COMPLETE**: Comprehensive CLI tool with multiple data sources and output formats
-  - Implementation:
-    - cmd/backtest/main.go (enhanced from 378 to 400+ lines)
-      - Database, CSV, JSON data source support (database implemented)
-      - HTML report generation via -html flag
-      - Text report generation via -output flag
-      - Optimization flags (-optimize, -optimize-method, -optimize-metric)
-      - Flexible configuration (capital, commission, position sizing, max positions)
-      - Simple and buy-and-hold example strategies
-      - Better validation and help text
-    - cmd/backtest/README.md (comprehensive documentation)
-      - Usage examples for all scenarios
-      - Flag descriptions
-      - Strategy documentation
-      - Output format specifications
-      - Data requirements (database, CSV, JSON)
-    - Successfully builds and runs with -help
+- [ ] **T271** [P0] Implement --verify-keys flag
+  - Add flag to orchestrator
+  - Test exchange API keys
+  - Test LLM API keys
+  - Report key validity
+  - **Acceptance**: --verify-keys flag works as documented
+  - **Estimate**: 2 hours
+  - **Rationale**: Documented in README but doesn't exist
 
-### 10.5 Production Hardening (Week 12, Days 1-3)
+- [ ] **T272** [P0] Add production secret enforcement
+  - Detect placeholder secrets
+  - Require strong passwords in production
+  - Validate secret strength
+  - **Acceptance**: Cannot start with weak secrets in production
+  - **Estimate**: 4 hours
+
+- [ ] **T273** [P0] Integrate secrets management
+  - Add HashiCorp Vault support OR
+  - Add AWS Secrets Manager support
+  - Update documentation
+  - **Acceptance**: Secrets can be loaded from Vault/AWS
+  - **Estimate**: 12 hours
+
+- [ ] **T274** [P1] Fix docker-compose.yml location
+  - Move to deployments/docker-compose.yml OR
+  - Update all documentation to reference root location
+  - **Acceptance**: Location consistent with documentation
+  - **Estimate**: 1 hour
+
+- [ ] **T275** [P1] Add example configurations
+  - Create configs/examples/conservative.yaml
+  - Create configs/examples/aggressive.yaml
+  - Create configs/examples/paper-trading.yaml
+  - Add configs/examples/README.md
+  - **Acceptance**: Example configs help users get started
+  - **Estimate**: 4 hours
+
+### 10.6 Monitoring Setup (Week 16, Days 1-2)
+
+- [ ] **T276** [P0] Create Grafana dashboards
+  - Create grafana/dashboards/system-overview.json
+  - Create grafana/dashboards/trading-performance.json
+  - Create grafana/dashboards/agent-performance.json
+  - Create grafana/dashboards/risk-metrics.json
+  - Add provisioning configuration
+  - **Acceptance**: All 4 dashboards exist and load in Grafana
+  - **Estimate**: 16 hours
+  - **Rationale**: Documented in README but missing
+
+- [ ] **T277** [P0] Complete Prometheus metrics coverage
+  - Add metrics to MCP servers (via HTTP endpoints)
+  - Add metrics to individual agents
+  - Update prometheus.yml with scrape targets
+  - **Acceptance**: All services expose metrics
+  - **Estimate**: 8 hours
+
+- [ ] **T278** [P1] Add alerting system integration
+  - Setup Prometheus AlertManager
+  - Configure alert rules
+  - Add Slack/Email/PagerDuty integration
+  - Test alert delivery
+  - **Acceptance**: Alerts fire and notify on critical events
+  - **Estimate**: 8 hours
+
+- [ ] **T279** [P1] Implement logging correlation IDs
+  - Add correlation ID middleware
+  - Propagate IDs via context
+  - Include in all log messages
+  - **Acceptance**: Can trace requests across services
+  - **Estimate**: 4 hours
+
+### 10.7 User Experience (Week 16, Days 3-5)
+
+- [ ] **T280** [P0] Build Explainability Dashboard
+  - API endpoints for LLM decisions
+    - GET /api/v1/decisions (list recent)
+    - GET /api/v1/decisions/:id (details)
+    - GET /api/v1/decisions/search (semantic search)
+  - Basic web UI (React/Vue or Grafana panels)
+  - Real-time updates via WebSocket
+  - **Acceptance**: Can view agent reasoning for all decisions
+  - **Estimate**: 24 hours
+  - **Rationale**: Core differentiator not exposed to users
+
+- [ ] **T281** [P1] Create backtesting HTML reports
+  - HTML template for backtest results
+  - Equity curve charts (Chart.js/Plotly)
+  - Trade distribution histograms
+  - Performance metrics table
+  - **Acceptance**: Backtest results generate standalone HTML
+  - **Estimate**: 8 hours
+  - **Rationale**: Documented in README but not implemented
+
+- [ ] **T282** [P1] Add web dashboard
+  - Simple Grafana-based dashboard OR
+  - Basic React/Vue app
+  - Real-time position monitoring
+  - Agent status display
+  - **Acceptance**: Users can monitor system via web UI
+  - **Estimate**: 16 hours
+
+- [ ] **T283** [P2] Create troubleshooting guide
+  - docs/TROUBLESHOOTING.md
+  - Common errors and solutions
+  - Debug tools and techniques
+  - FAQ section
+  - **Acceptance**: Troubleshooting guide helps users debug issues
+  - **Estimate**: 4 hours
+
+- [ ] **T284** [P2] Add development helper scripts
+  - scripts/dev/reset-db.sh
+  - scripts/dev/generate-test-data.sh
+  - scripts/dev/run-all-agents.sh
+  - scripts/dev/watch-logs.sh
+  - **Acceptance**: Helper scripts improve developer experience
+  - **Estimate**: 4 hours
+
+### 10.8 Production Deployment (Week 17, Day 1)
+
+- [ ] **T285** [P0] Complete production deployment checklist
+  - Create docs/PRODUCTION_CHECKLIST.md
+  - Security review
+  - Performance review
+  - Documentation review
+  - **Acceptance**: Checklist completed, all items verified
+  - **Estimate**: 4 hours
+
+- [ ] **T286** [P0] Run full production dry-run
+  - Deploy to staging environment
+  - Run smoke tests
+  - Run load tests
+  - Verify monitoring
+  - Test disaster recovery
+  - **Acceptance**: Dry-run succeeds, system ready for production
+  - **Estimate**: 8 hours
+
+- [ ] **T287** [P0] Document disaster recovery procedures
+  - Backup procedures
+  - Restore procedures
+  - RPO/RTO targets
+  - Incident response playbook
+  - **Acceptance**: DR procedures documented and tested
+  - **Estimate**: 6 hours
+
+- [ ] **T288** [P1] Add database backup automation
+  - Automated pg_dump cronjob
+  - Backup to S3 or equivalent
+  - Retention policy
+  - Restore testing
+  - **Acceptance**: Automated backups working
+  - **Estimate**: 4 hours
+
+
+### 10.9 Docker & Kubernetes (Week 12, Days 1-3)
 
 - [x] **T216** [P0] Docker containerization
   - Dockerfile for each service
@@ -2390,7 +2550,7 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Pipeline works
   - **Estimate**: 4 hours
 
-### 10.6 Security Hardening (Week 12, Days 3-4)
+### 10.10 Security Hardening (Week 12, Days 3-4)
 
 - [ ] **T220** [P0] Implement API key encryption
   - Encrypt keys at rest
@@ -2416,7 +2576,7 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Authorization enforced
   - **Estimate**: 3 hours
 
-### 10.7 Documentation (Week 12, Days 4-5)
+### 10.11 Documentation (Week 12, Days 4-5)
 
 - [ ] **T224** [P0] Create API documentation
   - OpenAPI/Swagger spec
@@ -2445,7 +2605,7 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Manual complete
   - **Estimate**: 4 hours
 
-### 10.8 Load Testing & Optimization (Week 12, Day 5)
+### 10.12 Load Testing & Optimization (Week 12, Day 5)
 
 - [ ] **T228** [P1] Load test agents
   - Test under high load
@@ -2477,6 +2637,280 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### Phase 10 Deliverables
 
+- [ ] LICENSE file (MIT)
+- [ ] Complete documentation (CONTRIBUTING, API, DEPLOYMENT, MCP_GUIDE)
+- [ ] CoinGecko MCP real integration
+- [ ] Technical Indicators MCP server functional
+- [ ] Orchestrator health endpoints
+- [ ] Risk Agent using real data
+- [ ] Position Manager complete
+- [ ] E2E test suite passing
+- [ ] CI/CD pipeline operational
+- [ ] Configuration validation
+- [ ] Secrets management integrated
+- ✅ Docker containers
+- ✅ Kubernetes manifests
+- [ ] Security hardening (TLS, auth, authorization)
+- [ ] Complete documentation (API, deployment, troubleshooting)
+- [ ] Prometheus metrics complete
+- [ ] Grafana dashboards prepared
+- [ ] Alerting system configured
+- [ ] Explainability Dashboard
+- [ ] Backtesting HTML reports
+- [ ] Web dashboard (basic)
+- [ ] Load testing complete
+- [ ] Production deployment checklist complete
+- [ ] Disaster recovery procedures documented
+
+**Exit Criteria**: All critical gaps addressed, test coverage >80%, documentation complete, CI/CD functional, production deployment successful, system monitoring operational, security hardening complete.
+
+---
+
+
+---
+
+## Phase 11: Advanced Features (Post-Production, Optional)
+
+**Goal**: Enhanced agent capabilities (already implemented)
+
+**Duration**: 1 week (optional)
+**Dependencies**: Phase 10 complete (optional enhancements)
+**Milestone**: Advanced agent features enabled
+
+**Accelerators**:
+
+- **pgvector** - No separate vector DB needed (saves 8 hours setup)
+- PostgreSQL extension integrates seamlessly with TimescaleDB
+- **TimescaleDB** - Already configured for time-series data compression
+- Kubernetes deployment patterns are well-established
+
+### 11.1 Semantic & Procedural Memory (Week 11, Days 1-2)
+
+- [x] **T200** [P2] Setup pgvector extension
+  - **Use pgvector** PostgreSQL extension (no separate DB needed)
+  - Enable extension: `CREATE EXTENSION vector;`
+  - Already integrated with existing PostgreSQL + TimescaleDB
+  - **Acceptance**: pgvector extension enabled and tested
+  - **Estimate**: 0.5 hours (reduced from 2 hours - just enable extension)
+  - **✅ COMPLETE**: pgvector was already enabled in migration 001_initial_schema.sql (line 13)
+
+- [x] **T201** [P2] Implement SemanticMemory
+  - internal/memory/semantic.go (670 lines)
+  - Store knowledge as embeddings with vector similarity search
+  - 5 knowledge types: fact, pattern, experience, strategy, risk
+  - Relevance scoring: confidence, importance, success rate, recency
+  - Database migration: migrations/002_semantic_memory.sql
+  - Comprehensive tests: internal/memory/semantic_test.go (390 lines)
+  - **Acceptance**: Semantic memory works
+  - **Estimate**: 4 hours
+  - **✅ COMPLETE**: Full semantic memory system with vector search, filters, validation tracking, and quality pruning
+
+- [x] **T202** [P2] Implement ProceduralMemory
+  - internal/memory/procedural.go (550 lines)
+  - Store learned policies (entry, exit, sizing, risk, hedging, rebalancing)
+  - Skill management (technical_analysis, orderbook_analysis, etc.)
+  - Performance tracking: success rates, P&L, Sharpe, win rate
+  - Database migration: migrations/003_procedural_memory.sql
+  - Comprehensive tests: internal/memory/procedural_test.go (370 lines)
+  - **Acceptance**: Procedural memory works
+  - **Estimate**: 3 hours
+  - **✅ COMPLETE**: Full procedural memory with policies, skills, performance tracking, and proficiency scoring
+
+- [x] **T203** [P2] Implement knowledge extraction
+  - internal/memory/extractor.go (600+ lines)
+  - Extract patterns from LLM decisions (success/failure analysis)
+  - Extract experiences from trading results
+  - Extract facts from market data (volatility, volume patterns)
+  - Pattern detection with confidence scoring
+  - Embedding generation integration via EmbeddingFunc
+  - Comprehensive tests: internal/memory/extractor_test.go (420+ lines)
+  - **Acceptance**: Knowledge extracted
+  - **Estimate**: 4 hours
+  - **✅ COMPLETE**: Full knowledge extraction system with pattern identification, confidence scoring, and automatic storage in semantic memory
+
+### 11.2 Agent Communication (Week 11, Days 2-3)
+
+- [x] **T204** [P2] Implement Blackboard system
+  - internal/orchestrator/blackboard.go (512 lines)
+  - internal/orchestrator/blackboard_test.go (570 lines)
+  - Redis-based shared memory with topic/agent indexing
+  - Pub/sub for real-time notifications
+  - Message priorities (Low, Normal, High, Urgent)
+  - Time-based queries and TTL support
+  - Statistics and topic management
+  - **✅ COMPLETE**: Full blackboard system with comprehensive tests
+  - **Estimate**: 3 hours
+
+- [x] **T205** [P2] Implement agent-to-agent messaging
+  - internal/orchestrator/messagebus.go (640 lines)
+  - internal/orchestrator/messagebus_test.go (615 lines)
+  - NATS-based message bus with agent-to-agent communication
+  - Direct messaging, broadcast, request-reply patterns
+  - Message types: request, reply, notification, broadcast, command, event
+  - Priority levels (0-9), TTL support
+  - Automatic reconnection and health monitoring
+  - **✅ COMPLETE**: Full message bus with comprehensive tests
+  - **Estimate**: 3 hours
+
+- [x] **T206** [P2] Implement consensus mechanisms
+  - internal/orchestrator/consensus.go (847 lines)
+  - internal/orchestrator/consensus_test.go (625 lines)
+  - Delphi method: iterative expert consensus with statistical analysis
+  - Contract Net protocol: task allocation through competitive bidding
+  - Round timeout handling, session management, bid selection algorithm
+  - **✅ COMPLETE**: Full consensus mechanisms with comprehensive tests
+  - **Estimate**: 4 hours
+
+### 11.3 Advanced Orchestrator Features (Week 11, Days 3-4)
+
+- [x] **T207** [P2] Implement agent hot-swapping
+  - internal/orchestrator/hotswap.go (723 lines)
+  - internal/orchestrator/hotswap_test.go (648 lines)
+  - Zero-downtime agent replacement with state transfer
+  - 6-step swap process: capture state, pause old, transfer, start new, verify, terminate old
+  - Automatic rollback on failure
+  - State serialization/deserialization with deep copy
+  - Agent registry with heartbeat monitoring
+  - Swap session tracking with detailed step logging
+  - **✅ COMPLETE**: Full hot-swap system with comprehensive tests
+  - **Estimate**: 4 hours
+
+- [x] **T208** [P2] Implement agent cloning
+  - internal/orchestrator/cloning.go (699 lines)
+  - internal/orchestrator/cloning_test.go (651 lines)
+  - Clone agents with state inheritance
+  - Configuration overrides for variants
+  - Deep state copying with JSON serialization
+  - **✅ COMPLETE**: Full cloning system with tests
+  - **Estimate**: 3 hours
+
+- [x] **T209** [P2] Implement A/B testing framework
+  - internal/orchestrator/cloning.go (same file)
+  - internal/orchestrator/cloning_test.go (same file)
+  - Control vs variant comparison with statistical analysis
+  - Performance metrics: latency, error rate, throughput
+  - Automatic winner selection based on weighted scoring
+  - Traffic splitting and variant management
+  - Experiment lifecycle: setup, running, completed, failed, cancelled
+  - Auto-promotion of winners via hot-swap
+  - Percentile calculations (P50, P95, P99)
+  - Real-time metric recording and aggregation
+  - **✅ COMPLETE**: Full A/B testing framework with 19 tests
+  - **Estimate**: 4 hours
+
+- [x] **T210** [P2] Implement hierarchical agents
+  - internal/orchestrator/hierarchy.go (970 lines)
+  - internal/orchestrator/hierarchy_test.go (735 lines)
+  - Meta-agent structure with sub-agent management
+  - Multiple delegation policies: BestFit, All, Weighted, RoundRobin, Auction
+  - Multiple aggregation policies: Voting, Weighted, Consensus, BestScore, Ensemble
+  - Activation conditions for dynamic sub-agent selection
+  - Situation assessment from blackboard data
+  - Resource limits and task allocation
+  - Complete hierarchy tracking with levels and parent-child relationships
+  - Performance metrics for both meta-agents and sub-agents
+  - **✅ COMPLETE**: Full hierarchical agent system with 16 tests
+  - **Estimate**: 4 hours
+
+### 11.4 Backtesting Engine (Week 11, Day 4 - Week 12, Day 1)
+
+- [x] **T211** [P1] Complete backtesting framework
+  - pkg/backtest/engine.go (663 lines)
+  - pkg/backtest/agent_replay.go (485 lines) - Agent replay adapter
+  - Historical data loader (`LoadHistoricalData`, placeholder for database loader)
+  - Time-step simulator (`Step`, `Run` methods)
+  - Agent replay mode with consensus strategies (Majority, Unanimous, Weighted, First, All)
+  - Agent performance tracking (signals generated, accuracy, confidence)
+  - Comprehensive tests: engine_test.go, agent_replay_test.go (480 lines)
+  - **Acceptance**: Backtesting works
+  - **Estimate**: 6 hours
+  - **✅ COMPLETE**: Full backtesting framework with agent integration and performance tracking
+
+- [x] **T212** [P1] Implement advanced performance metrics
+  - pkg/backtest/metrics.go (382 lines)
+  - Sharpe ratio (risk-adjusted return)
+  - Sortino ratio (downside risk-adjusted return)
+  - Calmar ratio (CAGR / Max Drawdown)
+  - Max drawdown (dollar and percentage)
+  - Win rate, profit factor, expectancy
+  - CAGR, annualized return, volatility
+  - Holding time statistics
+  - Text report generation (`GenerateReport`)
+  - Comprehensive tests: metrics_test.go (302 lines)
+  - **Acceptance**: All metrics calculated
+  - **Estimate**: 4 hours
+  - **✅ COMPLETE**: All advanced performance metrics with report generation
+
+- [x] **T213** [P1] Implement parameter optimization
+  - Grid search
+  - Walk-forward analysis
+  - Genetic algorithms
+  - **Acceptance**: Optimization works
+  - **Estimate**: 6 hours
+  - **✅ COMPLETE**: Three optimization methods implemented
+  - Implementation:
+    - pkg/backtest/optimization.go (958 lines)
+      - GridSearchOptimizer: Exhaustive parameter space search
+      - WalkForwardOptimizer: Rolling window with in/out-of-sample testing
+      - GeneticOptimizer: Evolutionary optimization with tournament selection
+      - 7 predefined objective functions (Sharpe, Sortino, Calmar, etc.)
+      - Parallel execution with configurable worker pools
+    - pkg/backtest/optimization_test.go (600+ lines)
+      - Comprehensive tests for all three optimizers
+      - Parameter combination generation tests
+      - All objective function tests
+      - Integration tests with full backtest runs
+
+- [x] **T214** [P1] Implement report generation
+  - HTML reports
+  - Equity curve charts
+  - Trade analysis
+  - **Acceptance**: Reports generated
+  - **Estimate**: 4 hours
+  - **✅ COMPLETE**: Comprehensive HTML report generator with interactive charts
+  - Implementation:
+    - pkg/backtest/report.go (750+ lines)
+      - ReportGenerator with HTML template engine
+      - Interactive Chart.js visualizations
+      - Equity curve, drawdown, monthly returns, trade distribution charts
+      - Win/loss pie chart
+      - Performance metrics summary
+      - Trade breakdown section
+      - Recent trades table
+      - Optimization results (optional)
+      - Responsive CSS design
+    - pkg/backtest/report_test.go (500+ lines)
+      - 20+ comprehensive test cases
+      - Chart data formatting tests
+      - Template rendering tests
+      - File save/load tests
+      - All tests passing
+
+- [x] **T215** [P1] Create CLI tool for backtesting
+  - Command-line interface
+  - Configuration via flags
+  - **Acceptance**: CLI works
+  - **Estimate**: 3 hours
+  - **✅ COMPLETE**: Comprehensive CLI tool with multiple data sources and output formats
+  - Implementation:
+    - cmd/backtest/main.go (enhanced from 378 to 400+ lines)
+      - Database, CSV, JSON data source support (database implemented)
+      - HTML report generation via -html flag
+      - Text report generation via -output flag
+      - Optimization flags (-optimize, -optimize-method, -optimize-metric)
+      - Flexible configuration (capital, commission, position sizing, max positions)
+      - Simple and buy-and-hold example strategies
+      - Better validation and help text
+    - cmd/backtest/README.md (comprehensive documentation)
+      - Usage examples for all scenarios
+      - Flag descriptions
+      - Strategy documentation
+      - Output format specifications
+      - Data requirements (database, CSV, JSON)
+    - Successfully builds and runs with -help
+
+### Phase 11 Deliverables
+
 - ✅ Semantic memory (vector DB)
 - ✅ Procedural memory
 - ✅ Blackboard system
@@ -2486,18 +2920,16 @@ This document consolidates all implementation tasks from the architecture and de
 - ✅ Hierarchical agents
 - ✅ Complete backtesting engine
 - ✅ Parameter optimization
-- ✅ Docker containers
-- ✅ Kubernetes manifests
-- ✅ CI/CD pipeline
-- ✅ Security hardening
-- ✅ Complete documentation
-- ✅ Load testing complete
+- ✅ HTML report generation
+- ✅ CLI tool for backtesting
 
-**Exit Criteria**: Production-ready system that can be deployed to Kubernetes, is fully secured, documented, and performance-tested.
+**Exit Criteria**: Advanced agent features available for use. All features already implemented and tested. Can be enabled as needed for enhanced capabilities.
+
+**Note**: Phase 11 is optional - all features are already complete and can be skipped for initial MVP launch.
 
 ---
 
-## Phase 11: Monitoring & Observability (Week 12, Day 5 - Week 13, Day 1)
+## Phase 12: Monitoring & Observability (Week 14)
 
 **Goal**: Comprehensive monitoring, metrics, dashboards, and alerting
 
@@ -2511,7 +2943,7 @@ This document consolidates all implementation tasks from the architecture and de
 - TimescaleDB enables fast metrics queries
 - Metrics already partially implemented in agents (from Phase 3)
 
-### 11.1 Prometheus Metrics (Week 12, Day 5)
+### 12.1 Prometheus Metrics (Week 12, Day 5)
 
 - [ ] **T162** [P1] Setup Prometheus metrics endpoint
   - GET /metrics
@@ -2541,7 +2973,7 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: System metrics exposed
   - **Estimate**: 2 hours
 
-### 11.2 Grafana Dashboards (Week 13, Day 1)
+### 12.2 Grafana Dashboards (Week 13, Day 1)
 
 - [ ] **T166** [P1] Create Grafana dashboard: System Overview
   - Active agents
@@ -2576,7 +3008,7 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Dashboard shows risk
   - **Estimate**: 3 hours
 
-### 11.3 Alerting (Week 13, Day 1)
+### 12.3 Alerting (Week 13, Day 1)
 
 - [ ] **T170** [P1] Setup Prometheus alerting rules
   - Alert on high error rate
@@ -2599,18 +3031,20 @@ This document consolidates all implementation tasks from the architecture and de
   - **Acceptance**: Error alerts work
   - **Estimate**: 2 hours
 
-### Phase 11 Deliverables
+### Phase 12 Deliverables
 
-- ✅ Prometheus metrics exposed for all components
-- ✅ 4 Grafana dashboards deployed (System, Trading, Agents, Risk)
-- ✅ Alerting configured for critical events
-- ✅ Metrics documentation
+- [ ] Prometheus metrics exposed for all components
+- [ ] 4 Grafana dashboards deployed (System, Trading, Agents, Risk)
+- [ ] Alerting configured for critical events
+- [ ] Metrics documentation
+- [ ] AlertManager integrated
+- [ ] PagerDuty/Slack notifications working
 
-**Exit Criteria**: Comprehensive monitoring in place. Grafana dashboards show full system state. Alerts fire correctly on critical events.
+**Exit Criteria**: Comprehensive monitoring in place. Grafana dashboards show full system state. Alerts fire correctly on critical events. System is fully observable in production.
 
 ---
 
-## Post-Phase 11: Ongoing Tasks
+## Post-Phase 12: Ongoing Tasks
 
 ### Maintenance & Monitoring
 
@@ -2635,15 +3069,17 @@ This document consolidates all implementation tasks from the architecture and de
 
 ## Task Summary Statistics
 
-**Total Tasks**: 244
-**Critical Path (P0)**: ~120 tasks
-**High Priority (P1)**: ~80 tasks
-**Medium Priority (P2)**: ~30 tasks
-**Nice to Have (P3)**: ~14 tasks
+**Total Tasks**: 288 (244 original + 44 from Phase 12)
+**Critical Path (P0)**: ~150 tasks
+**High Priority (P1)**: ~100 tasks
+**Medium Priority (P2)**: ~28 tasks
+**Nice to Have (P3)**: ~10 tasks
 
-**Estimated Total Hours**: ~512 hours (with open-source accelerators)
-**Estimated Duration**: 9.5 weeks (~2.4 months)
+**Estimated Total Hours**: ~697 hours (512 original + 185 Phase 12)
+**Estimated Duration**: 13.5 weeks (~3.4 months) with Phase 12 gap closure
 **Recommended Team**: 2-3 developers
+
+**Note**: Phase 12 addresses production readiness gaps identified in November 2025 comprehensive review. This phase is critical for production deployment.
 
 ---
 
@@ -2668,9 +3104,11 @@ Phase 8 (API Development)
   ↓
 Phase 9 (Agent Intelligence) ← Can start after Phase 5
   ↓
-Phase 10 (Advanced Features) ← Can start after Phase 8
+Phase 10 (Production Readiness) ← CRITICAL - Fix gaps, testing, deployment
   ↓
-Phase 11 (Monitoring & Observability) ← Best done after production deployment
+  ├─→ Phase 11 (Advanced Features) ← OPTIONAL - Already complete, can skip
+  │
+  └─→ Phase 12 (Monitoring & Observability) ← FINAL - After production deployment
 ```
 
 ---

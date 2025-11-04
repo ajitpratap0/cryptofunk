@@ -70,10 +70,16 @@ func TestHealthEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	assert.Equal(t, "OK", string(body))
+
+	// Verify JSON response contains expected fields
+	bodyStr := string(body)
+	assert.Contains(t, bodyStr, `"status":"healthy"`)
+	assert.Contains(t, bodyStr, `"timestamp"`)
+	assert.Contains(t, bodyStr, `"version"`)
 
 	// Cleanup
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -207,5 +213,46 @@ func TestMultipleServerInstances(t *testing.T) {
 	err = server1.Shutdown(ctx)
 	assert.NoError(t, err)
 	err = server2.Shutdown(ctx)
+	assert.NoError(t, err)
+}
+
+func TestRegisterHandler(t *testing.T) {
+	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	port := 9991
+
+	server := NewServer(port, log)
+	require.NotNil(t, server)
+
+	// Start server
+	err := server.Start()
+	require.NoError(t, err)
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Register a custom handler
+	customHandlerCalled := false
+	server.RegisterHandler("/custom", func(w http.ResponseWriter, r *http.Request) {
+		customHandlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("custom handler response"))
+	})
+
+	// Test custom endpoint
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/custom", port))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, customHandlerCalled)
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "custom handler response", string(body))
+
+	// Cleanup
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = server.Shutdown(ctx)
 	assert.NoError(t, err)
 }

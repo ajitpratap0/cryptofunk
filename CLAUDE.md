@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key Innovation**: Instead of a monolithic trading bot, CryptoFunk orchestrates multiple AI agents - each with specialized expertise (technical analysis, order book analysis, sentiment, trend following, mean reversion, risk management) - that collaborate through MCP to make trading decisions via weighted voting and consensus.
 
-**Current Status**: Phase 7 in progress (Position Tracking & Real Exchange Integration). Phases 1-6 complete. See TASKS.md for detailed implementation progress across all 10 phases.
+**Current Status**: Phase 10 in progress (Production Hardening). Phases 1-9 substantially complete. Currently on feature/phase-10-production-hardening branch. See TASKS.md for detailed implementation progress across all 10 phases.
 
 ## Build System
 
@@ -54,6 +54,14 @@ task docker-clean           # Remove volumes (fresh start)
 task build-orchestrator     # Build orchestrator only
 task build-servers          # Build all MCP servers
 task build-agents           # Build all agents
+
+# Deployment (see Deployment section for details)
+docker-compose -f deployments/docker-compose.yml up -d    # Local deployment
+kubectl apply -f deployments/k8s/                          # Kubernetes deployment
+
+# Health checks
+curl http://localhost:8081/health                          # Check orchestrator health
+curl http://localhost:8080/health                          # Check API health
 ```
 
 ## Architecture Overview
@@ -394,6 +402,66 @@ git checkout main
 git merge feature/phase-X-description
 ```
 
+## Deployment
+
+### Docker Compose (Local Development)
+
+The project includes a comprehensive Docker Compose setup in `deployments/docker-compose.yml` for local development:
+
+```bash
+# Start all services including infrastructure
+docker-compose -f deployments/docker-compose.yml up -d
+
+# View logs
+docker-compose -f deployments/docker-compose.yml logs -f
+
+# Stop all services
+docker-compose -f deployments/docker-compose.yml down
+```
+
+**Services included**:
+- PostgreSQL (with TimescaleDB and pgvector)
+- Redis (for caching)
+- NATS (for event messaging)
+- Prometheus (metrics collection)
+- Grafana (visualization)
+- All MCP servers (market-data, technical-indicators, risk-analyzer, order-executor)
+- Orchestrator
+- API server
+
+### Kubernetes (Production)
+
+Production-ready Kubernetes manifests are in `deployments/k8s/`:
+
+```bash
+# Deploy to Kubernetes
+kubectl apply -f deployments/k8s/namespace.yaml
+kubectl apply -f deployments/k8s/configmap.yaml
+kubectl apply -f deployments/k8s/secrets.yaml  # Create this from secrets.yaml.example
+kubectl apply -f deployments/k8s/
+
+# Check deployment status
+kubectl get pods -n cryptofunk
+kubectl get services -n cryptofunk
+
+# View logs
+kubectl logs -f deployment/orchestrator -n cryptofunk
+```
+
+**Key features**:
+- Health checks and readiness probes on all services
+- Resource limits and requests configured
+- Horizontal Pod Autoscaling (HPA) ready
+- Persistent volumes for PostgreSQL
+- ConfigMaps for configuration management
+- Secrets for sensitive data (API keys, database passwords)
+
+**IMPORTANT**: Before deploying to Kubernetes:
+1. Create secrets from `deployments/k8s/secrets.yaml.example`
+2. Update ConfigMap with your environment-specific values
+3. Ensure you have a Kubernetes cluster provisioned
+4. Review resource limits based on your cluster capacity
+
 ## Common Development Workflows
 
 ### Starting Fresh Development Environment
@@ -513,13 +581,28 @@ go test -v -race ./internal/orchestrator/...
 - ✅ Phase 4: Strategy Agents & Backtesting (trend, mean reversion, backtesting framework)
 - ✅ Phase 5: Orchestrator (coordination, weighted voting, consensus)
 - ✅ Phase 6: Risk Management Agent (circuit breakers, position sizing, veto power)
+- ✅ Phase 7: Real Exchange Integration & Position Tracking (exchange connectivity, P&L calculation)
+- ✅ Phase 8: Monitoring & Observability (Prometheus, Grafana, health checks)
+- ✅ Phase 9: LLM Agent Intelligence (agent reasoning, explainability, prompt engineering)
 
-**Current Focus**: Phase 7 - Real Exchange Integration & Position Tracking
-- Exchange connectivity via CCXT
-- Position tracking and P&L calculation
-- Real-time portfolio management
+**Current Focus**: Phase 10 - Production Readiness & Deployment (CRITICAL)
+- Legal compliance (LICENSE, CONTRIBUTING) - pending
+- Core functionality fixes (CoinGecko MCP, Technical Indicators) - pending
+- Testing infrastructure (E2E tests, CI/CD) - pending
+- Docker & Kubernetes (completed)
+- Security hardening - in progress
+- Production deployment preparation - in progress
 
-**Remaining**: Phases 8-10 (monitoring, optimization, production deployment - see TASKS.md)
+**Phase 11** (Optional): Advanced Features - Already Complete ✅
+- Semantic & procedural memory, agent hot-swapping, A/B testing
+- All features implemented and tested
+- Can be enabled post-launch for enhanced capabilities
+
+**Phase 12** (Final): Monitoring & Observability - 0.5 weeks
+- Prometheus metrics, Grafana dashboards, alerting
+- Final step after production deployment
+
+**Note**: Phases reorganized on 2025-11-04 to prioritize production readiness over advanced features. Phase 10 is now the critical path to production launch.
 
 ## Important Conventions
 
@@ -568,15 +651,55 @@ rsiValues := <-rsiChan  // Read from channel
 
 **Database Access**: Use parameterized queries (pgx handles this). Never construct SQL strings.
 
+## Health Checks and Monitoring
+
+All services expose health check endpoints for monitoring and orchestration:
+
+**Health Check Endpoints**:
+- Orchestrator: `http://localhost:8081/health`
+- API Server: `http://localhost:8080/health`
+- MCP Servers: `http://localhost:808X/health` (where X = 2-5 for different servers)
+
+**Health Check Response**:
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-01-15T10:30:00Z",
+  "version": "1.0.0",
+  "checks": {
+    "database": "ok",
+    "redis": "ok",
+    "nats": "ok"
+  }
+}
+```
+
+**Monitoring Health**:
+```bash
+# Check all services
+curl http://localhost:8081/health  # Orchestrator
+curl http://localhost:8080/health  # API
+
+# In Kubernetes
+kubectl get pods -n cryptofunk  # Shows ready status based on health checks
+```
+
+**Readiness vs Liveness**:
+- **Liveness probes**: Check if service is running (restart if failing)
+- **Readiness probes**: Check if service can accept traffic (remove from load balancer if failing)
+- Both are configured in Kubernetes manifests with appropriate delays and thresholds
+
 ## Troubleshooting
 
 **MCP Server Not Responding**: Check stderr logs. Ensure stdout is not being used for debugging.
 
-**Database Connection Issues**: Verify `docker-compose.yml` services are running (`docker-compose ps`).
+**Database Connection Issues**: Verify `docker-compose.yml` services are running (`docker-compose ps`). Check health endpoint: `curl http://localhost:8081/health`
 
 **Migration Errors**: Check `task db-status`. Reset with `task db-reset` (WARNING: deletes all data).
 
-**Agent Failures**: Check agent status in `agent_status` table. Orchestrator has health monitoring and auto-restart.
+**Agent Failures**: Check agent status in `agent_status` table. Orchestrator has health monitoring and auto-restart. Verify health endpoints are responding.
+
+**Services Not Ready in Kubernetes**: Check pod logs with `kubectl logs -f pod/<pod-name> -n cryptofunk`. Verify readiness probes are passing. Common issues: database not ready, missing secrets, incorrect configuration.
 
 ## Additional Resources
 

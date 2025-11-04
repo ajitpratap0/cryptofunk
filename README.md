@@ -215,11 +215,10 @@ websocat ws://localhost:8080/api/v1/ws
 - **[Future Agent Architecture](docs/AGENT_ARCHITECTURE_FUTURE.md)** - Custom RL models (post-MVP)
 - **[Implementation Tasks](TASKS.md)** - 244 tasks across 10 phases (9.5 weeks)
 - **[Open Source Tools](docs/OPEN_SOURCE_TOOLS.md)** - ⭐ Tools that accelerate development by 20% (includes Bifrost)
-- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands and workflows
 - **[Task vs Make](docs/TASK_VS_MAKE.md)** - Why we chose Task over Make
 - **[API Documentation](docs/API.md)** - REST and WebSocket API reference
-- **[MCP Integration](docs/MCP_GUIDE.md)** - MCP server and client usage
-- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment
+- **[MCP Development Guide](docs/MCP_GUIDE.md)** - Building custom MCP servers and agents
+- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment instructions
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
 
 ---
@@ -654,7 +653,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make changes and add tests
-4. Ensure tests pass (`make test`)
+4. Ensure tests pass (`task test`)
 5. Commit with conventional commits (`git commit -m 'feat: add amazing feature'`)
 6. Push to branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request

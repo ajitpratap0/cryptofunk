@@ -3,10 +3,15 @@ package backtest
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"strconv"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/rs/zerolog/log"
 )
 
@@ -447,40 +452,243 @@ func calculateSMA(candles []*Candlestick, period int) float64 {
 
 // HistoricalDataLoader loads historical candlestick data from database
 type HistoricalDataLoader struct {
-	// Database connection would go here
-	// For now, this is a placeholder for the database integration
+	db *db.DB
+}
+
+// NewHistoricalDataLoader creates a new historical data loader
+func NewHistoricalDataLoader(database *db.DB) *HistoricalDataLoader {
+	return &HistoricalDataLoader{
+		db: database,
+	}
 }
 
 // LoadFromDatabase loads historical data for backtesting from TimescaleDB
-// This is a placeholder - actual implementation would query the database
 func (h *HistoricalDataLoader) LoadFromDatabase(symbol, exchange, interval string, startDate, endDate time.Time) ([]*Candlestick, error) {
-	// TODO: Implement actual database query
-	// Query would look like:
-	// SELECT symbol, open_time as timestamp, open, high, low, close, volume
-	// FROM candlesticks
-	// WHERE symbol = $1 AND exchange = $2 AND interval = $3
-	//   AND open_time >= $4 AND open_time <= $5
-	// ORDER BY open_time ASC
+	if h.db == nil {
+		return nil, fmt.Errorf("database connection not initialized")
+	}
 
-	return nil, fmt.Errorf("database loader not yet implemented - use CSV loader instead")
+	ctx := context.Background()
+	query := `
+		SELECT symbol, open_time as timestamp, open, high, low, close, volume
+		FROM candlesticks
+		WHERE symbol = $1 AND exchange = $2 AND interval = $3
+		  AND open_time >= $4 AND open_time <= $5
+		ORDER BY open_time ASC
+	`
+
+	rows, err := h.db.Pool().Query(ctx, query, symbol, exchange, interval, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query candlesticks: %w", err)
+	}
+	defer rows.Close()
+
+	var candles []*Candlestick
+	for rows.Next() {
+		var c Candlestick
+		err := rows.Scan(
+			&c.Symbol,
+			&c.Timestamp,
+			&c.Open,
+			&c.High,
+			&c.Low,
+			&c.Close,
+			&c.Volume,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan candlestick: %w", err)
+		}
+		candles = append(candles, &c)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating candlesticks: %w", err)
+	}
+
+	log.Info().
+		Str("symbol", symbol).
+		Str("exchange", exchange).
+		Str("interval", interval).
+		Time("start", startDate).
+		Time("end", endDate).
+		Int("candles", len(candles)).
+		Msg("Loaded historical data from database")
+
+	return candles, nil
 }
 
 // LoadFromCSV loads historical data from a CSV file
+// CSV format: timestamp,symbol,open,high,low,close,volume
+// timestamp can be Unix timestamp (integer) or RFC3339 string
 func LoadFromCSV(filepath string) ([]*Candlestick, error) {
-	// TODO: Implement CSV loader for historical data
-	// CSV format: timestamp,symbol,open,high,low,close,volume
-	return nil, fmt.Errorf("CSV loader not yet implemented")
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open CSV file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+
+	// Read header row
+	header, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV header: %w", err)
+	}
+
+	// Validate header
+	expectedHeaders := []string{"timestamp", "symbol", "open", "high", "low", "close", "volume"}
+	if len(header) < len(expectedHeaders) {
+		return nil, fmt.Errorf("invalid CSV header: expected %v, got %v", expectedHeaders, header)
+	}
+
+	var candles []*Candlestick
+	lineNum := 1 // Start at 1 since we already read header
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CSV record at line %d: %w", lineNum, err)
+		}
+		lineNum++
+
+		if len(record) < 7 {
+			log.Warn().Int("line", lineNum).Msg("Skipping incomplete CSV record")
+			continue
+		}
+
+		// Parse timestamp (try Unix timestamp first, then RFC3339)
+		var timestamp time.Time
+		if unixTimestamp, err := strconv.ParseInt(record[0], 10, 64); err == nil {
+			timestamp = time.Unix(unixTimestamp, 0)
+		} else if parsedTime, err := time.Parse(time.RFC3339, record[0]); err == nil {
+			timestamp = parsedTime
+		} else {
+			log.Warn().Int("line", lineNum).Str("timestamp", record[0]).Msg("Failed to parse timestamp, skipping")
+			continue
+		}
+
+		// Parse float values
+		open, err := strconv.ParseFloat(record[2], 64)
+		if err != nil {
+			log.Warn().Int("line", lineNum).Msg("Failed to parse open price, skipping")
+			continue
+		}
+
+		high, err := strconv.ParseFloat(record[3], 64)
+		if err != nil {
+			log.Warn().Int("line", lineNum).Msg("Failed to parse high price, skipping")
+			continue
+		}
+
+		low, err := strconv.ParseFloat(record[4], 64)
+		if err != nil {
+			log.Warn().Int("line", lineNum).Msg("Failed to parse low price, skipping")
+			continue
+		}
+
+		close, err := strconv.ParseFloat(record[5], 64)
+		if err != nil {
+			log.Warn().Int("line", lineNum).Msg("Failed to parse close price, skipping")
+			continue
+		}
+
+		volume, err := strconv.ParseFloat(record[6], 64)
+		if err != nil {
+			log.Warn().Int("line", lineNum).Msg("Failed to parse volume, skipping")
+			continue
+		}
+
+		candle := &Candlestick{
+			Timestamp: timestamp,
+			Symbol:    record[1],
+			Open:      open,
+			High:      high,
+			Low:       low,
+			Close:     close,
+			Volume:    volume,
+		}
+
+		candles = append(candles, candle)
+	}
+
+	log.Info().
+		Str("file", filepath).
+		Int("candles", len(candles)).
+		Msg("Loaded historical data from CSV")
+
+	return candles, nil
 }
 
 // LoadFromJSON loads historical data from a JSON file
+// JSON format: array of candlestick objects or object with "candles" array
 func LoadFromJSON(filepath string) ([]*Candlestick, error) {
-	// TODO: Implement JSON loader for historical data
-	return nil, fmt.Errorf("JSON loader not yet implemented")
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open JSON file: %w", err)
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JSON file: %w", err)
+	}
+
+	// Try parsing as array of candlesticks first
+	var candles []*Candlestick
+	err = json.Unmarshal(data, &candles)
+	if err == nil {
+		log.Info().
+			Str("file", filepath).
+			Int("candles", len(candles)).
+			Msg("Loaded historical data from JSON (array format)")
+		return candles, nil
+	}
+
+	// Try parsing as object with "candles" field
+	var wrapper struct {
+		Candles []*Candlestick `json:"candles"`
+	}
+	err = json.Unmarshal(data, &wrapper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JSON file (tried both array and object formats): %w", err)
+	}
+
+	log.Info().
+		Str("file", filepath).
+		Int("candles", len(wrapper.Candles)).
+		Msg("Loaded historical data from JSON (object format)")
+
+	return wrapper.Candles, nil
 }
 
-// ExportResults exports backtest results to JSON
+// ExportResults exports backtest results to JSON file
 func ExportResults(engine *Engine, filepath string) error {
+	// Calculate additional statistics
+	winRate := 0.0
+	if engine.TotalTrades > 0 {
+		winRate = (float64(engine.WinningTrades) / float64(engine.TotalTrades)) * 100.0
+	}
+
+	avgWin := 0.0
+	if engine.WinningTrades > 0 {
+		avgWin = engine.TotalProfit / float64(engine.WinningTrades)
+	}
+
+	avgLoss := 0.0
+	if engine.LosingTrades > 0 {
+		avgLoss = engine.TotalLoss / float64(engine.LosingTrades)
+	}
+
+	profitFactor := 0.0
+	if engine.TotalLoss != 0 {
+		profitFactor = engine.TotalProfit / engine.TotalLoss
+	}
+
 	results := map[string]interface{}{
+		"export_timestamp": time.Now().UTC().Format(time.RFC3339),
 		"config": map[string]interface{}{
 			"initial_capital": engine.InitialCapital,
 			"commission_rate": engine.CommissionRate,
@@ -494,11 +702,17 @@ func ExportResults(engine *Engine, filepath string) error {
 			"total_trades":     engine.TotalTrades,
 			"winning_trades":   engine.WinningTrades,
 			"losing_trades":    engine.LosingTrades,
+			"win_rate":         winRate,
 			"total_profit":     engine.TotalProfit,
 			"total_loss":       engine.TotalLoss,
+			"net_profit":       engine.TotalProfit - engine.TotalLoss,
+			"average_win":      avgWin,
+			"average_loss":     avgLoss,
+			"profit_factor":    profitFactor,
 			"max_drawdown":     engine.MaxDrawdown,
 			"max_drawdown_pct": engine.MaxDrawdownPct,
 			"peak_equity":      engine.PeakEquity,
+			"final_equity":     engine.GetCurrentEquity(),
 		},
 	}
 
@@ -507,7 +721,18 @@ func ExportResults(engine *Engine, filepath string) error {
 		return fmt.Errorf("failed to marshal results: %w", err)
 	}
 
-	// TODO: Write to file
-	_ = data
-	return fmt.Errorf("file export not yet implemented")
+	// Write to file
+	err = os.WriteFile(filepath, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write results file: %w", err)
+	}
+
+	log.Info().
+		Str("file", filepath).
+		Int("trades", engine.TotalTrades).
+		Float64("net_profit", engine.TotalProfit-engine.TotalLoss).
+		Float64("win_rate", winRate).
+		Msg("Exported backtest results")
+
+	return nil
 }

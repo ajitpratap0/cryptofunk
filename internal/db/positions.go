@@ -507,6 +507,133 @@ func scanPositions(rows interface {
 	return positions, nil
 }
 
+// UpdatePositionQuantity updates the quantity of an open position (for partial closes)
+func (db *DB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuantity float64, additionalFees float64) error {
+	query := `
+		UPDATE positions
+		SET
+			quantity = $2,
+			fees = fees + $3,
+			updated_at = $4
+		WHERE id = $1 AND exit_time IS NULL
+	`
+
+	result, err := db.pool.Exec(ctx, query,
+		id,
+		newQuantity,
+		additionalFees,
+		time.Now(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update position quantity: %w", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("position not found or already closed: %s", id)
+	}
+
+	return nil
+}
+
+// UpdatePositionAveraging updates entry price and quantity when adding to a position
+func (db *DB) UpdatePositionAveraging(ctx context.Context, id uuid.UUID, newEntryPrice, newQuantity float64, additionalFees float64) error {
+	query := `
+		UPDATE positions
+		SET
+			entry_price = $2,
+			quantity = $3,
+			fees = fees + $4,
+			updated_at = $5
+		WHERE id = $1 AND exit_time IS NULL
+	`
+
+	result, err := db.pool.Exec(ctx, query,
+		id,
+		newEntryPrice,
+		newQuantity,
+		additionalFees,
+		time.Now(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update position averaging: %w", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("position not found or already closed: %s", id)
+	}
+
+	return nil
+}
+
+// PartialClosePosition partially closes a position and returns a new position for the closed part
+func (db *DB) PartialClosePosition(ctx context.Context, id uuid.UUID, closeQuantity, exitPrice float64, exitReason string, fees float64) (*Position, error) {
+	// Get the original position
+	position, err := db.GetPosition(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if position.ExitTime != nil {
+		return nil, fmt.Errorf("position already closed: %s", id)
+	}
+
+	if closeQuantity >= position.Quantity {
+		return nil, fmt.Errorf("close quantity (%f) >= position quantity (%f), use ClosePosition instead", closeQuantity, position.Quantity)
+	}
+
+	// Calculate realized P&L for closed portion
+	var realizedPnL float64
+	if position.Side == PositionSideLong {
+		realizedPnL = (exitPrice - position.EntryPrice) * closeQuantity
+	} else {
+		realizedPnL = (position.EntryPrice - exitPrice) * closeQuantity
+	}
+	realizedPnL -= fees
+
+	// Create a new closed position record for the partial close
+	now := time.Now()
+	closedPosition := &Position{
+		ID:          uuid.New(),
+		SessionID:   position.SessionID,
+		Symbol:      position.Symbol,
+		Exchange:    position.Exchange,
+		Side:        position.Side,
+		EntryPrice:  position.EntryPrice,
+		ExitPrice:   &exitPrice,
+		Quantity:    closeQuantity,
+		EntryTime:   position.EntryTime,
+		ExitTime:    &now,
+		StopLoss:    position.StopLoss,
+		TakeProfit:  position.TakeProfit,
+		RealizedPnL: &realizedPnL,
+		Fees:        fees,
+		EntryReason: position.EntryReason,
+		ExitReason:  &exitReason,
+		Metadata:    position.Metadata,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	// Insert the closed portion as a new record
+	err = db.CreatePosition(ctx, closedPosition)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create closed position record: %w", err)
+	}
+
+	// Update the original position to reduce quantity
+	remainingQuantity := position.Quantity - closeQuantity
+	err = db.UpdatePositionQuantity(ctx, id, remainingQuantity, 0) // fees already accounted for in closed portion
+	if err != nil {
+		return nil, fmt.Errorf("failed to update remaining position quantity: %w", err)
+	}
+
+	return closedPosition, nil
+}
+
 // ConvertPositionSide converts a string to PositionSide
 func ConvertPositionSide(side string) PositionSide {
 	switch side {

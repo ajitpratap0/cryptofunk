@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,14 +22,95 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-const version = "1.0.0"
-
 type APIServer struct {
-	router *gin.Engine
-	db     *db.DB
-	config *config.Config
-	hub    *Hub
-	port   string
+	router             *gin.Engine
+	db                 *db.DB
+	config             *config.Config
+	hub                *Hub
+	port               string
+	orchestratorClient *http.Client
+}
+
+// HTTP client for orchestrator communication with timeout and connection pooling
+var defaultOrchestratorClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     30 * time.Second,
+		DisableKeepAlives:   false,
+	},
+}
+
+// rateLimiterEntry tracks request timestamps for an IP address
+type rateLimiterEntry struct {
+	requests []time.Time
+	mu       sync.Mutex
+}
+
+// controlEndpointRateLimiter is a simple token bucket rate limiter for control endpoints
+// It allows N requests per time window per IP address
+type controlEndpointRateLimiter struct {
+	entries     sync.Map // map[string]*rateLimiterEntry
+	maxRequests int
+	window      time.Duration
+}
+
+// newControlEndpointRateLimiter creates a new rate limiter
+func newControlEndpointRateLimiter(maxRequests int, window time.Duration) *controlEndpointRateLimiter {
+	return &controlEndpointRateLimiter{
+		maxRequests: maxRequests,
+		window:      window,
+	}
+}
+
+// allow checks if a request from the given IP is allowed
+func (rl *controlEndpointRateLimiter) allow(ip string) bool {
+	now := time.Now()
+
+	// Get or create entry for this IP
+	val, _ := rl.entries.LoadOrStore(ip, &rateLimiterEntry{
+		requests: make([]time.Time, 0, rl.maxRequests),
+	})
+	entry := val.(*rateLimiterEntry)
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	// Remove expired requests (outside the time window)
+	cutoff := now.Add(-rl.window)
+	validRequests := make([]time.Time, 0, len(entry.requests))
+	for _, req := range entry.requests {
+		if req.After(cutoff) {
+			validRequests = append(validRequests, req)
+		}
+	}
+	entry.requests = validRequests
+
+	// Check if we're at the limit
+	if len(entry.requests) >= rl.maxRequests {
+		return false
+	}
+
+	// Add this request
+	entry.requests = append(entry.requests, now)
+	return true
+}
+
+// Middleware returns a Gin middleware that applies rate limiting
+func (rl *controlEndpointRateLimiter) Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		if !rl.allow(ip) {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":   "rate limit exceeded",
+				"message": fmt.Sprintf("Maximum %d requests per %v allowed", rl.maxRequests, rl.window),
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 func main() {
@@ -60,11 +143,12 @@ func main() {
 
 	// Create API server
 	server := &APIServer{
-		router: gin.Default(),
-		db:     database,
-		config: cfg,
-		hub:    hub,
-		port:   getPort(),
+		router:             gin.Default(),
+		db:                 database,
+		config:             cfg,
+		hub:                hub,
+		port:               getPort(),
+		orchestratorClient: defaultOrchestratorClient,
 	}
 
 	// Setup middleware
@@ -134,11 +218,15 @@ func (s *APIServer) setupRoutes() {
 		}
 
 		// Trading control routes
+		// Rate limiter: max 10 requests per minute per IP for control endpoints
+		controlRateLimiter := newControlEndpointRateLimiter(10, time.Minute)
 		trade := v1.Group("/trade")
 		{
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
-			trade.POST("/pause", s.handlePauseTrading)
+			// Apply rate limiting to pause/resume to prevent DOS
+			trade.POST("/pause", controlRateLimiter.Middleware(), s.handlePauseTrading)
+			trade.POST("/resume", controlRateLimiter.Middleware(), s.handleResumeTrading)
 		}
 
 		// Configuration routes
@@ -158,7 +246,7 @@ func (s *APIServer) setupRoutes() {
 	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"name":    "CryptoFunk Trading API",
-			"version": version,
+			"version": config.Version,
 			"status":  "running",
 		})
 	})
@@ -178,7 +266,7 @@ func (s *APIServer) start() {
 	go func() {
 		log.Info().
 			Str("port", s.port).
-			Str("version", version).
+			Str("version", config.Version).
 			Msg("Starting API server")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -214,14 +302,14 @@ func (s *APIServer) handleHealth(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":  "unhealthy",
 			"error":   "database connection failed",
-			"version": version,
+			"version": config.Version,
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "healthy",
-		"version": version,
+		"version": config.Version,
 		"uptime":  time.Since(startTime).String(),
 	})
 }
@@ -230,7 +318,7 @@ func (s *APIServer) handleHealth(c *gin.Context) {
 func (s *APIServer) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "operational",
-		"version": version,
+		"version": config.Version,
 		"uptime":  time.Since(startTime).String(),
 		"components": gin.H{
 			"database":  "healthy",
@@ -711,13 +799,91 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		return
 	}
 
-	// For now, just return success
-	// TODO: Implement actual pause logic in orchestrator
+	// Call orchestrator to pause trading with retry
+	orchestratorURL := s.getOrchestratorURL()
+	resp, err := s.callOrchestratorWithRetry(orchestratorURL + "/pause")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to call orchestrator pause endpoint")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to pause trading",
+			"details": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check orchestrator response
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{
+			"error": "orchestrator failed to pause trading",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Trading paused successfully",
 		"session_id": session.ID.String(),
 		"symbol":     session.Symbol,
-		"note":       "Pause logic to be implemented in orchestrator",
+	})
+}
+
+func (s *APIServer) handleResumeTrading(c *gin.Context) {
+	var req struct {
+		SessionID string `json:"session_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	sessionID, err := parseUUID(req.SessionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid session_id format",
+		})
+		return
+	}
+
+	// Get session to verify it exists
+	ctx := c.Request.Context()
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":      "session not found",
+			"session_id": req.SessionID,
+		})
+		return
+	}
+
+	// Call orchestrator to resume trading with retry
+	orchestratorURL := s.getOrchestratorURL()
+	resp, err := s.callOrchestratorWithRetry(orchestratorURL + "/resume")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to call orchestrator resume endpoint")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to resume trading",
+			"details": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check orchestrator response
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{
+			"error": "orchestrator failed to resume trading",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Trading resumed successfully",
+		"session_id": session.ID.String(),
+		"symbol":     session.Symbol,
 	})
 }
 
@@ -1144,6 +1310,53 @@ func getPort() string {
 
 	// Default port
 	return "8080"
+}
+
+func (s *APIServer) getOrchestratorURL() string {
+	// Try environment variable first (highest priority)
+	if url := os.Getenv("ORCHESTRATOR_URL"); url != "" {
+		return url
+	}
+
+	// Use configured URL (from config.yaml)
+	if s.config != nil && s.config.API.OrchestratorURL != "" {
+		return s.config.API.OrchestratorURL
+	}
+
+	// Fallback to default URL (orchestrator metrics server on port 8081)
+	return "http://localhost:8081"
+}
+
+// callOrchestratorWithRetry calls the orchestrator endpoint with retry logic
+func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error) {
+	const maxRetries = 3
+	const retryDelay = 100 * time.Millisecond
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(retryDelay * time.Duration(attempt)) // Exponential backoff
+			log.Debug().
+				Int("attempt", attempt+1).
+				Int("max_retries", maxRetries).
+				Str("url", url).
+				Msg("Retrying orchestrator call")
+		}
+
+		resp, err := s.orchestratorClient.Post(url, "application/json", nil)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+		log.Warn().
+			Err(err).
+			Int("attempt", attempt+1).
+			Str("url", url).
+			Msg("Orchestrator call failed")
+	}
+
+	return nil, fmt.Errorf("orchestrator call failed after %d attempts: %w", maxRetries, lastErr)
 }
 
 // requestLogger logs each HTTP request

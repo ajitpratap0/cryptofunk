@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"sync"
@@ -605,21 +606,127 @@ func (a *RiskAgent) calculateOptimalSize(symbol string, confidence float64) floa
 
 // getHistoricalWinRate returns historical win rate for symbol (or overall)
 func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
-	// TODO: Query database for historical win rate
-	// For now, return default conservative estimate
-	return 0.55 // 55% win rate
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Query winning and losing positions for symbol (or all if symbol is empty)
+	query := `
+		SELECT
+			COUNT(*) FILTER (WHERE realized_pnl > 0) AS winning_trades,
+			COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losing_trades
+		FROM positions
+		WHERE exit_time IS NOT NULL
+			AND realized_pnl IS NOT NULL
+	`
+
+	if symbol != "" {
+		query += " AND symbol = $1"
+	}
+
+	var winningTrades, losingTrades int64
+	var err error
+
+	if symbol != "" {
+		err = a.db.Pool().QueryRow(ctx, query, symbol).Scan(&winningTrades, &losingTrades)
+	} else {
+		err = a.db.Pool().QueryRow(ctx, query).Scan(&winningTrades, &losingTrades)
+	}
+
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to query historical win rate, using default")
+		return 0.55 // Default conservative estimate
+	}
+
+	totalTrades := winningTrades + losingTrades
+	if totalTrades == 0 {
+		return 0.55 // Default if no historical data
+	}
+
+	winRate := float64(winningTrades) / float64(totalTrades)
+	log.Debug().
+		Str("symbol", symbol).
+		Int64("winning", winningTrades).
+		Int64("losing", losingTrades).
+		Float64("win_rate", winRate).
+		Msg("Historical win rate calculated")
+
+	return winRate
 }
 
 // getHistoricalAvgWin returns average win size
 func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
-	// TODO: Query database for average win
-	return 200.0 // $200 average win
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT COALESCE(AVG(realized_pnl), 0)
+		FROM positions
+		WHERE exit_time IS NOT NULL
+			AND realized_pnl > 0
+	`
+
+	if symbol != "" {
+		query += " AND symbol = $1"
+	}
+
+	var avgWin float64
+	var err error
+
+	if symbol != "" {
+		err = a.db.Pool().QueryRow(ctx, query, symbol).Scan(&avgWin)
+	} else {
+		err = a.db.Pool().QueryRow(ctx, query).Scan(&avgWin)
+	}
+
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to query average win, using default")
+		return 200.0 // Default estimate
+	}
+
+	if avgWin == 0 {
+		return 200.0 // Default if no historical data
+	}
+
+	log.Debug().Str("symbol", symbol).Float64("avg_win", avgWin).Msg("Average win calculated")
+	return avgWin
 }
 
 // getHistoricalAvgLoss returns average loss size
 func (a *RiskAgent) getHistoricalAvgLoss(symbol string) float64 {
-	// TODO: Query database for average loss
-	return 100.0 // $100 average loss
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT COALESCE(ABS(AVG(realized_pnl)), 0)
+		FROM positions
+		WHERE exit_time IS NOT NULL
+			AND realized_pnl < 0
+	`
+
+	if symbol != "" {
+		query += " AND symbol = $1"
+	}
+
+	var avgLoss float64
+	var err error
+
+	if symbol != "" {
+		err = a.db.Pool().QueryRow(ctx, query, symbol).Scan(&avgLoss)
+	} else {
+		err = a.db.Pool().QueryRow(ctx, query).Scan(&avgLoss)
+	}
+
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to query average loss, using default")
+		return 100.0 // Default estimate
+	}
+
+	if avgLoss == 0 {
+		return 100.0 // Default if no historical data
+	}
+
+	log.Debug().Str("symbol", symbol).Float64("avg_loss", avgLoss).Msg("Average loss calculated")
+	return avgLoss
 }
 
 // ============================================================================
@@ -736,39 +843,293 @@ func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
 
 // calculatePerformanceMetrics calculates Sharpe, drawdown, etc.
 func (a *RiskAgent) calculatePerformanceMetrics() {
-	// TODO: Load equity curve from database
-	// For now, use mock data
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Load equity curve from performance_metrics table (last 30 days)
+	query := `
+		SELECT total_value, metric_time
+		FROM performance_metrics
+		WHERE metric_time >= NOW() - INTERVAL '30 days'
+		ORDER BY metric_time ASC
+		LIMIT 1000
+	`
+
+	rows, err := a.db.Pool().Query(ctx, query)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to query performance metrics, using defaults")
+		return
+	}
+	defer rows.Close()
+
+	var equityCurve []float64
+	var timestamps []time.Time
+
+	for rows.Next() {
+		var totalValue float64
+		var metricTime time.Time
+		if err := rows.Scan(&totalValue, &metricTime); err != nil {
+			log.Warn().Err(err).Msg("Failed to scan performance metrics row")
+			continue
+		}
+		equityCurve = append(equityCurve, totalValue)
+		timestamps = append(timestamps, metricTime)
+	}
+
 	a.beliefs.mu.Lock()
 	defer a.beliefs.mu.Unlock()
 
+	// Update equity curve
+	a.beliefs.equityCurve = equityCurve
+
+	// Calculate returns from equity curve
+	if len(equityCurve) > 1 {
+		returns := make([]float64, 0, len(equityCurve)-1)
+		for i := 1; i < len(equityCurve); i++ {
+			if equityCurve[i-1] > 0 {
+				ret := (equityCurve[i] - equityCurve[i-1]) / equityCurve[i-1]
+				returns = append(returns, ret)
+			}
+		}
+		a.beliefs.returns = returns
+
+		// Calculate Sharpe ratio from returns
+		if len(returns) > 0 {
+			sharpe := a.calculateSharpeRatio(returns)
+			a.beliefs.sharpeRatio = sharpe
+			log.Debug().Float64("sharpe_ratio", sharpe).Msg("Sharpe ratio calculated from returns")
+		}
+	}
+
 	// Calculate current drawdown
-	if len(a.beliefs.equityCurve) > 0 {
+	if len(equityCurve) > 0 {
 		peak := a.beliefs.peakEquity
-		current := a.beliefs.equityCurve[len(a.beliefs.equityCurve)-1]
-		if current > peak {
-			a.beliefs.peakEquity = current
-			a.beliefs.currentDrawdown = 0
-		} else if peak > 0 {
+		current := equityCurve[len(equityCurve)-1]
+
+		// Find peak equity in curve
+		for _, val := range equityCurve {
+			if val > peak {
+				peak = val
+			}
+		}
+
+		a.beliefs.peakEquity = peak
+
+		if current < peak && peak > 0 {
 			a.beliefs.currentDrawdown = ((peak - current) / peak) * 100
 			if a.beliefs.currentDrawdown > a.beliefs.maxDrawdown {
 				a.beliefs.maxDrawdown = a.beliefs.currentDrawdown
 			}
+		} else {
+			a.beliefs.currentDrawdown = 0
 		}
+
+		log.Debug().
+			Float64("peak", peak).
+			Float64("current", current).
+			Float64("drawdown_pct", a.beliefs.currentDrawdown).
+			Msg("Drawdown calculated")
+	}
+}
+
+// calculateSharpeRatio calculates Sharpe ratio from returns
+func (a *RiskAgent) calculateSharpeRatio(returns []float64) float64 {
+	if len(returns) == 0 {
+		return 0
 	}
 
-	// TODO: Calculate Sharpe ratio from returns
-	// For now, use placeholder
-	a.beliefs.sharpeRatio = 1.5
+	// Calculate mean return
+	sum := 0.0
+	for _, r := range returns {
+		sum += r
+	}
+	meanReturn := sum / float64(len(returns))
+
+	// Calculate standard deviation
+	variance := 0.0
+	for _, r := range returns {
+		diff := r - meanReturn
+		variance += diff * diff
+	}
+	variance /= float64(len(returns))
+	stdDev := math.Sqrt(variance)
+
+	if stdDev == 0 {
+		return 0
+	}
+
+	// Annualize (assuming daily returns)
+	annualizedReturn := meanReturn * 252.0
+	annualizedStdDev := stdDev * math.Sqrt(252.0)
+
+	// Sharpe ratio = (Return - RiskFreeRate) / StdDev
+	sharpe := (annualizedReturn - a.config.RiskFreeRate) / annualizedStdDev
+
+	return sharpe
 }
 
 // assessMarketConditions determines current market regime
 func (a *RiskAgent) assessMarketConditions() {
-	// TODO: Implement market regime detection
-	// For now, keep as sideways
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get recent candlestick data for BTC (major market indicator)
+	// Use 1-day candles for last 30 days
+	query := `
+		SELECT close, high, low, open_time
+		FROM candlesticks
+		WHERE symbol = 'BTC/USDT'
+			AND interval = '1d'
+			AND open_time >= NOW() - INTERVAL '30 days'
+		ORDER BY open_time ASC
+		LIMIT 30
+	`
+
+	rows, err := a.db.Pool().Query(ctx, query)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to query market data for regime detection")
+		a.beliefs.mu.Lock()
+		a.beliefs.marketRegime = "sideways"
+		a.beliefs.volatility = 0.02
+		a.beliefs.mu.Unlock()
+		return
+	}
+	defer rows.Close()
+
+	var closes []float64
+	var highs []float64
+	var lows []float64
+
+	for rows.Next() {
+		var close, high, low float64
+		var openTime time.Time
+		if err := rows.Scan(&close, &high, &low, &openTime); err != nil {
+			log.Warn().Err(err).Msg("Failed to scan candlestick row")
+			continue
+		}
+		closes = append(closes, close)
+		highs = append(highs, high)
+		lows = append(lows, low)
+	}
+
+	if len(closes) < 10 {
+		log.Warn().Int("data_points", len(closes)).Msg("Insufficient data for market regime detection")
+		a.beliefs.mu.Lock()
+		a.beliefs.marketRegime = "sideways"
+		a.beliefs.volatility = 0.02
+		a.beliefs.mu.Unlock()
+		return
+	}
+
+	// Calculate volatility (standard deviation of returns)
+	returns := make([]float64, 0, len(closes)-1)
+	for i := 1; i < len(closes); i++ {
+		if closes[i-1] > 0 {
+			ret := (closes[i] - closes[i-1]) / closes[i-1]
+			returns = append(returns, ret)
+		}
+	}
+
+	volatility := a.calculateStdDev(returns)
+
+	// Determine trend using moving averages
+	// Short MA (10-day) vs Long MA (20-day)
+	shortMA := a.calculateMovingAverage(closes, 10)
+	longMA := a.calculateMovingAverage(closes, 20)
+
+	// Calculate trend strength
+	var regime string
+	if len(closes) > 0 && shortMA > 0 && longMA > 0 {
+		priceTrend := (closes[len(closes)-1] - closes[0]) / closes[0]
+		maTrend := (shortMA - longMA) / longMA
+
+		if maTrend > 0.02 && priceTrend > 0 {
+			regime = "bullish"
+		} else if maTrend < -0.02 && priceTrend < 0 {
+			regime = "bearish"
+		} else {
+			regime = "sideways"
+		}
+	} else {
+		regime = "sideways"
+	}
+
 	a.beliefs.mu.Lock()
-	a.beliefs.marketRegime = "sideways"
-	a.beliefs.volatility = 0.02 // 2% volatility
+	a.beliefs.marketRegime = regime
+	a.beliefs.volatility = volatility
 	a.beliefs.mu.Unlock()
+
+	log.Debug().
+		Str("regime", regime).
+		Float64("volatility", volatility).
+		Float64("short_ma", shortMA).
+		Float64("long_ma", longMA).
+		Msg("Market conditions assessed")
+}
+
+// calculateStdDev calculates standard deviation of a slice
+func (a *RiskAgent) calculateStdDev(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	// Calculate mean
+	sum := 0.0
+	for _, v := range values {
+		sum += v
+	}
+	mean := sum / float64(len(values))
+
+	// Calculate variance
+	variance := 0.0
+	for _, v := range values {
+		diff := v - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(values))
+
+	return math.Sqrt(variance)
+}
+
+// calculateMovingAverage calculates simple moving average
+func (a *RiskAgent) calculateMovingAverage(values []float64, period int) float64 {
+	if len(values) < period || period <= 0 {
+		return 0
+	}
+
+	// Use most recent 'period' values
+	sum := 0.0
+	start := len(values) - period
+	for i := start; i < len(values); i++ {
+		sum += values[i]
+	}
+
+	return sum / float64(period)
+}
+
+// getCurrentPrice gets the current market price for a symbol from the database
+func (a *RiskAgent) getCurrentPrice(symbol string) float64 {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get most recent candlestick close price
+	query := `
+		SELECT close
+		FROM candlesticks
+		WHERE symbol = $1
+			AND interval = '1h'
+		ORDER BY open_time DESC
+		LIMIT 1
+	`
+
+	var price float64
+	err := a.db.Pool().QueryRow(ctx, query, symbol).Scan(&price)
+	if err != nil {
+		log.Warn().Err(err).Str("symbol", symbol).Msg("Failed to get current price from database, using default")
+		return 100.0 // Default fallback price
+	}
+
+	return price
 }
 
 // ============================================================================
@@ -793,8 +1154,10 @@ func (a *RiskAgent) evaluateProposal(ctx context.Context, symbol string, action 
 func (a *RiskAgent) evaluateProposalWithLLM(ctx context.Context, symbol string, action string, size float64, confidence float64) (*RiskIntentions, error) {
 	log.Debug().Str("symbol", symbol).Str("action", action).Msg("Evaluating proposal with LLM")
 
+	// Get current price from database
+	currentPrice := a.getCurrentPrice(symbol)
+
 	a.beliefs.mu.RLock()
-	currentPrice := 100.0                             // Mock price for now - should get from market data
 	portfolioValue := a.config.MaxPositionSize * 10.0 // Estimate portfolio as 10x max position
 	if a.beliefs.totalExposure > 0 {
 		portfolioValue = a.beliefs.totalExposure / 0.8 // Assume 80% utilization
@@ -976,7 +1339,10 @@ func (a *RiskAgent) evaluateProposalRuleBased(symbol string, action string, size
 	intentions.shouldVeto = false
 	intentions.recommendedSize = optimalSize
 	intentions.confidenceScore = 0.90
-	intentions.stopLossLevel = a.calculateStopLoss(100.0, action) // Use mock entry price
+
+	// Calculate stop loss using current market price
+	currentPrice := a.getCurrentPrice(symbol)
+	intentions.stopLossLevel = a.calculateStopLoss(currentPrice, action)
 
 	return intentions
 }
