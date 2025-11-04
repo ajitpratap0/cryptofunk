@@ -117,11 +117,11 @@ func main() {
 	// Setup logging
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	// Load configuration
+	// Load and validate configuration
 	configPath := os.Getenv("CONFIG_PATH")
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load configuration")
+		log.Fatal().Err(err).Msg("Failed to load or validate configuration")
 	}
 
 	// Initialize database
