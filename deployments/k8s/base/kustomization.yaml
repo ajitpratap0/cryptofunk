@@ -1,0 +1,83 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cryptofunk
+
+resources:
+  # Namespace
+  - namespace.yaml
+
+  # Configuration
+  - configmap.yaml
+  - secrets.yaml
+
+  # Persistent Storage
+  - pvc.yaml
+
+  # Infrastructure Deployments
+  - deployment-postgres.yaml
+  - deployment-redis.yaml
+  - deployment-nats.yaml
+  - deployment-bifrost.yaml
+  - deployment-prometheus.yaml
+  - deployment-grafana.yaml
+
+  # Application Deployments
+  - job-migrate.yaml
+  - deployment-orchestrator.yaml
+  - deployment-mcp-servers.yaml
+  - deployment-agents.yaml
+  - deployment-api.yaml
+
+  # Services
+  - services.yaml
+
+  # Ingress
+  - ingress.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: cryptofunk-trading-system
+  app.kubernetes.io/managed-by: kustomize
+
+# Images - update these for your registry
+images:
+  - name: cryptofunk/migrate
+    newName: your-registry.io/cryptofunk/migrate
+    newTag: latest
+  - name: cryptofunk/orchestrator
+    newName: your-registry.io/cryptofunk/orchestrator
+    newTag: latest
+  - name: cryptofunk/market-data-server
+    newName: your-registry.io/cryptofunk/market-data-server
+    newTag: latest
+  - name: cryptofunk/technical-indicators-server
+    newName: your-registry.io/cryptofunk/technical-indicators-server
+    newTag: latest
+  - name: cryptofunk/risk-analyzer-server
+    newName: your-registry.io/cryptofunk/risk-analyzer-server
+    newTag: latest
+  - name: cryptofunk/order-executor-server
+    newName: your-registry.io/cryptofunk/order-executor-server
+    newTag: latest
+  - name: cryptofunk/technical-agent
+    newName: your-registry.io/cryptofunk/technical-agent
+    newTag: latest
+  - name: cryptofunk/orderbook-agent
+    newName: your-registry.io/cryptofunk/orderbook-agent
+    newTag: latest
+  - name: cryptofunk/sentiment-agent
+    newName: your-registry.io/cryptofunk/sentiment-agent
+    newTag: latest
+  - name: cryptofunk/trend-agent
+    newName: your-registry.io/cryptofunk/trend-agent
+    newTag: latest
+  - name: cryptofunk/reversion-agent
+    newName: your-registry.io/cryptofunk/reversion-agent
+    newTag: latest
+  - name: cryptofunk/risk-agent
+    newName: your-registry.io/cryptofunk/risk-agent
+    newTag: latest
+  - name: cryptofunk/api
+    newName: your-registry.io/cryptofunk/api
+    newTag: latest

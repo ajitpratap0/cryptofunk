@@ -1,0 +1,88 @@
+# Ingress for routing external traffic to internal services
+# Requires an Ingress Controller (nginx, traefik, etc.) to be installed in the cluster
+#
+# For HTTPS/TLS:
+# 1. Install cert-manager: kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+# 2. Create ClusterIssuer for Let's Encrypt
+# 3. Add TLS configuration to this Ingress
+#
+# Example cert-manager annotation:
+#   cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cryptofunk-ingress
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: cryptofunk-ingress
+  annotations:
+    # NGINX Ingress Controller annotations
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # WebSocket support for API (real-time updates)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "api-service"
+
+    # CORS headers (if needed)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+
+    # Rate limiting (adjust as needed)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+
+    # For cert-manager (uncomment when ready for TLS)
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx  # Change to your ingress class (nginx, traefik, etc.)
+
+  # TLS configuration (uncomment when cert-manager is set up)
+  # tls:
+  # - hosts:
+  #   - api.cryptofunk.example.com
+  #   - grafana.cryptofunk.example.com
+  #   - prometheus.cryptofunk.example.com
+  #   secretName: cryptofunk-tls
+
+  rules:
+  # API Server
+  - host: api.cryptofunk.example.com  # Change to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 80
+
+  # Grafana Dashboards
+  - host: grafana.cryptofunk.example.com  # Change to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
+
+  # Prometheus Metrics
+  - host: prometheus.cryptofunk.example.com  # Change to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus-service
+            port:
+              number: 9090

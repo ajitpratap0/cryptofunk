@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cryptofunk
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/part-of: cryptofunk-trading-system

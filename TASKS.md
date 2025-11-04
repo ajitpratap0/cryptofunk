@@ -2319,7 +2319,7 @@ This document consolidates all implementation tasks from the architecture and de
       - Production deployment checklist
     - Ready for local development with: docker-compose up -d
 
-- [ ] **T218** [P1] Kubernetes manifests
+- [x] **T218** [P1] Kubernetes manifests
   - Deployments for all services
   - Services (ClusterIP, LoadBalancer)
   - ConfigMaps
@@ -2327,6 +2327,60 @@ This document consolidates all implementation tasks from the architecture and de
   - Ingress
   - **Acceptance**: Can deploy to K8s
   - **Estimate**: 6 hours
+  - **Implementation**:
+    - Created complete Kubernetes manifests in deployments/k8s/base/:
+      - namespace.yaml - cryptofunk namespace with labels
+      - configmap.yaml - Application configuration (trading mode, log level, service endpoints)
+      - secrets.yaml - Template for API keys and passwords (base64 encoded)
+      - pvc.yaml - 4 PersistentVolumeClaims (postgres 50Gi, redis 10Gi, prometheus 30Gi, grafana 5Gi)
+      - deployment-postgres.yaml - TimescaleDB with health checks and resource limits
+      - deployment-redis.yaml - Redis with persistence and memory limits
+      - deployment-nats.yaml - NATS with JetStream enabled
+      - deployment-bifrost.yaml - LLM gateway (2 replicas for HA)
+      - deployment-prometheus.yaml - Metrics collection with 30d retention
+      - deployment-grafana.yaml - Dashboard visualization
+      - job-migrate.yaml - Database migration Job (one-shot with backoffLimit)
+      - deployment-orchestrator.yaml - MCP coordinator (single instance)
+      - deployment-mcp-servers.yaml - 4 MCP servers (2 replicas each)
+      - deployment-agents.yaml - 6 trading agents (2 replicas each, template for remaining)
+      - deployment-api.yaml - REST/WebSocket API (3 replicas for HA)
+      - services.yaml - 8 services (ClusterIP for internal, LoadBalancer for external)
+      - ingress.yaml - NGINX Ingress with WebSocket support, CORS, rate limiting
+      - kustomization.yaml - Kustomize configuration with image registry mappings
+    - Resource configuration:
+      - Requests and limits for all deployments
+      - Total minimum: ~8 CPU cores, ~16GB RAM
+      - Total maximum: ~32 CPU cores, ~48GB RAM
+      - Production-ready resource allocation
+    - Health checks:
+      - Liveness and readiness probes for all long-running services
+      - HTTP probes for API services
+      - Exec probes for databases
+    - Service types:
+      - ClusterIP for internal services (postgres, redis, nats, orchestrator, MCP servers)
+      - LoadBalancer for external access (API, Grafana, Prometheus)
+      - Ingress for domain-based routing with TLS support
+    - Environment variable management:
+      - ConfigMaps for non-sensitive configuration
+      - Secrets for API keys and passwords
+      - Proper service discovery with Kubernetes DNS
+    - Kustomize support:
+      - Base manifests in base/
+      - Directory structure for overlays (dev, staging, prod)
+      - Image registry configuration
+      - Common labels across all resources
+    - Created deployments/k8s/README.md (comprehensive guide):
+      - Prerequisites (kubectl, kustomize, cluster requirements)
+      - Quick start guide
+      - Architecture diagram
+      - Complete deployment steps (10 steps)
+      - Scaling instructions (HPA and manual)
+      - Monitoring access
+      - Troubleshooting guide
+      - Security best practices (TLS, NetworkPolicy, RBAC)
+      - Maintenance procedures (backup, updates, rollback)
+      - Production deployment checklist
+    - Ready for production K8s deployment with: kubectl apply -k base/
 
 - [ ] **T219** [P1] Create CI/CD pipeline (GitHub Actions)
   - Run tests on PR
