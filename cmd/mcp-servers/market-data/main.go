@@ -11,11 +11,16 @@ import (
 	"github.com/adshao/go-binance/v2"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 const (
-	serverName    = "market-data"
-	serverVersion = "1.0.0"
+	serverName = "market-data"
+)
+
+var (
+	serverVersion = config.Version
 )
 
 // TickerData represents 24h ticker statistics

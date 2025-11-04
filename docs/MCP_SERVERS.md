@@ -75,7 +75,7 @@ task run-orchestrator
 ## Market Data Server
 
 **Server Name**: `market-data`
-**Version**: 0.1.0
+**Version**: 1.0.0
 **Purpose**: Provides real-time market data from Binance API with caching and TimescaleDB sync
 **Binary**: `bin/market-data`
 
