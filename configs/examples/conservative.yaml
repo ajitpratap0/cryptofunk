@@ -1,0 +1,127 @@
+# CryptoFunk Configuration: Conservative Trading Strategy
+# Recommended for: Risk-averse traders, long-term investors, beginners
+# Risk Level: Low
+# Expected Returns: 5-15% annual
+#
+# This configuration prioritizes capital preservation over aggressive gains.
+# Suitable for live trading with real capital.
+
+app:
+  name: "CryptoFunk-Conservative"
+  version: "1.0.0"
+  environment: "production"
+  log_level: "info"
+
+database:
+  host: "${DATABASE_HOST:-localhost}"
+  port: 5432
+  user: "${DATABASE_USER:-postgres}"
+  password: "${DATABASE_PASSWORD}"
+  database: "cryptofunk"
+  ssl_mode: "require"  # SSL required for production
+  pool_size: 10
+
+redis:
+  host: "${REDIS_HOST:-localhost}"
+  port: 6379
+  password: "${REDIS_PASSWORD}"
+  db: 0
+
+nats:
+  url: "${NATS_URL:-nats://localhost:4222}"
+  enable_jetstream: true
+
+llm:
+  gateway: "bifrost"
+  endpoint: "${LLM_ENDPOINT:-http://localhost:8080/v1/chat/completions}"
+  primary_model: "claude-sonnet-4-20250514"
+  fallback_model: "gpt-4-turbo"
+  temperature: 0.5  # Lower temperature for more conservative, predictable decisions
+  max_tokens: 2000
+  enable_caching: true
+  timeout: 30000
+
+trading:
+  mode: "live"  # Change to "paper" for testing
+  symbols:
+    - "BTC/USDT"  # Focus on major, liquid pairs only
+    - "ETH/USDT"
+  exchange: "binance"
+  initial_capital: 10000.0
+  max_positions: 2  # Limited concurrent positions
+  default_quantity: 0.01
+
+risk:
+  max_position_size: 0.05  # 5% max per position (very conservative)
+  max_daily_loss: 0.01  # 1% max daily loss
+  max_drawdown: 0.05  # 5% max drawdown
+  default_stop_loss: 0.02  # 2% stop loss
+  default_take_profit: 0.05  # 5% take profit (2.5:1 risk/reward)
+  llm_approval_required: true  # Require LLM validation
+  min_confidence: 0.80  # High confidence threshold
+
+exchanges:
+  binance:
+    api_key: "${BINANCE_API_KEY}"
+    secret_key: "${BINANCE_API_SECRET}"
+    testnet: false  # Live trading
+    rate_limit_ms: 200  # Conservative rate limiting
+
+api:
+  host: "0.0.0.0"
+  port: 8080
+  orchestrator_url: "http://localhost:8081"
+
+monitoring:
+  prometheus_port: 9100
+  enable_metrics: true
+
+# MCP Configuration
+mcp:
+  external:
+    coingecko:
+      enabled: true
+      name: "CoinGecko MCP"
+      url: "https://mcp.api.coingecko.com/mcp"
+      transport: "http_streaming"
+      cache_ttl: 120  # Longer cache for stable data
+      rate_limit:
+        enabled: true
+        requests_per_minute: 60  # Conservative API usage
+
+  internal:
+    order_executor:
+      enabled: true
+      name: "Order Executor"
+      command: "./bin/order-executor-server"
+      transport: "stdio"
+
+    risk_analyzer:
+      enabled: true
+      name: "Risk Analyzer"
+      command: "./bin/risk-analyzer-server"
+      transport: "stdio"
+
+    technical_indicators:
+      enabled: true
+      name: "Technical Indicators"
+      command: "./bin/technical-indicators-server"
+      transport: "stdio"
+
+    market_data:
+      enabled: false  # Use CoinGecko instead
+
+# Trading Strategy Notes:
+# - Focus on major pairs with high liquidity
+# - Small position sizes (5% max)
+# - Tight stop losses (2%)
+# - Higher confidence threshold (80%)
+# - LLM approval required for all trades
+# - Conservative profit targets
+# - Limited concurrent positions (2 max)
+#
+# Suitable for:
+# - Risk-averse traders
+# - Capital preservation focus
+# - Long-term steady growth
+# - Minimal monitoring required

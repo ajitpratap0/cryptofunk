@@ -1,0 +1,160 @@
+# CryptoFunk Configuration: Paper Trading Mode
+# Recommended for: Testing, development, strategy validation, learning
+# Risk Level: None (simulated trading only)
+# Expected Returns: N/A (no real money)
+#
+# This configuration uses paper trading (simulated) to test strategies
+# without risking real capital. Perfect for development and validation.
+
+app:
+  name: "CryptoFunk-PaperTrading"
+  version: "1.0.0"
+  environment: "development"  # Development mode for paper trading
+  log_level: "debug"  # Verbose logging for analysis
+
+database:
+  host: "${DATABASE_HOST:-localhost}"
+  port: 5432
+  user: "${DATABASE_USER:-postgres}"
+  password: "${DATABASE_PASSWORD:-postgres}"  # Can use simple password for dev
+  database: "cryptofunk_paper"  # Separate database for paper trading
+  ssl_mode: "disable"  # SSL not required for local dev
+  pool_size: 10
+
+redis:
+  host: "${REDIS_HOST:-localhost}"
+  port: 6379
+  password: "${REDIS_PASSWORD:-}"  # Optional for dev
+  db: 1  # Use separate Redis DB for paper trading
+
+nats:
+  url: "${NATS_URL:-nats://localhost:4222}"
+  enable_jetstream: true
+
+llm:
+  gateway: "bifrost"
+  endpoint: "${LLM_ENDPOINT:-http://localhost:8080/v1/chat/completions}"
+  primary_model: "claude-sonnet-4-20250514"
+  fallback_model: "gpt-4-turbo"
+  temperature: 0.7  # Moderate temperature for realistic decisions
+  max_tokens: 2000
+  enable_caching: true
+  timeout: 30000
+
+trading:
+  mode: "paper"  # *** PAPER TRADING MODE - NO REAL MONEY ***
+  symbols:
+    # Test with various pairs to validate strategy across different assets
+    - "BTC/USDT"   # High liquidity, lower volatility
+    - "ETH/USDT"   # High liquidity, moderate volatility
+    - "BNB/USDT"   # Exchange token
+    - "SOL/USDT"   # High volatility altcoin
+    - "ADA/USDT"   # Lower volatility altcoin
+  exchange: "binance"
+  initial_capital: 10000.0  # Simulated starting capital
+  max_positions: 3  # Moderate number of positions
+  default_quantity: 0.01
+
+risk:
+  max_position_size: 0.10  # 10% max per position (moderate)
+  max_daily_loss: 0.03  # 3% max daily loss (moderate)
+  max_drawdown: 0.10  # 10% max drawdown (moderate)
+  default_stop_loss: 0.03  # 3% stop loss
+  default_take_profit: 0.08  # 8% take profit (~2.5:1 risk/reward)
+  llm_approval_required: false  # Can disable for faster testing
+  min_confidence: 0.65  # Moderate confidence threshold
+
+exchanges:
+  binance:
+    api_key: "${BINANCE_API_KEY:-test_api_key}"  # Not used in paper mode
+    secret_key: "${BINANCE_API_SECRET:-test_secret}"  # Not used in paper mode
+    testnet: true  # Always use testnet for paper trading
+    rate_limit_ms: 200
+
+api:
+  host: "0.0.0.0"
+  port: 8080
+  orchestrator_url: "http://localhost:8081"
+
+monitoring:
+  prometheus_port: 9100
+  enable_metrics: true
+
+# MCP Configuration
+mcp:
+  external:
+    coingecko:
+      enabled: true
+      name: "CoinGecko MCP"
+      url: "https://mcp.api.coingecko.com/mcp"
+      transport: "http_streaming"
+      cache_ttl: 60  # Standard cache
+      rate_limit:
+        enabled: true
+        requests_per_minute: 90  # Moderate API usage
+
+  internal:
+    order_executor:
+      enabled: true
+      name: "Order Executor"
+      command: "./bin/order-executor-server"
+      transport: "stdio"
+
+    risk_analyzer:
+      enabled: true
+      name: "Risk Analyzer"
+      command: "./bin/risk-analyzer-server"
+      transport: "stdio"
+
+    technical_indicators:
+      enabled: true
+      name: "Technical Indicators"
+      command: "./bin/technical-indicators-server"
+      transport: "stdio"
+
+    market_data:
+      enabled: false  # Use CoinGecko instead
+
+# Paper Trading Strategy Notes:
+# - NO REAL MONEY INVOLVED - All trades are simulated
+# - Uses mock exchange with realistic slippage and latency
+# - Perfect for testing strategies before live deployment
+# - Moderate risk parameters for realistic testing
+# - Multiple pairs to test cross-asset performance
+# - Debug logging for detailed analysis
+# - Separate database and Redis DB to avoid conflicts
+#
+# Use Cases:
+# - Strategy development and validation
+# - Agent configuration testing
+# - Risk management testing
+# - Performance benchmarking
+# - Learning the system
+# - Integration testing
+# - Continuous integration/testing in CI/CD
+#
+# Getting Started with Paper Trading:
+# 1. Copy this file to configs/config.yaml
+# 2. Start infrastructure: task docker-up
+# 3. Run migrations: task db-migrate
+# 4. Start paper trading: task run-paper
+# 5. Monitor via Grafana: http://localhost:3000
+# 6. View trades in database: task db-shell
+#
+# Transitioning to Live Trading:
+# 1. Run paper trading for at least 2-4 weeks
+# 2. Verify positive returns and acceptable drawdown
+# 3. Review all trades and agent decisions
+# 4. Test risk management (circuit breakers, position limits)
+# 5. Start with small capital (1-5% of intended amount)
+# 6. Use conservative.yaml as starting point for live trading
+# 7. Monitor closely for first week
+# 8. Gradually increase capital as confidence builds
+#
+# Important Notes:
+# - Paper trading may not perfectly reflect live conditions
+# - Slippage and latency are simulated (may differ from reality)
+# - Market impact is approximated
+# - No real exchange connectivity required
+# - Safe to experiment and iterate quickly
+# - Use this for ALL new strategy development
