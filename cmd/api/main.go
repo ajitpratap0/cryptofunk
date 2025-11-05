@@ -810,7 +810,11 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	// Check orchestrator response
 	if resp.StatusCode != http.StatusOK {
@@ -870,7 +874,11 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	// Check orchestrator response
 	if resp.StatusCode != http.StatusOK {
@@ -1343,7 +1351,14 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		resp, err := s.orchestratorClient.Post(url, "application/json", nil)
+		req, err := http.NewRequest(http.MethodPost, url, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := s.orchestratorClient.Do(req)
 		if err == nil {
 			return resp, nil
 		}

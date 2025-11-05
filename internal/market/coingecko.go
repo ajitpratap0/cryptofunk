@@ -263,6 +263,7 @@ func (c *CoinGeckoClient) GetMarketChart(ctx context.Context, symbol string, day
 		Msg("Market chart fetched successfully")
 
 	return chart, nil
+	*/
 }
 
 // CoinInfo represents detailed coin information

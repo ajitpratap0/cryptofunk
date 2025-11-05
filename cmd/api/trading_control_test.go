@@ -62,9 +62,11 @@ func TestPauseTrading_Success(t *testing.T) {
 	mockOrchestrator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/pause", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "paused",
-		})
+		}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer mockOrchestrator.Close()
 
@@ -129,7 +131,9 @@ func TestPauseTrading_InvalidSessionID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	assert.Equal(t, "invalid session_id format", response["error"])
 }
 
@@ -156,7 +160,9 @@ func TestPauseTrading_NonExistentSession(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	assert.Equal(t, "session not found", response["error"])
 }
 

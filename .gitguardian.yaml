@@ -1,0 +1,12 @@
+version: 2
+
+secret:
+  ignored_paths:
+    - "**/*_test.go"
+    - "configs/examples/**"
+    - ".github/workflows/**"
+    - "docs/**"
+    - "**/*.md"
+    - "scripts/**"
+
+  ignore_known_secrets: true
