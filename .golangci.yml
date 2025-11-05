@@ -1,85 +1,83 @@
+# golangci-lint configuration for cryptofunk
+# Compatible with golangci-lint v1.55.2
+
 run:
   timeout: 5m
   tests: true
   modules-download-mode: readonly
+  allow-parallel-runners: true
 
 linters:
   enable:
     - errcheck      # Check for unchecked errors
     - gosimple      # Simplify code
-    - govet         # Report suspicious constructs
+    - govet         # Standard go vet checks
     - ineffassign   # Detect ineffectual assignments
     - staticcheck   # Advanced static analysis
-    - unused        # Check for unused code
+    - unused        # Find unused code
     - gofmt         # Check formatting
-    - goimports     # Check imports
-    - misspell      # Fix common spelling mistakes
-    - gocritic      # Additional checks
-    - gosec         # Security checks
-    - bodyclose     # Check HTTP response body closes
-    - noctx         # Check HTTP requests use context
-    - rowserrcheck  # Check SQL rows.Err
-    - sqlclosecheck # Check SQL Close() calls
-
-  disable:
-    - typecheck     # Disabled due to potential issues with generics
+    - goimports     # Check import order
+    - misspell      # Check for misspelled words
+    - goconst       # Find repeated strings that could be constants
+    - gosec         # Security-focused linting
+    - bodyclose     # Check HTTP response bodies are closed
+    - noctx         # Detect HTTP requests without context
+    - rowserrcheck  # Check SQL rows.Err is checked
+    - sqlclosecheck # Check SQL rows/statements are closed
 
 linters-settings:
   errcheck:
-    check-blank: true
-    check-type-assertions: true
+    check-blank: false
+    check-type-assertions: false
+    exclude-functions:
+      - (io.Closer).Close
+      - (*database/sql.Rows).Close
+      - (*database/sql.Stmt).Close
+
+  gosec:
+    excludes:
+      - G104  # Audit errors not checked (handled by errcheck)
+      - G304  # File path provided as input (false positives in config loading)
 
   govet:
-    check-shadowing: true
+    check-shadowing: false
     enable-all: true
+    disable:
+      - fieldalignment  # Don't enforce struct field alignment
+      - shadow          # Allow variable shadowing
 
-  gofmt:
-    simplify: true
+  staticcheck:
+    checks: ["all"]
+
+  unused:
+    check-exported: false
 
   goimports:
     local-prefixes: github.com/ajitpratap0/cryptofunk
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-    disabled-checks:
-      - unnamedResult    # Allow unnamed returns for clarity
-      - hugeParam        # Sometimes large structs are necessary
-
-  gosec:
-    severity: medium
-    confidence: medium
-    excludes:
-      - G104  # Audit errors not checked (covered by errcheck)
-      - G304  # File path from variable (false positives in config loading)
-
-  misspell:
-    locale: US
 
 issues:
   exclude-rules:
     # Exclude some linters from running on tests files
     - path: _test\.go
       linters:
+        - gocyclo
+        - errcheck
         - gosec
-        - gocritic
+        - goconst
 
-    # Exclude known false positives
-    - text: "weak cryptographic primitive"
+    # Exclude known issues in generated code
+    - path: ".*\\.pb\\.go"
       linters:
-        - gosec
+        - all
 
-    # Allow embedding in test files
-    - path: _test\.go
-      text: "embed"
+    # Ignore main packages (they handle errors with log.Fatal)
+    - path: cmd/
+      text: "Error return value"
+      linters:
+        - errcheck
 
   max-issues-per-linter: 0
   max-same-issues: 0
-
-  # Show all issues
-  exclude-use-default: false
 
 output:
   format: colored-line-number

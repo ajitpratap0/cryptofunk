@@ -1,0 +1,32 @@
+# GitGuardian configuration
+# Exclude test files and example configurations from secret scanning
+
+version: 2
+
+# Paths to exclude from scanning
+paths-ignore:
+  - "**/*_test.go"           # All test files
+  - "**/testdata/**"          # Test data directories
+  - "**/*.test"               # Test binaries
+  - "configs/examples/**"     # Example configurations
+  - ".github/workflows/**"    # GitHub Actions (contains test database credentials)
+  - "docs/**"                 # Documentation
+  - "**/*.md"                 # Markdown files
+
+# Specific secrets to ignore (test secrets only)
+matches-ignore:
+  - name: Test database credentials
+    match: "postgres:postgres"
+
+  - name: Test passwords in secrets_test.go
+    match: "MyStr0ng_P@ssw0rd!"
+
+  - name: Test Redis passwords
+    match: "RedisStr0ng_P@ss!"
+
+  - name: Example API keys
+    match: "[a-zA-Z0-9]{20,}"
+    path: "configs/examples/**"
+
+# Only scan for production secrets
+minimum-severity: high
