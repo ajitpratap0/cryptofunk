@@ -1,5 +1,7 @@
 // Sentiment Analysis Agent
 // Generates trading signals based on news sentiment and Fear & Greed Index
+//
+//nolint:goconst // Sentiment categories are domain-specific strings
 package main
 
 import (
@@ -618,9 +620,10 @@ func (a *SentimentAgent) updateBeliefs(articles []Article, fearGreed *FearGreedD
 		positiveCount := 0
 		negativeCount := 0
 		for _, article := range articles {
-			if article.Sentiment == "positive" {
+			switch article.Sentiment {
+			case "positive":
 				positiveCount++
-			} else if article.Sentiment == "negative" {
+			case "negative":
 				negativeCount++
 			}
 		}
@@ -701,9 +704,10 @@ func (a *SentimentAgent) generateSignal(articles []Article, fearGreed *FearGreed
 		positiveCount := 0
 		negativeCount := 0
 		for _, article := range articles {
-			if article.Sentiment == "positive" {
+			switch article.Sentiment {
+			case "positive":
 				positiveCount++
-			} else if article.Sentiment == "negative" {
+			case "negative":
 				negativeCount++
 			}
 		}
@@ -719,9 +723,10 @@ func (a *SentimentAgent) generateSignal(articles []Article, fearGreed *FearGreed
 		positiveCount := 0
 		negativeCount := 0
 		for _, article := range articles {
-			if article.Sentiment == "positive" {
+			switch article.Sentiment {
+			case "positive":
 				positiveCount++
-			} else if article.Sentiment == "negative" {
+			case "negative":
 				negativeCount++
 			}
 		}
@@ -916,7 +921,8 @@ func main() {
 					}
 
 					// Set fields based on server type
-					if serverConfig.Type == "internal" {
+					switch serverConfig.Type {
+					case "internal":
 						if cmd, ok := server["command"].(string); ok {
 							serverConfig.Command = cmd
 						}
@@ -932,7 +938,7 @@ func main() {
 								serverConfig.Env[k] = v.(string)
 							}
 						}
-					} else if serverConfig.Type == "external" {
+					case "external":
 						if url, ok := server["url"].(string); ok {
 							serverConfig.URL = url
 						}

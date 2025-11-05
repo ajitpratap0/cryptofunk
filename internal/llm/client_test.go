@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package llm
 
 import (
@@ -92,7 +93,7 @@ func TestClient_Complete(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.responseBody))
+				_, _ = w.Write([]byte(tt.responseBody)) // Test mock response
 			}))
 			defer server.Close()
 
@@ -177,14 +178,14 @@ func TestClient_CompleteWithRetry(t *testing.T) {
 
 				w.WriteHeader(statusCode)
 				if statusCode == http.StatusOK {
-					w.Write([]byte(`{
+					_, _ = w.Write([]byte(`{ // Test mock response
 						"choices": [{
 							"message": {"content": "test"}
 						}],
 						"usage": {"total_tokens": 100}
 					}`))
 				} else {
-					w.Write([]byte(`{
+					_, _ = w.Write([]byte(`{ // Test mock response
 						"error": {"message": "Error"}
 					}`))
 				}
@@ -478,7 +479,7 @@ func TestClient_CompleteWithSystem(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request format
 		var req ChatRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req) // Test mock - decode error handled by test assertions
 
 		if len(req.Messages) != 2 {
 			t.Errorf("Expected 2 messages, got %d", len(req.Messages))
@@ -491,7 +492,7 @@ func TestClient_CompleteWithSystem(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{
 				"message": {
 					"role": "assistant",

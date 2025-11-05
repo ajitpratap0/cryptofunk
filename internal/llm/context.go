@@ -1,3 +1,4 @@
+//nolint:goconst // Trading signals are domain-specific strings
 package llm
 
 import (
@@ -172,14 +173,15 @@ func (cb *ContextBuilder) FormatContextForPrompt(enhanced *EnhancedMarketContext
 
 			outcome := "PENDING"
 			pnlStr := ""
-			if decision.Outcome == "SUCCESS" {
+			switch decision.Outcome {
+			case "SUCCESS":
 				successCount++
 				outcome = "✓ SUCCESS"
 				if decision.PnL != 0 {
 					totalPnL += decision.PnL
 					pnlStr = fmt.Sprintf(" (P&L: $%.2f)", decision.PnL)
 				}
-			} else if decision.Outcome == "FAILURE" {
+			case "FAILURE":
 				failureCount++
 				outcome = "✗ FAILURE"
 				if decision.PnL != 0 {
@@ -222,12 +224,13 @@ func (cb *ContextBuilder) FormatContextForPrompt(enhanced *EnhancedMarketContext
 
 		for i := 0; i < recentCount; i++ {
 			decision := enhanced.RecentDecisions[i]
-			outcome := "PENDING"
-			if decision.Outcome == "SUCCESS" {
+			var outcome string
+			switch decision.Outcome {
+			case "SUCCESS":
 				outcome = "✓"
-			} else if decision.Outcome == "FAILURE" {
+			case "FAILURE":
 				outcome = "✗"
-			} else {
+			default:
 				outcome = "⋯"
 			}
 
@@ -280,7 +283,7 @@ func (cb *ContextBuilder) FormatLearningContext(
 		// Extract pattern from context if available
 		if len(decision.Context) > 0 {
 			var contextData map[string]interface{}
-			json.Unmarshal(decision.Context, &contextData)
+			_ = json.Unmarshal(decision.Context, &contextData) // Best effort context extraction
 
 			// Try to identify pattern
 			if indicators, ok := contextData["indicators"].(map[string]interface{}); ok {

@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -174,7 +174,9 @@ func (em *ExperimentManager) SelectVariant(experimentID string, decisionKey stri
 
 	// Use consistent hashing based on decision key
 	// This ensures same key always gets same variant (important for learning)
-	hash := md5.Sum([]byte(decisionKey))
+	// Note: Using SHA-256 instead of MD5 for security compliance (gosec)
+	// This is not cryptographic usage, but for consistent hashing in A/B tests
+	hash := sha256.Sum256([]byte(decisionKey))
 	hashInt := binary.BigEndian.Uint64(hash[:8])
 	selection := float64(hashInt%10000) / 10000.0 // Convert to 0-1 range
 

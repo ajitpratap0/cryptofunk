@@ -55,7 +55,7 @@ func setupTestHotSwapCoordinator(t *testing.T) (*HotSwapCoordinator, *Blackboard
 	cleanup := func() {
 		nc.Close()
 		ns.Shutdown()
-		redisClient.Close()
+		_ = redisClient.Close() // Test cleanup
 		mr.Close()
 	}
 
@@ -152,8 +152,8 @@ func TestListAgents(t *testing.T) {
 	agent1 := &AgentRegistration{Name: "agent1", Type: "technical"}
 	agent2 := &AgentRegistration{Name: "agent2", Type: "trend"}
 
-	hsc.RegisterAgent(ctx, agent1)
-	hsc.RegisterAgent(ctx, agent2)
+	_ = hsc.RegisterAgent(ctx, agent1) // Test setup - error handled by test
+	_ = hsc.RegisterAgent(ctx, agent2) // Test setup - error handled by test
 
 	agents := hsc.ListAgents()
 	assert.Len(t, agents, 2)
@@ -167,7 +167,7 @@ func TestUpdateAgentHeartbeat(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &AgentRegistration{Name: "test-agent", Type: "technical"}
-	hsc.RegisterAgent(ctx, agent)
+	_ = hsc.RegisterAgent(ctx, agent) // Test setup - error handled by test
 
 	// Get initial heartbeat
 	registered, _ := hsc.GetAgent("test-agent")
@@ -191,7 +191,7 @@ func TestUpdateAgentState(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &AgentRegistration{Name: "test-agent", Type: "technical"}
-	hsc.RegisterAgent(ctx, agent)
+	_ = hsc.RegisterAgent(ctx, agent) // Test setup - error handled by test
 
 	// Update state
 	newState := &AgentState{
@@ -260,15 +260,15 @@ func TestSwapAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Setup subscribers to handle control messages
-	mb.Subscribe("agent-v1", "control", func(msg *AgentMessage) error {
+	_, _ = mb.Subscribe("agent-v1", "control", func(msg *AgentMessage) error { // Test subscription
 		// Simulate agent responding to control messages
 		return nil
 	})
 
-	mb.Subscribe("agent-v2", "control", func(msg *AgentMessage) error {
+	_, _ = mb.Subscribe("agent-v2", "control", func(msg *AgentMessage) error { // Test subscription
 		// Simulate new agent responding
 		var payload map[string]interface{}
-		json.Unmarshal(msg.Payload, &payload)
+		_ = json.Unmarshal(msg.Payload, &payload) // Test - error acceptable
 
 		if command, ok := payload["command"].(string); ok && command == "ping" {
 			// Respond to ping
@@ -395,20 +395,21 @@ func TestPauseAndResumeAgent(t *testing.T) {
 		Status: AgentStatusActive,
 	}
 
-	hsc.RegisterAgent(ctx, agent)
+	_ = hsc.RegisterAgent(ctx, agent) // Test setup - error handled by test
 
 	// Subscribe to control messages
 	receivedPause := false
 	receivedResume := false
 
-	mb.Subscribe("test-agent", "control", func(msg *AgentMessage) error {
+	_, _ = mb.Subscribe("test-agent", "control", func(msg *AgentMessage) error { // Test subscription
 		var payload map[string]interface{}
-		json.Unmarshal(msg.Payload, &payload)
+		_ = json.Unmarshal(msg.Payload, &payload) // Test - error acceptable
 
 		if command, ok := payload["command"].(string); ok {
-			if command == "pause" {
+			switch command {
+			case "pause":
 				receivedPause = true
-			} else if command == "resume" {
+			case "resume":
 				receivedResume = true
 			}
 		}

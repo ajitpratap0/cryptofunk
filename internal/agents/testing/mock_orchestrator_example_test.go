@@ -39,7 +39,7 @@ func ExampleMockOrchestrator() {
 		fmt.Printf("Failed to start mock orchestrator: %v\n", err)
 		return
 	}
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Example cleanup
 
 	// Simulate agent publishing a signal
 	signal := struct {
@@ -53,7 +53,7 @@ func ExampleMockOrchestrator() {
 	}
 
 	data, _ := json.Marshal(signal)
-	nc.Publish("agents.analysis.technical", data)
+	_ = nc.Publish("agents.analysis.technical", data) // Example - error acceptable
 
 	// Wait for signal to be received
 	if err := mo.WaitForSignals(1, 2*time.Second); err != nil {
@@ -96,12 +96,6 @@ func ExampleMockOrchestrator_customDecisionPolicy() {
 		}
 
 		// Extract signal data
-		type GenericSignal struct {
-			Symbol     string
-			Signal     string
-			Confidence float64
-		}
-
 		var totalConfidence float64
 		var lastSymbol string
 
@@ -152,7 +146,7 @@ func ExampleMockOrchestrator_customDecisionPolicy() {
 		fmt.Printf("Failed to start: %v\n", err)
 		return
 	}
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Example cleanup
 
 	// Publish low confidence signal
 	signal := struct {
@@ -166,9 +160,9 @@ func ExampleMockOrchestrator_customDecisionPolicy() {
 	}
 
 	data, _ := json.Marshal(signal)
-	nc.Publish("agents.analysis.technical", data)
+	_ = nc.Publish("agents.analysis.technical", data) // Example - error acceptable
 
-	mo.WaitForSignals(1, 2*time.Second)
+	_ = mo.WaitForSignals(1, 2*time.Second) // Example - timeout acceptable
 	decision, _ := mo.WaitForDecision(2 * time.Second)
 
 	fmt.Printf("Decision: %s (reasoning: %s)\n",
@@ -201,8 +195,8 @@ func ExampleMockOrchestrator_multipleAgents() {
 	}
 
 	ctx := context.Background()
-	mo.Start(ctx)
-	defer mo.Stop()
+	_ = mo.Start(ctx)                // Example - error logged
+	defer func() { _ = mo.Stop() }() // Example cleanup
 
 	// Technical agent signal
 	techSignal := struct {
@@ -211,7 +205,7 @@ func ExampleMockOrchestrator_multipleAgents() {
 		Confidence float64 `json:"confidence"`
 	}{Symbol: "BTC/USDT", Signal: "BUY", Confidence: 0.85}
 	techData, _ := json.Marshal(techSignal)
-	nc.Publish("agents.analysis.technical", techData)
+	_ = nc.Publish("agents.analysis.technical", techData) // Example - error acceptable
 
 	// Order book agent signal
 	obSignal := struct {
@@ -220,7 +214,7 @@ func ExampleMockOrchestrator_multipleAgents() {
 		Confidence float64 `json:"confidence"`
 	}{Symbol: "BTC/USDT", Signal: "BUY", Confidence: 0.80}
 	obData, _ := json.Marshal(obSignal)
-	nc.Publish("agents.analysis.orderbook", obData)
+	_ = nc.Publish("agents.analysis.orderbook", obData) // Example - error acceptable
 
 	// Sentiment agent signal
 	sentSignal := struct {
@@ -229,10 +223,10 @@ func ExampleMockOrchestrator_multipleAgents() {
 		Confidence float64 `json:"confidence"`
 	}{Symbol: "BTC/USDT", Signal: "BULLISH", Confidence: 0.75}
 	sentData, _ := json.Marshal(sentSignal)
-	nc.Publish("agents.analysis.sentiment", sentData)
+	_ = nc.Publish("agents.analysis.sentiment", sentData) // Example - error acceptable
 
 	// Wait for all signals
-	mo.WaitForSignals(3, 2*time.Second)
+	_ = mo.WaitForSignals(3, 2*time.Second) // Example - timeout acceptable
 
 	// Check signal counts per topic
 	fmt.Printf("Technical signals: %d\n", mo.GetSignalCount("agents.analysis.technical"))
@@ -265,8 +259,8 @@ func ExampleMockOrchestrator_testing() {
 	})
 
 	ctx := context.Background()
-	mo.Start(ctx)
-	defer mo.Stop()
+	_ = mo.Start(ctx)                // Example - error logged
+	defer func() { _ = mo.Stop() }() // Example cleanup
 
 	// Simulate agent publishing
 	signal := struct {
@@ -276,7 +270,7 @@ func ExampleMockOrchestrator_testing() {
 	}{Symbol: "BTC/USDT", Signal: "BUY", Confidence: 0.90}
 
 	data, _ := json.Marshal(signal)
-	nc.Publish("agents.analysis.technical", data)
+	_ = nc.Publish("agents.analysis.technical", data) // Example - error acceptable
 
 	// Verify signal was received
 	if err := mo.WaitForSignals(1, 2*time.Second); err != nil {

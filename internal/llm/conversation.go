@@ -1,3 +1,4 @@
+//nolint:goconst // Message role types are LLM API constants
 package llm
 
 import (

@@ -248,7 +248,7 @@ func (m *MockExchange) simulateMarketFill(ctx context.Context, order *Order) {
 	slippage := m.calculateSlippage(order.Quantity, midPrice)
 
 	// Apply slippage based on order side
-	fillPrice := midPrice
+	var fillPrice float64
 	if order.Side == OrderSideBuy {
 		// Buying means paying the ask price (higher than mid)
 		fillPrice = midPrice * (1 + slippage)
@@ -352,7 +352,7 @@ func (m *MockExchange) simulatePartialFills(order *Order, basePrice float64, sta
 
 		// Slight price variation for each partial fill (simulate order book depth)
 		priceVariation := 0.0001 * float64(fillCount) // 0.01% per fill
-		fillPrice := basePrice
+		var fillPrice float64
 		if order.Side == OrderSideBuy {
 			fillPrice = basePrice * (1 + priceVariation)
 		} else {

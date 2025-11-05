@@ -1,5 +1,7 @@
 // Mean Reversion Agent
 // Generates trading signals when price deviates from mean (Bollinger Bands + RSI extremes)
+//
+//nolint:goconst // Trading signals and band positions are domain-specific strings
 package main
 
 import (
@@ -360,7 +362,7 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 	bollinger, err := a.calculateBollingerBands(ctx, symbol, prices)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to calculate Bollinger Bands")
-		return fmt.Errorf("Bollinger Band calculation failed: %w", err)
+		return fmt.Errorf("bollinger Band calculation failed: %w", err)
 	}
 
 	log.Info().
@@ -1173,7 +1175,8 @@ func (a *ReversionAgent) calculateExitLevels(signal string, entryPrice float64) 
 
 	var stopLoss, takeProfit, risk, reward, riskReward float64
 
-	if signal == "BUY" {
+	switch signal {
+	case "BUY":
 		// For BUY (long position):
 		// - Entry: current price
 		// - Stop-loss: 2% below entry (tight stop for mean reversion)
@@ -1184,7 +1187,7 @@ func (a *ReversionAgent) calculateExitLevels(signal string, entryPrice float64) 
 		// Calculate risk/reward
 		risk = entryPrice - stopLoss
 		reward = takeProfit - entryPrice
-	} else if signal == "SELL" {
+	case "SELL":
 		// For SELL (short position):
 		// - Entry: current price
 		// - Stop-loss: 2% above entry (tight stop for mean reversion)

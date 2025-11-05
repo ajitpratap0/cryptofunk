@@ -152,7 +152,7 @@ func TestExecuteSell(t *testing.T) {
 	_ = engine.ExecuteSignal(buySignal) // Test setup - error handled by test
 
 	// Advance to next candle (price increased)
-	_, _ = engine.Step(context.Background()) // Test setup - error handled by test
+	_ = engine.Step(context.Background()) // Test setup - error handled by test
 
 	// Now sell
 	sellSignal := &Signal{
@@ -227,7 +227,7 @@ func TestInsufficientCash(t *testing.T) {
 	candlesticks := []*Candlestick{
 		{Symbol: "BTC", Timestamp: time.Now(), Close: 50000},
 	}
-	_ = engine.LoadHistoricalData("BTC", candlesticks) // Test setup - error handled by test
+	engine.LoadHistoricalData("BTC", candlesticks)
 
 	signal := &Signal{
 		Symbol:     "BTC",
@@ -321,7 +321,7 @@ func createTestEngine() *Engine {
 		{Symbol: "BTC", Timestamp: time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC), Close: 53000, Open: 52000, High: 53500, Low: 51500, Volume: 140},
 	}
 
-	_ = engine.LoadHistoricalData("BTC", candlesticks) // Test setup - error handled by test
+	engine.LoadHistoricalData("BTC", candlesticks)
 
 	return engine
 }
@@ -384,7 +384,7 @@ func TestBacktestWithProfitableTrade(t *testing.T) {
 
 	// Sell
 	signal = &Signal{Symbol: "BTC", Side: "SELL", Confidence: 0.8, Agent: "test"}
-	_ = engine.ExecuteSignal(signal) // Test setup - error handled by test
+	engine.ExecuteSignal(signal)
 
 	// Should have made a profit
 	assert.Len(t, engine.ClosedPositions, 1)

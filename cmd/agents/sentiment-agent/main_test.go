@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package main
 
 import (
@@ -733,7 +734,11 @@ func TestBeliefBase_OverwriteBelief(t *testing.T) {
 	assert.Equal(t, "source2", belief.Source)
 }
 
+// TODO: Will be used for testing news sentiment analysis in Phase 11
+//
 // Mock HTTP server for CryptoPanic API
+//
+//nolint:unused
 func createMockNewsServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := map[string]interface{}{
@@ -788,7 +793,11 @@ func createMockNewsServer(t *testing.T) *httptest.Server {
 	}))
 }
 
+// TODO: Will be used for testing fear & greed sentiment analysis in Phase 11
+//
 // Mock HTTP server for Fear & Greed API
+//
+//nolint:unused
 func createMockFearGreedServer(t *testing.T, value int, classification string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response := map[string]interface{}{

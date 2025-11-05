@@ -1,5 +1,7 @@
 // Order Book Analysis Agent
 // Generates market insights from order book depth and imbalances
+//
+//nolint:goconst // Trading signals (BUY/SELL/HOLD) are domain-specific strings
 package main
 
 import (
@@ -385,16 +387,11 @@ func (a *OrderBookAgent) analyzeDepth(levels []OrderBookLevel, isBid bool) []Pri
 		return nil
 	}
 
-	// Calculate cumulative volume at each price level
-	cumulativeLevels := make([]PriceLevel, 0, len(levels))
+	// Calculate cumulative volume
 	cumulativeVolume := 0.0
 
 	for _, level := range levels {
 		cumulativeVolume += level.Quantity
-		cumulativeLevels = append(cumulativeLevels, PriceLevel{
-			Price:  level.Price,
-			Volume: cumulativeVolume,
-		})
 	}
 
 	// Find levels with significant volume (>20% of total volume)

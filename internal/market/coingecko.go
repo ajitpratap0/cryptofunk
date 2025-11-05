@@ -416,7 +416,11 @@ func (c *CoinGeckoClient) Close() error {
 
 // Helper functions
 
+// TODO: Will be used when CoinGecko MCP integration is enabled (currently using mock data)
+//
 // parseTimestamp converts various timestamp formats to time.Time
+//
+//nolint:unused
 func parseTimestamp(v interface{}) time.Time {
 	switch t := v.(type) {
 	case float64:
@@ -431,7 +435,11 @@ func parseTimestamp(v interface{}) time.Time {
 	}
 }
 
+// TODO: Will be used when CoinGecko MCP integration is enabled (currently using mock data)
+//
 // parseFloat converts various numeric types to float64
+//
+//nolint:unused
 func parseFloat(v interface{}) float64 {
 	switch n := v.(type) {
 	case float64:
@@ -449,7 +457,11 @@ func parseFloat(v interface{}) float64 {
 	return 0.0
 }
 
+// TODO: Will be used when CoinGecko MCP integration is enabled (currently using mock data)
+//
 // parseFloatString parses a string to float64
+//
+//nolint:unused
 func parseFloatString(s string) (float64, error) {
 	var f float64
 	if err := json.Unmarshal([]byte(s), &f); err != nil {
@@ -458,7 +470,11 @@ func parseFloatString(s string) (float64, error) {
 	return f, nil
 }
 
+// TODO: Will be used when CoinGecko MCP integration is enabled (currently using mock data)
+//
 // getString safely extracts a string from a map
+//
+//nolint:unused
 func getString(m map[string]interface{}, key string) string {
 	if v, ok := m[key]; ok {
 		if str, ok := v.(string); ok {

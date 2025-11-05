@@ -14,7 +14,6 @@ type FallbackClient struct {
 	clients        []*Client
 	modelNames     []string
 	circuitBreaker *CircuitBreaker
-	mu             sync.RWMutex
 }
 
 // FallbackConfig configures the fallback client
@@ -387,7 +386,8 @@ func (cb *CircuitBreaker) RecordFailure(modelIndex int) {
 	circuit.failures = validFailures
 
 	// Check if we should open the circuit
-	if circuit.state == CircuitClosed {
+	switch circuit.state {
+	case CircuitClosed:
 		if circuit.consecutiveFails >= cb.config.FailureThreshold {
 			circuit.state = CircuitOpen
 			circuit.openedAt = now
@@ -396,7 +396,7 @@ func (cb *CircuitBreaker) RecordFailure(modelIndex int) {
 				Int("consecutive_failures", circuit.consecutiveFails).
 				Msg("Circuit breaker opened due to failures")
 		}
-	} else if circuit.state == CircuitHalfOpen {
+	case CircuitHalfOpen:
 		// Failure in half-open state - go back to open
 		circuit.state = CircuitOpen
 		circuit.openedAt = now

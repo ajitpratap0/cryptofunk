@@ -317,21 +317,21 @@ func (hsc *HotSwapCoordinator) SwapAgent(ctx context.Context, oldAgentName, newA
 	if err := hsc.transferState(ctx, session, newAgent); err != nil {
 		hsc.failSwap(session, err)
 		// Attempt rollback
-		hsc.resumeAgent(ctx, oldAgent)
+		_ = hsc.resumeAgent(ctx, oldAgent) // Best effort rollback
 		return session, err
 	}
 
 	// Step 4: Start new agent
 	if err := hsc.startNewAgent(ctx, session, newAgent); err != nil {
 		hsc.failSwap(session, err)
-		hsc.resumeAgent(ctx, oldAgent)
+		_ = hsc.resumeAgent(ctx, oldAgent) // Best effort rollback
 		return session, err
 	}
 
 	// Step 5: Verify new agent
 	if err := hsc.verifyAgent(ctx, session, newAgent); err != nil {
 		hsc.failSwap(session, err)
-		hsc.resumeAgent(ctx, oldAgent)
+		_ = hsc.resumeAgent(ctx, oldAgent) // Best effort rollback
 		return session, err
 	}
 

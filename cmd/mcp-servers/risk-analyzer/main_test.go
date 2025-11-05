@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package main
 
 import (

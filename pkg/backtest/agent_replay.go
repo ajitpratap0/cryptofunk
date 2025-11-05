@@ -1,4 +1,6 @@
 // Agent replay mode for backtesting with trading agents
+//
+//nolint:goconst // Trading signals are domain-specific strings
 package backtest
 
 import (
@@ -8,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
@@ -520,12 +524,19 @@ func (h *HistoricalDataLoader) LoadFromDatabase(symbol, exchange, interval strin
 // LoadFromCSV loads historical data from a CSV file
 // CSV format: timestamp,symbol,open,high,low,close,volume
 // timestamp can be Unix timestamp (integer) or RFC3339 string
-func LoadFromCSV(filepath string) ([]*Candlestick, error) {
-	file, err := os.Open(filepath)
+func LoadFromCSV(filePath string) ([]*Candlestick, error) {
+	// Validate and clean the file path to prevent directory traversal
+	cleanPath := filepath.Clean(filePath)
+	// Ensure the path doesn't contain any parent directory references
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid file path: contains parent directory references")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open CSV file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // File will be read before closure
 
 	reader := csv.NewReader(file)
 
@@ -615,7 +626,7 @@ func LoadFromCSV(filepath string) ([]*Candlestick, error) {
 	}
 
 	log.Info().
-		Str("file", filepath).
+		Str("file", filePath).
 		Int("candles", len(candles)).
 		Msg("Loaded historical data from CSV")
 
@@ -624,12 +635,19 @@ func LoadFromCSV(filepath string) ([]*Candlestick, error) {
 
 // LoadFromJSON loads historical data from a JSON file
 // JSON format: array of candlestick objects or object with "candles" array
-func LoadFromJSON(filepath string) ([]*Candlestick, error) {
-	file, err := os.Open(filepath)
+func LoadFromJSON(filePath string) ([]*Candlestick, error) {
+	// Validate and clean the file path to prevent directory traversal
+	cleanPath := filepath.Clean(filePath)
+	// Ensure the path doesn't contain any parent directory references
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid file path: contains parent directory references")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open JSON file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // File will be read before closure
 
 	data, err := io.ReadAll(file)
 	if err != nil {
@@ -641,7 +659,7 @@ func LoadFromJSON(filepath string) ([]*Candlestick, error) {
 	err = json.Unmarshal(data, &candles)
 	if err == nil {
 		log.Info().
-			Str("file", filepath).
+			Str("file", filePath).
 			Int("candles", len(candles)).
 			Msg("Loaded historical data from JSON (array format)")
 		return candles, nil
@@ -657,7 +675,7 @@ func LoadFromJSON(filepath string) ([]*Candlestick, error) {
 	}
 
 	log.Info().
-		Str("file", filepath).
+		Str("file", filePath).
 		Int("candles", len(wrapper.Candles)).
 		Msg("Loaded historical data from JSON (object format)")
 
@@ -665,7 +683,7 @@ func LoadFromJSON(filepath string) ([]*Candlestick, error) {
 }
 
 // ExportResults exports backtest results to JSON file
-func ExportResults(engine *Engine, filepath string) error {
+func ExportResults(engine *Engine, filePath string) error {
 	// Calculate additional statistics
 	winRate := 0.0
 	if engine.TotalTrades > 0 {
@@ -722,13 +740,13 @@ func ExportResults(engine *Engine, filepath string) error {
 	}
 
 	// Write to file
-	err = os.WriteFile(filepath, data, 0644)
+	err = os.WriteFile(filePath, data, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write results file: %w", err)
 	}
 
 	log.Info().
-		Str("file", filepath).
+		Str("file", filePath).
 		Int("trades", engine.TotalTrades).
 		Float64("net_profit", engine.TotalProfit-engine.TotalLoss).
 		Float64("win_rate", winRate).

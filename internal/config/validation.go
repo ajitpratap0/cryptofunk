@@ -430,11 +430,8 @@ func (c *Config) validateEnvironmentRequirements() ValidationErrors {
 			}
 		}
 
-		// Ensure live trading in production
-		if strings.ToLower(c.Trading.Mode) == "paper" {
-			// This is just a warning - paper trading in production might be intentional for testing
-			// Don't add as error, but could log a warning
-		}
+		// Note: Paper trading in production might be intentional for testing
+		// Not enforcing live trading mode as a hard requirement
 
 		// Ensure SSL for database in production
 		if c.Database.SSLMode == "disable" {

@@ -1,4 +1,6 @@
 // Arbitrage Agent Unit Tests
+//
+//nolint:goconst // Test files use repeated strings for clarity
 package main
 
 import (

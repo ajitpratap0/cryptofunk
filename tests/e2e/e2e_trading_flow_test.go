@@ -331,10 +331,11 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 		select {
 		case decision := <-decisionChan:
 			// Risk agent's high weight should prevent BUY
-			if decision.Action == "HOLD" {
+			switch decision.Action {
+			case "HOLD":
 				t.Logf("Risk veto successful: Action=%s, Consensus=%.2f",
 					decision.Action, decision.Consensus)
-			} else if decision.Action == "BUY" {
+			case "BUY":
 				// BUY can still win if risk agent's weight isn't dominant enough
 				assert.Less(t, decision.Consensus, 0.9,
 					"If BUY wins despite risk HOLD, consensus should be lower")

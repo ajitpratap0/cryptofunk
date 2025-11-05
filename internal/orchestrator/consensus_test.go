@@ -56,7 +56,7 @@ func setupTestConsensusManager(t *testing.T) (*ConsensusManager, *Blackboard, *M
 	cleanup := func() {
 		nc.Close()
 		ns.Shutdown()
-		redisClient.Close()
+		_ = redisClient.Close() // Test cleanup
 		mr.Close()
 	}
 
@@ -178,9 +178,9 @@ func TestDelphiConsensusConvergence(t *testing.T) {
 	require.NoError(t, err)
 
 	// Round 1: Divergent opinions
-	cm.SubmitDelphiResponse(ctx, session.ID, "agent1", 50000.0, 0.8, "Technical analysis")
-	cm.SubmitDelphiResponse(ctx, session.ID, "agent2", 55000.0, 0.7, "Bullish trend")
-	cm.SubmitDelphiResponse(ctx, session.ID, "agent3", 48000.0, 0.9, "Support levels")
+	_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent1", 50000.0, 0.8, "Technical analysis") // Test setup
+	_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent2", 55000.0, 0.7, "Bullish trend")      // Test setup
+	_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent3", 48000.0, 0.9, "Support levels")     // Test setup
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -190,9 +190,9 @@ func TestDelphiConsensusConvergence(t *testing.T) {
 
 	if len(updatedSession.Rounds) > 1 {
 		// Round 2: More convergent
-		cm.SubmitDelphiResponse(ctx, session.ID, "agent1", 51000.0, 0.85, "Adjusted based on feedback")
-		cm.SubmitDelphiResponse(ctx, session.ID, "agent2", 52000.0, 0.8, "Moderate adjustment")
-		cm.SubmitDelphiResponse(ctx, session.ID, "agent3", 50500.0, 0.9, "Converging to mean")
+		_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent1", 51000.0, 0.85, "Adjusted based on feedback") // Test round 2
+		_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent2", 52000.0, 0.8, "Moderate adjustment")         // Test round 2
+		_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent3", 50500.0, 0.9, "Converging to mean")          // Test round 2
 
 		time.Sleep(200 * time.Millisecond)
 
@@ -287,7 +287,7 @@ func TestStartContractNet(t *testing.T) {
 			Deadline:  time.Now().Add(45 * time.Minute),
 			Reasoning: "Experienced in market analysis",
 		}
-		cm.SubmitBid(ctx, bid1)
+		_ = cm.SubmitBid(ctx, bid1) // Test setup
 
 		// Agent 2 bid
 		bid2 := &Bid{
@@ -298,7 +298,7 @@ func TestStartContractNet(t *testing.T) {
 			Deadline:  time.Now().Add(50 * time.Minute),
 			Reasoning: "Specialized in Binance data",
 		}
-		cm.SubmitBid(ctx, bid2)
+		_ = cm.SubmitBid(ctx, bid2) // Test setup
 
 		// Agent 3 bid
 		bid3 := &Bid{
@@ -309,7 +309,7 @@ func TestStartContractNet(t *testing.T) {
 			Deadline:  time.Now().Add(40 * time.Minute),
 			Reasoning: "Fast turnaround",
 		}
-		cm.SubmitBid(ctx, bid3)
+		_ = cm.SubmitBid(ctx, bid3) // Test setup
 	}()
 
 	contract, err := cm.StartContractNet(ctx, task, eligibleAgents, 500*time.Millisecond)
@@ -539,8 +539,8 @@ func TestListSessions(t *testing.T) {
 
 	// Create multiple sessions
 	participants := []string{"agent1", "agent2"}
-	cm.StartDelphiConsensus(ctx, "topic1", "Question 1?", participants, config)
-	cm.StartDelphiConsensus(ctx, "topic2", "Question 2?", participants, config)
+	_, _ = cm.StartDelphiConsensus(ctx, "topic1", "Question 1?", participants, config) // Test setup
+	_, _ = cm.StartDelphiConsensus(ctx, "topic2", "Question 2?", participants, config) // Test setup
 
 	sessions := cm.ListSessions()
 	assert.GreaterOrEqual(t, len(sessions), 2)
@@ -585,8 +585,8 @@ func TestRoundTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	// Only submit 2 out of 3 responses
-	cm.SubmitDelphiResponse(ctx, session.ID, "agent1", 100.0, 0.8, "Response 1")
-	cm.SubmitDelphiResponse(ctx, session.ID, "agent2", 102.0, 0.9, "Response 2")
+	_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent1", 100.0, 0.8, "Response 1") // Test response
+	_ = cm.SubmitDelphiResponse(ctx, session.ID, "agent2", 102.0, 0.9, "Response 2") // Test response
 
 	// Wait for timeout
 	time.Sleep(400 * time.Millisecond)

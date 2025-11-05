@@ -49,7 +49,7 @@ func TestNewBlackboard(t *testing.T) {
 	err = bb.client.Ping(ctx).Err()
 	assert.NoError(t, err)
 
-	bb.Close()
+	_ = bb.Close() // Test cleanup
 }
 
 // TestNewBlackboard_DefaultPrefix tests default prefix
@@ -66,7 +66,7 @@ func TestNewBlackboard_DefaultPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "blackboard:", bb.prefix)
 
-	bb.Close()
+	_ = bb.Close() // Test cleanup
 }
 
 // TestBlackboardMessage_Helpers tests message helper methods
@@ -102,7 +102,7 @@ func TestBlackboardMessage_Helpers(t *testing.T) {
 func TestPost(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -134,7 +134,7 @@ func TestPost(t *testing.T) {
 func TestPost_WithDefaults(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -157,7 +157,7 @@ func TestPost_WithDefaults(t *testing.T) {
 func TestPost_WithExpiration(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -182,7 +182,7 @@ func TestPost_WithExpiration(t *testing.T) {
 func TestGetByTopic(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -227,7 +227,7 @@ func TestGetByTopic(t *testing.T) {
 func TestGetByTopicRange(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -236,15 +236,15 @@ func TestGetByTopicRange(t *testing.T) {
 	// Post messages at different times
 	msg1, _ := NewMessage("test", "agent", map[string]string{"time": "old"})
 	msg1.CreatedAt = now.Add(-2 * time.Hour)
-	bb.Post(ctx, msg1)
+	_ = bb.Post(ctx, msg1) // Test setup - error acceptable
 
 	msg2, _ := NewMessage("test", "agent", map[string]string{"time": "recent"})
 	msg2.CreatedAt = now.Add(-30 * time.Minute)
-	bb.Post(ctx, msg2)
+	_ = bb.Post(ctx, msg2) // Test setup - error acceptable
 
 	msg3, _ := NewMessage("test", "agent", map[string]string{"time": "new"})
 	msg3.CreatedAt = now
-	bb.Post(ctx, msg3)
+	_ = bb.Post(ctx, msg3) // Test setup - error acceptable
 
 	// Query for messages in the last hour
 	messages, err := bb.GetByTopicRange(ctx, "test", now.Add(-1*time.Hour), now.Add(1*time.Minute), 10)
@@ -256,7 +256,7 @@ func TestGetByTopicRange(t *testing.T) {
 func TestGetByAgent(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -289,7 +289,7 @@ func TestGetByAgent(t *testing.T) {
 func TestGetByPriority(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -325,7 +325,7 @@ func TestGetByPriority(t *testing.T) {
 func TestSubscribe(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -338,7 +338,7 @@ func TestSubscribe(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		msg, _ := NewMessage("signals", "test-agent", map[string]string{"test": "data"})
-		bb.Post(context.Background(), msg)
+		_ = bb.Post(context.Background(), msg) // Benchmark - error acceptable
 	}()
 
 	// Wait for notification
@@ -356,7 +356,7 @@ func TestSubscribe(t *testing.T) {
 func TestClear(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -387,18 +387,18 @@ func TestClear(t *testing.T) {
 func TestClearExpired(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
 	// Post message with short TTL
 	msg1, _ := NewMessage("test", "agent", map[string]string{"msg": "1"})
 	msg1.WithTTL(1 * time.Second)
-	bb.Post(ctx, msg1)
+	_ = bb.Post(ctx, msg1) // Test setup - error acceptable
 
 	// Post message without TTL
 	msg2, _ := NewMessage("test", "agent", map[string]string{"msg": "2"})
-	bb.Post(ctx, msg2)
+	_ = bb.Post(ctx, msg2) // Test setup - error acceptable
 
 	// Fast-forward time
 	mr.FastForward(2 * time.Second)
@@ -419,7 +419,7 @@ func TestClearExpired(t *testing.T) {
 func TestGetTopics(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -446,19 +446,19 @@ func TestGetTopics(t *testing.T) {
 func TestGetStats(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
 	// Post messages to different topics
 	for i := 0; i < 5; i++ {
 		msg, _ := NewMessage("signals", "agent", map[string]int{"value": i})
-		bb.Post(ctx, msg)
+		_ = bb.Post(ctx, msg) // Benchmark - error acceptable
 	}
 
 	for i := 0; i < 3; i++ {
 		msg, _ := NewMessage("market_data", "agent", map[string]int{"value": i})
-		bb.Post(ctx, msg)
+		_ = bb.Post(ctx, msg) // Benchmark - error acceptable
 	}
 
 	// Get statistics
@@ -490,7 +490,7 @@ func TestMessagePriorities(t *testing.T) {
 func TestGetMessagesByKeys_EmptyKeys(t *testing.T) {
 	bb, mr := setupTestBlackboard(t)
 	defer mr.Close()
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -513,7 +513,7 @@ func TestDefaultBlackboardConfig(t *testing.T) {
 
 func BenchmarkPost(b *testing.B) {
 	mr := miniredis.NewMiniRedis()
-	mr.Start()
+	_ = mr.Start() // Benchmark - error handled by test
 	defer mr.Close()
 
 	client := redis.NewClient(&redis.Options{
@@ -524,20 +524,20 @@ func BenchmarkPost(b *testing.B) {
 		client: client,
 		prefix: "bench:",
 	}
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Benchmark cleanup
 
 	ctx := context.Background()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		msg, _ := NewMessage("test", "agent", map[string]int{"value": i})
-		bb.Post(ctx, msg)
+		_ = bb.Post(ctx, msg) // Benchmark - error acceptable
 	}
 }
 
 func BenchmarkGetByTopic(b *testing.B) {
 	mr := miniredis.NewMiniRedis()
-	mr.Start()
+	_ = mr.Start() // Benchmark - error handled by test
 	defer mr.Close()
 
 	client := redis.NewClient(&redis.Options{
@@ -548,18 +548,18 @@ func BenchmarkGetByTopic(b *testing.B) {
 		client: client,
 		prefix: "bench:",
 	}
-	defer bb.Close()
+	defer func() { _ = bb.Close() }() // Benchmark cleanup
 
 	ctx := context.Background()
 
 	// Populate with test data
 	for i := 0; i < 100; i++ {
 		msg, _ := NewMessage("test", "agent", map[string]int{"value": i})
-		bb.Post(ctx, msg)
+		_ = bb.Post(ctx, msg) // Benchmark - error acceptable
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		bb.GetByTopic(ctx, "test", 10)
+		_, _ = bb.GetByTopic(ctx, "test", 10) // Benchmark - error acceptable
 	}
 }

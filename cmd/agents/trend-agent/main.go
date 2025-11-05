@@ -1,5 +1,7 @@
 // Trend Following Agent
 // Generates trading signals using EMA crossover and trend strength (ADX)
+//
+//nolint:goconst // Trading signals are domain-specific strings
 package main
 
 import (
@@ -574,7 +576,8 @@ func (a *TrendAgent) generateTrendSignalRuleBased(ctx context.Context, symbol st
 
 	if indicators.Strength == "strong" {
 		// Strong trend detected
-		if indicators.Trend == "uptrend" {
+		switch indicators.Trend {
+		case "uptrend":
 			signal = "BUY"
 			// Confidence based on EMA separation and ADX strength
 			emaDiff := indicators.FastEMA - indicators.SlowEMA
@@ -593,7 +596,7 @@ func (a *TrendAgent) generateTrendSignalRuleBased(ctx context.Context, symbol st
 				"Strong uptrend: Fast EMA (%.2f) > Slow EMA (%.2f), ADX=%.2f (>%.0f)",
 				indicators.FastEMA, indicators.SlowEMA, indicators.ADX, a.adxThreshold,
 			)
-		} else if indicators.Trend == "downtrend" {
+		case "downtrend":
 			signal = "SELL"
 			emaDiff := indicators.SlowEMA - indicators.FastEMA
 			emaPercent := (emaDiff / indicators.SlowEMA) * 100
@@ -606,7 +609,7 @@ func (a *TrendAgent) generateTrendSignalRuleBased(ctx context.Context, symbol st
 				"Strong downtrend: Fast EMA (%.2f) < Slow EMA (%.2f), ADX=%.2f (>%.0f)",
 				indicators.FastEMA, indicators.SlowEMA, indicators.ADX, a.adxThreshold,
 			)
-		} else {
+		default:
 			signal = "HOLD"
 			confidence = 0.3
 			reasoning = "Strong trend but EMAs converged - waiting for clear direction"
@@ -665,10 +668,11 @@ func (a *TrendAgent) generateTrendSignalRuleBased(ctx context.Context, symbol st
 
 // calculateStopLoss calculates the stop-loss price based on entry price and signal direction
 func (a *TrendAgent) calculateStopLoss(entryPrice float64, signal string) float64 {
-	if signal == "BUY" {
+	switch signal {
+	case "BUY":
 		// For long positions, stop-loss is below entry price
 		return entryPrice * (1.0 - a.stopLossPct)
-	} else if signal == "SELL" {
+	case "SELL":
 		// For short positions, stop-loss is above entry price
 		return entryPrice * (1.0 + a.stopLossPct)
 	}
@@ -677,10 +681,11 @@ func (a *TrendAgent) calculateStopLoss(entryPrice float64, signal string) float6
 
 // calculateTakeProfit calculates the take-profit price based on entry price and signal direction
 func (a *TrendAgent) calculateTakeProfit(entryPrice float64, signal string) float64 {
-	if signal == "BUY" {
+	switch signal {
+	case "BUY":
 		// For long positions, take-profit is above entry price
 		return entryPrice * (1.0 + a.takeProfitPct)
-	} else if signal == "SELL" {
+	case "SELL":
 		// For short positions, take-profit is below entry price
 		return entryPrice * (1.0 - a.takeProfitPct)
 	}
@@ -724,7 +729,8 @@ func (a *TrendAgent) updateTrailingStop(currentPrice float64, signal string) flo
 	}
 
 	// Calculate trailing stop based on position type
-	if signal == "BUY" {
+	switch signal {
+	case "BUY":
 		// For long positions, track highest price and trail below it
 		if currentPrice > a.highestPrice {
 			a.highestPrice = currentPrice
@@ -747,7 +753,7 @@ func (a *TrendAgent) updateTrailingStop(currentPrice float64, signal string) flo
 
 		return trailingStop
 
-	} else if signal == "SELL" {
+	case "SELL":
 		// For short positions, track lowest price and trail above it
 		if a.lowestPrice == 0 || currentPrice < a.lowestPrice {
 			a.lowestPrice = currentPrice
@@ -789,9 +795,10 @@ func (a *TrendAgent) updateBeliefs(symbol string, indicators *TrendIndicators, c
 
 	// Update trend direction belief
 	trendConfidence := 0.5 // Base confidence
-	if indicators.Strength == "strong" {
+	switch indicators.Strength {
+	case "strong":
 		trendConfidence = 0.8
-	} else if indicators.Strength == "weak" {
+	case "weak":
 		trendConfidence = 0.4
 	}
 
@@ -837,9 +844,10 @@ func (a *TrendAgent) updateBeliefs(symbol string, indicators *TrendIndicators, c
 
 	// Update position state belief
 	positionState := "none"
-	if a.lastSignal == "BUY" {
+	switch a.lastSignal {
+	case "BUY":
 		positionState = "long"
-	} else if a.lastSignal == "SELL" {
+	case "SELL":
 		positionState = "short"
 	}
 
@@ -1221,7 +1229,8 @@ func main() {
 						Type: server["type"].(string),
 					}
 
-					if serverConfig.Type == "internal" {
+					switch serverConfig.Type {
+					case "internal":
 						if cmd, ok := server["command"].(string); ok {
 							serverConfig.Command = cmd
 						}
@@ -1237,7 +1246,7 @@ func main() {
 								serverConfig.Env[k] = v.(string)
 							}
 						}
-					} else if serverConfig.Type == "external" {
+					case "external":
 						if url, ok := server["url"].(string); ok {
 							serverConfig.URL = url
 						}

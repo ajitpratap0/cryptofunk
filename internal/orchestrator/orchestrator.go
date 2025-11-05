@@ -1,4 +1,6 @@
 // Package orchestrator coordinates multiple trading agents via weighted voting and consensus
+//
+//nolint:goconst // Trading signals are domain-specific strings
 package orchestrator
 
 import (

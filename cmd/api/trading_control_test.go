@@ -268,9 +268,9 @@ func TestOrchestratorFailure(t *testing.T) {
 func TestRateLimiting(t *testing.T) {
 	mockOrchestrator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
-		})
+		}) // Test mock response
 	}))
 	defer mockOrchestrator.Close()
 
@@ -306,9 +306,10 @@ func TestRateLimiting(t *testing.T) {
 
 		server.router.ServeHTTP(w, req)
 
-		if w.Code == http.StatusOK {
+		switch w.Code {
+		case http.StatusOK:
 			successCount++
-		} else if w.Code == http.StatusTooManyRequests {
+		case http.StatusTooManyRequests:
 			rateLimitedCount++
 		}
 	}
@@ -324,9 +325,9 @@ func TestConcurrentPauseResume(t *testing.T) {
 		// Simulate slight delay
 		time.Sleep(10 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
-		})
+		}) // Test mock response
 	}))
 	defer mockOrchestrator.Close()
 
@@ -443,9 +444,9 @@ func TestOrchestratorRetry(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
-		})
+		}) // Test mock response
 	}))
 	defer mockOrchestrator.Close()
 

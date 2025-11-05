@@ -284,8 +284,10 @@ func (sm *SemanticMemory) FindSimilar(ctx context.Context, embedding []float32, 
 			item.LastValidated = *lastValidated
 		}
 
-		// Record access
-		go sm.RecordAccess(context.Background(), item.ID)
+		// Record access (best effort telemetry)
+		go func(id uuid.UUID) {
+			_ = sm.RecordAccess(context.Background(), id)
+		}(item.ID)
 
 		items = append(items, &item)
 	}

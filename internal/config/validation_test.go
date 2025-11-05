@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package config
 
 import (
@@ -640,7 +641,7 @@ func TestValidateEnvironmentRequirements(t *testing.T) {
 				c.App.Environment = "production"
 				c.Database.Host = ""
 				// DATABASE_URL not set
-				os.Unsetenv("DATABASE_URL")
+				_ = os.Unsetenv("DATABASE_URL") // Test env cleanup
 			},
 			expectError: "DATABASE_URL is required in production",
 		},
@@ -683,7 +684,7 @@ func TestValidateAndLoad(t *testing.T) {
 	// Create a temporary config file with invalid configuration
 	tmpfile, err := os.CreateTemp("", "config-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }() // Test cleanup
 
 	// Write invalid config (missing required fields)
 	invalidConfig := `
@@ -698,7 +699,7 @@ trading:
 `
 	_, err = tmpfile.WriteString(invalidConfig)
 	require.NoError(t, err)
-	tmpfile.Close()
+	_ = tmpfile.Close() // Test cleanup
 
 	// Try to load - should fail validation
 	_, err = Load(tmpfile.Name())

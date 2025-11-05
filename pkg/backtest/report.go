@@ -1,4 +1,6 @@
 // HTML report generation for backtest results
+//
+//nolint:goconst // Chart placeholder is a JSON template string
 package backtest
 
 import (
@@ -96,7 +98,7 @@ func (r *ReportGenerator) SaveToFile(filepath string) error {
 		return err
 	}
 
-	return os.WriteFile(filepath, []byte(html), 0644)
+	return os.WriteFile(filepath, []byte(html), 0600)
 }
 
 // prepareTemplateData prepares all data needed for the HTML template

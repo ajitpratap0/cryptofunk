@@ -221,8 +221,8 @@ func (a *BaseAgent) connectMCPServers() error {
 
 // createStdioClient creates an MCP session with stdio transport for internal servers
 func (a *BaseAgent) createStdioClient(ctx context.Context, config MCPServerConfig) (*mcp.ClientSession, error) {
-	// Create command transport (spawns process with exec.Command)
-	cmd := exec.Command(config.Command, config.Args...)
+	// Create command transport (spawns process with exec.CommandContext)
+	cmd := exec.CommandContext(ctx, config.Command, config.Args...) // #nosec G204 Command from validated agent config
 	// Convert env map to KEY=value slice format
 	for key, val := range config.Env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, val))

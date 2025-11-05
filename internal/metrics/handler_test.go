@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -41,9 +42,12 @@ func TestRegisterHandlers(t *testing.T) {
 	defer server.Close()
 
 	// Test /metrics endpoint
-	resp, err := http.Get(server.URL + "/metrics")
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL+"/metrics", nil)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }() // Test cleanup
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
@@ -102,7 +106,7 @@ func TestRegisterHandlers_WithOtherRoutes(t *testing.T) {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		customHandlerCalled = true
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("healthy"))
+		_, _ = w.Write([]byte("healthy")) // Test mock response
 	})
 
 	// Register metrics handlers
@@ -113,16 +117,21 @@ func TestRegisterHandlers_WithOtherRoutes(t *testing.T) {
 	defer server.Close()
 
 	// Test custom handler
-	resp, err := http.Get(server.URL + "/health")
+	req, err := http.NewRequestWithContext(context.Background(), "GET", server.URL+"/health", nil)
 	require.NoError(t, err)
-	resp.Body.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close() // Test cleanup
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, customHandlerCalled)
 
 	// Test metrics handler
-	resp, err = http.Get(server.URL + "/metrics")
+	req, err = http.NewRequestWithContext(context.Background(), "GET", server.URL+"/metrics", nil)
 	require.NoError(t, err)
-	resp.Body.Close()
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close() // Test cleanup
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 

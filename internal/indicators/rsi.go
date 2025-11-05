@@ -1,3 +1,4 @@
+//nolint:goconst // Signal types are domain-specific strings
 package indicators
 
 import (

@@ -52,7 +52,11 @@ func sendHeartbeat(t *testing.T, nc *nats.Conn, topic, agentName, agentType stri
 	require.NoError(t, err)
 }
 
+// TODO: Will be used in Phase 10 E2E tests for map-based signal testing
+//
 // sendSignalMap sends a trading signal via NATS (as map)
+//
+//nolint:unused
 func sendSignalMap(t *testing.T, nc *nats.Conn, topic, agentName, action string, confidence float64) {
 	t.Helper()
 	signal := map[string]interface{}{

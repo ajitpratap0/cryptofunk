@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package main
 
 import (
@@ -72,7 +73,7 @@ func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 	// Return cleanup function
 	cleanup := func() {
 		database.Close()
-		container.Terminate(ctx)
+		_ = container.Terminate(ctx) // Test cleanup - error logged by testcontainers
 	}
 
 	return database, cleanup

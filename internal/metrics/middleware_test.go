@@ -186,7 +186,7 @@ func TestHTTPMiddleware(t *testing.T) {
 					w.WriteHeader(tt.handlerStatus)
 				}
 				if tt.handlerBody != "" {
-					w.Write([]byte(tt.handlerBody))
+					_, _ = w.Write([]byte(tt.handlerBody)) // Test mock response
 				}
 			})
 
@@ -212,7 +212,7 @@ func TestHTTPMiddleware_MetricsRecorded(t *testing.T) {
 	// We can't directly assert metric values, but we can verify no panics occur
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success")) // Test mock response
 	})
 
 	wrappedHandler := HTTPMiddleware(handler)
@@ -233,7 +233,7 @@ func TestHTTPMiddleware_PreservesHeaders(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Custom-Header", "test-value")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`)) // Test mock response
 	})
 
 	wrappedHandler := HTTPMiddleware(handler)
@@ -250,9 +250,9 @@ func TestHTTPMiddleware_PreservesHeaders(t *testing.T) {
 func TestHTTPMiddleware_MultipleWrites(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("part1"))
-		w.Write([]byte("part2"))
-		w.Write([]byte("part3"))
+		_, _ = w.Write([]byte("part1")) // Test mock response
+		_, _ = w.Write([]byte("part2")) // Test mock response
+		_, _ = w.Write([]byte("part3")) // Test mock response
 	})
 
 	wrappedHandler := HTTPMiddleware(handler)
@@ -269,7 +269,7 @@ func TestHTTPMiddleware_MultipleWrites(t *testing.T) {
 func TestHTTPMiddleware_WithQueryParams(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok")) // Test mock response
 	})
 
 	wrappedHandler := HTTPMiddleware(handler)

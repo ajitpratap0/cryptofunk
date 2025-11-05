@@ -1,3 +1,4 @@
+//nolint:goconst // MCP tool names are defined by protocol spec
 package main
 
 import (
@@ -670,17 +671,19 @@ func (s *MCPServer) checkPortfolioLimits(args map[string]interface{}) (interface
 	tradeValue := tradeQuantity * tradePrice
 
 	// Adjust for BUY/SELL
-	if tradeSide == "BUY" {
+	switch tradeSide {
+	case "BUY":
 		positionsBySymbol[tradeSymbol] += tradeValue
-	} else if tradeSide == "SELL" {
+	case "SELL":
 		positionsBySymbol[tradeSymbol] -= tradeValue
 	}
 
 	// Calculate new total portfolio value
 	newTotalValue := totalPortfolioValue
-	if tradeSide == "BUY" {
+	switch tradeSide {
+	case "BUY":
 		newTotalValue += tradeValue
-	} else if tradeSide == "SELL" {
+	case "SELL":
 		newTotalValue -= tradeValue
 	}
 
@@ -1001,7 +1004,7 @@ func (s *MCPServer) calculateDrawdown(args map[string]interface{}) (interface{},
 	drawdownDuration := maxDrawdownIdx - peakIdx
 
 	// Find recovery point (when equity returns to peak level)
-	var recoveryIdx int = -1
+	recoveryIdx := -1
 	var recovered bool
 	if maxDrawdownIdx < len(equityCurve)-1 {
 		peakValue := runningMax[maxDrawdownIdx]

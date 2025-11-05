@@ -1351,7 +1351,13 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		resp, err := s.orchestratorClient.Post(url, "application/json", nil)
+		req, err := http.NewRequestWithContext(context.Background(), "POST", url, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := s.orchestratorClient.Do(req)
 		if err == nil {
 			return resp, nil
 		}

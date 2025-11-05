@@ -48,7 +48,9 @@ func (s *Server) Start() error {
 			"version":   config.Version,
 		}
 
-		json.NewEncoder(w).Encode(health)
+		if err := json.NewEncoder(w).Encode(health); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	})
 
 	s.server = &http.Server{

@@ -79,8 +79,13 @@ func (m *Migrator) loadMigrations() ([]Migration, error) {
 		}
 
 		// Read file content
+		// Validate that the file path is within the migrations directory to prevent directory traversal
 		filePath := filepath.Join(migrationsDir, entry.Name())
-		content, err := os.ReadFile(filePath)
+		cleanPath := filepath.Clean(filePath)
+		if !strings.HasPrefix(cleanPath, filepath.Clean(migrationsDir)) {
+			return nil, fmt.Errorf("invalid migration file path: %s", entry.Name())
+		}
+		content, err := os.ReadFile(cleanPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read migration file %s: %w", entry.Name(), err)
 		}
@@ -176,7 +181,7 @@ func (m *Migrator) applyMigration(ctx context.Context, migration Migration) erro
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // Rollback on error - commit overrides if successful
 
 	// Execute migration SQL
 	if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {

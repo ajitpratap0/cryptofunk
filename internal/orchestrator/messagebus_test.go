@@ -63,7 +63,7 @@ func TestNewMessageBus(t *testing.T) {
 	assert.Equal(t, "test.", mb.prefix)
 	assert.True(t, mb.nc.IsConnected())
 
-	mb.Close()
+	_ = mb.Close() // Test cleanup
 }
 
 // TestNewMessageBus_DefaultPrefix tests default prefix
@@ -80,7 +80,7 @@ func TestNewMessageBus_DefaultPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "agents.", mb.prefix)
 
-	mb.Close()
+	_ = mb.Close() // Test cleanup
 }
 
 // TestAgentMessage_Helpers tests message helper methods
@@ -114,7 +114,7 @@ func TestAgentMessage_Helpers(t *testing.T) {
 func TestSend(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -129,7 +129,7 @@ func TestSend(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send message
 	payload := map[string]string{"signal": "BUY"}
@@ -164,7 +164,7 @@ func TestSend(t *testing.T) {
 func TestBroadcast(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -179,7 +179,7 @@ func TestBroadcast(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
-		defer sub.Unsubscribe()
+		defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 	}
 
 	// Give subscriptions time to establish
@@ -213,7 +213,7 @@ func TestBroadcast(t *testing.T) {
 func TestRequest(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -223,7 +223,7 @@ func TestRequest(t *testing.T) {
 		return mb.Reply(context.Background(), msg, map[string]string{"result": "success"})
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Give subscription time to establish
 	time.Sleep(100 * time.Millisecond)
@@ -245,7 +245,7 @@ func TestRequest(t *testing.T) {
 func TestRequest_Timeout(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -266,7 +266,7 @@ func TestRequest_Timeout(t *testing.T) {
 func TestMessageBusSubscribe(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -281,17 +281,17 @@ func TestMessageBusSubscribe(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send multiple messages
 	for i := 0; i < 3; i++ {
 		msg, _ := NewAgentMessage("sender", "receiver", "trading", map[string]int{"count": i})
-		mb.Send(ctx, msg)
+		_ = mb.Send(ctx, msg) // Benchmark - error acceptable
 	}
 
 	// Send message to different topic (should not be received)
 	wrongMsg, _ := NewAgentMessage("sender", "receiver", "market_data", map[string]string{"data": "test"})
-	mb.Send(ctx, wrongMsg)
+	_ = mb.Send(ctx, wrongMsg) // Test setup - error expected
 
 	// Wait for messages
 	time.Sleep(200 * time.Millisecond)
@@ -309,7 +309,7 @@ func TestMessageBusSubscribe(t *testing.T) {
 func TestSubscribeAll(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -324,18 +324,18 @@ func TestSubscribeAll(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send messages to different topics
 	topics := []string{"trading", "market_data", "alerts"}
 	for _, topic := range topics {
 		msg, _ := NewAgentMessage("sender", "receiver", topic, map[string]string{"topic": topic})
-		mb.Send(ctx, msg)
+		_ = mb.Send(ctx, msg) // Benchmark - error acceptable
 	}
 
 	// Send message to different agent (should not be received)
 	wrongMsg, _ := NewAgentMessage("sender", "other-agent", "trading", map[string]string{"data": "test"})
-	mb.Send(ctx, wrongMsg)
+	_ = mb.Send(ctx, wrongMsg) // Test setup - error expected
 
 	// Wait for messages
 	time.Sleep(200 * time.Millisecond)
@@ -350,7 +350,7 @@ func TestSubscribeAll(t *testing.T) {
 func TestMessageTTL(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -365,14 +365,14 @@ func TestMessageTTL(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send message with short TTL
 	msg, _ := NewAgentMessage("sender", "receiver", "trading", map[string]string{"data": "test"})
 	msg.WithTTL(100 * time.Millisecond)
 	msg.Timestamp = time.Now().Add(-200 * time.Millisecond) // Already expired
 
-	mb.Send(ctx, msg)
+	_ = mb.Send(ctx, msg)
 
 	// Wait a bit
 	time.Sleep(200 * time.Millisecond)
@@ -387,7 +387,7 @@ func TestMessageTTL(t *testing.T) {
 func TestMessageBusPriorities(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -402,14 +402,14 @@ func TestMessageBusPriorities(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send messages with different priorities
 	testPriorities := []int{0, 5, 9}
 	for _, priority := range testPriorities {
 		msg, _ := NewAgentMessage("sender", "receiver", "trading", map[string]int{"priority": priority})
 		msg.WithPriority(priority)
-		mb.Send(ctx, msg)
+		_ = mb.Send(ctx, msg) // Benchmark - error acceptable
 	}
 
 	// Wait for messages
@@ -443,7 +443,7 @@ func TestMessageTypes(t *testing.T) {
 func TestSubscription_IsValid(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	sub, err := mb.Subscribe("agent", "topic", func(msg *AgentMessage) error {
 		return nil
@@ -454,7 +454,7 @@ func TestSubscription_IsValid(t *testing.T) {
 	assert.True(t, sub.IsValid())
 
 	// Should be invalid after unsubscribe
-	sub.Unsubscribe()
+	_ = sub.Unsubscribe() // Test cleanup
 	assert.False(t, sub.IsValid())
 }
 
@@ -462,7 +462,7 @@ func TestSubscription_IsValid(t *testing.T) {
 func TestMessageBusGetStats(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	stats := mb.GetStats()
 
@@ -484,7 +484,7 @@ func TestDefaultMessageBusConfig(t *testing.T) {
 func TestErrorHandling(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -493,7 +493,7 @@ func TestErrorHandling(t *testing.T) {
 		return assert.AnError // Simulate handler error
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send message
 	msg, _ := NewAgentMessage("sender", "receiver", "trading", map[string]string{"test": "data"})
@@ -508,7 +508,7 @@ func TestErrorHandling(t *testing.T) {
 func TestConcurrentMessaging(t *testing.T) {
 	mb, ns := setupTestMessageBus(t)
 	defer ns.Shutdown()
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 
@@ -528,7 +528,7 @@ func TestConcurrentMessaging(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }() // Test cleanup
 
 	// Send many messages concurrently
 	var sendWg sync.WaitGroup
@@ -537,7 +537,7 @@ func TestConcurrentMessaging(t *testing.T) {
 		go func(n int) {
 			defer sendWg.Done()
 			msg, _ := NewAgentMessage("sender", "receiver", "trading", map[string]int{"n": n})
-			mb.Send(ctx, msg)
+			_ = mb.Send(ctx, msg) // Benchmark - error acceptable
 		}(i)
 	}
 
@@ -575,14 +575,14 @@ func BenchmarkSend(b *testing.B) {
 	}
 
 	mb, _ := NewMessageBus(config)
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	ctx := context.Background()
 	msg, _ := NewAgentMessage("sender", "receiver", "test", map[string]string{"data": "benchmark"})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mb.Send(ctx, msg)
+		_ = mb.Send(ctx, msg) // Benchmark - error acceptable
 	}
 }
 
@@ -596,10 +596,10 @@ func BenchmarkRequest(b *testing.B) {
 	}
 
 	mb, _ := NewMessageBus(config)
-	defer mb.Close()
+	defer func() { _ = mb.Close() }() // Test cleanup
 
 	// Set up responder
-	mb.Subscribe("responder", "query", func(msg *AgentMessage) error {
+	_, _ = mb.Subscribe("responder", "query", func(msg *AgentMessage) error { // Test subscription
 		return mb.Reply(context.Background(), msg, map[string]string{"result": "ok"})
 	})
 
@@ -608,6 +608,6 @@ func BenchmarkRequest(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mb.Request(ctx, request, 1*time.Second)
+		_, _ = mb.Request(ctx, request, 1*time.Second) // Benchmark - error acceptable
 	}
 }

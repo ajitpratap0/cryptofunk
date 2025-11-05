@@ -281,7 +281,7 @@ func (bb *Blackboard) Subscribe(ctx context.Context, topic string) (<-chan *Blac
 
 	go func() {
 		defer close(ch)
-		defer pubsub.Close()
+		defer func() { _ = pubsub.Close() }() // Cleanup subscription
 
 		msgChan := pubsub.Channel()
 		for {

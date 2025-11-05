@@ -36,8 +36,11 @@ func main() {
 		}
 	}()
 
+	// Create context
+	ctx := context.Background()
+
 	// Test connection
-	if err := database.Ping(); err != nil {
+	if err := database.PingContext(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to ping database: %v\n", err)
 		os.Exit(1)
 	}
@@ -47,7 +50,6 @@ func main() {
 
 	// Create migrator
 	migrator := db.NewMigrator(database)
-	ctx := context.Background()
 
 	// Execute command
 	switch *command {

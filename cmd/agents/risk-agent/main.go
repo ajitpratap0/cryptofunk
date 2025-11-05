@@ -1,5 +1,7 @@
 // Risk Management Agent
 // Monitors portfolio risk and has veto power over trades
+//
+//nolint:goconst // Trading signals and market regimes are domain-specific strings
 package main
 
 import (
@@ -136,8 +138,9 @@ type RiskIntentions struct {
 
 	// Next actions
 	monitorDrawdown bool
-	reduceExposure  bool
-	increaseCash    bool
+	// TODO: Will be used in Phase 11 for advanced risk control strategies
+	// reduceExposure  bool
+	// increaseCash    bool
 }
 
 // Position represents a trading position (matches internal/risk)
@@ -893,7 +896,6 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 	defer rows.Close()
 
 	var equityCurve []float64
-	var timestamps []time.Time
 
 	for rows.Next() {
 		var totalValue float64
@@ -903,7 +905,6 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 			continue
 		}
 		equityCurve = append(equityCurve, totalValue)
-		timestamps = append(timestamps, metricTime)
 	}
 
 	a.beliefs.mu.Lock()
@@ -1037,8 +1038,6 @@ func (a *RiskAgent) assessMarketConditions() {
 	defer rows.Close()
 
 	var closes []float64
-	var highs []float64
-	var lows []float64
 
 	for rows.Next() {
 		var close, high, low float64
@@ -1048,8 +1047,6 @@ func (a *RiskAgent) assessMarketConditions() {
 			continue
 		}
 		closes = append(closes, close)
-		highs = append(highs, high)
-		lows = append(lows, low)
 	}
 
 	if len(closes) < 10 {
@@ -1479,7 +1476,7 @@ func buildApprovalReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, co
 	reasoning := "RISK MANAGEMENT APPROVAL\n\n"
 
 	reasoning += "PORTFOLIO HEALTH:\n"
-	reasoning += fmt.Sprintf("- All risk limits satisfied\n")
+	reasoning += "- All risk limits satisfied\n"
 	reasoning += fmt.Sprintf("- Open Positions: %d / %d (capacity available)\n",
 		beliefs.openPositionCount, config.MaxOpenPositions)
 	reasoning += fmt.Sprintf("- Exposure Utilization: %.1f%% (healthy)\n", beliefs.limitsUtilization*100)
@@ -1502,7 +1499,11 @@ func buildApprovalReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, co
 	return reasoning
 }
 
+// TODO: Will be used in Phase 11 for proactive risk signal generation
+//
 // generateRiskSignal creates and publishes a risk management signal
+//
+//nolint:unused
 func (a *RiskAgent) generateRiskSignal(ctx context.Context, symbol string, proposedAction string) error {
 	signal, confidence, reasoning := a.assessRisk(ctx, symbol, proposedAction)
 

@@ -112,7 +112,7 @@ func TestRedisMetrics_Get_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 
@@ -160,7 +160,7 @@ func TestRedisMetrics_Set_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 
@@ -196,7 +196,7 @@ func TestRedisMetrics_Del_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 
@@ -231,7 +231,7 @@ func TestRedisMetrics_Exists_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 
@@ -271,7 +271,7 @@ func TestRedisMetrics_Expire_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 
@@ -310,7 +310,7 @@ func TestRedisMetrics_HitRateCalculation_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 
@@ -327,9 +327,9 @@ func TestRedisMetrics_HitRateCalculation_Integration(t *testing.T) {
 	rm.ResetStats()
 
 	// Generate 2 hits and 1 miss
-	rm.Get(ctx, testKey1) // hit
-	rm.Get(ctx, testKey1) // hit
-	rm.Get(ctx, testKey2) // miss
+	_, _ = rm.Get(ctx, testKey1) // hit - error ignored for test stats
+	_, _ = rm.Get(ctx, testKey1) // hit - error ignored for test stats
+	_, _ = rm.Get(ctx, testKey2) // miss - error ignored for test stats
 
 	// Verify stats
 	assert.Equal(t, int64(2), rm.hits)
@@ -355,7 +355,7 @@ func TestRedisMetrics_MultipleKeys_Integration(t *testing.T) {
 		t.Skip("Redis not available, skipping integration test")
 	}
 
-	defer client.Close()
+	defer func() { _ = client.Close() }() // Test cleanup
 
 	rm := NewRedisMetrics(client)
 

@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package llm
 
 import (
@@ -22,12 +23,12 @@ func TestAgentWithFallbackClient(t *testing.T) {
 		if calls <= 2 {
 			// Fail first 2 calls (simulate temporary outage)
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte(`{"error": {"message": "Primary temporarily down"}}`))
+			_, _ = w.Write([]byte(`{"error": {"message": "Primary temporarily down"}}`)) // Test mock response
 			return
 		}
 		// Succeed on subsequent calls (simulate recovery)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{
 				"message": {
 					"content": "{\"side\": \"BUY\", \"confidence\": 0.85, \"reasoning\": \"Strong uptrend\"}"
@@ -43,7 +44,7 @@ func TestAgentWithFallbackClient(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackCalls.Add(1)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{
 				"message": {
 					"content": "{\"side\": \"HOLD\", \"confidence\": 0.70, \"reasoning\": \"Uncertain trend\"}"
@@ -213,7 +214,7 @@ func TestAgentWithCircuitBreaker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		failureCount.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": {"message": "Service down"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Service down"}}`)) // Test mock response
 	}))
 	defer server.Close()
 
@@ -239,7 +240,7 @@ func TestAgentWithCircuitBreaker(t *testing.T) {
 
 	// Make 5 failed calls
 	for i := 0; i < 5; i++ {
-		client.Complete(context.Background(), messages)
+		_, _ = client.Complete(context.Background(), messages) // Test circuit breaker - errors expected
 	}
 
 	// Circuit should be open now
@@ -251,7 +252,7 @@ func TestAgentWithCircuitBreaker(t *testing.T) {
 
 	// Verify circuit blocks further calls (failureCount should not increase)
 	previousFailures := failureCount.Load()
-	client.Complete(context.Background(), messages)
+	_, _ = client.Complete(context.Background(), messages) // Test circuit breaker - error expected
 
 	if failureCount.Load() != previousFailures {
 		t.Error("Circuit breaker should block calls when OPEN")
@@ -261,7 +262,7 @@ func TestAgentWithCircuitBreaker(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Next call should attempt recovery (half-open state)
-	client.Complete(context.Background(), messages)
+	_, _ = client.Complete(context.Background(), messages) // Test circuit breaker - error expected
 
 	// Should have attempted one more call (half-open allows one request)
 	if failureCount.Load() <= previousFailures {

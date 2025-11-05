@@ -170,7 +170,8 @@ func ValidateSecret(secret string, name string, minLength int, requireStrong boo
 
 	// Apply strength requirements
 	if requireStrong {
-		if result.Strength == SecretStrengthWeak {
+		switch result.Strength {
+		case SecretStrengthWeak:
 			result.IsValid = false
 			result.Errors = append(result.Errors, fmt.Sprintf("%s is too weak for production use", name))
 
@@ -194,7 +195,7 @@ func ValidateSecret(secret string, name string, minLength int, requireStrong boo
 				}
 				result.Errors = append(result.Errors, fmt.Sprintf("- Include at least 3 of: %s", strings.Join(suggestions, ", ")))
 			}
-		} else if result.Strength == SecretStrengthMedium {
+		case SecretStrengthMedium:
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s has medium strength - consider using a stronger secret", name))
 		}
 	}

@@ -71,7 +71,7 @@ func TestSaveToFile(t *testing.T) {
 
 	// Create temporary file
 	tmpfile := "/tmp/backtest_report_test.html"
-	defer os.Remove(tmpfile)
+	defer func() { _ = os.Remove(tmpfile) }() // Test cleanup
 
 	// Save report
 	err = generator.SaveToFile(tmpfile)
