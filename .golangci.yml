@@ -13,8 +13,6 @@ run:
 
 linters:
   disable-all: true
-  disable:
-    - typecheck     # Explicitly disable typecheck (causes false positives with embedded types)
   enable:
     - errcheck      # Check for unchecked errors
     - gosimple      # Simplify code
