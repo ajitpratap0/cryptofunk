@@ -161,7 +161,10 @@ func TestServerShutdown(t *testing.T) {
 
 	// Verify server is stopped
 	time.Sleep(100 * time.Millisecond)
-	_, err = http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+	resp2, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+	if resp2 != nil {
+		resp2.Body.Close()
+	}
 	assert.Error(t, err) // Should fail because server is stopped
 }
 

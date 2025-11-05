@@ -350,7 +350,11 @@ func (a *SentimentAgent) fetchNews(ctx context.Context) ([]Article, error) {
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
@@ -438,7 +442,11 @@ func (a *SentimentAgent) fetchFearGreedIndex(ctx context.Context) (*FearGreedDat
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
@@ -464,7 +472,9 @@ func (a *SentimentAgent) fetchFearGreedIndex(ctx context.Context) (*FearGreedDat
 
 	// Parse value
 	var value int
-	fmt.Sscanf(result.Data[0].Value, "%d", &value)
+	if _, err := fmt.Sscanf(result.Data[0].Value, "%d", &value); err != nil {
+		return nil, fmt.Errorf("failed to parse fear & greed value: %w", err)
+	}
 
 	fearGreed := &FearGreedData{
 		Value:          value,
