@@ -117,11 +117,11 @@ func main() {
 	// Setup logging
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	// Load configuration
+	// Load and validate configuration
 	configPath := os.Getenv("CONFIG_PATH")
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load configuration")
+		log.Fatal().Err(err).Msg("Failed to load or validate configuration")
 	}
 
 	// Initialize database
@@ -810,7 +810,11 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close response body")
+		}
+	}()
 
 	// Check orchestrator response
 	if resp.StatusCode != http.StatusOK {
@@ -870,7 +874,11 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close response body")
+		}
+	}()
 
 	// Check orchestrator response
 	if resp.StatusCode != http.StatusOK {
@@ -1343,7 +1351,13 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		resp, err := s.orchestratorClient.Post(url, "application/json", nil)
+		req, err := http.NewRequestWithContext(context.Background(), "POST", url, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := s.orchestratorClient.Do(req)
 		if err == nil {
 			return resp, nil
 		}

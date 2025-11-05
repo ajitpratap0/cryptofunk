@@ -1,0 +1,170 @@
+# CryptoFunk Configuration
+# Environment variables override these settings with CRYPTOFUNK_ prefix
+# Example: CRYPTOFUNK_TRADING_MODE=live overrides trading.mode
+
+app:
+  name: "CryptoFunk"
+  version: "0.1.0"
+  environment: "development"  # development, staging, production
+  log_level: "info"           # debug, info, warn, error
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "${POSTGRES_PASSWORD}"
+  database: "cryptofunk"
+  ssl_mode: "disable"
+  pool_size: 10
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+nats:
+  url: "nats://localhost:4222"
+  enable_jetstream: true
+
+llm:
+  enabled: true  # Enable/disable LLM reasoning (falls back to rule-based)
+  gateway: "bifrost"
+  endpoint: "http://localhost:8080/v1/chat/completions"
+  api_key: "${LLM_API_KEY}"  # Optional for Bifrost, required for direct OpenAI/Anthropic
+
+  # Model Configuration
+  primary_model: "claude-sonnet-4-20250514"
+  fallback_models:  # Optional: List of fallback models (automatic failover)
+    - "gpt-4-turbo"
+    - "gpt-3.5-turbo"
+
+  # Request Settings
+  temperature: 0.7
+  max_tokens: 2000
+  timeout: 30s
+
+  # Caching (Bifrost feature)
+  enable_caching: true
+
+  # Circuit Breaker Configuration (resilience for model failures)
+  circuit_breaker:
+    failure_threshold: 5      # Open circuit after N consecutive failures
+    success_threshold: 2      # Close circuit after N consecutive successes
+    timeout: 60s              # Time before attempting recovery (half-open state)
+    time_window: 5m           # Sliding window for failure tracking
+
+# MCP Server Configuration (Hybrid Architecture)
+# External and internal MCP servers for market data, analysis, and execution
+mcp:
+  # External MCP Servers
+  external:
+    coingecko:
+      enabled: true
+      name: "CoinGecko MCP"
+      url: "https://mcp.api.coingecko.com/mcp"
+      transport: "http_streaming"
+      description: "76+ market data tools for prices, historical data, trends"
+      cache_ttl: 60  # seconds to cache responses in Redis
+      rate_limit:
+        enabled: true
+        requests_per_minute: 100  # Adjust based on your CoinGecko tier
+      tools:  # Available tools from CoinGecko MCP
+        - "get_price"           # Current cryptocurrency prices
+        - "get_market_chart"    # Historical OHLCV data
+        - "get_coin_info"       # Coin metadata
+        - "get_trending"        # Trending coins
+        - "get_top_gainers"     # Top gaining coins
+        # Note: Full list of 76+ tools available, configure as needed
+
+  # Internal (Custom) MCP Servers
+  internal:
+    order_executor:
+      enabled: true
+      name: "Order Executor"
+      command: "./bin/order-executor-server"
+      transport: "stdio"
+      description: "Execute orders on exchanges (Binance via CCXT)"
+      args: []
+      env:
+        EXCHANGE: "binance"
+        MODE: "${TRADING_MODE}"  # paper or live
+      tools:
+        - "place_market_order"
+        - "place_limit_order"
+        - "cancel_order"
+        - "get_order_status"
+        - "get_positions"
+
+    risk_analyzer:
+      enabled: true
+      name: "Risk Analyzer"
+      command: "./bin/risk-analyzer-server"
+      transport: "stdio"
+      description: "Portfolio risk management and position sizing"
+      args: []
+      tools:
+        - "calculate_position_size"  # Kelly Criterion
+        - "calculate_var"            # Value at Risk
+        - "check_portfolio_limits"   # Limit enforcement
+        - "calculate_sharpe"         # Sharpe ratio
+        - "calculate_drawdown"       # Drawdown metrics
+
+    technical_indicators:
+      enabled: true
+      name: "Technical Indicators"
+      command: "./bin/technical-indicators-server"
+      transport: "stdio"
+      description: "Technical analysis indicators (RSI, MACD, Bollinger, etc.)"
+      args: []
+      tools:
+        - "calculate_rsi"
+        - "calculate_macd"
+        - "calculate_bollinger_bands"
+        - "calculate_ema"
+        - "calculate_adx"
+        - "detect_patterns"
+
+    market_data:
+      enabled: false  # Optional: Use only if you need Binance-specific features
+      name: "Market Data (Binance)"
+      command: "./bin/market-data-server"
+      transport: "stdio"
+      description: "Binance-specific market data (optional, CoinGecko covers most use cases)"
+      args: []
+      note: "Disabled by default - CoinGecko MCP is primary data source"
+
+trading:
+  mode: "paper"  # paper or live
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+  exchange: "binance"
+  initial_capital: 10000.0
+  max_positions: 3
+  default_quantity: 0.01
+
+risk:
+  max_position_size: 0.1       # 10% of portfolio
+  max_daily_loss: 0.02         # 2% maximum daily loss
+  max_drawdown: 0.1            # 10% maximum drawdown
+  default_stop_loss: 0.02      # 2% stop loss
+  default_take_profit: 0.05    # 5% take profit
+  llm_approval_required: true  # Require LLM approval for trades
+  min_confidence: 0.7          # Minimum confidence for signals
+
+exchanges:
+  binance:
+    api_key: "${BINANCE_API_KEY}"
+    secret_key: "${BINANCE_API_SECRET}"
+    testnet: true
+    rate_limit_ms: 100
+
+api:
+  host: "0.0.0.0"
+  port: 8081
+  orchestrator_url: "http://localhost:8081"  # URL for orchestrator control endpoints
+
+monitoring:
+  prometheus_port: 9100
+  enable_metrics: true

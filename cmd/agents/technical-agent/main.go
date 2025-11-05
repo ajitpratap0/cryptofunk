@@ -1,5 +1,7 @@
 // Technical Analysis Agent
 // Generates market insights using technical indicators
+//
+//nolint:goconst // Trading signals and trend states are domain-specific strings
 package main
 
 import (
@@ -34,10 +36,11 @@ type TechnicalAgent struct {
 	natsTopic string
 
 	// LLM client for AI-powered analysis
-	llmClient       llm.LLMClient // Interface supports both Client and FallbackClient
-	promptBuilder   *llm.PromptBuilder
-	useLLM          bool                 // Enable/disable LLM reasoning
-	decisionTracker *llm.DecisionTracker // Track LLM decisions (optional)
+	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
+	promptBuilder *llm.PromptBuilder
+	useLLM        bool // Enable/disable LLM reasoning
+	// TODO: Will be used in Phase 11 for LLM decision tracking and learning
+	// decisionTracker *llm.DecisionTracker // Track LLM decisions (optional)
 
 	// Technical analysis configuration
 	symbols           []string
@@ -363,9 +366,10 @@ func (a *TechnicalAgent) updateBeliefs(symbol string, indicators *IndicatorValue
 	buyCount := 0
 	sellCount := 0
 	for _, signal := range trendSignals {
-		if signal == "buy" {
+		switch signal {
+		case "buy":
 			buyCount++
-		} else if signal == "sell" {
+		case "sell":
 			sellCount++
 		}
 	}
@@ -1167,7 +1171,11 @@ func getFloat64FromConfig(config map[string]interface{}, key string, defaultValu
 	return defaultValue
 }
 
+// TODO: Will be used in Phase 11 for real-time price monitoring
+//
 // fetchCurrentPrice fetches current price for a symbol from CoinGecko
+//
+//nolint:unused
 func (a *TechnicalAgent) fetchCurrentPrice(ctx context.Context, symbol string) (float64, error) {
 	log.Debug().Str("symbol", symbol).Msg("Fetching current price from CoinGecko")
 
@@ -1754,7 +1762,8 @@ func main() {
 					}
 
 					// Set fields based on server type
-					if serverConfig.Type == "internal" {
+					switch serverConfig.Type {
+					case "internal":
 						if cmd, ok := server["command"].(string); ok {
 							serverConfig.Command = cmd
 						}
@@ -1770,7 +1779,7 @@ func main() {
 								serverConfig.Env[k] = v.(string)
 							}
 						}
-					} else if serverConfig.Type == "external" {
+					case "external":
 						// DEBUG: Log raw server map to see all fields
 						log.Debug().Interface("server_map", server).Msg("Raw server map for external type")
 

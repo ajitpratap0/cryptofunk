@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,13 +13,23 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 )
 
 func main() {
+	// Parse command-line flags
+	verifyKeys := flag.Bool("verify-keys", false, "Verify API keys and secrets, then exit")
+	flag.Parse()
+
 	// Configure logging to stderr (important for MCP protocol - stdout is reserved)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+	// If --verify-keys flag is set, verify keys and exit
+	if *verifyKeys {
+		os.Exit(verifyAPIKeys())
+	}
 
 	log.Info().Msg("Starting CryptoFunk MCP Orchestrator")
 
@@ -181,4 +192,157 @@ func main() {
 	}
 
 	log.Info().Msg("Orchestrator shutdown complete")
+}
+
+// verifyAPIKeys verifies all configured API keys and secrets
+// Returns 0 if all keys are valid, 1 if any keys are invalid or missing
+func verifyAPIKeys() int {
+	log.Info().Msg("Verifying API keys and secrets...")
+
+	// Load main configuration
+	cfg, err := config.Load("")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load configuration")
+		return 1
+	}
+
+	allValid := true
+	keysChecked := 0
+
+	// Verify Exchange API Keys
+	if len(cfg.Exchanges) > 0 {
+		log.Info().Msg("Checking exchange API keys...")
+		for exchangeName, exchangeConfig := range cfg.Exchanges {
+			keysChecked++
+
+			// Check if keys are present
+			if exchangeConfig.APIKey == "" {
+				log.Warn().Str("exchange", exchangeName).Msg("❌ API key not configured")
+				allValid = false
+				continue
+			}
+			if exchangeConfig.SecretKey == "" {
+				log.Warn().Str("exchange", exchangeName).Msg("❌ Secret key not configured")
+				allValid = false
+				continue
+			}
+
+			// Check for placeholder values
+			placeholders := []string{"YOUR_API_KEY", "changeme", "test_api_key", ""}
+			isPlaceholder := false
+			for _, placeholder := range placeholders {
+				if exchangeConfig.APIKey == placeholder || exchangeConfig.SecretKey == placeholder {
+					isPlaceholder = true
+					break
+				}
+			}
+
+			if isPlaceholder {
+				log.Warn().
+					Str("exchange", exchangeName).
+					Msg("❌ API keys appear to be placeholder values")
+				allValid = false
+				continue
+			}
+
+			// For paper trading, keys don't need to be validated against the exchange
+			if cfg.Trading.Mode == "paper" || cfg.Trading.Mode == "PAPER" {
+				log.Info().
+					Str("exchange", exchangeName).
+					Str("mode", cfg.Trading.Mode).
+					Msg("✓ Exchange keys configured (paper trading mode - not validated against exchange)")
+				continue
+			}
+
+			// For live trading, we should validate against the exchange
+			// However, this requires actual exchange API calls which may fail for various reasons
+			// (network, rate limits, etc.) so we just check for presence and format
+			log.Info().
+				Str("exchange", exchangeName).
+				Str("mode", cfg.Trading.Mode).
+				Int("key_length", len(exchangeConfig.APIKey)).
+				Msg("✓ Exchange API keys configured (live mode - validation requires exchange connection)")
+		}
+	} else {
+		log.Warn().Msg("No exchanges configured")
+	}
+
+	// Verify LLM Configuration
+	log.Info().Msg("Checking LLM configuration...")
+	keysChecked++
+
+	if cfg.LLM.Endpoint == "" {
+		log.Error().Msg("❌ LLM endpoint not configured")
+		allValid = false
+	} else if cfg.LLM.Gateway == "" {
+		log.Error().Msg("❌ LLM gateway not configured")
+		allValid = false
+	} else if cfg.LLM.PrimaryModel == "" {
+		log.Error().Msg("❌ LLM primary model not configured")
+		allValid = false
+	} else {
+		log.Info().
+			Str("gateway", cfg.LLM.Gateway).
+			Str("endpoint", cfg.LLM.Endpoint).
+			Str("model", cfg.LLM.PrimaryModel).
+			Msg("✓ LLM configuration present (endpoint validation requires live connection)")
+	}
+
+	// Verify Database Configuration
+	log.Info().Msg("Checking database configuration...")
+	keysChecked++
+
+	if cfg.Database.Host == "" {
+		log.Error().Msg("❌ Database host not configured")
+		allValid = false
+	} else if cfg.Database.Database == "" {
+		log.Error().Msg("❌ Database name not configured")
+		allValid = false
+	} else {
+		// Check password for non-development environments
+		if cfg.App.Environment != "development" && cfg.Database.Password == "" {
+			log.Warn().
+				Str("environment", cfg.App.Environment).
+				Msg("❌ Database password not configured (required for non-development environments)")
+			allValid = false
+		}
+
+		// Check for placeholder passwords
+		if cfg.App.Environment == "production" {
+			placeholders := []string{"changeme", "changeme_in_production", "postgres", "password"}
+			for _, placeholder := range placeholders {
+				if cfg.Database.Password == placeholder {
+					log.Error().
+						Str("password", placeholder).
+						Msg("❌ Database password is a common placeholder value (SECURITY RISK)")
+					allValid = false
+					break
+				}
+			}
+		}
+
+		if allValid {
+			log.Info().
+				Str("host", cfg.Database.Host).
+				Str("database", cfg.Database.Database).
+				Str("ssl_mode", cfg.Database.SSLMode).
+				Msg("✓ Database configuration present")
+		}
+	}
+
+	// Summary
+	log.Info().Msg("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	if allValid {
+		log.Info().
+			Int("keys_checked", keysChecked).
+			Msg("✅ All API keys and configuration verified successfully")
+		log.Info().Msg("System is ready to start")
+		return 0
+	} else {
+		log.Error().
+			Int("keys_checked", keysChecked).
+			Msg("❌ Some API keys or configuration are invalid or missing")
+		log.Error().Msg("Please fix the above issues before starting the system")
+		return 1
+	}
 }

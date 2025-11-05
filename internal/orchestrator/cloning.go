@@ -289,7 +289,7 @@ func (cc *CloningCoordinator) StartABTest(ctx context.Context, name, controlAgen
 		if err != nil {
 			// Cleanup already created clones
 			for _, v := range experiment.VariantAgents {
-				cc.hotSwap.UnregisterAgent(ctx, v)
+				_ = cc.hotSwap.UnregisterAgent(ctx, v) // Best effort cleanup
 			}
 			return nil, fmt.Errorf("failed to create variant %d: %w", i+1, err)
 		}

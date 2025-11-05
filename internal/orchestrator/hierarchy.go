@@ -405,7 +405,7 @@ func (hm *HierarchyManager) AssessSituation(ctx context.Context, metaAgentName s
 
 	// Read portfolio state
 	if messages, err := hm.blackboard.GetByTopic(ctx, "portfolio_state", 1); err == nil && len(messages) > 0 {
-		json.Unmarshal(messages[0].Content, &situation.PortfolioState)
+		_ = json.Unmarshal(messages[0].Content, &situation.PortfolioState) // Best effort unmarshaling
 	}
 
 	// Time of day

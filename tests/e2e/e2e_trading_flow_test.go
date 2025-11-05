@@ -1,6 +1,6 @@
 // End-to-End Trading Flow Test
 // Tests the complete flow: Market Data → Agents → Orchestrator → Order Execution
-package tests
+package e2e
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -332,10 +331,11 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 		select {
 		case decision := <-decisionChan:
 			// Risk agent's high weight should prevent BUY
-			if decision.Action == "HOLD" {
+			switch decision.Action {
+			case "HOLD":
 				t.Logf("Risk veto successful: Action=%s, Consensus=%.2f",
 					decision.Action, decision.Consensus)
-			} else if decision.Action == "BUY" {
+			case "BUY":
 				// BUY can still win if risk agent's weight isn't dominant enough
 				assert.Less(t, decision.Consensus, 0.9,
 					"If BUY wins despite risk HOLD, consensus should be lower")
@@ -352,53 +352,4 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Log("E2E Trading Flow Test Complete")
-}
-
-// Helper functions
-
-func startEmbeddedNATS(t *testing.T) *natsserver.Server {
-	t.Helper()
-	opts := &natsserver.Options{
-		Host:           "127.0.0.1",
-		Port:           -1, // Random port
-		NoLog:          true,
-		NoSigs:         true,
-		MaxControlLine: 4096,
-	}
-	ns, err := natsserver.NewServer(opts)
-	require.NoError(t, err)
-
-	go ns.Start()
-
-	// Wait for server to be ready
-	if !ns.ReadyForConnections(4 * time.Second) {
-		t.Fatal("NATS server did not start in time")
-	}
-
-	return ns
-}
-
-func sendHeartbeat(t *testing.T, nc *nats.Conn, topic, agentName, agentType string, weight float64) {
-	t.Helper()
-	heartbeat := map[string]interface{}{
-		"agent_name":       agentName,
-		"agent_type":       agentType,
-		"weight":           weight,
-		"timestamp":        time.Now().Format(time.RFC3339),
-		"status":           "HEALTHY",
-		"enabled":          true,
-		"performance_data": map[string]interface{}{},
-	}
-	data, err := json.Marshal(heartbeat)
-	require.NoError(t, err)
-	err = nc.Publish(topic, data)
-	require.NoError(t, err)
-}
-
-func sendSignal(t *testing.T, nc *nats.Conn, topic string, signal *orchestrator.AgentSignal) {
-	t.Helper()
-	data, err := json.Marshal(signal)
-	require.NoError(t, err)
-	err = nc.Publish(topic, data)
-	require.NoError(t, err)
 }

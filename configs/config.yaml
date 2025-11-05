@@ -42,7 +42,7 @@ llm:
   # Request Settings
   temperature: 0.7
   max_tokens: 2000
-  timeout: 30s
+  timeout: 30000
 
   # Caching (Bifrost feature)
   enable_caching: true

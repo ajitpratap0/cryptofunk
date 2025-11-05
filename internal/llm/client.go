@@ -100,7 +100,7 @@ func (c *Client) Complete(ctx context.Context, messages []ChatMessage) (*ChatRes
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // Body will be read before closure
 
 	duration := time.Since(start)
 
@@ -284,9 +284,10 @@ func extractFirstJSONObject(content string) string {
 
 	for i := startIdx; i < len(content); i++ {
 		ch := rune(content[i])
-		if ch == openChar {
+		switch ch {
+		case openChar:
 			depth++
-		} else if ch == closeChar {
+		case closeChar:
 			depth--
 			if depth == 0 {
 				return content[startIdx : i+1]

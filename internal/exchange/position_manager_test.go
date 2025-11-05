@@ -1,7 +1,6 @@
 package exchange
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -10,52 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// Mock database for testing (in-memory only, no actual DB calls)
-type mockDB struct{}
-
-func (m *mockDB) CreatePosition(ctx context.Context, position *db.Position) error {
-	return nil
-}
-
-func (m *mockDB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
-	return nil
-}
-
-func (m *mockDB) UpdateUnrealizedPnL(ctx context.Context, id uuid.UUID, currentPrice float64) error {
-	return nil
-}
-
-func (m *mockDB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuantity float64, additionalFees float64) error {
-	return nil
-}
-
-func (m *mockDB) UpdatePositionAveraging(ctx context.Context, id uuid.UUID, newEntryPrice, newQuantity float64, additionalFees float64) error {
-	return nil
-}
-
-func (m *mockDB) PartialClosePosition(ctx context.Context, id uuid.UUID, closeQuantity, exitPrice float64, exitReason string, fees float64) (*db.Position, error) {
-	// Create a mock closed position
-	now := time.Now()
-	realizedPnL := closeQuantity * 10.0 // Mock P&L
-	closedPos := &db.Position{
-		ID:          uuid.New(),
-		Symbol:      "BTC/USD",
-		Side:        db.PositionSideLong,
-		EntryPrice:  100.0,
-		ExitPrice:   &exitPrice,
-		Quantity:    closeQuantity,
-		EntryTime:   now.Add(-time.Hour),
-		ExitTime:    &now,
-		RealizedPnL: &realizedPnL,
-		Fees:        fees,
-	}
-	return closedPos, nil
-}
-
-func (m *mockDB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error) {
-	return []*db.Position{}, nil
-}
 
 func TestPartialClosePosition_LONG(t *testing.T) {
 	pm := NewPositionManager(nil)

@@ -33,7 +33,8 @@ type BinanceExchange struct {
 	testnet bool
 
 	// WebSocket
-	wsClient    *binance.Client
+	// TODO: Will be used in Phase 11 for WebSocket streaming
+	// wsClient    *binance.Client
 	listenKey   string
 	wsStopChan  chan struct{}
 	wsErrChan   chan error

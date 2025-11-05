@@ -18,9 +18,6 @@ const (
 
 	// Send pings to peer with this period. Must be less than pongWait
 	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer
-	maxMessageSize = 512
 )
 
 // MessageType represents the type of WebSocket message
@@ -151,12 +148,19 @@ func (h *Hub) ClientCount() int {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Error().Err(err).Msg("Error closing WebSocket connection")
+		}
 	}()
 
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		log.Error().Err(err).Msg("Error setting read deadline")
+		return
+	}
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		if err := c.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			log.Error().Err(err).Msg("Error setting read deadline in pong handler")
+		}
 		return nil
 	})
 
@@ -179,16 +183,23 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			log.Error().Err(err).Msg("Error closing WebSocket connection")
+		}
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				log.Error().Err(err).Msg("Error setting write deadline")
+				return
+			}
 			if !ok {
 				// The hub closed the channel
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					log.Error().Err(err).Msg("Error writing close message")
+				}
 				return
 			}
 
@@ -196,13 +207,22 @@ func (c *Client) writePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				log.Error().Err(err).Msg("Error writing message")
+				return
+			}
 
 			// Add queued messages to the current websocket message
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
+				if _, err := w.Write([]byte{'\n'}); err != nil {
+					log.Error().Err(err).Msg("Error writing newline")
+					return
+				}
+				if _, err := w.Write(<-c.send); err != nil {
+					log.Error().Err(err).Msg("Error writing queued message")
+					return
+				}
 			}
 
 			if err := w.Close(); err != nil {
@@ -210,7 +230,10 @@ func (c *Client) writePump() {
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				log.Error().Err(err).Msg("Error setting write deadline for ping")
+				return
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

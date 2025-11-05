@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -438,10 +439,11 @@ func TestFormatLearningContext_NilTracker(t *testing.T) {
 		AgentName: "test-agent",
 	})
 
-	context, err := cb.FormatLearningContext(nil, "BTC/USDT", map[string]float64{
+	ctx := context.TODO()
+	contextStr, err := cb.FormatLearningContext(ctx, "BTC/USDT", map[string]float64{
 		"RSI": 65.5,
 	})
 
 	assert.NoError(t, err)
-	assert.Empty(t, context)
+	assert.Empty(t, contextStr)
 }

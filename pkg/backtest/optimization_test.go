@@ -416,7 +416,7 @@ func TestGeneticOptimizer_InitializePopulation(t *testing.T) {
 	optimizer := &GeneticOptimizer{
 		params:         params,
 		populationSize: 10,
-		rng:            rand.New(rand.NewSource(42)),
+		rng:            rand.New(rand.NewSource(42)), // #nosec G404 -- Test code: deterministic random for reproducible tests
 	}
 
 	population := optimizer.initializePopulation()
@@ -455,7 +455,7 @@ func TestGeneticOptimizer_Crossover(t *testing.T) {
 
 	optimizer := &GeneticOptimizer{
 		params: params,
-		rng:    rand.New(rand.NewSource(42)),
+		rng:    rand.New(rand.NewSource(42)), // #nosec G404 Deterministic random for reproducible tests
 	}
 
 	parent1 := ParameterSet{"a": 5, "b": 0.5}
@@ -479,8 +479,8 @@ func TestGeneticOptimizer_Mutate(t *testing.T) {
 
 	optimizer := &GeneticOptimizer{
 		params:       params,
-		mutationRate: 1.0, // 100% mutation for testing
-		rng:          rand.New(rand.NewSource(42)),
+		mutationRate: 1.0,                          // 100% mutation for testing
+		rng:          rand.New(rand.NewSource(42)), // #nosec G404 Deterministic random for reproducible tests
 	}
 
 	original := ParameterSet{"period": 15}
@@ -504,7 +504,7 @@ func TestGeneticOptimizer_SelectParent(t *testing.T) {
 	}
 
 	optimizer := &GeneticOptimizer{
-		rng: rand.New(rand.NewSource(42)),
+		rng: rand.New(rand.NewSource(42)), // #nosec G404 Deterministic random for reproducible tests
 	}
 
 	// Run tournament selection multiple times

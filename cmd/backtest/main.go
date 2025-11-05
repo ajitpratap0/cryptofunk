@@ -1,5 +1,7 @@
 // Backtest Runner CLI
 // Runs trading strategies on historical data to evaluate performance
+//
+//nolint:goconst // Data source types are configuration strings
 package main
 
 import (
@@ -42,9 +44,10 @@ var (
 	maxPositions   = flag.Int("max-positions", 3, "Maximum concurrent positions")
 
 	// Optimization
-	optimize       = flag.Bool("optimize", false, "Run parameter optimization")
-	optimizeMethod = flag.String("optimize-method", "grid", "Optimization method (grid, walk-forward, genetic)")
-	optimizeMetric = flag.String("optimize-metric", "sharpe", "Optimization metric (sharpe, sortino, calmar, return, profit-factor)")
+	optimize = flag.Bool("optimize", false, "Run parameter optimization")
+	// TODO: Will be used in Phase 11 for advanced strategy optimization
+	// optimizeMethod = flag.String("optimize-method", "grid", "Optimization method (grid, walk-forward, genetic)")
+	// optimizeMetric = flag.String("optimize-metric", "sharpe", "Optimization metric (sharpe, sortino, calmar, return, profit-factor)")
 
 	// Output
 	outputFile = flag.String("output", "", "Output file for text report (optional)")
@@ -202,7 +205,7 @@ func runBacktest(ctx context.Context, start, end time.Time, symbolList []string)
 
 	// Write text report to file if specified
 	if *outputFile != "" {
-		if err := os.WriteFile(*outputFile, []byte(report), 0644); err != nil {
+		if err := os.WriteFile(*outputFile, []byte(report), 0600); err != nil {
 			log.Warn().Err(err).Str("file", *outputFile).Msg("Failed to write output file")
 		} else {
 			log.Info().Str("file", *outputFile).Msg("Text report written to file")

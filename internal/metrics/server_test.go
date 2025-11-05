@@ -65,9 +65,12 @@ func TestHealthEndpoint(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test health endpoint
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://localhost:%d/health", port), nil)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }() // Test cleanup
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
@@ -110,9 +113,12 @@ func TestMetricsEndpoint(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test metrics endpoint
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://localhost:%d/metrics", port), nil)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }() // Test cleanup
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain; version=0.0.4; charset=utf-8")
@@ -148,9 +154,12 @@ func TestServerShutdown(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify server is running
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://localhost:%d/health", port), nil)
 	require.NoError(t, err)
-	resp.Body.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close() // Test cleanup
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Shutdown server
@@ -161,7 +170,12 @@ func TestServerShutdown(t *testing.T) {
 
 	// Verify server is stopped
 	time.Sleep(100 * time.Millisecond)
-	_, err = http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+	req2, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://localhost:%d/health", port), nil)
+	require.NoError(t, err)
+	resp2, err := client.Do(req2)
+	if resp2 != nil {
+		_ = resp2.Body.Close() // Test cleanup
+	}
 	assert.Error(t, err) // Should fail because server is stopped
 }
 
@@ -196,14 +210,19 @@ func TestMultipleServerInstances(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test both health endpoints
-	resp1, err := http.Get("http://localhost:9993/health")
+	req1, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:9993/health", nil)
 	require.NoError(t, err)
-	defer resp1.Body.Close()
+	client := &http.Client{}
+	resp1, err := client.Do(req1)
+	require.NoError(t, err)
+	defer func() { _ = resp1.Body.Close() }() // Test cleanup
 	assert.Equal(t, http.StatusOK, resp1.StatusCode)
 
-	resp2, err := http.Get("http://localhost:9992/health")
+	req2, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost:9992/health", nil)
 	require.NoError(t, err)
-	defer resp2.Body.Close()
+	resp2, err := client.Do(req2)
+	require.NoError(t, err)
+	defer func() { _ = resp2.Body.Close() }() // Test cleanup
 	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 
 	// Cleanup both servers
@@ -235,13 +254,16 @@ func TestRegisterHandler(t *testing.T) {
 	server.RegisterHandler("/custom", func(w http.ResponseWriter, r *http.Request) {
 		customHandlerCalled = true
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("custom handler response"))
+		_, _ = w.Write([]byte("custom handler response")) // Test mock response
 	})
 
 	// Test custom endpoint
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/custom", port))
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://localhost:%d/custom", port), nil)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }() // Test cleanup
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, customHandlerCalled)

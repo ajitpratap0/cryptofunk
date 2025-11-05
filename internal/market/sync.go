@@ -123,8 +123,8 @@ func (s *SyncService) syncSymbol(ctx context.Context, symbol string) error {
 		return fmt.Errorf("failed to fetch market chart: %w", err)
 	}
 
-	// Convert to candlesticks
-	candlesticks := chart.ToCandlesticks()
+	// Convert to candlesticks (15-minute intervals)
+	candlesticks := chart.ToCandlesticks(15)
 	if len(candlesticks) == 0 {
 		log.Debug().
 			Str("symbol", symbol).
@@ -200,7 +200,7 @@ func (s *SyncService) storeCandlesticks(ctx context.Context, symbol string, cand
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // Rollback on error - commit overrides if successful
 
 	// Prepare insert statement with ON CONFLICT to handle duplicates
 	stmt, err := tx.PrepareContext(ctx, `
@@ -219,7 +219,7 @@ func (s *SyncService) storeCandlesticks(ctx context.Context, symbol string, cand
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }() // Statement cleanup
 
 	// Insert/update each candlestick
 	for _, candle := range candlesticks {
@@ -263,7 +263,7 @@ func (s *SyncService) GetCandlesticks(ctx context.Context, symbol string, start,
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Rows cleanup
 
 	var candlesticks []Candlestick
 	for rows.Next() {

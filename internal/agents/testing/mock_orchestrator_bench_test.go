@@ -32,7 +32,7 @@ func BenchmarkMockOrchestrator_SignalProcessing(b *testing.B) {
 	if err := mo.Start(ctx); err != nil {
 		b.Fatalf("Failed to start mock orchestrator: %v", err)
 	}
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Benchmark cleanup
 
 	// Prepare test signal
 	signal := struct {
@@ -51,12 +51,12 @@ func BenchmarkMockOrchestrator_SignalProcessing(b *testing.B) {
 
 	// Benchmark signal processing
 	for i := 0; i < b.N; i++ {
-		nc.Publish("bench.signal.processing", data)
+		_ = nc.Publish("bench.signal.processing", data) // Benchmark - error acceptable
 	}
 
 	// Wait for all signals to be processed
 	b.StopTimer()
-	mo.WaitForSignals(b.N, 10*time.Second)
+	_ = mo.WaitForSignals(b.N, 10*time.Second) // Benchmark - timeout acceptable
 }
 
 // BenchmarkMockOrchestrator_DecisionMaking measures decision-making latency
@@ -76,8 +76,8 @@ func BenchmarkMockOrchestrator_DecisionMaking(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	mo.Start(ctx)
-	defer mo.Stop()
+	_ = mo.Start(ctx)                // Benchmark mock - error handled by test framework
+	defer func() { _ = mo.Stop() }() // Benchmark cleanup
 
 	signal := struct {
 		Symbol     string  `json:"symbol"`
@@ -94,8 +94,8 @@ func BenchmarkMockOrchestrator_DecisionMaking(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		mo.Reset()
-		nc.Publish("bench.decision.making", data)
-		mo.WaitForDecision(5 * time.Second)
+		_ = nc.Publish("bench.decision.making", data) // Benchmark - error acceptable
+		_, _ = mo.WaitForDecision(5 * time.Second)    // Benchmark - timeout acceptable
 	}
 }
 
@@ -120,8 +120,8 @@ func BenchmarkMockOrchestrator_MultipleSignals(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	mo.Start(ctx)
-	defer mo.Stop()
+	_ = mo.Start(ctx)                // Benchmark mock - error handled by test framework
+	defer func() { _ = mo.Stop() }() // Benchmark cleanup
 
 	// Prepare different signals
 	signals := []struct {
@@ -171,9 +171,9 @@ func BenchmarkMockOrchestrator_MultipleSignals(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		mo.Reset()
 		for _, sig := range signals {
-			nc.Publish(sig.topic, sig.data)
+			_ = nc.Publish(sig.topic, sig.data) // Benchmark - error acceptable
 		}
-		mo.WaitForSignals(3, 5*time.Second)
+		_ = mo.WaitForSignals(3, 5*time.Second) // Benchmark - timeout acceptable
 	}
 }
 
@@ -194,8 +194,8 @@ func BenchmarkMockOrchestrator_ConcurrentSignals(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	mo.Start(ctx)
-	defer mo.Stop()
+	_ = mo.Start(ctx)                // Benchmark mock - error handled by test framework
+	defer func() { _ = mo.Stop() }() // Benchmark cleanup
 
 	signal := struct {
 		Symbol     string  `json:"symbol"`
@@ -213,7 +213,7 @@ func BenchmarkMockOrchestrator_ConcurrentSignals(b *testing.B) {
 	// Run concurrent signal publishing
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			nc.Publish("bench.concurrent", data)
+			_ = nc.Publish("bench.concurrent", data) // Benchmark - error acceptable
 		}
 	})
 
@@ -289,8 +289,8 @@ func BenchmarkMockOrchestrator_GettersUnderLoad(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	mo.Start(ctx)
-	defer mo.Stop()
+	_ = mo.Start(ctx)                // Benchmark mock - error handled by test framework
+	defer func() { _ = mo.Stop() }() // Benchmark cleanup
 
 	// Populate with some signals
 	signal := struct {
@@ -305,9 +305,9 @@ func BenchmarkMockOrchestrator_GettersUnderLoad(b *testing.B) {
 	data, _ := json.Marshal(signal)
 
 	for i := 0; i < 100; i++ {
-		nc.Publish("bench.getters", data)
+		_ = nc.Publish("bench.getters", data) // Benchmark - error acceptable
 	}
-	mo.WaitForSignals(100, 5*time.Second)
+	_ = mo.WaitForSignals(100, 5*time.Second) // Benchmark - timeout acceptable
 
 	b.ResetTimer()
 

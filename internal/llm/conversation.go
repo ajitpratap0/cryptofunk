@@ -1,3 +1,4 @@
+//nolint:goconst // Message role types are LLM API constants
 package llm
 
 import (
@@ -170,7 +171,8 @@ func (cm *ConversationMemory) GetMessagesForPrompt() []ChatMessage {
 		validMessages = append(validMessages, msg)
 	}
 
-	// Add other messages from most recent, stopping when we hit token limit
+	// Collect other messages that fit within token limit (from oldest that fit)
+	otherValidMessages := make([]ChatMessage, 0)
 	for i := len(otherMessages) - 1; i >= 0; i-- {
 		msg := otherMessages[i]
 		tokens := estimateTokens(msg.Content)
@@ -185,8 +187,13 @@ func (cm *ConversationMemory) GetMessagesForPrompt() []ChatMessage {
 		}
 
 		totalTokens += tokens
-		// Prepend to maintain chronological order
-		validMessages = append([]ChatMessage{msg}, validMessages...)
+		// Collect messages (will reverse order later)
+		otherValidMessages = append(otherValidMessages, msg)
+	}
+
+	// Reverse otherValidMessages to restore chronological order and append after system messages
+	for i := len(otherValidMessages) - 1; i >= 0; i-- {
+		validMessages = append(validMessages, otherValidMessages[i])
 	}
 
 	return validMessages

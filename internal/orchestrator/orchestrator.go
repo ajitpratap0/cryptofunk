@@ -1,4 +1,6 @@
 // Package orchestrator coordinates multiple trading agents via weighted voting and consensus
+//
+//nolint:goconst // Trading signals are domain-specific strings
 package orchestrator
 
 import (
@@ -22,6 +24,14 @@ const (
 	MaxSignalBufferSize = 10000
 	// SignalBufferEvictionRatio is the fraction of old signals to remove when buffer is full
 	SignalBufferEvictionRatio = 0.5
+	// HealthStatusHealthy represents a healthy agent status
+	HealthStatusHealthy = "HEALTHY"
+	// HealthStatusDegraded represents a degraded agent status
+	HealthStatusDegraded = "DEGRADED"
+	// HealthStatusUnhealthy represents an unhealthy agent status
+	HealthStatusUnhealthy = "UNHEALTHY"
+	// HealthStatusUnknown represents an unknown agent status
+	HealthStatusUnknown = "UNKNOWN"
 )
 
 // AgentSignal represents a signal received from an agent
@@ -393,7 +403,7 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 			Weight:          o.getDefaultWeight(agentType),
 			LastSignal:      signal.Timestamp,
 			SignalCount:     1,
-			HealthStatus:    "UNKNOWN",
+			HealthStatus:    HealthStatusUnknown,
 			PerformanceData: make(map[string]interface{}),
 		}
 		o.log.Info().
@@ -461,7 +471,9 @@ func (o *Orchestrator) makeDecision(ctx context.Context) error {
 		})
 
 		// Publish all decisions including HOLD (needed for monitoring and testing)
-		o.publishDecision(decision)
+		if err := o.publishDecision(decision); err != nil {
+			o.log.Error().Err(err).Str("symbol", decision.Symbol).Msg("Failed to publish decision")
+		}
 		o.metrics.DecisionsTotal.Inc()
 		o.metrics.ConsensusScore.Observe(decision.Consensus)
 
@@ -642,12 +654,12 @@ func (o *Orchestrator) checkAgentHealth() {
 		previousStatus := session.HealthStatus
 
 		if timeSinceHeartbeat > 5*time.Minute {
-			session.HealthStatus = "UNHEALTHY"
+			session.HealthStatus = HealthStatusUnhealthy
 			session.Enabled = false
 		} else if timeSinceSignal > 10*time.Minute {
-			session.HealthStatus = "DEGRADED"
+			session.HealthStatus = HealthStatusDegraded
 		} else {
-			session.HealthStatus = "HEALTHY"
+			session.HealthStatus = HealthStatusHealthy
 			healthyCount++
 		}
 
@@ -673,7 +685,7 @@ func (o *Orchestrator) updateActiveAgentsMetric() {
 
 	activeCount := 0
 	for _, session := range o.agents {
-		if session.Enabled && session.HealthStatus == "HEALTHY" {
+		if session.Enabled && session.HealthStatus == HealthStatusHealthy {
 			activeCount++
 		}
 	}
@@ -686,7 +698,7 @@ func (o *Orchestrator) updateActiveAgentsMetric() {
 func (o *Orchestrator) updateActiveAgentsMetricLocked() {
 	activeCount := 0
 	for _, session := range o.agents {
-		if session.Enabled && session.HealthStatus == "HEALTHY" {
+		if session.Enabled && session.HealthStatus == HealthStatusHealthy {
 			activeCount++
 		}
 	}
@@ -789,21 +801,25 @@ func (o *Orchestrator) handlePauseRequest(w http.ResponseWriter, r *http.Request
 	if err := o.Pause(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"error":   err.Error(),
 			"success": false,
-		})
+		}); err != nil {
+			o.log.Error().Err(err).Msg("Failed to encode pause error response")
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":   "Trading paused successfully",
 		"paused":    true,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"success":   true,
-	})
+	}); err != nil {
+		o.log.Error().Err(err).Msg("Failed to encode pause success response")
+	}
 }
 
 func (o *Orchestrator) handleResumeRequest(w http.ResponseWriter, r *http.Request) {
@@ -815,21 +831,25 @@ func (o *Orchestrator) handleResumeRequest(w http.ResponseWriter, r *http.Reques
 	if err := o.Resume(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"error":   err.Error(),
 			"success": false,
-		})
+		}); err != nil {
+			o.log.Error().Err(err).Msg("Failed to encode resume error response")
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":   "Trading resumed successfully",
 		"paused":    false,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"success":   true,
-	})
+	}); err != nil {
+		o.log.Error().Err(err).Msg("Failed to encode resume success response")
+	}
 }
 
 func (o *Orchestrator) handleStatusRequest(w http.ResponseWriter, r *http.Request) {
@@ -848,11 +868,13 @@ func (o *Orchestrator) handleStatusRequest(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"paused":        isPaused,
 		"active_agents": activeAgents,
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
-	})
+	}); err != nil {
+		o.log.Error().Err(err).Msg("Failed to encode status response")
+	}
 }
 
 // Shutdown gracefully stops the orchestrator

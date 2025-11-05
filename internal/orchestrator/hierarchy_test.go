@@ -690,10 +690,10 @@ func setupHierarchyTest(t *testing.T) (*Blackboard, *MessageBus, *HotSwapCoordin
 
 func cleanupHierarchy(blackboard *Blackboard, messageBus *MessageBus) {
 	if blackboard != nil {
-		blackboard.Close()
+		_ = blackboard.Close() // Test cleanup
 	}
 	if messageBus != nil {
-		messageBus.Close()
+		_ = messageBus.Close() // Test cleanup
 	}
 }
 

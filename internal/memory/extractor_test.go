@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
@@ -433,4 +434,309 @@ func TestMockKnowledgeExtractor(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 10, count)
+}
+
+// TestNewKnowledgeExtractor tests extractor creation with defaults
+func TestNewKnowledgeExtractor(t *testing.T) {
+	config := ExtractionConfig{
+		MinConfidence:  0.0, // Should default to 0.5
+		MinOccurrences: 0,   // Should default to 3
+		EmbeddingFunc:  mockEmbeddingFunc,
+	}
+
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	assert.NotNil(t, extractor)
+	assert.Equal(t, 0.5, extractor.minConfidence)
+	assert.Equal(t, 3, extractor.minOccurrences)
+	assert.NotNil(t, extractor.embeddingFunc)
+}
+
+// TestNewKnowledgeExtractor_CustomConfig tests extractor with custom config
+func TestNewKnowledgeExtractor_CustomConfig(t *testing.T) {
+	config := ExtractionConfig{
+		MinConfidence:  0.7,
+		MinOccurrences: 5,
+		EmbeddingFunc:  mockEmbeddingFunc,
+	}
+
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	assert.NotNil(t, extractor)
+	assert.Equal(t, 0.7, extractor.minConfidence)
+	assert.Equal(t, 5, extractor.minOccurrences)
+}
+
+// TestCreateKnowledgeFromExperience tests experience knowledge creation
+func TestCreateKnowledgeFromExperience(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	exp := &Experience{
+		Description: "Stop losses at 2% work better than 5% for BTC",
+		SuccessRate: 0.85,
+		AvgPnL:      125.50,
+		Occurrences: 20,
+		Symbol:      "BTC/USDT",
+	}
+
+	knowledge, err := extractor.createKnowledgeFromExperience(ctx, exp, "trend-agent")
+
+	require.NoError(t, err)
+	assert.NotNil(t, knowledge)
+	assert.Equal(t, KnowledgeExperience, knowledge.Type)
+	assert.Equal(t, exp.Description, knowledge.Content)
+	assert.Equal(t, exp.SuccessRate, knowledge.Confidence)
+	assert.Equal(t, 0.7, knowledge.Importance)
+	assert.Equal(t, "trading_results", knowledge.Source)
+	assert.Equal(t, "trend-agent", knowledge.AgentName)
+	assert.NotEmpty(t, knowledge.Embedding)
+}
+
+// TestCreateKnowledgeFromFact tests fact knowledge creation
+func TestCreateKnowledgeFromFact(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	fact := &Fact{
+		Statement:  "BTC volatility increases by 20% during US trading hours",
+		Confidence: 0.9,
+		Source:     "market_data_analysis",
+	}
+
+	knowledge, err := extractor.createKnowledgeFromFact(ctx, fact, "BTC/USDT")
+
+	require.NoError(t, err)
+	assert.NotNil(t, knowledge)
+	assert.Equal(t, KnowledgeFact, knowledge.Type)
+	assert.Equal(t, fact.Statement, knowledge.Content)
+	assert.Equal(t, fact.Confidence, knowledge.Confidence)
+	assert.Equal(t, 0.6, knowledge.Importance)
+	assert.Equal(t, "market_data_analysis", knowledge.Source)
+	assert.NotNil(t, knowledge.Symbol)
+	assert.Equal(t, "BTC/USDT", *knowledge.Symbol)
+	assert.NotEmpty(t, knowledge.Embedding)
+}
+
+// TestCreateKnowledgeFromExperience_NoEmbeddingFunc tests without embedding function
+func TestCreateKnowledgeFromExperience_NoEmbeddingFunc(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = nil // No embedding function
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	exp := &Experience{
+		Description: "Test experience",
+		SuccessRate: 0.8,
+		AvgPnL:      50.0,
+		Occurrences: 10,
+		Symbol:      "ETH/USDT",
+	}
+
+	knowledge, err := extractor.createKnowledgeFromExperience(ctx, exp, "test-agent")
+
+	require.NoError(t, err)
+	assert.NotNil(t, knowledge)
+	assert.Nil(t, knowledge.Embedding) // Should be nil when no embedding func
+}
+
+// TestCreateKnowledgeFromFact_NoEmbeddingFunc tests fact creation without embedding
+func TestCreateKnowledgeFromFact_NoEmbeddingFunc(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = nil
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	fact := &Fact{
+		Statement:  "Test fact",
+		Confidence: 0.85,
+		Source:     "test",
+	}
+
+	knowledge, err := extractor.createKnowledgeFromFact(ctx, fact, "BTC/USDT")
+
+	require.NoError(t, err)
+	assert.NotNil(t, knowledge)
+	assert.Nil(t, knowledge.Embedding)
+}
+
+// TestExtractExperiences tests experience extraction (currently placeholder)
+func TestExtractExperiences(t *testing.T) {
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	// Currently returns empty slice
+	experiences := extractor.extractExperiences(nil)
+
+	assert.NotNil(t, experiences)
+	assert.Empty(t, experiences) // Placeholder implementation
+}
+
+// TestAnalyzeVolatilityPatterns tests volatility pattern analysis (placeholder)
+func TestAnalyzeVolatilityPatterns(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	facts := extractor.analyzeVolatilityPatterns(ctx, "BTC/USDT", time.Now())
+
+	assert.NotNil(t, facts)
+	assert.Empty(t, facts) // Placeholder implementation
+}
+
+// TestAnalyzeVolumePatterns tests volume pattern analysis (placeholder)
+func TestAnalyzeVolumePatterns(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	facts := extractor.analyzeVolumePatterns(ctx, "ETH/USDT", time.Now())
+
+	assert.NotNil(t, facts)
+	assert.Empty(t, facts) // Placeholder implementation
+}
+
+// TestFormatIndicatorCondition_EdgeCases tests edge cases
+func TestFormatIndicatorCondition_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		indicator string
+		value     interface{}
+		expected  string
+	}{
+		{
+			name:      "RSI above 70",
+			indicator: "rsi",
+			value:     float64(75),
+			expected:  "RSI exceeds 70 (overbought)",
+		},
+		{
+			name:      "RSI below 30",
+			indicator: "rsi",
+			value:     float64(25),
+			expected:  "RSI below 30 (oversold)",
+		},
+		{
+			name:      "RSI middle range",
+			indicator: "rsi",
+			value:     float64(50),
+			expected:  "rsi is 50.00",
+		},
+		{
+			name:      "MACD positive",
+			indicator: "macd",
+			value:     float64(0.5),
+			expected:  "MACD is positive (bullish)",
+		},
+		{
+			name:      "MACD negative",
+			indicator: "macd",
+			value:     float64(-0.5),
+			expected:  "MACD is negative (bearish)",
+		},
+		{
+			name:      "MACD exactly 0",
+			indicator: "macd",
+			value:     float64(0),
+			expected:  "macd is 0.00",
+		},
+		{
+			name:      "Unknown indicator",
+			indicator: "unknown",
+			value:     float64(42.5),
+			expected:  "unknown is 42.50",
+		},
+		{
+			name:      "Nil value",
+			indicator: "test",
+			value:     nil,
+			expected:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatIndicatorCondition(tt.indicator, tt.value)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestExtractConditions_InvalidJSON tests handling of invalid JSON
+func TestExtractConditions_InvalidJSON(t *testing.T) {
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	decision := &db.LLMDecision{
+		Context: []byte(`{invalid json`),
+	}
+
+	conditions := extractor.extractConditions(decision)
+
+	// Should return empty slice (not nil) on parse error
+	assert.Empty(t, conditions)
+}
+
+// TestCreateKnowledgeFromPattern_MultipleSymbols tests pattern with multiple symbols
+func TestCreateKnowledgeFromPattern_MultipleSymbols(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	pattern := &PatternCandidate{
+		Condition:    "MACD is positive (bullish)",
+		Outcome:      "typically leads to profitable trades",
+		Occurrences:  15,
+		SuccessCount: 12,
+		FailureCount: 3,
+		AvgPnL:       67.25,
+		Symbols:      []string{"BTC/USDT", "ETH/USDT", "SOL/USDT"},
+		AgentNames:   []string{"technical-agent"},
+		DecisionIDs:  []uuid.UUID{uuid.New(), uuid.New()},
+	}
+
+	knowledge, err := extractor.createKnowledgeFromPattern(ctx, pattern, "technical-agent")
+
+	require.NoError(t, err)
+	assert.NotNil(t, knowledge)
+	assert.Nil(t, knowledge.Symbol) // Should be nil for multi-symbol patterns
+	assert.Contains(t, knowledge.Content, "MACD is positive")
+	assert.Contains(t, knowledge.Content, "15 times")
+	assert.Contains(t, knowledge.Content, "80.0%") // 12/15 success rate
+}
+
+// TestCreateKnowledgeFromPattern_SingleSymbol tests pattern with single symbol
+func TestCreateKnowledgeFromPattern_SingleSymbol(t *testing.T) {
+	ctx := context.Background()
+	config := DefaultExtractionConfig()
+	config.EmbeddingFunc = mockEmbeddingFunc
+	extractor := NewKnowledgeExtractor(nil, config)
+
+	pattern := &PatternCandidate{
+		Condition:    "RSI below 30 (oversold)",
+		Outcome:      "typically leads to profitable trades",
+		Occurrences:  8,
+		SuccessCount: 7,
+		FailureCount: 1,
+		AvgPnL:       92.50,
+		Symbols:      []string{"BTC/USDT"},
+		AgentNames:   []string{"technical-agent"},
+		DecisionIDs:  []uuid.UUID{uuid.New()},
+	}
+
+	knowledge, err := extractor.createKnowledgeFromPattern(ctx, pattern, "technical-agent")
+
+	require.NoError(t, err)
+	assert.NotNil(t, knowledge)
+	assert.NotNil(t, knowledge.Symbol)
+	assert.Equal(t, "BTC/USDT", *knowledge.Symbol)
 }

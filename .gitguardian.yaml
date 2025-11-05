@@ -1,0 +1,53 @@
+# GitGuardian configuration - v2 format
+# Documentation: https://docs.gitguardian.com/ggshield-docs/configuration
+version: 2
+
+# Exit with zero status even when incidents are detected (optional)
+exit_zero: false
+
+# Secret detection configuration
+secret:
+  # Paths to exclude from scanning (glob patterns)
+  ignored_paths:
+    - "**/*_test.go"           # All Go test files
+    - "**/testdata/**"         # Test data directories
+    - "**/*.test"              # Test binaries
+    - "configs/examples/**"    # Example configurations
+    - ".github/workflows/**"   # GitHub Actions workflows
+    - "docs/**"                # Documentation files
+    - "**/*.md"                # All Markdown files
+    - "scripts/**"             # Utility scripts
+    - "**/.env.example"        # Example environment files
+    - "**/deployments/.env.example"  # Deployment example files
+
+  # Specific secrets to ignore (test credentials only)
+  ignored_matches:
+    - name: Test database credentials
+      match: "postgres:postgres"
+
+    - name: Test password in secrets validation tests
+      match: "MyStr0ng_P@ssw0rd!"
+
+    - name: Test Redis password
+      match: "RedisStr0ng_P@ss!"
+
+    - name: Placeholder Anthropic API key
+      match: "sk-ant-api03-your-anthropic-api-key"
+
+    - name: Placeholder OpenAI API key
+      match: "sk-proj-your-openai-api-key"
+
+    - name: Test API key placeholder
+      match: "test_api_key"
+
+    - name: Test secret placeholder
+      match: "test_secret"
+
+    - name: Binance test API keys (paper trading examples)
+      match: "your_binance_api_key"
+
+    - name: Binance test secrets (paper trading examples)
+      match: "your_binance_api_secret"
+
+  # Hide secrets in output for security
+  show_secrets: false

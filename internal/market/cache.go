@@ -220,7 +220,7 @@ func (c *CachedCoinGeckoClient) Health(ctx context.Context) error {
 
 	// Check Redis health
 	if err := c.redis.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("Redis unhealthy: %w", err)
+		return fmt.Errorf("redis unhealthy: %w", err)
 	}
 
 	return nil

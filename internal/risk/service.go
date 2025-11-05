@@ -338,9 +338,9 @@ func (s *Service) CalculateDrawdown(args map[string]interface{}) (interface{}, e
 	}
 
 	// Track peak, current drawdown, and maximum drawdown
-	var peak float64 = equityCurve[0]
-	var maxDrawdown float64 = 0
-	var currentDrawdown float64 = 0
+	peak := equityCurve[0]
+	var maxDrawdown float64
+	var currentDrawdown float64
 	var maxDrawdownStart, maxDrawdownEnd int
 	var currentDrawdownStart int
 

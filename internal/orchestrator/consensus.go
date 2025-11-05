@@ -418,7 +418,8 @@ func (cm *ConsensusManager) calculateStatistics(round *ConsensusRound) *RoundSta
 	// Calculate standard deviation
 	variance := 0.0
 	for _, v := range values {
-		variance += math.Pow(v-mean, 2)
+		diff := v - mean
+		variance += diff * diff
 	}
 	stdDev := math.Sqrt(variance / float64(len(values)))
 
@@ -696,7 +697,7 @@ func (cm *ConsensusManager) StartContractNet(ctx context.Context, task *Contract
 				"task_id": task.ID.String(),
 				"reason":  "Another agent selected",
 			})
-			cm.messageBus.Send(ctx, rejectMsg)
+			_ = cm.messageBus.Send(ctx, rejectMsg) // Best effort notification
 		}
 	}
 

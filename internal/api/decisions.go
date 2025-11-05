@@ -119,7 +119,7 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 	if filter.Offset > 0 {
 		query += ` OFFSET $` + itoa(argPos)
 		args = append(args, filter.Offset)
-		argPos++
+		// argPos++ - removed: ineffectual assignment (last use)
 	}
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -211,7 +211,7 @@ func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter Decisi
 	if filter.ToDate != nil {
 		query += ` AND created_at <= $` + itoa(argPos)
 		args = append(args, *filter.ToDate)
-		argPos++
+		// argPos++ - removed: ineffectual assignment (last use)
 	}
 
 	var stats DecisionStats
@@ -278,7 +278,7 @@ func (r *DecisionRepository) getCountsByField(ctx context.Context, field string,
 	if filter.ToDate != nil {
 		query += ` AND created_at <= $` + itoa(argPos)
 		args = append(args, *filter.ToDate)
-		argPos++
+		// argPos++ - removed: ineffectual assignment (last use)
 	}
 
 	query += ` GROUP BY ` + field

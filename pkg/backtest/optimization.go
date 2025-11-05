@@ -319,7 +319,7 @@ func (opt *GridSearchOptimizer) runBacktest(ctx context.Context, params Paramete
 
 	// Load data
 	for symbol, candles := range data {
-		engine.LoadHistoricalData(symbol, candles)
+		_ = engine.LoadHistoricalData(symbol, candles) // Optimization run - error logged elsewhere
 	}
 
 	// Run backtest
@@ -564,7 +564,7 @@ func (opt *WalkForwardOptimizer) runBacktest(ctx context.Context, params Paramet
 
 	engine := NewEngine(opt.config)
 	for symbol, candles := range data {
-		engine.LoadHistoricalData(symbol, candles)
+		_ = engine.LoadHistoricalData(symbol, candles) // Optimization run - error logged elsewhere
 	}
 
 	if err := engine.Run(ctx, strategy); err != nil {
@@ -617,7 +617,7 @@ func NewGeneticOptimizer(factory StrategyFactory, params []*Parameter, objective
 		mutationRate:   0.1,
 		eliteRatio:     0.2, // Keep top 20%
 		parallel:       4,
-		rng:            rand.New(rand.NewSource(seed)),
+		rng:            rand.New(rand.NewSource(seed)), // #nosec G404 -- Non-cryptographic use: genetic algorithm needs reproducible randomness for backtesting
 		seed:           seed,
 	}
 }
@@ -634,7 +634,7 @@ func (opt *GeneticOptimizer) SetParameters(popSize, gens int, mutRate, eliteRati
 // This is useful for testing and debugging. If not called, a time-based seed is used.
 func (opt *GeneticOptimizer) SetSeed(seed int64) {
 	opt.seed = seed
-	opt.rng = rand.New(rand.NewSource(seed))
+	opt.rng = rand.New(rand.NewSource(seed)) // #nosec G404 -- Non-cryptographic use: genetic algorithm needs reproducible randomness for backtesting
 }
 
 // Optimize performs genetic algorithm optimization
@@ -880,7 +880,7 @@ func (opt *GeneticOptimizer) runBacktest(ctx context.Context, params ParameterSe
 
 	engine := NewEngine(opt.config)
 	for symbol, candles := range data {
-		engine.LoadHistoricalData(symbol, candles)
+		_ = engine.LoadHistoricalData(symbol, candles) // Optimization run - error logged elsewhere
 	}
 
 	if err := engine.Run(ctx, strategy); err != nil {

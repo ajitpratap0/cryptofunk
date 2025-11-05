@@ -1,3 +1,4 @@
+//nolint:goconst // SQL fragments used in query building
 package memory
 
 import (

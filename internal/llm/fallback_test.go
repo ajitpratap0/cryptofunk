@@ -1,3 +1,4 @@
+//nolint:goconst // Test files use repeated strings for clarity
 package llm
 
 import (
@@ -14,7 +15,7 @@ func TestFallbackClient_SuccessOnPrimary(t *testing.T) {
 	// Create test server for primary model (succeeds)
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{"message": {"content": "Primary response"}}],
 			"usage": {"total_tokens": 100}
 		}`))
@@ -26,7 +27,7 @@ func TestFallbackClient_SuccessOnPrimary(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackCalled.Store(true)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{"message": {"content": "Fallback response"}}],
 			"usage": {"total_tokens": 100}
 		}`))
@@ -74,7 +75,7 @@ func TestFallbackClient_FallbackOnPrimaryFailure(t *testing.T) {
 	// Create test server for primary model (fails)
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": {"message": "Service unavailable"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Service unavailable"}}`)) // Test mock response
 	}))
 	defer primaryServer.Close()
 
@@ -83,7 +84,7 @@ func TestFallbackClient_FallbackOnPrimaryFailure(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackCalled.Store(true)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{"message": {"content": "Fallback response"}}],
 			"usage": {"total_tokens": 100}
 		}`))
@@ -130,19 +131,19 @@ func TestFallbackClient_AllModelsFail(t *testing.T) {
 	// Create test servers that all fail
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": {"message": "Primary unavailable"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Primary unavailable"}}`)) // Test mock response
 	}))
 	defer primaryServer.Close()
 
 	fallback1Server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": {"message": "Fallback 1 unavailable"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Fallback 1 unavailable"}}`)) // Test mock response
 	}))
 	defer fallback1Server.Close()
 
 	fallback2Server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": {"message": "Fallback 2 unavailable"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Fallback 2 unavailable"}}`))
 	}))
 	defer fallback2Server.Close()
 
@@ -178,7 +179,7 @@ func TestFallbackClient_SkipNonRetryableErrors(t *testing.T) {
 	// Primary fails with non-retryable error (400)
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": {"message": "Invalid request"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Invalid request"}}`))
 	}))
 	defer primaryServer.Close()
 
@@ -187,7 +188,7 @@ func TestFallbackClient_SkipNonRetryableErrors(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackCalled.Store(true)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{"message": {"content": "Fallback response"}}],
 			"usage": {"total_tokens": 100}
 		}`))
@@ -232,10 +233,10 @@ func TestFallbackClient_CompleteWithRetry(t *testing.T) {
 		count := callCount.Add(1)
 		if count == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error": {"message": "Rate limited"}}`))
+			_, _ = w.Write([]byte(`{"error": {"message": "Rate limited"}}`))
 		} else {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			_, _ = w.Write([]byte(`{
 				"choices": [{"message": {"content": "Success after retry"}}],
 				"usage": {"total_tokens": 100}
 			}`))
@@ -274,7 +275,7 @@ func TestFallbackClient_CompleteWithSystem(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request has system and user messages
 		var req ChatRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req) // Test mock - decode error handled by test assertions
 
 		if len(req.Messages) != 2 {
 			t.Errorf("Expected 2 messages, got %d", len(req.Messages))
@@ -287,7 +288,7 @@ func TestFallbackClient_CompleteWithSystem(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"choices": [{"message": {"content": "System response"}}],
 			"usage": {"total_tokens": 100}
 		}`))
@@ -529,7 +530,7 @@ func TestCircuitBreakerStatus(t *testing.T) {
 func TestFallbackClient_GetCircuitBreakerStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": {"message": "Unavailable"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "Unavailable"}}`))
 	}))
 	defer server.Close()
 
@@ -546,7 +547,7 @@ func TestFallbackClient_GetCircuitBreakerStatus(t *testing.T) {
 	})
 
 	// Trigger some failures
-	fc.Complete(context.Background(), []ChatMessage{{Role: "user", Content: "Test"}})
+	_, _ = fc.Complete(context.Background(), []ChatMessage{{Role: "user", Content: "Test"}}) // Test circuit breaker - error expected
 
 	statuses := fc.GetCircuitBreakerStatus()
 
@@ -584,7 +585,7 @@ func TestFallbackClient_ResetCircuitBreaker(t *testing.T) {
 	})
 
 	// Open the circuit
-	fc.Complete(context.Background(), []ChatMessage{{Role: "user", Content: "Test"}})
+	_, _ = fc.Complete(context.Background(), []ChatMessage{{Role: "user", Content: "Test"}}) // Test circuit breaker - error expected
 
 	statuses := fc.GetCircuitBreakerStatus()
 	if statuses[0].State != CircuitOpen {

@@ -4,6 +4,7 @@
 
 **Multi-Agent Trading System Orchestrated by Model Context Protocol (MCP)**
 
+[![CI](https://github.com/ajitpratap0/cryptofunk/workflows/CI/badge.svg)](https://github.com/ajitpratap0/cryptofunk/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![MCP](https://img.shields.io/badge/MCP-Official%20SDK-7C3AED?style=flat)](https://github.com/modelcontextprotocol/go-sdk)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)

@@ -282,6 +282,7 @@ func (e *Engine) ExecuteSignal(signal *Signal) error {
 	// Use close price for execution
 	price := candle.Close
 
+	//nolint:goconst // Trading signals (BUY/SELL/HOLD) are domain vocabulary, not magic strings
 	switch signal.Side {
 	case "BUY":
 		return e.executeBuy(signal, price, candle.Timestamp)

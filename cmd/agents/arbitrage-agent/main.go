@@ -1,5 +1,7 @@
 // Arbitrage Agent
 // Detects and exploits price differences across multiple exchanges
+//
+//nolint:goconst // Trading signals and risk levels are domain-specific strings
 package main
 
 import (

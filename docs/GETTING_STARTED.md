@@ -660,7 +660,7 @@ func main() {
     // Create MCP server
     server := mcp.NewServer(&mcp.Implementation{
         Name:    "market-data-server",
-        Version: "0.1.0",
+        Version: "1.0.0",
     }, nil)
 
     // Add tools

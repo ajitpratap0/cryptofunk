@@ -87,3 +87,4 @@ checkpoints/
 *.pth
 
 .claude/skills/
+api

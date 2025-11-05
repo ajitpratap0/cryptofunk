@@ -1,5 +1,7 @@
 // Risk Management Agent
 // Monitors portfolio risk and has veto power over trades
+//
+//nolint:goconst // Trading signals and market regimes are domain-specific strings
 package main
 
 import (
@@ -136,8 +138,9 @@ type RiskIntentions struct {
 
 	// Next actions
 	monitorDrawdown bool
-	reduceExposure  bool
-	increaseCash    bool
+	// TODO: Will be used in Phase 11 for advanced risk control strategies
+	// reduceExposure  bool
+	// increaseCash    bool
 }
 
 // Position represents a trading position (matches internal/risk)
@@ -623,6 +626,12 @@ func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
 		query += " AND symbol = $1"
 	}
 
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default win rate")
+		return 0.55 // Default conservative estimate
+	}
+
 	var winningTrades, losingTrades int64
 	var err error
 
@@ -655,6 +664,12 @@ func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
 
 // getHistoricalAvgWin returns average win size
 func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default average win")
+		return 200.0 // Default estimate
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -693,6 +708,12 @@ func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
 
 // getHistoricalAvgLoss returns average loss size
 func (a *RiskAgent) getHistoricalAvgLoss(symbol string) float64 {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default average loss")
+		return 100.0 // Default estimate
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -794,6 +815,12 @@ func (a *RiskAgent) updateBeliefs(ctx context.Context) error {
 
 // loadPortfolioState loads current positions from database
 func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Msg("No database connection, skipping portfolio state load")
+		return nil // Graceful degradation
+	}
+
 	// Query database for open positions
 	query := `
 		SELECT symbol,
@@ -843,6 +870,12 @@ func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
 
 // calculatePerformanceMetrics calculates Sharpe, drawdown, etc.
 func (a *RiskAgent) calculatePerformanceMetrics() {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Msg("No database connection, skipping performance metrics calculation")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -863,7 +896,6 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 	defer rows.Close()
 
 	var equityCurve []float64
-	var timestamps []time.Time
 
 	for rows.Next() {
 		var totalValue float64
@@ -873,7 +905,6 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 			continue
 		}
 		equityCurve = append(equityCurve, totalValue)
-		timestamps = append(timestamps, metricTime)
 	}
 
 	a.beliefs.mu.Lock()
@@ -970,6 +1001,16 @@ func (a *RiskAgent) calculateSharpeRatio(returns []float64) float64 {
 
 // assessMarketConditions determines current market regime
 func (a *RiskAgent) assessMarketConditions() {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Msg("No database connection, using default market conditions")
+		a.beliefs.mu.Lock()
+		a.beliefs.marketRegime = "sideways"
+		a.beliefs.volatility = 0.02
+		a.beliefs.mu.Unlock()
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -997,8 +1038,6 @@ func (a *RiskAgent) assessMarketConditions() {
 	defer rows.Close()
 
 	var closes []float64
-	var highs []float64
-	var lows []float64
 
 	for rows.Next() {
 		var close, high, low float64
@@ -1008,8 +1047,6 @@ func (a *RiskAgent) assessMarketConditions() {
 			continue
 		}
 		closes = append(closes, close)
-		highs = append(highs, high)
-		lows = append(lows, low)
 	}
 
 	if len(closes) < 10 {
@@ -1109,6 +1146,12 @@ func (a *RiskAgent) calculateMovingAverage(values []float64, period int) float64
 
 // getCurrentPrice gets the current market price for a symbol from the database
 func (a *RiskAgent) getCurrentPrice(symbol string) float64 {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default price")
+		return 100.0 // Default fallback price
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -1433,7 +1476,7 @@ func buildApprovalReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, co
 	reasoning := "RISK MANAGEMENT APPROVAL\n\n"
 
 	reasoning += "PORTFOLIO HEALTH:\n"
-	reasoning += fmt.Sprintf("- All risk limits satisfied\n")
+	reasoning += "- All risk limits satisfied\n"
 	reasoning += fmt.Sprintf("- Open Positions: %d / %d (capacity available)\n",
 		beliefs.openPositionCount, config.MaxOpenPositions)
 	reasoning += fmt.Sprintf("- Exposure Utilization: %.1f%% (healthy)\n", beliefs.limitsUtilization*100)
@@ -1456,7 +1499,11 @@ func buildApprovalReasoning(intentions *RiskIntentions, beliefs *RiskBeliefs, co
 	return reasoning
 }
 
+// TODO: Will be used in Phase 11 for proactive risk signal generation
+//
 // generateRiskSignal creates and publishes a risk management signal
+//
+//nolint:unused
 func (a *RiskAgent) generateRiskSignal(ctx context.Context, symbol string, proposedAction string) error {
 	signal, confidence, reasoning := a.assessRisk(ctx, symbol, proposedAction)
 

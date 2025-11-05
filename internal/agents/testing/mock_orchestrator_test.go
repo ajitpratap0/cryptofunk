@@ -153,7 +153,7 @@ func TestMockOrchestrator_ReceiveSignal(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish a test signal
 	signal := TestTechnicalSignal{
@@ -210,7 +210,7 @@ func TestMockOrchestrator_MultipleSignals(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish technical signal
 	techSignal := TestTechnicalSignal{
@@ -279,7 +279,7 @@ func TestMockOrchestrator_DecisionMaking(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish a BUY signal
 	signal := TestTechnicalSignal{
@@ -329,7 +329,7 @@ func TestMockOrchestrator_MajorityVoting(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish 2 BUY signals and 1 SELL signal
 	buySignal1 := TestTechnicalSignal{
@@ -339,7 +339,7 @@ func TestMockOrchestrator_MajorityVoting(t *testing.T) {
 		Reasoning:  "Technical buy",
 	}
 	data1, _ := json.Marshal(buySignal1)
-	nc.Publish(topics[0], data1)
+	_ = nc.Publish(topics[0], data1) // Best effort publish in test
 
 	buySignal2 := TestOrderBookSignal{
 		Symbol:     "BTC/USDT",
@@ -348,7 +348,7 @@ func TestMockOrchestrator_MajorityVoting(t *testing.T) {
 		Reasoning:  "Orderbook buy",
 	}
 	data2, _ := json.Marshal(buySignal2)
-	nc.Publish(topics[1], data2)
+	_ = nc.Publish(topics[1], data2) // Best effort publish in test
 
 	sellSignal := TestSentimentSignal{
 		Symbol:     "BTC/USDT",
@@ -357,7 +357,7 @@ func TestMockOrchestrator_MajorityVoting(t *testing.T) {
 		Reasoning:  "Sentiment sell",
 	}
 	data3, _ := json.Marshal(sellSignal)
-	nc.Publish(topics[2], data3)
+	_ = nc.Publish(topics[2], data3) // Best effort publish in test
 
 	// Wait for decision
 	decision, err := mo.WaitForDecision(2 * time.Second)
@@ -397,7 +397,7 @@ func TestMockOrchestrator_CustomDecisionPolicy(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish a BUY signal (should be ignored by custom policy)
 	signal := TestTechnicalSignal{
@@ -407,7 +407,7 @@ func TestMockOrchestrator_CustomDecisionPolicy(t *testing.T) {
 		Reasoning:  "Strong buy",
 	}
 	data, _ := json.Marshal(signal)
-	nc.Publish(topic, data)
+	_ = nc.Publish(topic, data) // Best effort publish in test
 
 	// Wait for decision
 	decision, err := mo.WaitForDecision(2 * time.Second)
@@ -435,7 +435,7 @@ func TestMockOrchestrator_Reset(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish a signal
 	signal := TestTechnicalSignal{
@@ -445,11 +445,11 @@ func TestMockOrchestrator_Reset(t *testing.T) {
 		Reasoning:  "Test signal",
 	}
 	data, _ := json.Marshal(signal)
-	nc.Publish(topic, data)
+	_ = nc.Publish(topic, data) // Best effort publish in test
 
 	// Wait for signal and decision
-	mo.WaitForSignals(1, 2*time.Second)
-	mo.WaitForDecision(2 * time.Second)
+	_ = mo.WaitForSignals(1, 2*time.Second)    // Test wait - timeout acceptable
+	_, _ = mo.WaitForDecision(2 * time.Second) // Test wait - timeout acceptable
 
 	// Verify data exists
 	assert.NotEmpty(t, mo.GetReceivedSignals())
@@ -480,7 +480,7 @@ func TestMockOrchestrator_GettersThreadSafety(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Publish multiple signals concurrently
 	for i := 0; i < 10; i++ {
@@ -491,11 +491,13 @@ func TestMockOrchestrator_GettersThreadSafety(t *testing.T) {
 			Reasoning:  "Concurrent signal",
 		}
 		data, _ := json.Marshal(signal)
-		go nc.Publish(topic, data)
+		go func(t string, d []byte) {
+			_ = nc.Publish(t, d) // Test mock - error acceptable
+		}(topic, data)
 	}
 
 	// Wait for signals
-	mo.WaitForSignals(10, 5*time.Second)
+	_ = mo.WaitForSignals(10, 5*time.Second) // Test wait - timeout acceptable
 
 	// Concurrent reads should not panic
 	done := make(chan bool, 4)
@@ -538,7 +540,7 @@ func TestMockOrchestrator_WaitTimeout(t *testing.T) {
 	ctx := context.Background()
 	err = mo.Start(ctx)
 	require.NoError(t, err)
-	defer mo.Stop()
+	defer func() { _ = mo.Stop() }() // Test cleanup
 
 	// Wait for signals that won't arrive
 	err = mo.WaitForSignals(10, 100*time.Millisecond)

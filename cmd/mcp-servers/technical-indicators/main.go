@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -151,7 +152,7 @@ func (s *MCPServer) handleInitialize(params json.RawMessage) interface{} {
 		"protocolVersion": "2024-11-05",
 		"serverInfo": map[string]interface{}{
 			"name":    "technical-indicators",
-			"version": "1.0.0",
+			"version": config.Version,
 		},
 		"capabilities": map[string]interface{}{
 			"tools": map[string]interface{}{},

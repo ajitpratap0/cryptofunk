@@ -194,9 +194,9 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Validate configuration
-	if err := validate(&cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+	// Validate configuration using comprehensive validation
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil
@@ -294,69 +294,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("monitoring.enable_metrics", true)
 }
 
-// validate validates the configuration
-func validate(cfg *Config) error {
-	// Validate trading mode
-	if cfg.Trading.Mode != "paper" && cfg.Trading.Mode != "live" {
-		return fmt.Errorf("invalid trading mode: %s (must be 'paper' or 'live')", cfg.Trading.Mode)
-	}
-
-	// Validate symbols
-	if len(cfg.Trading.Symbols) == 0 {
-		return fmt.Errorf("at least one trading symbol must be configured")
-	}
-
-	// Validate capital
-	if cfg.Trading.InitialCapital <= 0 {
-		return fmt.Errorf("initial capital must be positive")
-	}
-
-	// Validate risk parameters
-	if cfg.Risk.MaxPositionSize <= 0 || cfg.Risk.MaxPositionSize > 1 {
-		return fmt.Errorf("max position size must be between 0 and 1")
-	}
-
-	if cfg.Risk.MinConfidence < 0 || cfg.Risk.MinConfidence > 1 {
-		return fmt.Errorf("min confidence must be between 0 and 1")
-	}
-
-	// Validate LLM config
-	if cfg.LLM.Endpoint == "" {
-		return fmt.Errorf("LLM endpoint must be configured")
-	}
-
-	// Validate production secrets - ensure no placeholder values
-	if cfg.App.Environment == "production" {
-		// List of known placeholder values
-		placeholders := []string{"changeme", "changeme_in_production", "cryptofunk_grafana"}
-
-		// Check database password
-		if cfg.Database.Password == "" {
-			return fmt.Errorf("SECURITY: database password must be set in production")
-		}
-		for _, placeholder := range placeholders {
-			if cfg.Database.Password == placeholder {
-				return fmt.Errorf("SECURITY: database password cannot be '%s' in production - change POSTGRES_PASSWORD", placeholder)
-			}
-		}
-
-		// Check exchange API secrets (if configured)
-		for name, exchange := range cfg.Exchanges {
-			if exchange.SecretKey != "" {
-				for _, placeholder := range placeholders {
-					if exchange.SecretKey == placeholder {
-						return fmt.Errorf("SECURITY: %s API secret cannot be '%s' in production - change BINANCE_API_SECRET", name, placeholder)
-					}
-				}
-			}
-		}
-
-		// Note: Add more secret validations as needed for JWT_SECRET, GRAFANA_ADMIN_PASSWORD, etc.
-		// These should be validated in their respective service startup code
-	}
-
-	return nil
-}
+// Note: Comprehensive validation is now in validation.go
+// The Config.Validate() method is called during Load()
 
 // GetDSN returns the PostgreSQL connection string
 func (c *DatabaseConfig) GetDSN() string {
