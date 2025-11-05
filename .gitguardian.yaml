@@ -1,33 +1,53 @@
-# GitGuardian configuration
-# Exclude test files and example configurations from secret scanning
-
+# GitGuardian configuration - v2 format
+# Documentation: https://docs.gitguardian.com/ggshield-docs/configuration
 version: 2
 
-# Paths to exclude from scanning
-paths-ignore:
-  - "**/*_test.go"           # All test files
-  - "**/testdata/**"          # Test data directories
-  - "**/*.test"               # Test binaries
-  - "configs/examples/**"     # Example configurations
-  - ".github/workflows/**"    # GitHub Actions (contains test database credentials)
-  - "docs/**"                 # Documentation
-  - "**/*.md"                 # Markdown files
-  - "scripts/**"              # Scripts
+# Exit with zero status even when incidents are detected (optional)
+exit_zero: false
 
-# Specific secrets to ignore (test secrets only)
-matches-ignore:
-  - name: Test database credentials
-    match: "postgres:postgres"
+# Secret detection configuration
+secret:
+  # Paths to exclude from scanning (glob patterns)
+  ignored_paths:
+    - "**/*_test.go"           # All Go test files
+    - "**/testdata/**"         # Test data directories
+    - "**/*.test"              # Test binaries
+    - "configs/examples/**"    # Example configurations
+    - ".github/workflows/**"   # GitHub Actions workflows
+    - "docs/**"                # Documentation files
+    - "**/*.md"                # All Markdown files
+    - "scripts/**"             # Utility scripts
+    - "**/.env.example"        # Example environment files
+    - "**/deployments/.env.example"  # Deployment example files
 
-  - name: Test passwords in secrets_test.go
-    match: "MyStr0ng_P@ssw0rd!"
+  # Specific secrets to ignore (test credentials only)
+  ignored_matches:
+    - name: Test database credentials
+      match: "postgres:postgres"
 
-  - name: Test Redis passwords
-    match: "RedisStr0ng_P@ss!"
+    - name: Test password in secrets validation tests
+      match: "MyStr0ng_P@ssw0rd!"
 
-  - name: Example API keys
-    match: "[a-zA-Z0-9]{20,}"
-    path: "configs/examples/**"
+    - name: Test Redis password
+      match: "RedisStr0ng_P@ss!"
 
-# Only scan for production secrets
-minimum-severity: high
+    - name: Placeholder Anthropic API key
+      match: "sk-ant-api03-your-anthropic-api-key"
+
+    - name: Placeholder OpenAI API key
+      match: "sk-proj-your-openai-api-key"
+
+    - name: Test API key placeholder
+      match: "test_api_key"
+
+    - name: Test secret placeholder
+      match: "test_secret"
+
+    - name: Binance test API keys (paper trading examples)
+      match: "your_binance_api_key"
+
+    - name: Binance test secrets (paper trading examples)
+      match: "your_binance_api_secret"
+
+  # Hide secrets in output for security
+  show_secrets: false

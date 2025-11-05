@@ -10,6 +10,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/market"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
