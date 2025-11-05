@@ -97,7 +97,11 @@ func testRedisCaching(cfg *config.Config, client *market.CoinGeckoClient) {
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.DB,
 	})
-	defer redisClient.Close()
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed to close Redis connection")
+		}
+	}()
 
 	// Test Redis connection
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -170,7 +174,11 @@ func testTimescaleDBSync(cfg *config.Config, cachedClient *market.CachedCoinGeck
 		fmt.Println("  ℹ Start PostgreSQL with: docker-compose up -d postgres")
 		return
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Error().Err(err).Msg("Failed to close database connection")
+		}
+	}()
 
 	// Test database connection
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

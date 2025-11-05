@@ -12,6 +12,7 @@ paths-ignore:
   - ".github/workflows/**"    # GitHub Actions (contains test database credentials)
   - "docs/**"                 # Documentation
   - "**/*.md"                 # Markdown files
+  - "scripts/**"              # Scripts
 
 # Specific secrets to ignore (test secrets only)
 matches-ignore:

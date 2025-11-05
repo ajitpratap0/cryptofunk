@@ -160,7 +160,7 @@ func (c *ConsoleAlerter) Send(ctx context.Context, alert Alert) error {
 	fmt.Printf("Severity: %s\n", alert.Severity)
 	fmt.Printf("Time: %s\n", alert.Timestamp.Format(time.RFC3339))
 
-	if alert.Metadata != nil && len(alert.Metadata) > 0 {
+	if len(alert.Metadata) > 0 {
 		fmt.Println("Metadata:")
 		for key, value := range alert.Metadata {
 			fmt.Printf("  - %s: %v\n", key, value)
@@ -198,54 +198,64 @@ func SetDefaultManager(manager *Manager) {
 
 // AlertOrderFailed sends an alert for order placement failure
 func AlertOrderFailed(ctx context.Context, symbol, side string, quantity float64, err error) {
-	defaultManager.SendCritical(ctx, "Order Placement Failed", fmt.Sprintf(
+	if sendErr := defaultManager.SendCritical(ctx, "Order Placement Failed", fmt.Sprintf(
 		"Failed to place %s order for %s: %v", side, symbol, err,
 	), map[string]interface{}{
 		"symbol":   symbol,
 		"side":     side,
 		"quantity": quantity,
 		"error":    err.Error(),
-	})
+	}); sendErr != nil {
+		log.Error().Err(sendErr).Msg("Failed to send order failed alert")
+	}
 }
 
 // AlertOrderCancelFailed sends an alert for order cancellation failure
 func AlertOrderCancelFailed(ctx context.Context, orderID, symbol string, err error) {
-	defaultManager.SendWarning(ctx, "Order Cancellation Failed", fmt.Sprintf(
+	if sendErr := defaultManager.SendWarning(ctx, "Order Cancellation Failed", fmt.Sprintf(
 		"Failed to cancel order %s for %s: %v", orderID, symbol, err,
 	), map[string]interface{}{
 		"order_id": orderID,
 		"symbol":   symbol,
 		"error":    err.Error(),
-	})
+	}); sendErr != nil {
+		log.Error().Err(sendErr).Msg("Failed to send order cancel failed alert")
+	}
 }
 
 // AlertConnectionError sends an alert for exchange connection issues
 func AlertConnectionError(ctx context.Context, exchange string, err error) {
-	defaultManager.SendCritical(ctx, "Exchange Connection Error", fmt.Sprintf(
+	if sendErr := defaultManager.SendCritical(ctx, "Exchange Connection Error", fmt.Sprintf(
 		"Lost connection to %s: %v", exchange, err,
 	), map[string]interface{}{
 		"exchange": exchange,
 		"error":    err.Error(),
-	})
+	}); sendErr != nil {
+		log.Error().Err(sendErr).Msg("Failed to send connection error alert")
+	}
 }
 
 // AlertPositionRisk sends an alert for position risk violations
 func AlertPositionRisk(ctx context.Context, symbol string, riskLevel float64, reason string) {
-	defaultManager.SendCritical(ctx, "Position Risk Alert", fmt.Sprintf(
+	if sendErr := defaultManager.SendCritical(ctx, "Position Risk Alert", fmt.Sprintf(
 		"High risk detected for %s position: %s (risk level: %.2f)", symbol, reason, riskLevel,
 	), map[string]interface{}{
 		"symbol":     symbol,
 		"risk_level": riskLevel,
 		"reason":     reason,
-	})
+	}); sendErr != nil {
+		log.Error().Err(sendErr).Msg("Failed to send position risk alert")
+	}
 }
 
 // AlertSystemError sends an alert for critical system errors
 func AlertSystemError(ctx context.Context, component string, err error) {
-	defaultManager.SendCritical(ctx, "System Error", fmt.Sprintf(
+	if sendErr := defaultManager.SendCritical(ctx, "System Error", fmt.Sprintf(
 		"Critical error in %s: %v", component, err,
 	), map[string]interface{}{
 		"component": component,
 		"error":     err.Error(),
-	})
+	}); sendErr != nil {
+		log.Error().Err(sendErr).Msg("Failed to send system error alert")
+	}
 }

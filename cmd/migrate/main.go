@@ -30,7 +30,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close database connection: %v\n", err)
+		}
+	}()
 
 	// Test connection
 	if err := database.Ping(); err != nil {
