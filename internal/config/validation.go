@@ -1,3 +1,4 @@
+//nolint:goconst // Configuration strings (live, production, etc.) are domain-specific values, not magic strings
 package config
 
 import (

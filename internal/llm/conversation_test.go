@@ -1,3 +1,4 @@
+//nolint:goconst // Test file with message role constants ("user", "assistant", "system") for clarity
 package llm
 
 import (
