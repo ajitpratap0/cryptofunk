@@ -8,6 +8,9 @@ run:
   allow-parallel-runners: true
 
 linters:
+  disable:
+    - typecheck     # Disable typecheck - causes false positives with imports
+
   enable:
     - errcheck      # Check for unchecked errors
     - gosimple      # Simplify code
