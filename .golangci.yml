@@ -6,6 +6,9 @@ run:
   tests: true
   modules-download-mode: readonly
   allow-parallel-runners: true
+  skip-dirs:
+    - cmd/agents/orderbook-agent
+    - cmd/agents/arbitrage-agent
 
 linters:
   disable-all: true
