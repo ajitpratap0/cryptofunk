@@ -83,45 +83,45 @@ func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrenc
 	}, nil
 
 	/*
-	// MCP tool call implementation (when session is available):
-	if c.session == nil {
-		return nil, fmt.Errorf("MCP session not connected")
-	}
+		// MCP tool call implementation (when session is available):
+		if c.session == nil {
+			return nil, fmt.Errorf("MCP session not connected")
+		}
 
-	result, err := c.session.CallTool(ctx, &mcp.CallToolRequest{
-		Name: "get_price",
-		Arguments: map[string]interface{}{
-			"ids":           symbol,
-			"vs_currencies": vsCurrency,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("MCP tool call failed: %w", err)
-	}
+		result, err := c.session.CallTool(ctx, &mcp.CallToolRequest{
+			Name: "get_price",
+			Arguments: map[string]interface{}{
+				"ids":           symbol,
+				"vs_currencies": vsCurrency,
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("MCP tool call failed: %w", err)
+		}
 
-	// Extract text content from MCP result
-	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from CoinGecko")
-	}
+		// Extract text content from MCP result
+		if len(result.Content) == 0 {
+			return nil, fmt.Errorf("empty result from CoinGecko")
+		}
 
-	textContent, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		return nil, fmt.Errorf("invalid content type from CoinGecko")
-	}
+		textContent, ok := result.Content[0].(*mcp.TextContent)
+		if !ok {
+			return nil, fmt.Errorf("invalid content type from CoinGecko")
+		}
 
-	// Parse JSON result - CoinGecko returns {symbol: {usd: price}}
-	var resultMap map[string]interface{}
-	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
-		return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
-	}
+		// Parse JSON result - CoinGecko returns {symbol: {usd: price}}
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
+			return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
+		}
 
-	// Extract price for the symbol
-	symbolData, ok := resultMap[symbol].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("symbol data not found for %s", symbol)
-	}
+		// Extract price for the symbol
+		symbolData, ok := resultMap[symbol].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("symbol data not found for %s", symbol)
+		}
 
-	priceInterface, ok := symbolData[vsCurrency]
+		priceInterface, ok := symbolData[vsCurrency]
 	*/
 }
 
@@ -173,96 +173,97 @@ func (c *CoinGeckoClient) GetMarketChart(ctx context.Context, symbol string, day
 	}, nil
 
 	/*
-	// MCP tool call implementation (when session is available):
-	if c.session == nil {
-		return nil, fmt.Errorf("MCP session not connected")
-	}
+		// MCP tool call implementation (when session is available):
+		if c.session == nil {
+			return nil, fmt.Errorf("MCP session not connected")
+		}
 
-	result, err := c.session.CallTool(ctx, &mcp.CallToolRequest{
-		Name: "get_market_chart",
-		Arguments: map[string]interface{}{
-			"id":          symbol,
-			"vs_currency": "usd",
-			"days":        days,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("MCP tool call failed: %w", err)
-	}
+		result, err := c.session.CallTool(ctx, &mcp.CallToolRequest{
+			Name: "get_market_chart",
+			Arguments: map[string]interface{}{
+				"id":          symbol,
+				"vs_currency": "usd",
+				"days":        days,
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("MCP tool call failed: %w", err)
+		}
 
-	// Extract text content from MCP result
-	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from CoinGecko")
-	}
+		// Extract text content from MCP result
+		if len(result.Content) == 0 {
+			return nil, fmt.Errorf("empty result from CoinGecko")
+		}
 
-	textContent, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		return nil, fmt.Errorf("invalid content type from CoinGecko")
-	}
+		textContent, ok := result.Content[0].(*mcp.TextContent)
+		if !ok {
+			return nil, fmt.Errorf("invalid content type from CoinGecko")
+		}
 
-	// Parse JSON result
-	// CoinGecko returns {prices: [[timestamp, price], ...], market_caps: [[timestamp, cap], ...], total_volumes: [[timestamp, volume], ...]}
-	var resultMap map[string]interface{}
-	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
-		return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
-	}
+		// Parse JSON result
+		// CoinGecko returns {prices: [[timestamp, price], ...], market_caps: [[timestamp, cap], ...], total_volumes: [[timestamp, volume], ...]}
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
+			return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
+		}
 
-	chart := &MarketChart{
-		Prices:       make([]PricePoint, 0),
-		MarketCaps:   make([]PricePoint, 0),
-		TotalVolumes: make([]PricePoint, 0),
-	}
+		chart := &MarketChart{
+			Prices:       make([]PricePoint, 0),
+			MarketCaps:   make([]PricePoint, 0),
+			TotalVolumes: make([]PricePoint, 0),
+		}
 
-	// Parse prices array
-	if pricesRaw, ok := resultMap["prices"].([]interface{}); ok {
-		for _, p := range pricesRaw {
-			if point, ok := p.([]interface{}); ok && len(point) >= 2 {
-				timestamp := parseTimestamp(point[0])
-				value := parseFloat(point[1])
-				chart.Prices = append(chart.Prices, PricePoint{
-					Timestamp: timestamp,
-					Value:     value,
-				})
+		// Parse prices array
+		if pricesRaw, ok := resultMap["prices"].([]interface{}); ok {
+			for _, p := range pricesRaw {
+				if point, ok := p.([]interface{}); ok && len(point) >= 2 {
+					timestamp := parseTimestamp(point[0])
+					value := parseFloat(point[1])
+					chart.Prices = append(chart.Prices, PricePoint{
+						Timestamp: timestamp,
+						Value:     value,
+					})
+				}
 			}
 		}
-	}
 
-	// Parse market_caps array
-	if marketCapsRaw, ok := resultMap["market_caps"].([]interface{}); ok {
-		for _, m := range marketCapsRaw {
-			if point, ok := m.([]interface{}); ok && len(point) >= 2 {
-				timestamp := parseTimestamp(point[0])
-				value := parseFloat(point[1])
-				chart.MarketCaps = append(chart.MarketCaps, PricePoint{
-					Timestamp: timestamp,
-					Value:     value,
-				})
+		// Parse market_caps array
+		if marketCapsRaw, ok := resultMap["market_caps"].([]interface{}); ok {
+			for _, m := range marketCapsRaw {
+				if point, ok := m.([]interface{}); ok && len(point) >= 2 {
+					timestamp := parseTimestamp(point[0])
+					value := parseFloat(point[1])
+					chart.MarketCaps = append(chart.MarketCaps, PricePoint{
+						Timestamp: timestamp,
+						Value:     value,
+					})
+				}
 			}
 		}
-	}
 
-	// Parse total_volumes array
-	if volumesRaw, ok := resultMap["total_volumes"].([]interface{}); ok {
-		for _, v := range volumesRaw {
-			if point, ok := v.([]interface{}); ok && len(point) >= 2 {
-				timestamp := parseTimestamp(point[0])
-				value := parseFloat(point[1])
-				chart.TotalVolumes = append(chart.TotalVolumes, PricePoint{
-					Timestamp: timestamp,
-					Value:     value,
-				})
+		// Parse total_volumes array
+		if volumesRaw, ok := resultMap["total_volumes"].([]interface{}); ok {
+			for _, v := range volumesRaw {
+				if point, ok := v.([]interface{}); ok && len(point) >= 2 {
+					timestamp := parseTimestamp(point[0])
+					value := parseFloat(point[1])
+					chart.TotalVolumes = append(chart.TotalVolumes, PricePoint{
+						Timestamp: timestamp,
+						Value:     value,
+					})
+				}
 			}
 		}
-	}
 
-	log.Debug().
-		Str("symbol", symbol).
-		Int("price_points", len(chart.Prices)).
-		Int("market_cap_points", len(chart.MarketCaps)).
-		Int("volume_points", len(chart.TotalVolumes)).
-		Msg("Market chart fetched successfully")
+		log.Debug().
+			Str("symbol", symbol).
+			Int("price_points", len(chart.Prices)).
+			Int("market_cap_points", len(chart.MarketCaps)).
+			Int("volume_points", len(chart.TotalVolumes)).
+			Msg("Market chart fetched successfully")
 
-	return chart, nil
+		return chart, nil
+	*/
 }
 
 // CoinInfo represents detailed coin information
@@ -281,62 +282,16 @@ func (c *CoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*Coin
 		Str("coin_id", coinID).
 		Msg("Fetching coin info from CoinGecko MCP")
 
-	// Call get_coin_info tool via MCP
-	result, err := c.client.CallTool(ctx, &mcp.CallToolParams{
-		Name: "get_coin_info",
-		Arguments: map[string]interface{}{
-			"id": coinID,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("MCP tool call failed: %w", err)
-	}
-
-	// Extract text content from MCP result
-	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from CoinGecko")
-	}
-
-	textContent, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		return nil, fmt.Errorf("invalid content type from CoinGecko")
-	}
-
-	// Parse JSON result
-	var resultMap map[string]interface{}
-	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
-		return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
-	}
-
-	coinInfo := &CoinInfo{
+	// TODO: Use MCP session when HTTP transport is available
+	// For now, return mock data
+	return &CoinInfo{
 		ID:          coinID,
-		Symbol:      getString(resultMap, "symbol"),
-		Name:        getString(resultMap, "name"),
-		Description: getString(resultMap, "description"),
-		Links:       make(map[string]string),
-		MarketData:  make(map[string]interface{}),
-	}
-
-	// Extract links if present
-	if linksRaw, ok := resultMap["links"].(map[string]interface{}); ok {
-		for k, v := range linksRaw {
-			if str, ok := v.(string); ok {
-				coinInfo.Links[k] = str
-			}
-		}
-	}
-
-	// Extract market data if present
-	if marketDataRaw, ok := resultMap["market_data"].(map[string]interface{}); ok {
-		coinInfo.MarketData = marketDataRaw
-	}
-
-	log.Debug().
-		Str("coin_id", coinID).
-		Str("name", coinInfo.Name).
-		Msg("Coin info fetched successfully")
-
-	return coinInfo, nil
+		Symbol:      coinID,
+		Name:        coinID,
+		Description: fmt.Sprintf("Mock information for %s", coinID),
+		Links:       map[string]string{"homepage": "https://example.com"},
+		MarketData:  map[string]interface{}{"market_cap": 1000000.0},
+	}, nil
 }
 
 // ToCandlesticks converts MarketChart data to OHLCV candlesticks

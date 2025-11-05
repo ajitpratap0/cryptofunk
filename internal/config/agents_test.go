@@ -50,10 +50,10 @@ func TestAnalysisAgentConfig(t *testing.T) {
 	assert.Equal(t, "orderbook-agent", orderbookAgent.Name)
 	assert.Equal(t, "10s", orderbookAgent.StepInterval)
 
-	// Test sentiment agent (should be disabled)
+	// Test sentiment agent (now enabled as Phase 3.4 is complete)
 	sentimentAgent, ok := cfg.AnalysisAgents["sentiment"]
 	require.True(t, ok)
-	assert.False(t, sentimentAgent.Enabled)
+	assert.True(t, sentimentAgent.Enabled)
 	assert.Equal(t, "sentiment-agent", sentimentAgent.Name)
 	assert.Equal(t, "5m", sentimentAgent.StepInterval)
 }
@@ -62,19 +62,19 @@ func TestStrategyAgentConfig(t *testing.T) {
 	cfg, err := LoadAgentConfig("../../configs/agents.yaml")
 	require.NoError(t, err)
 
-	// Test trend following agent
-	trendAgent, ok := cfg.StrategyAgents["trend_following"]
+	// Test trend following agent (key changed from "trend_following" to "trend")
+	trendAgent, ok := cfg.StrategyAgents["trend"]
 	require.True(t, ok)
 	assert.True(t, trendAgent.Enabled)
-	assert.Equal(t, "trend-agent", trendAgent.Name)
+	assert.Equal(t, "trend-follower", trendAgent.Name)
 	assert.Equal(t, "strategy", trendAgent.Type)
 	assert.Equal(t, "1.0.0", trendAgent.Version)
-	assert.Equal(t, "1m", trendAgent.StepInterval)
+	assert.Equal(t, "5m", trendAgent.StepInterval)
 	assert.NotNil(t, trendAgent.Config)
 
-	// Verify strategy-specific config
-	strategyConfig := trendAgent.Config["strategy"]
-	assert.Equal(t, "trend_following", strategyConfig)
+	// Verify strategy-specific config (symbols instead of "strategy" field)
+	symbols := trendAgent.Config["symbols"]
+	assert.NotNil(t, symbols)
 
 	// Test MCP server connections
 	require.Len(t, trendAgent.MCPServers, 2)
@@ -221,11 +221,11 @@ func TestGetEnabledAgents(t *testing.T) {
 	enabledAnalysis := cfg.GetEnabledAnalysisAgents()
 	assert.Contains(t, enabledAnalysis, "technical")
 	assert.NotContains(t, enabledAnalysis, "orderbook") // disabled
-	assert.NotContains(t, enabledAnalysis, "sentiment") // disabled
+	assert.Contains(t, enabledAnalysis, "sentiment")    // enabled (Phase 3.4 complete)
 
-	// Test enabled strategy agents
+	// Test enabled strategy agents (key changed from "trend_following" to "trend")
 	enabledStrategy := cfg.GetEnabledStrategyAgents()
-	assert.Contains(t, enabledStrategy, "trend_following")
+	assert.Contains(t, enabledStrategy, "trend")
 	assert.NotContains(t, enabledStrategy, "mean_reversion") // disabled
 	assert.NotContains(t, enabledStrategy, "arbitrage")      // disabled
 

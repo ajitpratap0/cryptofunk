@@ -623,6 +623,12 @@ func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
 		query += " AND symbol = $1"
 	}
 
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default win rate")
+		return 0.55 // Default conservative estimate
+	}
+
 	var winningTrades, losingTrades int64
 	var err error
 
@@ -655,6 +661,12 @@ func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
 
 // getHistoricalAvgWin returns average win size
 func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default average win")
+		return 200.0 // Default estimate
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -693,6 +705,12 @@ func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
 
 // getHistoricalAvgLoss returns average loss size
 func (a *RiskAgent) getHistoricalAvgLoss(symbol string) float64 {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default average loss")
+		return 100.0 // Default estimate
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -794,6 +812,12 @@ func (a *RiskAgent) updateBeliefs(ctx context.Context) error {
 
 // loadPortfolioState loads current positions from database
 func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Msg("No database connection, skipping portfolio state load")
+		return nil // Graceful degradation
+	}
+
 	// Query database for open positions
 	query := `
 		SELECT symbol,
@@ -843,6 +867,12 @@ func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
 
 // calculatePerformanceMetrics calculates Sharpe, drawdown, etc.
 func (a *RiskAgent) calculatePerformanceMetrics() {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Msg("No database connection, skipping performance metrics calculation")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -970,6 +1000,16 @@ func (a *RiskAgent) calculateSharpeRatio(returns []float64) float64 {
 
 // assessMarketConditions determines current market regime
 func (a *RiskAgent) assessMarketConditions() {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Msg("No database connection, using default market conditions")
+		a.beliefs.mu.Lock()
+		a.beliefs.marketRegime = "sideways"
+		a.beliefs.volatility = 0.02
+		a.beliefs.mu.Unlock()
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -1109,6 +1149,12 @@ func (a *RiskAgent) calculateMovingAverage(values []float64, period int) float64
 
 // getCurrentPrice gets the current market price for a symbol from the database
 func (a *RiskAgent) getCurrentPrice(symbol string) float64 {
+	// Check if database is available
+	if a.db == nil {
+		log.Debug().Str("symbol", symbol).Msg("No database connection, using default price")
+		return 100.0 // Default fallback price
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

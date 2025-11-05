@@ -76,10 +76,10 @@ func TestValidateSecret_MediumStrength(t *testing.T) {
 
 func TestValidateSecret_StrongPassword(t *testing.T) {
 	strongPasswords := []string{
-		"MyP@ssw0rd12345!",          // 16 chars, 4 types
-		"Tr0ng_P@ssw0rd_2024",       // 19 chars, 4 types
-		"Secure!Database#Pass99",     // 22 chars, 4 types
-		"aB3$fG7*jK9@mN2pQr",        // 18 chars, 4 types
+		"MyP@ssw0rd12345!",       // 16 chars, 4 types
+		"Tr0ng_P@ssw0rd_2024",    // 19 chars, 4 types
+		"Secure!Database#Pass99", // 22 chars, 4 types
+		"aB3$fG7*jK9@mN2pQr",     // 18 chars, 4 types
 	}
 
 	for _, strong := range strongPasswords {
@@ -284,52 +284,52 @@ func TestGetSecretStrengthDescription(t *testing.T) {
 
 func TestValidateSecret_CharacterComposition(t *testing.T) {
 	tests := []struct {
-		name            string
-		password        string
+		name             string
+		password         string
 		expectedStrength SecretStrength
-		minLength       int
-		requireStrong   bool
-		expectValid     bool
+		minLength        int
+		requireStrong    bool
+		expectValid      bool
 	}{
 		{
-			name:            "only lowercase",
-			password:        "abcdefghijklmnop",
+			name:             "only lowercase",
+			password:         "abcdefghijklmnop",
 			expectedStrength: SecretStrengthWeak,
-			minLength:       12,
-			requireStrong:   true,
-			expectValid:     false,
+			minLength:        12,
+			requireStrong:    true,
+			expectValid:      false,
 		},
 		{
-			name:            "lowercase + numbers",
-			password:        "h7j2p9k4m6q8",
+			name:             "lowercase + numbers",
+			password:         "h7j2p9k4m6q8",
 			expectedStrength: SecretStrengthMedium,
-			minLength:       12,
-			requireStrong:   false,  // Medium is acceptable when not requiring strong
-			expectValid:     true,
+			minLength:        12,
+			requireStrong:    false, // Medium is acceptable when not requiring strong
+			expectValid:      true,
 		},
 		{
-			name:            "lowercase + uppercase + numbers",
-			password:        "H7J2P9K4M6Q8",
+			name:             "lowercase + uppercase + numbers",
+			password:         "H7J2P9K4M6Q8",
 			expectedStrength: SecretStrengthMedium,
-			minLength:       12,
-			requireStrong:   false,  // Medium is acceptable when not requiring strong
-			expectValid:     true,
+			minLength:        12,
+			requireStrong:    false, // Medium is acceptable when not requiring strong
+			expectValid:      true,
 		},
 		{
-			name:            "all four types, short",
-			password:        "Ab1!cdef",
+			name:             "all four types, short",
+			password:         "Ab1!cdef",
 			expectedStrength: SecretStrengthWeak,
-			minLength:       12,
-			requireStrong:   true,
-			expectValid:     false,
+			minLength:        12,
+			requireStrong:    true,
+			expectValid:      false,
 		},
 		{
-			name:            "all four types, long",
-			password:        "Ab1!cdefghijklmn",
+			name:             "all four types, long",
+			password:         "Ab1!cdefghijklmn",
 			expectedStrength: SecretStrengthStrong,
-			minLength:       12,
-			requireStrong:   true,
-			expectValid:     true,
+			minLength:        12,
+			requireStrong:    true,
+			expectValid:      true,
 		},
 	}
 

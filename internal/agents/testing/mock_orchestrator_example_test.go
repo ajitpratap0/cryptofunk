@@ -75,7 +75,7 @@ func ExampleMockOrchestrator() {
 	fmt.Printf("Decision: %s %s (confidence: %.2f)\n",
 		decision.Action, decision.Symbol, decision.Confidence)
 
-	// Output:
+	// Example output when NATS is available:
 	// Received 1 signal(s)
 	// Decision: BUY BTC/USDT (confidence: 0.85)
 }
@@ -174,7 +174,7 @@ func ExampleMockOrchestrator_customDecisionPolicy() {
 	fmt.Printf("Decision: %s (reasoning: %s)\n",
 		decision.Action, decision.Reasoning)
 
-	// Output:
+	// Example output when NATS is available:
 	// Decision: HOLD (reasoning: Confidence threshold not met)
 }
 
@@ -244,7 +244,7 @@ func ExampleMockOrchestrator_multipleAgents() {
 	fmt.Printf("Final decision: %s (confidence: %.2f)\n",
 		decision.Action, decision.Confidence)
 
-	// Output:
+	// Example output when NATS is available:
 	// Technical signals: 1
 	// Order book signals: 1
 	// Sentiment signals: 1
@@ -296,7 +296,7 @@ func ExampleMockOrchestrator_testing() {
 		fmt.Println("Test passed: correct decision made")
 	}
 
-	// Output:
+	// Example output when NATS is available:
 	// Test passed: signal received and recorded
 	// Test passed: correct decision made
 }

@@ -399,6 +399,80 @@ func TestServiceIntegration(t *testing.T) {
 		assert.Equal(t, OrderStatusFilled, order.Status)
 	})
 
+	t.Run("Place limit order via service", func(t *testing.T) {
+		service.exchange.SetMarketPrice("ETHUSDT", 3000.0)
+
+		args := map[string]interface{}{
+			"symbol":   "ETHUSDT",
+			"side":     "sell",
+			"quantity": 1.0,
+			"price":    3100.0,
+		}
+
+		result, err := service.PlaceLimitOrder(args)
+		require.NoError(t, err)
+
+		order := result.(*Order)
+		assert.Equal(t, "ETHUSDT", order.Symbol)
+		assert.Equal(t, OrderSideSell, order.Side)
+		assert.Equal(t, OrderTypeLimit, order.Type)
+		assert.Equal(t, OrderStatusOpen, order.Status)
+		assert.Equal(t, 3100.0, order.Price)
+	})
+
+	t.Run("Cancel order via service", func(t *testing.T) {
+		// First, place a limit order
+		service.exchange.SetMarketPrice("BTCUSDT", 50000.0)
+		args := map[string]interface{}{
+			"symbol":   "BTCUSDT",
+			"side":     "buy",
+			"quantity": 0.1,
+			"price":    48000.0,
+		}
+
+		result, err := service.PlaceLimitOrder(args)
+		require.NoError(t, err)
+		order := result.(*Order)
+
+		// Cancel it
+		cancelArgs := map[string]interface{}{
+			"order_id": order.ID,
+		}
+
+		cancelResult, err := service.CancelOrder(cancelArgs)
+		require.NoError(t, err)
+
+		cancelledOrder := cancelResult.(*Order)
+		assert.Equal(t, OrderStatusCancelled, cancelledOrder.Status)
+	})
+
+	t.Run("Get order status via service", func(t *testing.T) {
+		// Place an order
+		service.exchange.SetMarketPrice("BTCUSDT", 50000.0)
+		args := map[string]interface{}{
+			"symbol":   "BTCUSDT",
+			"side":     "buy",
+			"quantity": 0.05,
+		}
+
+		result, err := service.PlaceMarketOrder(args)
+		require.NoError(t, err)
+		order := result.(*Order)
+
+		// Get its status
+		statusArgs := map[string]interface{}{
+			"order_id": order.ID,
+		}
+
+		statusResult, err := service.GetOrderStatus(statusArgs)
+		require.NoError(t, err)
+
+		statusMap := statusResult.(map[string]interface{})
+		statusOrder := statusMap["order"].(*Order)
+		assert.Equal(t, order.ID, statusOrder.ID)
+		assert.Equal(t, OrderStatusFilled, statusOrder.Status)
+	})
+
 	t.Run("Get positions (without session)", func(t *testing.T) {
 		result, err := service.GetPositions(map[string]interface{}{})
 		require.NoError(t, err)
@@ -408,6 +482,21 @@ func TestServiceIntegration(t *testing.T) {
 
 		// Without an active session, there should be no positions
 		assert.Equal(t, 0, count)
+	})
+
+	t.Run("Get position by symbol (without session)", func(t *testing.T) {
+		args := map[string]interface{}{
+			"symbol": "BTCUSDT",
+		}
+
+		result, err := service.GetPositionBySymbol(args)
+		require.NoError(t, err)
+
+		resultMap := result.(map[string]interface{})
+		exists := resultMap["exists"].(bool)
+
+		// Without session, position shouldn't exist
+		assert.False(t, exists)
 	})
 
 	t.Run("Update position P&L (without session)", func(t *testing.T) {
@@ -425,6 +514,16 @@ func TestServiceIntegration(t *testing.T) {
 
 		// Without positions, P&L should be 0
 		assert.Equal(t, 0.0, totalPnL)
+	})
+
+	t.Run("Close position by symbol (without position)", func(t *testing.T) {
+		args := map[string]interface{}{
+			"symbol": "BTCUSDT",
+		}
+
+		_, err := service.ClosePositionBySymbol(args)
+		// Should return error when no position exists
+		assert.Error(t, err)
 	})
 }
 
@@ -519,4 +618,321 @@ type mockError struct {
 
 func (e *mockError) Error() string {
 	return e.msg
+}
+
+// TestMockExchangeSessionManagement tests session management
+func TestMockExchangeSessionManagement(t *testing.T) {
+	exchange := NewMockExchange(nil)
+
+	t.Run("GetSession returns nil initially", func(t *testing.T) {
+		session := exchange.GetSession()
+		assert.Nil(t, session)
+	})
+
+	t.Run("SetSession and GetSession", func(t *testing.T) {
+		sessionID := uuid.New()
+		exchange.SetSession(&sessionID)
+
+		retrievedSession := exchange.GetSession()
+		require.NotNil(t, retrievedSession)
+		assert.Equal(t, sessionID, *retrievedSession)
+	})
+
+	t.Run("SetSession with nil clears session", func(t *testing.T) {
+		// First set a session
+		sessionID := uuid.New()
+		exchange.SetSession(&sessionID)
+		assert.NotNil(t, exchange.GetSession())
+
+		// Clear it
+		exchange.SetSession(nil)
+		assert.Nil(t, exchange.GetSession())
+	})
+}
+
+// TestConvertToDBOrder tests the convertToDBOrder function
+func TestConvertToDBOrder(t *testing.T) {
+	exchange := NewMockExchange(nil)
+	sessionID := uuid.New()
+	exchange.SetSession(&sessionID)
+
+	t.Run("Convert filled market order", func(t *testing.T) {
+		now := time.Now()
+		filledAt := now
+		order := &Order{
+			ID:           uuid.New().String(),
+			Symbol:       "BTCUSDT",
+			Side:         OrderSideBuy,
+			Type:         OrderTypeMarket,
+			Status:       OrderStatusFilled,
+			Price:        50000.0,
+			Quantity:     0.1,
+			FilledQty:    0.1,
+			AvgFillPrice: 50100.0,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			FilledAt:     &filledAt,
+		}
+
+		dbOrder := exchange.convertToDBOrder(order)
+
+		assert.Equal(t, order.Symbol, dbOrder.Symbol)
+		assert.Equal(t, "PAPER", dbOrder.Exchange)
+		assert.Equal(t, db.OrderSideBuy, dbOrder.Side)
+		assert.Equal(t, db.OrderTypeMarket, dbOrder.Type)
+		assert.Equal(t, db.OrderStatusFilled, dbOrder.Status)
+		assert.NotNil(t, dbOrder.Price)
+		assert.Equal(t, 50000.0, *dbOrder.Price)
+		assert.Equal(t, 0.1, dbOrder.Quantity)
+		assert.Equal(t, 0.1, dbOrder.ExecutedQuantity)
+		assert.InDelta(t, 5010.0, dbOrder.ExecutedQuoteQuantity, 1.0) // 0.1 * 50100
+		assert.NotNil(t, dbOrder.SessionID)
+		assert.Equal(t, sessionID, *dbOrder.SessionID)
+	})
+
+	t.Run("Convert limit order with zero price", func(t *testing.T) {
+		order := &Order{
+			ID:        uuid.New().String(),
+			Symbol:    "ETHUSDT",
+			Side:      OrderSideSell,
+			Type:      OrderTypeLimit,
+			Status:    OrderStatusOpen,
+			Price:     0, // Zero price
+			Quantity:  1.0,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		dbOrder := exchange.convertToDBOrder(order)
+
+		assert.Nil(t, dbOrder.Price) // Price should be nil when zero
+		assert.Equal(t, db.OrderTypeLimit, dbOrder.Type)
+		// OrderStatusOpen maps to OrderStatusPartiallyFilled in db
+		assert.Equal(t, db.OrderStatusPartiallyFilled, dbOrder.Status)
+	})
+
+	t.Run("Convert order with empty ID", func(t *testing.T) {
+		order := &Order{
+			ID:        "", // Empty ID
+			Symbol:    "BTCUSDT",
+			Side:      OrderSideBuy,
+			Type:      OrderTypeMarket,
+			Status:    OrderStatusFilled,
+			Price:     50000.0,
+			Quantity:  0.1,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		dbOrder := exchange.convertToDBOrder(order)
+
+		// Should handle empty ID gracefully
+		assert.NotNil(t, dbOrder)
+		assert.Equal(t, order.Symbol, dbOrder.Symbol)
+	})
+}
+
+// TestUpdateOrderStatusInDB tests updateOrderStatusInDB with nil db
+func TestUpdateOrderStatusInDB(t *testing.T) {
+	exchange := NewMockExchange(nil) // nil database
+
+	t.Run("Should not panic with nil database", func(t *testing.T) {
+		order := &Order{
+			ID:           uuid.New().String(),
+			Symbol:       "BTCUSDT",
+			Side:         OrderSideBuy,
+			Type:         OrderTypeMarket,
+			Status:       OrderStatusFilled,
+			FilledQty:    0.1,
+			AvgFillPrice: 50000.0,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+
+		// Should not panic, just return silently when db is nil
+		assert.NotPanics(t, func() {
+			exchange.updateOrderStatusInDB(context.Background(), order)
+		})
+	})
+}
+
+// TestPersistTradeInDB tests persistTradeInDB with nil db
+func TestPersistTradeInDB(t *testing.T) {
+	exchange := NewMockExchange(nil) // nil database
+
+	t.Run("Should not panic with nil database", func(t *testing.T) {
+		orderID := uuid.New().String()
+		order := &Order{
+			ID:        orderID,
+			Symbol:    "BTCUSDT",
+			Side:      OrderSideBuy,
+			Type:      OrderTypeMarket,
+			Status:    OrderStatusFilled,
+			CreatedAt: time.Now(),
+		}
+
+		// Add order to exchange
+		exchange.orders[orderID] = order
+
+		fill := Fill{
+			OrderID:   orderID,
+			Quantity:  0.1,
+			Price:     50000.0,
+			Timestamp: time.Now(),
+		}
+
+		// Should not panic, just return silently when db is nil
+		assert.NotPanics(t, func() {
+			exchange.persistTradeInDB(context.Background(), orderID, fill)
+		})
+	})
+}
+
+// TestCancelOrderEdgeCases tests additional cancel order scenarios
+func TestCancelOrderEdgeCases(t *testing.T) {
+	exchange := NewMockExchange(nil)
+	exchange.SetMarketPrice("BTCUSDT", 50000.0)
+
+	t.Run("Cancel non-existent order", func(t *testing.T) {
+		_, err := exchange.CancelOrder(context.Background(), "non-existent-id")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "order not found")
+	})
+
+	t.Run("Cancel already filled order", func(t *testing.T) {
+		// Place and fill a market order
+		req := PlaceOrderRequest{
+			Symbol:   "BTCUSDT",
+			Side:     OrderSideBuy,
+			Type:     OrderTypeMarket,
+			Quantity: 0.1,
+		}
+
+		resp, err := exchange.PlaceOrder(context.Background(), req)
+		require.NoError(t, err)
+		assert.Equal(t, OrderStatusFilled, resp.Status)
+
+		// Try to cancel
+		_, err = exchange.CancelOrder(context.Background(), resp.OrderID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot cancel order in status")
+	})
+
+	t.Run("Cancel already cancelled order", func(t *testing.T) {
+		// Place a limit order
+		req := PlaceOrderRequest{
+			Symbol:   "BTCUSDT",
+			Side:     OrderSideBuy,
+			Type:     OrderTypeLimit,
+			Quantity: 0.1,
+			Price:    45000.0,
+		}
+
+		resp, err := exchange.PlaceOrder(context.Background(), req)
+		require.NoError(t, err)
+
+		// Cancel it
+		_, err = exchange.CancelOrder(context.Background(), resp.OrderID)
+		require.NoError(t, err)
+
+		// Try to cancel again
+		_, err = exchange.CancelOrder(context.Background(), resp.OrderID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot cancel order in status")
+	})
+}
+
+// TestGetOrderEdgeCases tests GetOrder edge cases
+func TestGetOrderEdgeCases(t *testing.T) {
+	exchange := NewMockExchange(nil)
+
+	t.Run("Get non-existent order", func(t *testing.T) {
+		_, err := exchange.GetOrder(context.Background(), "non-existent-id")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "order not found")
+	})
+}
+
+// TestGetOrderFillsEdgeCases tests GetOrderFills edge cases
+func TestGetOrderFillsEdgeCases(t *testing.T) {
+	exchange := NewMockExchange(nil)
+
+	t.Run("Get fills for non-existent order", func(t *testing.T) {
+		fills, err := exchange.GetOrderFills(context.Background(), "non-existent-id")
+		require.NoError(t, err)
+		assert.Empty(t, fills)
+	})
+}
+
+// TestMockExchangeConcurrency tests concurrent access to mock exchange
+func TestMockExchangeConcurrency(t *testing.T) {
+	exchange := NewMockExchange(nil)
+	exchange.SetMarketPrice("BTCUSDT", 50000.0)
+
+	t.Run("Concurrent order placement", func(t *testing.T) {
+		const numOrders = 10
+		done := make(chan bool, numOrders)
+
+		for i := 0; i < numOrders; i++ {
+			go func() {
+				req := PlaceOrderRequest{
+					Symbol:   "BTCUSDT",
+					Side:     OrderSideBuy,
+					Type:     OrderTypeMarket,
+					Quantity: 0.01,
+				}
+
+				_, err := exchange.PlaceOrder(context.Background(), req)
+				assert.NoError(t, err)
+				done <- true
+			}()
+		}
+
+		// Wait for all goroutines
+		for i := 0; i < numOrders; i++ {
+			<-done
+		}
+
+		// All orders should be recorded
+		exchange.mu.RLock()
+		orderCount := len(exchange.orders)
+		exchange.mu.RUnlock()
+
+		assert.Equal(t, numOrders, orderCount)
+	})
+
+	t.Run("Concurrent price updates and order placement", func(t *testing.T) {
+		const numIterations = 20
+		done := make(chan bool, numIterations*2)
+
+		// Price updater goroutines
+		for i := 0; i < numIterations; i++ {
+			go func(iteration int) {
+				price := 50000.0 + float64(iteration)*100
+				exchange.SetMarketPrice("ETHUSDT", price)
+				done <- true
+			}(i)
+		}
+
+		// Order placement goroutines
+		for i := 0; i < numIterations; i++ {
+			go func() {
+				req := PlaceOrderRequest{
+					Symbol:   "ETHUSDT",
+					Side:     OrderSideBuy,
+					Type:     OrderTypeMarket,
+					Quantity: 0.01,
+				}
+
+				_, err := exchange.PlaceOrder(context.Background(), req)
+				assert.NoError(t, err)
+				done <- true
+			}()
+		}
+
+		// Wait for all goroutines
+		for i := 0; i < numIterations*2; i++ {
+			<-done
+		}
+	})
 }

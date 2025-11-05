@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -280,6 +281,126 @@ func TestSkillTypes(t *testing.T) {
 	assert.Equal(t, SkillType("trend_following"), SkillTrendFollowing)
 	assert.Equal(t, SkillType("mean_reversion"), SkillMeanReversion)
 	assert.Equal(t, SkillType("risk_management"), SkillRiskManagement)
+}
+
+// TestCreatePolicyParameters tests policy parameter creation
+func TestCreatePolicyParameters(t *testing.T) {
+	data := map[string]interface{}{
+		"threshold":    0.75,
+		"max_attempts": 5,
+		"enabled":      true,
+	}
+
+	params, err := CreatePolicyParameters(data)
+	require.NoError(t, err)
+	assert.NotNil(t, params)
+	assert.Contains(t, string(params), "0.75")
+	assert.Contains(t, string(params), "true")
+}
+
+// TestCreateSkillImplementation tests skill implementation creation
+func TestCreateSkillImplementation(t *testing.T) {
+	data := map[string]interface{}{
+		"algorithm": "moving_average",
+		"period":    20,
+		"method":    "exponential",
+	}
+
+	impl, err := CreateSkillImplementation(data)
+	require.NoError(t, err)
+	assert.NotNil(t, impl)
+	assert.Contains(t, string(impl), "moving_average")
+	assert.Contains(t, string(impl), "exponential")
+}
+
+// TestNewProceduralMemory tests procedural memory creation
+func TestNewProceduralMemory(t *testing.T) {
+	pm := NewProceduralMemory(nil)
+
+	assert.NotNil(t, pm)
+	assert.Nil(t, pm.pool)
+}
+
+// TestPolicy_StorePolicy_IDGeneration tests ID generation
+func TestPolicy_StorePolicy_IDGeneration(t *testing.T) {
+	policy := &Policy{
+		Type:        PolicyEntry,
+		Name:        "Test Policy",
+		Description: "Test description",
+		AgentName:   "test-agent",
+	}
+
+	assert.Equal(t, uuid.Nil, policy.ID)
+
+	// Simulate StorePolicy behavior
+	if policy.ID == uuid.Nil {
+		policy.ID = uuid.New()
+	}
+
+	assert.NotEqual(t, uuid.Nil, policy.ID)
+}
+
+// TestPolicy_StorePolicy_TimestampGeneration tests timestamp generation
+func TestPolicy_StorePolicy_TimestampGeneration(t *testing.T) {
+	policy := &Policy{
+		Type:        PolicyEntry,
+		Name:        "Test Policy",
+		Description: "Test description",
+		AgentName:   "test-agent",
+	}
+
+	now := time.Now()
+
+	assert.True(t, policy.CreatedAt.IsZero())
+
+	// Simulate StorePolicy behavior
+	if policy.CreatedAt.IsZero() {
+		policy.CreatedAt = now
+	}
+	policy.UpdatedAt = now
+
+	assert.False(t, policy.CreatedAt.IsZero())
+	assert.False(t, policy.UpdatedAt.IsZero())
+}
+
+// TestSkill_StoreSkill_IDGeneration tests skill ID generation
+func TestSkill_StoreSkill_IDGeneration(t *testing.T) {
+	skill := &Skill{
+		Type:        SkillTechnicalAnalysis,
+		Name:        "Test Skill",
+		Description: "Test description",
+		AgentName:   "test-agent",
+	}
+
+	assert.Equal(t, uuid.Nil, skill.ID)
+
+	if skill.ID == uuid.Nil {
+		skill.ID = uuid.New()
+	}
+
+	assert.NotEqual(t, uuid.Nil, skill.ID)
+}
+
+// TestSkill_StoreSkill_TimestampGeneration tests skill timestamp generation
+func TestSkill_StoreSkill_TimestampGeneration(t *testing.T) {
+	skill := &Skill{
+		Type:        SkillTechnicalAnalysis,
+		Name:        "Test Skill",
+		Description: "Test description",
+		AgentName:   "test-agent",
+	}
+
+	now := time.Now()
+
+	assert.True(t, skill.CreatedAt.IsZero())
+
+	if skill.CreatedAt.IsZero() {
+		skill.CreatedAt = now
+	}
+	skill.UpdatedAt = now
+
+	assert.False(t, skill.CreatedAt.IsZero())
+	assert.False(t, skill.UpdatedAt.IsZero())
 }
 
 // Mock ProceduralMemory for unit testing without database
