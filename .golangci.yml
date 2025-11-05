@@ -41,10 +41,30 @@ linters-settings:
 
   govet:
     check-shadowing: false
-    enable-all: true
-    disable:
-      - fieldalignment  # Don't enforce struct field alignment
-      - shadow          # Allow variable shadowing
+    enable:
+      - asmdecl
+      - assign
+      - atomic
+      - bools
+      - buildtag
+      - cgocall
+      - composites
+      - copylocks
+      - errorsas
+      - httpresponse
+      - ifaceassert
+      - loopclosure
+      - lostcancel
+      - nilfunc
+      - printf
+      - shift
+      - stdmethods
+      - structtag
+      - tests
+      - unmarshal
+      - unreachable
+      - unsafeptr
+      - unusedresult
 
   staticcheck:
     checks: ["all"]
