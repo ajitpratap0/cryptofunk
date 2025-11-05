@@ -1,5 +1,7 @@
 # golangci-lint configuration for cryptofunk
-# Compatible with golangci-lint v1.55.2
+# Compatible with golangci-lint v2.6.0+
+
+version: "2"
 
 run:
   timeout: 5m
@@ -15,13 +17,10 @@ linters:
   disable-all: true
   enable:
     - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
     - govet         # Standard go vet checks
     - ineffassign   # Detect ineffectual assignments
-    - staticcheck   # Advanced static analysis
+    - staticcheck   # Advanced static analysis (includes gosimple)
     - unused        # Find unused code
-    - gofmt         # Check formatting
-    - goimports     # Check import order
     - misspell      # Check for misspelled words
     - goconst       # Find repeated strings that could be constants
     - gosec         # Security-focused linting
@@ -29,6 +28,11 @@ linters:
     - noctx         # Detect HTTP requests without context
     - rowserrcheck  # Check SQL rows.Err is checked
     - sqlclosecheck # Check SQL rows/statements are closed
+
+formatters:
+  enable:
+    - gofmt         # Format code
+    - goimports     # Organize imports
 
 linters-settings:
   errcheck:
@@ -77,6 +81,7 @@ linters-settings:
   unused:
     check-exported: false
 
+formatters-settings:
   goimports:
     local-prefixes: github.com/ajitpratap0/cryptofunk
 

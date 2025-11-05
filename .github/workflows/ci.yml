@@ -7,7 +7,7 @@ on:
     branches: [ main, develop ]
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.21'
 
 jobs:
   lint:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.6.1
 
       - name: Run golangci-lint
         run: golangci-lint run --timeout=5m
@@ -260,12 +260,9 @@ jobs:
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
-          args: '-no-fail -fmt json -out results.json ./...'
+          args: '-no-fail -fmt sarif -out results.sarif ./...'
 
-      - name: Display security issues
-        if: always()
-        run: |
-          if [ -f results.json ]; then
-            echo "Security scan results:"
-            cat results.json | jq -r '.Issues[] | select(.severity == "HIGH" or .severity == "MEDIUM") | "[\(.severity)] \(.rule_id): \(.file):\(.line) - \(.details)"' || cat results.json
-          fi
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
