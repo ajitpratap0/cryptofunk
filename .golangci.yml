@@ -9,6 +9,7 @@ run:
   skip-dirs:
     - cmd/agents/orderbook-agent
     - cmd/agents/arbitrage-agent
+    - cmd/agents/reversion-agent
 
 linters:
   disable-all: true
