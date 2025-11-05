@@ -12,6 +12,8 @@ run:
 
 linters:
   disable-all: true
+  disable:
+    - typecheck     # Explicitly disable typecheck (causes false positives with embedded types)
   enable:
     - errcheck      # Check for unchecked errors
     - gosimple      # Simplify code
@@ -28,7 +30,6 @@ linters:
     - noctx         # Detect HTTP requests without context
     - rowserrcheck  # Check SQL rows.Err is checked
     - sqlclosecheck # Check SQL rows/statements are closed
-  # Note: typecheck is NOT enabled (disabled by disable-all)
 
 linters-settings:
   errcheck:
