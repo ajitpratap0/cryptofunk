@@ -810,7 +810,11 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close response body")
+		}
+	}()
 
 	// Check orchestrator response
 	if resp.StatusCode != http.StatusOK {
@@ -870,7 +874,11 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close response body")
+		}
+	}()
 
 	// Check orchestrator response
 	if resp.StatusCode != http.StatusOK {

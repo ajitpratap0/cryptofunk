@@ -919,7 +919,9 @@ func TestFetchNews_MalformedJSON(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"invalid json"`))
+		if _, err := w.Write([]byte(`{"invalid json"`)); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer mockServer.Close()
 
@@ -1169,7 +1171,9 @@ func TestFetchFearGreedIndex_MalformedJSON(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"data": [malformed`))
+		if _, err := w.Write([]byte(`{"data": [malformed`)); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer mockServer.Close()
 
@@ -1316,7 +1320,9 @@ func TestFetchFearGreedIndex_ExtremeValues(t *testing.T) {
 				}`, tt.value, tt.classification)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(response))
+				if _, err := w.Write([]byte(response)); err != nil {
+					t.Errorf("Failed to write response: %v", err)
+				}
 			}))
 			defer mockServer.Close()
 
