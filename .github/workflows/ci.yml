@@ -135,13 +135,18 @@ jobs:
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total test coverage: ${COVERAGE}%"
 
-          # Fail if coverage is below 40% (current baseline)
-          # TODO: Gradually increase this threshold to 80%
-          if (( $(echo "$COVERAGE < 40" | bc -l) )); then
-            echo "❌ Test coverage is below 40%"
+          # Minimum coverage threshold (gradually increasing to 80%)
+          THRESHOLD=50
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "❌ Test coverage ${COVERAGE}% is below minimum threshold ${THRESHOLD}%"
             exit 1
           fi
-          echo "✅ Test coverage is acceptable"
+          echo "✅ Test coverage ${COVERAGE}% meets minimum threshold ${THRESHOLD}%"
+
+          # Warning if coverage drops below 60%
+          if (( $(echo "$COVERAGE < 60" | bc -l) )); then
+            echo "⚠️  Warning: Test coverage is below recommended 60%"
+          fi
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

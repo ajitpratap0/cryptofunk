@@ -33,7 +33,19 @@ func main() {
 
 	log.Info().Msg("Starting CryptoFunk MCP Orchestrator")
 
-	// Load configuration
+	// Load and validate main configuration first
+	// This ensures all required environment variables, API keys, and settings are valid
+	log.Info().Msg("Validating system configuration...")
+	mainCfg, err := config.Load("")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Configuration validation failed. Please fix the errors above and try again.")
+	}
+	log.Info().
+		Str("environment", mainCfg.App.Environment).
+		Str("trading_mode", mainCfg.Trading.Mode).
+		Msg("✓ System configuration validated successfully")
+
+	// Load orchestrator-specific configuration
 	viper.SetConfigName("orchestrator")
 	viper.AddConfigPath("./configs")
 	viper.AddConfigPath(".")

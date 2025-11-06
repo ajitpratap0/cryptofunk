@@ -1,0 +1,310 @@
+name: PR Quality Gates
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  # Validate PR title follows conventional commit format
+  pr-title:
+    name: Validate PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title format
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            chore
+            ci
+            build
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            didn't match the configured pattern. Please ensure that the subject
+            doesn't start with an uppercase character.
+
+  # Check for required labels
+  pr-labels:
+    name: Check Required Labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for labels
+        uses: mheap/github-action-required-labels@v5
+        with:
+          mode: minimum
+          count: 1
+          labels: "bug, enhancement, documentation, dependencies, performance, security, breaking-change"
+          add_comment: true
+
+  # Check PR size
+  pr-size:
+    name: Check PR Size
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const additions = pr.additions;
+            const deletions = pr.deletions;
+            const changes = additions + deletions;
+
+            console.log(`PR has ${additions} additions and ${deletions} deletions (total: ${changes} changes)`);
+
+            // Warning for large PRs (>500 lines changed)
+            if (changes > 500) {
+              core.warning(`⚠️  This PR modifies ${changes} lines. Consider breaking it into smaller PRs for easier review.`);
+            }
+
+            // Fail for extremely large PRs (>1000 lines)
+            if (changes > 1000) {
+              core.setFailed(`❌ This PR is too large (${changes} lines). Please break it into smaller, focused PRs.`);
+            }
+
+  # Check for breaking changes
+  breaking-changes:
+    name: Check for Breaking Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for breaking changes in commit messages
+        run: |
+          # Check if any commit has BREAKING CHANGE in the body
+          if git log origin/${{ github.base_ref }}..HEAD --grep="BREAKING CHANGE" --oneline | grep -q "BREAKING CHANGE"; then
+            echo "⚠️  WARNING: This PR contains breaking changes!"
+            echo "Please ensure:"
+            echo "  1. Documentation is updated"
+            echo "  2. Migration guide is provided"
+            echo "  3. Version bump is appropriate (major version)"
+
+            # Check if PR has breaking-change label
+            if ! gh pr view ${{ github.event.pull_request.number }} --json labels --jq '.labels[].name' | grep -q "breaking-change"; then
+              echo "❌ Breaking changes detected but 'breaking-change' label is missing!"
+              exit 1
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Check dependencies
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.base.ref == 'main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, LGPL-2.0
+
+  # Check for TODO comments
+  todo-check:
+    name: Check TODO Comments
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for TODO comments
+        run: |
+          # Find all TODO comments in Go files
+          TODOS=$(grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.go" . || true)
+
+          if [ -n "$TODOS" ]; then
+            echo "⚠️  Found TODO/FIXME comments in the codebase:"
+            echo "$TODOS"
+            echo ""
+            echo "Please ensure these are tracked as GitHub issues."
+
+            # Count TODOs
+            TODO_COUNT=$(echo "$TODOS" | wc -l)
+            if [ $TODO_COUNT -gt 10 ]; then
+              echo "⚠️  Warning: More than 10 TODO comments found. Consider addressing some before merging."
+            fi
+          fi
+
+  # Verify no debug code
+  debug-check:
+    name: Check for Debug Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for debug statements
+        run: |
+          # Check for common debug patterns
+          DEBUG_PATTERNS=$(grep -rn "fmt.Println\|log.Println\|print(\|println(" --include="*.go" . | grep -v "_test.go" || true)
+
+          if [ -n "$DEBUG_PATTERNS" ]; then
+            echo "❌ Found debug print statements in non-test code:"
+            echo "$DEBUG_PATTERNS"
+            echo ""
+            echo "Please remove debug statements or use proper logging (zerolog)."
+            exit 1
+          fi
+
+          echo "✅ No debug statements found"
+
+  # Check documentation
+  docs-check:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if documentation needs update
+        run: |
+          # Get list of changed files
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+
+          # Check if significant Go files changed
+          GO_FILES=$(echo "$FILES_CHANGED" | grep "\.go$" | grep -v "_test.go" || true)
+
+          if [ -n "$GO_FILES" ]; then
+            # Check if any documentation was updated
+            DOCS_UPDATED=$(echo "$FILES_CHANGED" | grep -E "README\.md|docs/.*\.md|CLAUDE\.md" || true)
+
+            if [ -z "$DOCS_UPDATED" ]; then
+              echo "⚠️  Warning: Go code was modified but no documentation was updated."
+              echo "Consider updating:"
+              echo "  - README.md (for user-facing changes)"
+              echo "  - CLAUDE.md (for architecture changes)"
+              echo "  - docs/ (for detailed documentation)"
+            else
+              echo "✅ Documentation was updated"
+            fi
+          fi
+
+  # Test coverage diff
+  coverage-diff:
+    name: Coverage Diff
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: timescale/timescaledb-ha:pg15-latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cryptofunk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          go run cmd/migrate/main.go up
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
+          REDIS_URL: "localhost:6379"
+          NATS_URL: "nats://localhost:4222"
+        run: |
+          go test -coverprofile=coverage-new.out -covermode=atomic ./...
+
+      - name: Get base branch coverage
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git checkout origin/${{ github.base_ref }}
+          go test -coverprofile=coverage-base.out -covermode=atomic ./... || echo "Base coverage not available"
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
+          REDIS_URL: "localhost:6379"
+        continue-on-error: true
+
+      - name: Compare coverage
+        run: |
+          if [ -f coverage-base.out ]; then
+            BASE_COVERAGE=$(go tool cover -func=coverage-base.out | grep total | awk '{print $3}' | sed 's/%//')
+            NEW_COVERAGE=$(go tool cover -func=coverage-new.out | grep total | awk '{print $3}' | sed 's/%//')
+
+            echo "Base coverage: ${BASE_COVERAGE}%"
+            echo "New coverage: ${NEW_COVERAGE}%"
+
+            DIFF=$(echo "$NEW_COVERAGE - $BASE_COVERAGE" | bc)
+            echo "Coverage diff: ${DIFF}%"
+
+            # Fail if coverage decreased by more than 1%
+            if (( $(echo "$DIFF < -1" | bc -l) )); then
+              echo "❌ Coverage decreased by ${DIFF}%. Please add tests for new code."
+              exit 1
+            elif (( $(echo "$DIFF > 0" | bc -l) )); then
+              echo "✅ Coverage increased by ${DIFF}%!"
+            else
+              echo "✅ Coverage maintained"
+            fi
+          else
+            echo "⚠️  Base coverage not available, skipping comparison"
+          fi
+
+  # All checks must pass
+  all-checks:
+    name: All PR Checks Passed
+    runs-on: ubuntu-latest
+    needs: [pr-title, pr-size, debug-check, coverage-diff]
+    if: always()
+    steps:
+      - name: Check all jobs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const needs = ${{ toJSON(needs) }};
+            const failures = Object.values(needs).filter(job => job.result === 'failure');
+
+            if (failures.length > 0) {
+              core.setFailed(`${failures.length} required check(s) failed`);
+            } else {
+              core.info('✅ All PR quality checks passed!');
+            }

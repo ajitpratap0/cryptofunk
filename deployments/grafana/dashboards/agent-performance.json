@@ -1,0 +1,115 @@
+{
+  "title": "CryptoFunk - Agent Performance",
+  "uid": "cryptofunk-agents",
+  "tags": ["cryptofunk", "agents"],
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Agent Health Status",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 24, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "cryptofunk_agent_healthy",
+          "legendFormat": "{{agent}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Agent Signal Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "targets": [
+        {
+          "expr": "rate(cryptofunk_agent_signals_total[5m])",
+          "legendFormat": "{{agent}} - {{signal_type}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Agent Analysis Duration (p95)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(cryptofunk_agent_analysis_duration_seconds_bucket[5m])) * 1000",
+          "legendFormat": "{{agent}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ms"}
+      }
+    },
+    {
+      "id": 4,
+      "title": "Signal Confidence Distribution",
+      "type": "heatmap",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "targets": [
+        {
+          "expr": "rate(cryptofunk_agent_confidence_bucket[5m])",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "LLM Call Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "targets": [
+        {
+          "expr": "rate(cryptofunk_agent_llm_calls_total[5m])",
+          "legendFormat": "{{agent}} - {{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "LLM Token Usage (per hour)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "targets": [
+        {
+          "expr": "rate(cryptofunk_agent_llm_tokens_total[1h]) * 3600",
+          "legendFormat": "{{agent}} - {{type}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "LLM Call Latency (p95)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(cryptofunk_agent_llm_duration_seconds_bucket[5m])) * 1000",
+          "legendFormat": "{{agent}} - {{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ms"}
+      }
+    }
+  ]
+}

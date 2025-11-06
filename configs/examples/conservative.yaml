@@ -1,14 +1,10 @@
-# CryptoFunk Configuration: Conservative Trading Strategy
-# Recommended for: Risk-averse traders, long-term investors, beginners
-# Risk Level: Low
-# Expected Returns: 5-15% annual
-#
-# This configuration prioritizes capital preservation over aggressive gains.
-# Suitable for live trading with real capital.
+# Conservative Trading Configuration
+# Safe settings for risk-averse traders
+# Lower position sizes, tighter stop-losses, higher confidence requirements
 
 app:
-  name: "CryptoFunk-Conservative"
-  version: "1.0.0"
+  name: "CryptoFunk"
+  version: "0.1.0"
   environment: "production"
   log_level: "info"
 
@@ -16,7 +12,7 @@ database:
   host: "${DATABASE_HOST:-localhost}"
   port: 5432
   user: "${DATABASE_USER:-postgres}"
-  password: "${DATABASE_PASSWORD}"
+  password: "${DATABASE_PASSWORD}"  # REQUIRED: Set via environment variable
   database: "cryptofunk"
   ssl_mode: "require"  # SSL required for production
   pool_size: 10
@@ -32,51 +28,28 @@ nats:
   enable_jetstream: true
 
 llm:
+  enabled: true
   gateway: "bifrost"
   endpoint: "${LLM_ENDPOINT:-http://localhost:8080/v1/chat/completions}"
+  api_key: "${LLM_API_KEY}"  # Optional for Bifrost
+
+  # Conservative: Use most reliable models
   primary_model: "claude-sonnet-4-20250514"
-  fallback_model: "gpt-4-turbo"
-  temperature: 0.5  # Lower temperature for more conservative, predictable decisions
+  fallback_models:
+    - "gpt-4-turbo"
+    - "gpt-4"
+
+  temperature: 0.5  # Lower temperature for more conservative decisions
   max_tokens: 2000
+  timeout: 45000  # Longer timeout for careful analysis
   enable_caching: true
-  timeout: 30000
 
-trading:
-  mode: "live"  # Change to "paper" for testing
-  symbols:
-    - "BTC/USDT"  # Focus on major, liquid pairs only
-    - "ETH/USDT"
-  exchange: "binance"
-  initial_capital: 10000.0
-  max_positions: 2  # Limited concurrent positions
-  default_quantity: 0.01
+  circuit_breaker:
+    failure_threshold: 3  # More sensitive to failures
+    success_threshold: 2
+    timeout: 120s  # Longer recovery time
+    time_window: 10m
 
-risk:
-  max_position_size: 0.05  # 5% max per position (very conservative)
-  max_daily_loss: 0.01  # 1% max daily loss
-  max_drawdown: 0.05  # 5% max drawdown
-  default_stop_loss: 0.02  # 2% stop loss
-  default_take_profit: 0.05  # 5% take profit (2.5:1 risk/reward)
-  llm_approval_required: true  # Require LLM validation
-  min_confidence: 0.80  # High confidence threshold
-
-exchanges:
-  binance:
-    api_key: "${BINANCE_API_KEY}"
-    secret_key: "${BINANCE_API_SECRET}"
-    testnet: false  # Live trading
-    rate_limit_ms: 200  # Conservative rate limiting
-
-api:
-  host: "0.0.0.0"
-  port: 8080
-  orchestrator_url: "http://localhost:8081"
-
-monitoring:
-  prometheus_port: 9100
-  enable_metrics: true
-
-# MCP Configuration
 mcp:
   external:
     coingecko:
@@ -84,10 +57,15 @@ mcp:
       name: "CoinGecko MCP"
       url: "https://mcp.api.coingecko.com/mcp"
       transport: "http_streaming"
-      cache_ttl: 120  # Longer cache for stable data
+      description: "Market data for conservative trading"
+      cache_ttl: 120  # Longer cache for stability
       rate_limit:
         enabled: true
-        requests_per_minute: 60  # Conservative API usage
+        requests_per_minute: 50  # Conservative rate limiting
+      tools:
+        - "get_price"
+        - "get_market_chart"
+        - "get_coin_info"
 
   internal:
     order_executor:
@@ -95,33 +73,53 @@ mcp:
       name: "Order Executor"
       command: "./bin/order-executor-server"
       transport: "stdio"
+      description: "Execute orders conservatively"
 
     risk_analyzer:
       enabled: true
       name: "Risk Analyzer"
       command: "./bin/risk-analyzer-server"
       transport: "stdio"
+      description: "Strict risk management"
 
     technical_indicators:
       enabled: true
       name: "Technical Indicators"
       command: "./bin/technical-indicators-server"
       transport: "stdio"
+      description: "Conservative technical analysis"
 
-    market_data:
-      enabled: false  # Use CoinGecko instead
+trading:
+  mode: "live"  # Conservative settings suitable for live trading
+  symbols:
+    - "BTCUSDT"  # Only most liquid pair
+  exchange: "binance"
+  initial_capital: 10000.0
+  max_positions: 1  # Only 1 position at a time for safety
+  default_quantity: 0.005  # Very small default quantity
 
-# Trading Strategy Notes:
-# - Focus on major pairs with high liquidity
-# - Small position sizes (5% max)
-# - Tight stop losses (2%)
-# - Higher confidence threshold (80%)
-# - LLM approval required for all trades
-# - Conservative profit targets
-# - Limited concurrent positions (2 max)
-#
-# Suitable for:
-# - Risk-averse traders
-# - Capital preservation focus
-# - Long-term steady growth
-# - Minimal monitoring required
+# CONSERVATIVE RISK PARAMETERS
+risk:
+  max_position_size: 0.05      # Only 5% of portfolio per position
+  max_daily_loss: 0.01         # Stop trading if 1% daily loss
+  max_drawdown: 0.05           # 5% maximum drawdown (very tight)
+  default_stop_loss: 0.015     # 1.5% stop loss (tight)
+  default_take_profit: 0.03    # 3% take profit (conservative 2:1 R:R)
+  llm_approval_required: true  # ALWAYS require LLM approval
+  min_confidence: 0.8          # Require 80% confidence (very high)
+
+exchanges:
+  binance:
+    api_key: "${BINANCE_API_KEY}"
+    secret_key: "${BINANCE_API_SECRET}"
+    testnet: false  # Production mode
+    rate_limit_ms: 200  # Conservative rate limiting
+
+api:
+  host: "0.0.0.0"
+  port: 8081
+  orchestrator_url: "http://localhost:8081"
+
+monitoring:
+  prometheus_port: 9100
+  enable_metrics: true

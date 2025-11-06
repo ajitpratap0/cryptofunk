@@ -36,13 +36,28 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 10s
 
-  # Trading Agents (if they expose metrics)
+  # MCP Servers
+  - job_name: 'mcp-servers'
+    static_configs:
+      - targets:
+        - 'market-data-server:9201'
+        - 'technical-indicators-server:9202'
+        - 'risk-analyzer-server:9203'
+        - 'order-executor-server:9204'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Trading Agents
   - job_name: 'agents'
     static_configs:
       - targets:
         - 'technical-agent:9101'
-        - 'trend-agent:9102'
-        - 'risk-agent:9103'
+        - 'orderbook-agent:9102'
+        - 'sentiment-agent:9103'
+        - 'trend-agent:9104'
+        - 'reversion-agent:9105'
+        - 'arbitrage-agent:9106'
+        - 'risk-agent:9107'
     metrics_path: '/metrics'
     scrape_interval: 15s
 

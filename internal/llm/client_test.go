@@ -178,14 +178,14 @@ func TestClient_CompleteWithRetry(t *testing.T) {
 
 				w.WriteHeader(statusCode)
 				if statusCode == http.StatusOK {
-					_, _ = w.Write([]byte(`{ // Test mock response
+					_, _ = w.Write([]byte(`{
 						"choices": [{
 							"message": {"content": "test"}
 						}],
 						"usage": {"total_tokens": 100}
 					}`))
 				} else {
-					_, _ = w.Write([]byte(`{ // Test mock response
+					_, _ = w.Write([]byte(`{
 						"error": {"message": "Error"}
 					}`))
 				}

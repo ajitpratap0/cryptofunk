@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 const (
@@ -78,6 +79,13 @@ func main() {
 	logger := log.With().Str("server", serverName).Logger()
 	logger.Info().Msg("Starting Market Data MCP Server")
 
+	// Start metrics server on port 9201
+	metricsServer := metrics.NewServer(9201, logger)
+	if err := metricsServer.Start(); err != nil {
+		logger.Fatal().Err(err).Msg("Failed to start metrics server")
+	}
+	logger.Info().Msg("Metrics server started on :9201")
+
 	// Get API keys from environment
 	apiKey := os.Getenv("BINANCE_API_KEY")
 	secretKey := os.Getenv("BINANCE_API_SECRET")
@@ -139,10 +147,21 @@ func (s *MCPServer) Run() error {
 
 // handleRequest routes MCP requests to appropriate handlers
 func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
+	startTime := time.Now()
+
 	response := &MCPResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 	}
+
+	defer func() {
+		status := "success"
+		if response.Error != nil {
+			status = "error"
+		}
+		metrics.MCPRequestsTotal.WithLabelValues(serverName, req.Method, status).Inc()
+		metrics.MCPRequestDuration.WithLabelValues(serverName, req.Method).Observe(time.Since(startTime).Seconds())
+	}()
 
 	switch req.Method {
 	case "initialize":
@@ -259,6 +278,8 @@ func (s *MCPServer) listTools() interface{} {
 
 // callTool executes the requested tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
+	startTime := time.Now()
+
 	s.service.logger.Debug().
 		Str("tool", name).
 		Interface("args", args).
@@ -266,16 +287,29 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 
 	ctx := context.Background()
 
+	var result interface{}
+	var err error
+
 	switch name {
 	case "get_price":
-		return s.service.handleGetCurrentPrice(ctx, args)
+		result, err = s.service.handleGetCurrentPrice(ctx, args)
 	case "get_ticker_24h":
-		return s.service.handleGetTicker24h(ctx, args)
+		result, err = s.service.handleGetTicker24h(ctx, args)
 	case "get_order_book":
-		return s.service.handleGetOrderbook(ctx, args)
+		result, err = s.service.handleGetOrderbook(ctx, args)
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", name)
+		err = fmt.Errorf("unknown tool: %s", name)
 	}
+
+	// Record metrics
+	status := "success"
+	if err != nil {
+		status = "error"
+	}
+	metrics.MCPToolCallsTotal.WithLabelValues(serverName, name, status).Inc()
+	metrics.MCPToolCallDuration.WithLabelValues(serverName, name).Observe(time.Since(startTime).Seconds())
+
+	return result, err
 }
 
 // handleGetCurrentPrice gets current price for a symbol

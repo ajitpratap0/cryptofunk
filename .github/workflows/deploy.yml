@@ -1,0 +1,338 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      version:
+        description: 'Version/Tag to deploy (leave empty for latest from branch)'
+        required: false
+        type: string
+
+  push:
+    branches:
+      - develop  # Auto-deploy to staging
+    tags:
+      - 'v*.*.*'  # Auto-deploy to production on version tags
+
+env:
+  GO_VERSION: '1.25'
+  REGISTRY: ghcr.io
+
+jobs:
+  # Determine deployment environment
+  setup:
+    name: Setup Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.determine-env.outputs.environment }}
+      version: ${{ steps.determine-env.outputs.version }}
+      namespace: ${{ steps.determine-env.outputs.namespace }}
+    steps:
+      - name: Determine environment
+        id: determine-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ inputs.environment }}"
+            VERSION="${{ inputs.version }}"
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            ENVIRONMENT="staging"
+            VERSION="develop-$(echo ${{ github.sha }} | cut -c1-7)"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            ENVIRONMENT="production"
+            VERSION="${{ github.ref_name }}"
+          else
+            echo "Unknown deployment trigger"
+            exit 1
+          fi
+
+          # Set namespace based on environment
+          if [ "$ENVIRONMENT" == "production" ]; then
+            NAMESPACE="cryptofunk"
+          else
+            NAMESPACE="cryptofunk-$ENVIRONMENT"
+          fi
+
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "namespace=$NAMESPACE" >> $GITHUB_OUTPUT
+
+          echo "Deploying version $VERSION to $ENVIRONMENT (namespace: $NAMESPACE)"
+
+  # Pre-deployment checks
+  pre-deploy:
+    name: Pre-Deployment Checks
+    runs-on: ubuntu-latest
+    needs: setup
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Kubernetes manifests
+        run: |
+          # Install kubeval
+          curl -LO https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo mv kubeval /usr/local/bin/
+
+          # Validate all manifests
+          kubeval --strict deployments/k8s/*.yaml
+
+      - name: Check deployment readiness
+        run: |
+          echo "Environment: ${{ needs.setup.outputs.environment }}"
+          echo "Version: ${{ needs.setup.outputs.version }}"
+          echo "Namespace: ${{ needs.setup.outputs.namespace }}"
+
+          # Verify version exists in container registry
+          VERSION="${{ needs.setup.outputs.version }}"
+          if [ -n "$VERSION" ]; then
+            echo "Deploying version: $VERSION"
+          else
+            echo "❌ No version specified"
+            exit 1
+          fi
+
+  # Deploy to Kubernetes
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: [setup, pre-deploy]
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+      url: ${{ steps.get-url.outputs.url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ needs.setup.outputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply ConfigMap
+        run: |
+          kubectl apply -f deployments/k8s/configmap.yaml -n ${{ needs.setup.outputs.namespace }}
+
+      - name: Apply Secrets
+        run: |
+          # Secrets should be managed externally (e.g., sealed-secrets, external-secrets)
+          # This is a placeholder for secret management
+          echo "Verifying secrets exist..."
+          kubectl get secret cryptofunk-secrets -n ${{ needs.setup.outputs.namespace }} || \
+            echo "⚠️  Warning: Secrets not found. Please ensure secrets are configured."
+
+      - name: Deploy PostgreSQL
+        run: |
+          kubectl apply -f deployments/k8s/postgres.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl rollout status statefulset/postgres -n ${{ needs.setup.outputs.namespace }} --timeout=5m
+
+      - name: Deploy Redis
+        run: |
+          kubectl apply -f deployments/k8s/redis.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl rollout status deployment/redis -n ${{ needs.setup.outputs.namespace }} --timeout=3m
+
+      - name: Deploy NATS
+        run: |
+          kubectl apply -f deployments/k8s/nats.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl rollout status deployment/nats -n ${{ needs.setup.outputs.namespace }} --timeout=3m
+
+      - name: Run database migrations
+        run: |
+          # Deploy migration job
+          envsubst < deployments/k8s/job-migrate.yaml | kubectl apply -f - -n ${{ needs.setup.outputs.namespace }}
+
+          # Wait for migration to complete
+          kubectl wait --for=condition=complete job/db-migrate -n ${{ needs.setup.outputs.namespace }} --timeout=5m || \
+            (kubectl logs job/db-migrate -n ${{ needs.setup.outputs.namespace }} && exit 1)
+
+      - name: Deploy MCP Servers
+        run: |
+          for server in market-data technical-indicators risk-analyzer order-executor; do
+            kubectl apply -f deployments/k8s/mcp-server-${server}.yaml -n ${{ needs.setup.outputs.namespace }}
+            kubectl rollout status deployment/mcp-${server} -n ${{ needs.setup.outputs.namespace }} --timeout=5m
+          done
+
+      - name: Deploy Orchestrator
+        run: |
+          kubectl apply -f deployments/k8s/orchestrator.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl rollout status deployment/orchestrator -n ${{ needs.setup.outputs.namespace }} --timeout=5m
+
+      - name: Deploy API
+        run: |
+          kubectl apply -f deployments/k8s/api.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl rollout status deployment/api -n ${{ needs.setup.outputs.namespace }} --timeout=5m
+
+      - name: Deploy Monitoring Stack
+        if: needs.setup.outputs.environment == 'production'
+        run: |
+          kubectl apply -f deployments/k8s/prometheus.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl apply -f deployments/k8s/grafana.yaml -n ${{ needs.setup.outputs.namespace }}
+
+      - name: Get deployment URL
+        id: get-url
+        run: |
+          # Get the LoadBalancer IP or Ingress URL
+          URL=$(kubectl get service api -n ${{ needs.setup.outputs.namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || echo "pending")
+          if [ "$URL" == "pending" ]; then
+            URL=$(kubectl get ingress -n ${{ needs.setup.outputs.namespace }} -o jsonpath='{.spec.rules[0].host}' || echo "http://localhost")
+          fi
+          echo "url=https://${URL}" >> $GITHUB_OUTPUT
+          echo "Deployment URL: https://${URL}"
+
+  # Post-deployment smoke tests
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [setup, deploy]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for services to stabilize..."
+          sleep 30
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Check pod health
+        run: |
+          echo "Checking pod health in namespace ${{ needs.setup.outputs.namespace }}..."
+
+          # Get all pods
+          kubectl get pods -n ${{ needs.setup.outputs.namespace }}
+
+          # Check if all pods are running
+          NOT_RUNNING=$(kubectl get pods -n ${{ needs.setup.outputs.namespace }} --field-selector=status.phase!=Running --no-headers | wc -l)
+          if [ $NOT_RUNNING -gt 0 ]; then
+            echo "❌ $NOT_RUNNING pod(s) are not in Running state"
+            kubectl get pods -n ${{ needs.setup.outputs.namespace }} --field-selector=status.phase!=Running
+            exit 1
+          fi
+
+          echo "✅ All pods are running"
+
+      - name: Test health endpoints
+        run: |
+          NAMESPACE="${{ needs.setup.outputs.namespace }}"
+
+          # Port-forward to API service for testing
+          kubectl port-forward -n $NAMESPACE svc/api 8080:80 &
+          PF_PID=$!
+          sleep 5
+
+          # Test health endpoint
+          HEALTH_STATUS=$(curl -s http://localhost:8080/health | jq -r '.status' || echo "failed")
+          if [ "$HEALTH_STATUS" != "healthy" ]; then
+            echo "❌ Health check failed: $HEALTH_STATUS"
+            kill $PF_PID
+            exit 1
+          fi
+
+          echo "✅ Health check passed"
+          kill $PF_PID
+
+      - name: Test orchestrator connectivity
+        run: |
+          NAMESPACE="${{ needs.setup.outputs.namespace }}"
+
+          # Port-forward to orchestrator
+          kubectl port-forward -n $NAMESPACE svc/orchestrator 8081:8081 &
+          PF_PID=$!
+          sleep 5
+
+          # Test health endpoint
+          ORCH_STATUS=$(curl -s http://localhost:8081/health | jq -r '.status' || echo "failed")
+          if [ "$ORCH_STATUS" != "healthy" ]; then
+            echo "❌ Orchestrator health check failed"
+            kill $PF_PID
+            exit 1
+          fi
+
+          echo "✅ Orchestrator health check passed"
+          kill $PF_PID
+
+      - name: Verify database connectivity
+        run: |
+          NAMESPACE="${{ needs.setup.outputs.namespace }}"
+
+          # Check if migrations table exists
+          kubectl exec -n $NAMESPACE deployment/api -- sh -c \
+            "psql \$DATABASE_URL -c 'SELECT COUNT(*) FROM schema_version;'" || \
+            (echo "❌ Database connectivity check failed" && exit 1)
+
+          echo "✅ Database connectivity verified"
+
+  # Rollback on failure
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    needs: [setup, deploy, smoke-tests]
+    if: failure()
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Rollback deployments
+        run: |
+          NAMESPACE="${{ needs.setup.outputs.namespace }}"
+          echo "Rolling back deployments in namespace $NAMESPACE..."
+
+          for deployment in orchestrator api mcp-market-data mcp-technical-indicators mcp-risk-analyzer mcp-order-executor; do
+            kubectl rollout undo deployment/$deployment -n $NAMESPACE || echo "Could not rollback $deployment"
+          done
+
+          echo "⚠️  Rollback completed. Please investigate the deployment failure."
+
+  # Notification
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    needs: [setup, deploy, smoke-tests]
+    if: always()
+    steps:
+      - name: Send deployment notification
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const environment = '${{ needs.setup.outputs.environment }}';
+            const version = '${{ needs.setup.outputs.version }}';
+            const deployStatus = '${{ needs.smoke-tests.result }}';
+            const emoji = deployStatus === 'success' ? '✅' : '❌';
+
+            const message = `${emoji} Deployment to **${environment}**\n\nVersion: \`${version}\`\nStatus: ${deployStatus}\nTriggered by: @${{ github.actor }}`;
+
+            console.log(message);
+
+            // You can integrate with Slack, Discord, etc. here
+            // Example: await fetch(process.env.SLACK_WEBHOOK_URL, { method: 'POST', body: JSON.stringify({ text: message }) });
