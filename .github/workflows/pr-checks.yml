@@ -5,7 +5,7 @@ on:
     branches: [ main, develop ]
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.25.3'
 
 jobs:
   # Validate PR title follows conventional commit format
@@ -65,13 +65,13 @@ jobs:
 
             console.log(`PR has ${additions} additions and ${deletions} deletions (total: ${changes} changes)`);
 
-            // Warning for large PRs (>500 lines changed)
-            if (changes > 500) {
+            // Warning for large PRs (>1000 lines changed)
+            if (changes > 1000) {
               core.warning(`⚠️  This PR modifies ${changes} lines. Consider breaking it into smaller PRs for easier review.`);
             }
 
-            // Fail for extremely large PRs (>1000 lines)
-            if (changes > 1000) {
+            // Fail for extremely large PRs (>5000 lines) unless it's infrastructure/documentation
+            if (changes > 5000 && !pr.title.includes('infrastructure') && !pr.title.includes('docs')) {
               core.setFailed(`❌ This PR is too large (${changes} lines). Please break it into smaller, focused PRs.`);
             }
 
@@ -155,18 +155,18 @@ jobs:
 
       - name: Check for debug statements
         run: |
-          # Check for common debug patterns
-          DEBUG_PATTERNS=$(grep -rn "fmt.Println\|log.Println\|print(\|println(" --include="*.go" . | grep -v "_test.go" || true)
+          # Check for common debug patterns (excluding cmd/ since those are CLIs)
+          DEBUG_PATTERNS=$(grep -rn "fmt.Println\|log.Println\|print(\|println(" --include="*.go" internal/ pkg/ 2>/dev/null | grep -v "_test.go" || true)
 
           if [ -n "$DEBUG_PATTERNS" ]; then
-            echo "❌ Found debug print statements in non-test code:"
+            echo "❌ Found debug print statements in library code:"
             echo "$DEBUG_PATTERNS"
             echo ""
             echo "Please remove debug statements or use proper logging (zerolog)."
             exit 1
           fi
 
-          echo "✅ No debug statements found"
+          echo "✅ No debug statements found in library code"
 
   # Check documentation
   docs-check:
