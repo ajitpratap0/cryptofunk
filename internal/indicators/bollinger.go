@@ -56,14 +56,14 @@ func (s *Service) CalculateBollingerBands(args map[string]interface{}) (interfac
 	close(pricesChan)
 
 	bbIndicator := volatility.NewBollingerBandsWithPeriod[float64](period)
-	lowerChan, middleChan, upperChan := bbIndicator.Compute(pricesChan)
+	upperChan, middleChan, lowerChan := bbIndicator.Compute(pricesChan)
 
 	// Collect results
 	var lowerValues, middleValues, upperValues []float64
 	for {
-		l, lok := <-lowerChan
-		m, mok := <-middleChan
 		u, uok := <-upperChan
+		m, mok := <-middleChan
+		l, lok := <-lowerChan
 		if !lok || !mok || !uok {
 			break
 		}

@@ -1,0 +1,159 @@
+{
+  "title": "CryptoFunk - Risk Metrics",
+  "uid": "cryptofunk-risk",
+  "tags": ["cryptofunk", "risk"],
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Circuit Breaker Status",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "cryptofunk_circuit_breaker_tripped",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Current Drawdown vs Threshold",
+      "type": "gauge",
+      "gridPos": {"h": 5, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "cryptofunk_drawdown_percent{mode=\"paper\"}",
+          "legendFormat": "Current"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 20}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Risk Limit Breaches",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "targets": [
+        {
+          "expr": "rate(cryptofunk_risk_limit_breaches_total[5m])",
+          "legendFormat": "{{limit_type}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Value at Risk (VaR)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {
+          "expr": "cryptofunk_var_value_usd",
+          "legendFormat": "VaR {{confidence}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD"}
+      }
+    },
+    {
+      "id": 5,
+      "title": "Position Sizes",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "targets": [
+        {
+          "expr": "cryptofunk_positions_open",
+          "legendFormat": "{{symbol}} - {{side}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Portfolio Value",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "targets": [
+        {
+          "expr": "cryptofunk_portfolio_value_usd",
+          "legendFormat": "{{mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "currencyUSD"}
+      }
+    },
+    {
+      "id": 7,
+      "title": "Circuit Breaker Trips Over Time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "targets": [
+        {
+          "expr": "rate(cryptofunk_circuit_breaker_trips_total[5m])",
+          "legendFormat": "{{breaker_type}} - {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Sharpe Ratio Trend",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {
+          "expr": "cryptofunk_sharpe_ratio",
+          "legendFormat": "{{mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "green", "value": 2}
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

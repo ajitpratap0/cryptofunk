@@ -56,7 +56,7 @@ task build-servers          # Build all MCP servers
 task build-agents           # Build all agents
 
 # Deployment (see Deployment section for details)
-docker-compose -f deployments/docker-compose.yml up -d    # Local deployment
+docker-compose up -d                                       # Local deployment
 kubectl apply -f deployments/k8s/                          # Kubernetes deployment
 
 # Health checks
@@ -190,14 +190,16 @@ cryptofunk/
 │   ├── agents.yaml                # Agent configurations
 │   └── orchestrator.yaml          # Orchestrator settings
 ├── scripts/                       # Utility scripts
-├── deployments/                   # Kubernetes manifests
+├── deployments/                   # Deployment configurations
 │   ├── k8s/                       # Kubernetes YAML
-│   └── docker-compose.yml         # Local development
+│   ├── grafana/                   # Grafana dashboards
+│   └── prometheus/                # Prometheus configuration
 ├── docs/                          # Documentation
 │   ├── OPEN_SOURCE_TOOLS.md       # Rationale for tool choices
 │   ├── MCP_INTEGRATION.md         # MCP architecture details
 │   ├── TASK_VS_MAKE.md            # Why Task over Make
 │   └── LLM_AGENT_ARCHITECTURE.md  # Agent design patterns
+├── docker-compose.yml             # Docker Compose for local development (all services)
 ├── Taskfile.yml                   # Task build definitions (PRIMARY BUILD FILE)
 ├── TASKS.md                       # Implementation plan (10 phases)
 ├── README.md                      # Project overview and quick start
@@ -406,17 +408,17 @@ git merge feature/phase-X-description
 
 ### Docker Compose (Local Development)
 
-The project includes a comprehensive Docker Compose setup in `deployments/docker-compose.yml` for local development:
+The project includes a comprehensive Docker Compose setup in the root `docker-compose.yml` for local development:
 
 ```bash
 # Start all services including infrastructure
-docker-compose -f deployments/docker-compose.yml up -d
+docker-compose up -d
 
 # View logs
-docker-compose -f deployments/docker-compose.yml logs -f
+docker-compose logs -f
 
 # Stop all services
-docker-compose -f deployments/docker-compose.yml down
+docker-compose down
 ```
 
 **Services included**:

@@ -1,14 +1,10 @@
-# CryptoFunk Configuration: Aggressive Trading Strategy
-# Recommended for: Risk-tolerant traders, experienced users, short-term traders
-# Risk Level: High
-# Expected Returns: 30-100%+ annual (with higher volatility)
-#
-# This configuration prioritizes high returns with higher risk tolerance.
-# Suitable for experienced traders with capital they can afford to lose.
+# Aggressive Trading Configuration
+# Higher risk, higher reward settings for experienced traders
+# Larger position sizes, wider stop-losses, lower confidence requirements
 
 app:
-  name: "CryptoFunk-Aggressive"
-  version: "1.0.0"
+  name: "CryptoFunk"
+  version: "0.1.0"
   environment: "production"
   log_level: "info"
 
@@ -16,10 +12,10 @@ database:
   host: "${DATABASE_HOST:-localhost}"
   port: 5432
   user: "${DATABASE_USER:-postgres}"
-  password: "${DATABASE_PASSWORD}"
+  password: "${DATABASE_PASSWORD}"  # REQUIRED: Set via environment variable
   database: "cryptofunk"
   ssl_mode: "require"  # SSL required for production
-  pool_size: 20  # Higher pool size for more activity
+  pool_size: 15  # Higher for more concurrent operations
 
 redis:
   host: "${REDIS_HOST:-localhost}"
@@ -32,59 +28,28 @@ nats:
   enable_jetstream: true
 
 llm:
+  enabled: true
   gateway: "bifrost"
   endpoint: "${LLM_ENDPOINT:-http://localhost:8080/v1/chat/completions}"
+  api_key: "${LLM_API_KEY}"  # Optional for Bifrost
+
+  # Aggressive: Faster models acceptable
   primary_model: "claude-sonnet-4-20250514"
-  fallback_model: "gpt-4-turbo"
-  temperature: 0.8  # Higher temperature for more creative, aggressive decisions
+  fallback_models:
+    - "gpt-4-turbo"
+    - "gpt-3.5-turbo"  # Faster fallback
+
+  temperature: 0.8  # Higher temperature for more creative strategies
   max_tokens: 2000
+  timeout: 20000  # Shorter timeout for faster decisions
   enable_caching: true
-  timeout: 30000
 
-trading:
-  mode: "live"  # Change to "paper" for testing
-  symbols:
-    # Major pairs
-    - "BTC/USDT"
-    - "ETH/USDT"
-    # Additional liquid altcoins for diversification
-    - "BNB/USDT"
-    - "SOL/USDT"
-    - "ADA/USDT"
-    - "XRP/USDT"
-    - "MATIC/USDT"
-    - "AVAX/USDT"
-  exchange: "binance"
-  initial_capital: 10000.0
-  max_positions: 5  # Multiple concurrent positions for diversification
-  default_quantity: 0.01
+  circuit_breaker:
+    failure_threshold: 8  # More tolerant of failures
+    success_threshold: 2
+    timeout: 30s  # Quick recovery
+    time_window: 3m
 
-risk:
-  max_position_size: 0.20  # 20% max per position (aggressive)
-  max_daily_loss: 0.05  # 5% max daily loss (higher tolerance)
-  max_drawdown: 0.15  # 15% max drawdown (higher tolerance)
-  default_stop_loss: 0.05  # 5% stop loss (wider stops for volatility)
-  default_take_profit: 0.15  # 15% take profit (3:1 risk/reward)
-  llm_approval_required: true  # Still require LLM validation
-  min_confidence: 0.60  # Lower confidence threshold (more trades)
-
-exchanges:
-  binance:
-    api_key: "${BINANCE_API_KEY}"
-    secret_key: "${BINANCE_API_SECRET}"
-    testnet: false  # Live trading
-    rate_limit_ms: 100  # Faster rate limiting for active trading
-
-api:
-  host: "0.0.0.0"
-  port: 8080
-  orchestrator_url: "http://localhost:8081"
-
-monitoring:
-  prometheus_port: 9100
-  enable_metrics: true
-
-# MCP Configuration
 mcp:
   external:
     coingecko:
@@ -92,10 +57,17 @@ mcp:
       name: "CoinGecko MCP"
       url: "https://mcp.api.coingecko.com/mcp"
       transport: "http_streaming"
-      cache_ttl: 60  # Shorter cache for fresher data
+      description: "Market data for aggressive trading"
+      cache_ttl: 30  # Shorter cache for fresher data
       rate_limit:
         enabled: true
-        requests_per_minute: 120  # More API calls for active trading
+        requests_per_minute: 200  # Higher rate limit
+      tools:
+        - "get_price"
+        - "get_market_chart"
+        - "get_coin_info"
+        - "get_trending"
+        - "get_top_gainers"
 
   internal:
     order_executor:
@@ -103,43 +75,56 @@ mcp:
       name: "Order Executor"
       command: "./bin/order-executor-server"
       transport: "stdio"
+      description: "Execute orders aggressively"
 
     risk_analyzer:
       enabled: true
       name: "Risk Analyzer"
       command: "./bin/risk-analyzer-server"
       transport: "stdio"
+      description: "Balanced risk management"
 
     technical_indicators:
       enabled: true
       name: "Technical Indicators"
       command: "./bin/technical-indicators-server"
       transport: "stdio"
+      description: "Aggressive technical analysis"
 
-    market_data:
-      enabled: false  # Use CoinGecko instead
+trading:
+  mode: "live"  # Aggressive settings for live trading
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+    - "BNBUSDT"
+    - "SOLUSDT"  # Multiple pairs for diversification
+  exchange: "binance"
+  initial_capital: 10000.0
+  max_positions: 5  # Up to 5 concurrent positions
+  default_quantity: 0.02  # Larger default quantity
 
-# Trading Strategy Notes:
-# - Diversified across 8+ liquid trading pairs
-# - Larger position sizes (20% max)
-# - Wider stop losses (5%) to handle volatility
-# - Higher profit targets (15%)
-# - Lower confidence threshold (60%) for more opportunities
-# - Multiple concurrent positions (5 max)
-# - Higher risk/reward ratio (3:1)
-# - More active trading with faster decisions
-#
-# Suitable for:
-# - Risk-tolerant traders
-# - Experienced users who understand volatility
-# - Short to medium-term trading
-# - Active monitoring and management
-# - Capital you can afford to lose
-#
-# Risk Warning:
-# - High volatility exposure
-# - Potential for significant losses
-# - Requires active monitoring
-# - Not suitable for risk-averse investors
-# - Test thoroughly in paper mode first
-# - Never invest more than you can afford to lose
+# AGGRESSIVE RISK PARAMETERS
+risk:
+  max_position_size: 0.2       # Up to 20% of portfolio per position
+  max_daily_loss: 0.05         # Stop trading if 5% daily loss
+  max_drawdown: 0.15           # 15% maximum drawdown (higher risk tolerance)
+  default_stop_loss: 0.03      # 3% stop loss (wider)
+  default_take_profit: 0.10    # 10% take profit (aggressive 3.3:1 R:R)
+  llm_approval_required: false # Allow rule-based trading without LLM
+  min_confidence: 0.6          # Accept 60% confidence (lower threshold)
+
+exchanges:
+  binance:
+    api_key: "${BINANCE_API_KEY}"
+    secret_key: "${BINANCE_API_SECRET}"
+    testnet: false  # Production mode
+    rate_limit_ms: 50  # Faster execution
+
+api:
+  host: "0.0.0.0"
+  port: 8081
+  orchestrator_url: "http://localhost:8081"
+
+monitoring:
+  prometheus_port: 9100
+  enable_metrics: true
