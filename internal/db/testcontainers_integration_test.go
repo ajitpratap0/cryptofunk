@@ -564,3 +564,245 @@ func TestConcurrentOperationsWithTestcontainers(t *testing.T) {
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(orders), 50)
 }
+
+func TestListActiveSessionsWithTestcontainers(t *testing.T) {
+	tc := testhelpers.SetupTestDatabase(t)
+	err := tc.ApplyMigrations("../../migrations")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	t.Run("EmptyDatabase", func(t *testing.T) {
+		sessions, err := tc.DB.ListActiveSessions(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, sessions, "Should return empty list for no active sessions")
+	})
+
+	t.Run("WithActiveSessions", func(t *testing.T) {
+		// Create 3 active sessions
+		activeSession1 := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "BTC/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now().Add(-2 * time.Hour),
+			InitialCapital: 10000.0,
+		}
+		err := tc.DB.CreateSession(ctx, activeSession1)
+		require.NoError(t, err)
+
+		activeSession2 := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "ETH/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now().Add(-1 * time.Hour),
+			InitialCapital: 5000.0,
+		}
+		err = tc.DB.CreateSession(ctx, activeSession2)
+		require.NoError(t, err)
+
+		activeSession3 := &db.TradingSession{
+			Mode:           db.TradingModeLive,
+			Symbol:         "SOL/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now(),
+			InitialCapital: 20000.0,
+		}
+		err = tc.DB.CreateSession(ctx, activeSession3)
+		require.NoError(t, err)
+
+		// Create 1 stopped session (should NOT appear in results)
+		stoppedSession := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "DOGE/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now().Add(-3 * time.Hour),
+			InitialCapital: 1000.0,
+		}
+		err = tc.DB.CreateSession(ctx, stoppedSession)
+		require.NoError(t, err)
+		err = tc.DB.StopSession(ctx, stoppedSession.ID, 1100.0)
+		require.NoError(t, err)
+
+		// List active sessions
+		activeSessions, err := tc.DB.ListActiveSessions(ctx)
+		require.NoError(t, err)
+		assert.Len(t, activeSessions, 3, "Should return exactly 3 active sessions")
+
+		// Verify sessions are ordered by started_at DESC (most recent first)
+		assert.Equal(t, "SOL/USDT", activeSessions[0].Symbol)
+		assert.Equal(t, "ETH/USDT", activeSessions[1].Symbol)
+		assert.Equal(t, "BTC/USDT", activeSessions[2].Symbol)
+
+		// Verify all returned sessions have nil StoppedAt
+		for _, session := range activeSessions {
+			assert.Nil(t, session.StoppedAt, "Active session should have nil StoppedAt")
+		}
+	})
+
+	t.Run("AllSessionsStopped", func(t *testing.T) {
+		// Truncate to start fresh
+		err := tc.TruncateAllTables()
+		require.NoError(t, err)
+
+		// Create and immediately stop a session
+		session := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "XRP/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now(),
+			InitialCapital: 2000.0,
+		}
+		err = tc.DB.CreateSession(ctx, session)
+		require.NoError(t, err)
+		err = tc.DB.StopSession(ctx, session.ID, 2100.0)
+		require.NoError(t, err)
+
+		// Should return empty list
+		activeSessions, err := tc.DB.ListActiveSessions(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, activeSessions)
+	})
+}
+
+func TestGetSessionsBySymbolWithTestcontainers(t *testing.T) {
+	tc := testhelpers.SetupTestDatabase(t)
+	err := tc.ApplyMigrations("../../migrations")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	t.Run("NoMatchingSessions", func(t *testing.T) {
+		sessions, err := tc.DB.GetSessionsBySymbol(ctx, "NONEXISTENT/USDT")
+		require.NoError(t, err)
+		assert.Empty(t, sessions, "Should return empty list for non-existent symbol")
+	})
+
+	t.Run("WithMultipleSymbols", func(t *testing.T) {
+		// Create sessions for BTC/USDT
+		btcSession1 := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "BTC/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now().Add(-3 * time.Hour),
+			InitialCapital: 10000.0,
+		}
+		err := tc.DB.CreateSession(ctx, btcSession1)
+		require.NoError(t, err)
+
+		btcSession2 := &db.TradingSession{
+			Mode:           db.TradingModeLive,
+			Symbol:         "BTC/USDT",
+			Exchange:       "coinbase",
+			StartedAt:      time.Now().Add(-1 * time.Hour),
+			InitialCapital: 15000.0,
+		}
+		err = tc.DB.CreateSession(ctx, btcSession2)
+		require.NoError(t, err)
+
+		// Create session for ETH/USDT (should NOT appear in BTC results)
+		ethSession := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "ETH/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now().Add(-2 * time.Hour),
+			InitialCapital: 5000.0,
+		}
+		err = tc.DB.CreateSession(ctx, ethSession)
+		require.NoError(t, err)
+
+		// Get BTC/USDT sessions
+		btcSessions, err := tc.DB.GetSessionsBySymbol(ctx, "BTC/USDT")
+		require.NoError(t, err)
+		assert.Len(t, btcSessions, 2, "Should return exactly 2 BTC/USDT sessions")
+
+		// Verify all are BTC/USDT
+		for _, session := range btcSessions {
+			assert.Equal(t, "BTC/USDT", session.Symbol)
+		}
+
+		// Verify ordering by started_at DESC (most recent first)
+		assert.Equal(t, "coinbase", btcSessions[0].Exchange, "Most recent session should be first")
+		assert.Equal(t, "binance", btcSessions[1].Exchange, "Older session should be second")
+
+		// Get ETH/USDT sessions
+		ethSessions, err := tc.DB.GetSessionsBySymbol(ctx, "ETH/USDT")
+		require.NoError(t, err)
+		assert.Len(t, ethSessions, 1)
+		assert.Equal(t, "ETH/USDT", ethSessions[0].Symbol)
+	})
+
+	t.Run("IncludesStoppedSessions", func(t *testing.T) {
+		// Truncate to start fresh
+		err := tc.TruncateAllTables()
+		require.NoError(t, err)
+
+		// Create active session
+		activeSession := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "ADA/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now(),
+			InitialCapital: 3000.0,
+		}
+		err = tc.DB.CreateSession(ctx, activeSession)
+		require.NoError(t, err)
+
+		// Create stopped session
+		stoppedSession := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "ADA/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now().Add(-1 * time.Hour),
+			InitialCapital: 4000.0,
+		}
+		err = tc.DB.CreateSession(ctx, stoppedSession)
+		require.NoError(t, err)
+		err = tc.DB.StopSession(ctx, stoppedSession.ID, 4200.0)
+		require.NoError(t, err)
+
+		// GetSessionsBySymbol should return BOTH active and stopped
+		sessions, err := tc.DB.GetSessionsBySymbol(ctx, "ADA/USDT")
+		require.NoError(t, err)
+		assert.Len(t, sessions, 2, "Should include both active and stopped sessions")
+
+		// Verify one is stopped, one is active
+		var hasActive, hasStopped bool
+		for _, session := range sessions {
+			if session.StoppedAt == nil {
+				hasActive = true
+			} else {
+				hasStopped = true
+				assert.NotNil(t, session.FinalCapital)
+				assert.Equal(t, 4200.0, *session.FinalCapital)
+			}
+		}
+		assert.True(t, hasActive, "Should have at least one active session")
+		assert.True(t, hasStopped, "Should have at least one stopped session")
+	})
+
+	t.Run("CaseSensitiveSymbol", func(t *testing.T) {
+		// Truncate to start fresh
+		err := tc.TruncateAllTables()
+		require.NoError(t, err)
+
+		session := &db.TradingSession{
+			Mode:           db.TradingModePaper,
+			Symbol:         "DOT/USDT",
+			Exchange:       "binance",
+			StartedAt:      time.Now(),
+			InitialCapital: 5000.0,
+		}
+		err = tc.DB.CreateSession(ctx, session)
+		require.NoError(t, err)
+
+		// Exact match should work
+		sessions, err := tc.DB.GetSessionsBySymbol(ctx, "DOT/USDT")
+		require.NoError(t, err)
+		assert.Len(t, sessions, 1)
+
+		// Case-sensitive mismatch should return nothing (PostgreSQL default)
+		sessionsDifferentCase, err := tc.DB.GetSessionsBySymbol(ctx, "dot/usdt")
+		require.NoError(t, err)
+		assert.Empty(t, sessionsDifferentCase, "Symbol query should be case-sensitive")
+	})
+}

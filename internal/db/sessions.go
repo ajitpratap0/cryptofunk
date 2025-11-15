@@ -204,6 +204,137 @@ func (db *DB) StopSession(ctx context.Context, sessionID uuid.UUID, finalCapital
 	return nil
 }
 
+// ListActiveSessions retrieves all active (not stopped) trading sessions
+func (db *DB) ListActiveSessions(ctx context.Context) ([]*TradingSession, error) {
+	query := `
+		SELECT id, mode, symbol, exchange, started_at, stopped_at,
+		       initial_capital, final_capital, total_trades, winning_trades,
+		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
+		       config, metadata, created_at, updated_at
+		FROM trading_sessions
+		WHERE stopped_at IS NULL
+		ORDER BY started_at DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Msg("Failed to list active sessions")
+		return nil, fmt.Errorf("failed to list active sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*TradingSession
+	for rows.Next() {
+		var session TradingSession
+		err := rows.Scan(
+			&session.ID,
+			&session.Mode,
+			&session.Symbol,
+			&session.Exchange,
+			&session.StartedAt,
+			&session.StoppedAt,
+			&session.InitialCapital,
+			&session.FinalCapital,
+			&session.TotalTrades,
+			&session.WinningTrades,
+			&session.LosingTrades,
+			&session.TotalPnL,
+			&session.MaxDrawdown,
+			&session.SharpeRatio,
+			&session.Config,
+			&session.Metadata,
+			&session.CreatedAt,
+			&session.UpdatedAt,
+		)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Msg("Failed to scan session row")
+			return nil, fmt.Errorf("failed to scan session row: %w", err)
+		}
+		sessions = append(sessions, &session)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating session rows: %w", err)
+	}
+
+	log.Debug().
+		Int("count", len(sessions)).
+		Msg("Listed active sessions")
+
+	return sessions, nil
+}
+
+// GetSessionsBySymbol retrieves all trading sessions for a specific symbol
+func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*TradingSession, error) {
+	query := `
+		SELECT id, mode, symbol, exchange, started_at, stopped_at,
+		       initial_capital, final_capital, total_trades, winning_trades,
+		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
+		       config, metadata, created_at, updated_at
+		FROM trading_sessions
+		WHERE symbol = $1
+		ORDER BY started_at DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query, symbol)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("symbol", symbol).
+			Msg("Failed to get sessions by symbol")
+		return nil, fmt.Errorf("failed to get sessions by symbol: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*TradingSession
+	for rows.Next() {
+		var session TradingSession
+		err := rows.Scan(
+			&session.ID,
+			&session.Mode,
+			&session.Symbol,
+			&session.Exchange,
+			&session.StartedAt,
+			&session.StoppedAt,
+			&session.InitialCapital,
+			&session.FinalCapital,
+			&session.TotalTrades,
+			&session.WinningTrades,
+			&session.LosingTrades,
+			&session.TotalPnL,
+			&session.MaxDrawdown,
+			&session.SharpeRatio,
+			&session.Config,
+			&session.Metadata,
+			&session.CreatedAt,
+			&session.UpdatedAt,
+		)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("symbol", symbol).
+				Msg("Failed to scan session row")
+			return nil, fmt.Errorf("failed to scan session row: %w", err)
+		}
+		sessions = append(sessions, &session)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating session rows: %w", err)
+	}
+
+	log.Debug().
+		Str("symbol", symbol).
+		Int("count", len(sessions)).
+		Msg("Retrieved sessions by symbol")
+
+	return sessions, nil
+}
+
 // SessionStats holds session statistics
 type SessionStats struct {
 	TotalTrades   int
