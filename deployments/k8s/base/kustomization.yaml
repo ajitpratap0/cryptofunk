@@ -9,7 +9,9 @@ resources:
 
   # Configuration
   - configmap.yaml
+  - configmap-monitoring.yaml
   - secrets.yaml
+  - vault-integration.yaml
 
   # Persistent Storage
   - pvc.yaml
@@ -20,6 +22,7 @@ resources:
   - deployment-nats.yaml
   - deployment-bifrost.yaml
   - deployment-prometheus.yaml
+  - deployment-alertmanager.yaml
   - deployment-grafana.yaml
 
   # Application Deployments
@@ -34,6 +37,9 @@ resources:
 
   # Ingress
   - ingress.yaml
+
+  # Network Policies
+  - network-policy.yaml
 
 # Common labels applied to all resources
 commonLabels:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -469,11 +470,11 @@ func TestHealth_WithMock(t *testing.T) {
 
 // TestConcurrentRequests_WithMock tests concurrent API requests with mocks
 func TestConcurrentRequests_WithMock(t *testing.T) {
-	requestCount := 0
+	var requestCount int32 // Use int32 for atomic operations
 
 	// Create mock HTTP server that counts requests
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
+		atomic.AddInt32(&requestCount, 1) // Thread-safe increment
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -511,8 +512,9 @@ func TestConcurrentRequests_WithMock(t *testing.T) {
 	}
 
 	// Verify all requests were made
-	if requestCount != numRequests {
-		t.Errorf("Expected %d requests, got %d", numRequests, requestCount)
+	finalCount := atomic.LoadInt32(&requestCount)
+	if finalCount != numRequests {
+		t.Errorf("Expected %d requests, got %d", numRequests, finalCount)
 	}
 }
 

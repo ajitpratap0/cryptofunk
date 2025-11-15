@@ -380,7 +380,12 @@ func (cm *ConsensusManager) finalizeDelphiConsensus(session *ConsensusSession, f
 	msg, _ := NewMessage(session.Topic, "orchestrator", session.Result)
 	msg.WithMetadata("consensus_session_id", session.ID.String())
 	msg.WithMetadata("consensus_method", string(ConsensusDelphi))
-	if err := cm.blackboard.Post(context.Background(), msg); err != nil {
+
+	// Use 5-second timeout for blackboard post
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := cm.blackboard.Post(ctx, msg); err != nil {
 		log.Warn().Err(err).Msg("Failed to post consensus result to blackboard")
 	}
 }

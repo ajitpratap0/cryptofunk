@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
 	"github.com/rs/zerolog/log"
+	"github.com/sony/gobreaker"
 )
 
 // TradingMode represents the trading mode (paper or live)
@@ -23,6 +25,7 @@ type Service struct {
 	db              *db.DB
 	mode            TradingMode
 	positionManager *PositionManager
+	circuitBreaker  *risk.CircuitBreakerManager
 }
 
 // ServiceConfig contains configuration for the exchange service
@@ -63,11 +66,15 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	// Create position manager
 	positionManager := NewPositionManager(database)
 
+	// Create circuit breaker manager
+	circuitBreaker := risk.NewCircuitBreakerManager()
+
 	return &Service{
 		exchange:        exchange,
 		db:              database,
 		mode:            config.Mode,
 		positionManager: positionManager,
+		circuitBreaker:  circuitBreaker,
 	}, nil
 }
 
@@ -81,7 +88,9 @@ func NewServicePaper(database *db.DB) *Service {
 func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceMarketOrder called")
 
-	ctx := context.Background()
+	// Create context with 30-second timeout for exchange API calls
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Extract symbol
 	symbol, ok := args["symbol"].(string)
@@ -116,11 +125,24 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 		Quantity: quantity,
 	}
 
-	// Place order
-	resp, err := s.exchange.PlaceOrder(ctx, req)
+	// Place order through circuit breaker
+	var resp *PlaceOrderResponse
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.PlaceOrder(ctx, req)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	resp = cbResult.(*PlaceOrderResponse)
 
 	// Get order details
 	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
@@ -146,7 +168,9 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceLimitOrder called")
 
-	ctx := context.Background()
+	// Create context with 30-second timeout for exchange API calls
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Extract symbol
 	symbol, ok := args["symbol"].(string)
@@ -221,7 +245,8 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("CancelOrder called")
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Extract order_id
 	orderID, ok := args["order_id"].(string)
@@ -242,7 +267,8 @@ func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) 
 func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetOrderStatus called")
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Extract order_id
 	orderID, ok := args["order_id"].(string)
@@ -304,7 +330,8 @@ func (s *Service) StartSession(args map[string]interface{}) (interface{}, error)
 		Config:         config,
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if err := s.db.CreateSession(ctx, session); err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
@@ -351,7 +378,8 @@ func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) 
 	}
 
 	// Stop session in database
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if err := s.db.StopSession(ctx, *sessionID, finalCapital); err != nil {
 		return nil, fmt.Errorf("failed to stop session: %w", err)
 	}
@@ -408,7 +436,8 @@ func (s *Service) GetSessionStats(args map[string]interface{}) (interface{}, err
 	}
 
 	// Get session from database
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	session, err := s.db.GetSession(ctx, *sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -490,7 +519,8 @@ func (s *Service) UpdatePositionPnL(args map[string]interface{}) (interface{}, e
 		}
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	err := s.positionManager.UpdateUnrealizedPnL(ctx, prices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update P&L: %w", err)
@@ -528,7 +558,8 @@ func (s *Service) ClosePositionBySymbol(args map[string]interface{}) (interface{
 		return nil, fmt.Errorf("no open position for symbol: %s", symbol)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	err = s.db.ClosePosition(ctx, position.ID, exitPrice, exitReason, 0.0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to close position: %w", err)

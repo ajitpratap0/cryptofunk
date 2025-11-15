@@ -1,0 +1,182 @@
+# Production override for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file enforces production security settings:
+# - TLS/SSL for all database and Redis connections
+# - Vault integration for secrets management
+# - Non-default ports for security through obscurity
+# - Resource limits
+# - Security context for containers
+
+version: '3.9'
+
+services:
+  # PostgreSQL - Enforce TLS
+  postgres:
+    environment:
+      # Require SSL connections in production
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+    command: >
+      postgres
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/server.crt
+      -c ssl_key_file=/var/lib/postgresql/server.key
+      -c ssl_ca_file=/var/lib/postgresql/root.crt
+      -c password_encryption=scram-sha-256
+      -c log_connections=on
+      -c log_disconnections=on
+    volumes:
+      # Mount TLS certificates (must be provided separately)
+      - ./certs/postgres/server.crt:/var/lib/postgresql/server.crt:ro
+      - ./certs/postgres/server.key:/var/lib/postgresql/server.key:ro
+      - ./certs/postgres/root.crt:/var/lib/postgresql/root.crt:ro
+
+  # Redis - Enforce TLS and authentication
+  redis:
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD environment variable is required}
+      --tls-port 6380
+      --port 0
+      --tls-cert-file /tls/redis.crt
+      --tls-key-file /tls/redis.key
+      --tls-ca-cert-file /tls/ca.crt
+      --tls-auth-clients no
+    ports:
+      - "6380:6380"  # TLS port instead of 6379
+    volumes:
+      # Mount TLS certificates (must be provided separately)
+      - ./certs/redis/redis.crt:/tls/redis.crt:ro
+      - ./certs/redis/redis.key:/tls/redis.key:ro
+      - ./certs/redis/ca.crt:/tls/ca.crt:ro
+
+  # Migrate - Use TLS connection
+  migrate:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/root.crt
+    volumes:
+      - ./certs/postgres/root.crt:/certs/root.crt:ro
+
+  # Orchestrator - TLS connections and Vault
+  orchestrator:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+      # Vault configuration
+      VAULT_ENABLED: "true"
+      VAULT_ADDR: ${VAULT_ADDR:?VAULT_ADDR environment variable is required}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_AUTH_METHOD: ${VAULT_AUTH_METHOD:-kubernetes}
+      VAULT_MOUNT_PATH: ${VAULT_MOUNT_PATH:-secret}
+      VAULT_SECRET_PATH: ${VAULT_SECRET_PATH:-cryptofunk/production}
+      # Environment
+      CRYPTOFUNK_APP_ENVIRONMENT: production
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # MCP Server: Market Data - TLS connections
+  market-data-server:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # MCP Server: Technical Indicators - TLS connections
+  technical-indicators-server:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # MCP Server: Risk Analyzer - TLS connections
+  risk-analyzer-server:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # MCP Server: Order Executor - TLS connections
+  order-executor-server:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # Trading Agent: Technical Analysis - TLS connections
+  technical-agent:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # Trading Agent: Order Book Analysis - TLS connections
+  orderbook-agent:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # Trading Agent: Sentiment Analysis - TLS connections
+  sentiment-agent:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # Trading Agent: Trend Following - TLS connections
+  trend-agent:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # Trading Agent: Mean Reversion - TLS connections
+  reversion-agent:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # Trading Agent: Risk Management - TLS connections
+  risk-agent:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro
+
+  # REST/WebSocket API Server - TLS connections
+  api:
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=require&sslrootcert=/certs/postgres-ca.crt
+      REDIS_URL: rediss://:${REDIS_PASSWORD}@redis:6380?tls_insecure_skip_verify=false&tls_ca_cert=/certs/redis-ca.crt
+      # Enforce production settings
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://cryptofunk.example.com}
+      CRYPTOFUNK_APP_ENVIRONMENT: production
+    volumes:
+      - ./certs/postgres/ca.crt:/certs/postgres-ca.crt:ro
+      - ./certs/redis/ca.crt:/certs/redis-ca.crt:ro

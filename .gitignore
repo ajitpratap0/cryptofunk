@@ -88,3 +88,9 @@ checkpoints/
 
 .claude/skills/
 api
+
+# Test artifacts
+/tmp/test_output.txt
+
+# Certificate files (generated for local development)
+certs/

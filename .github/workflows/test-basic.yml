@@ -1,0 +1,23 @@
+name: Test Basic
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-echo:
+    name: Test Echo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo test
+        run: echo "Hello from GitHub Actions"
+
+      - name: Check environment
+        run: |
+          echo "Runner OS: $RUNNER_OS"
+          echo "GitHub Event: $GITHUB_EVENT_NAME"
+          pwd
+          ls -la
+
+      - name: Success
+        run: echo "✓ Basic workflow works!"

@@ -1,0 +1,796 @@
+# Network Policies for CryptoFunk
+# Implements zero-trust network segmentation using Kubernetes NetworkPolicy
+#
+# Policy Overview:
+# - Deny all traffic by default
+# - Explicitly allow required communication paths
+# - Isolate infrastructure (DB, Redis) from external access
+# - Allow monitoring (Prometheus) to scrape metrics
+# - Allow agents to communicate with orchestrator and MCP servers
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: cryptofunk
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# PostgreSQL - Only accessible by application components
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from orchestrator
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow from MCP servers
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: mcp-server
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: agent
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow from API server
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow from migration job
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: migrate
+    ports:
+    - protocol: TCP
+      port: 5432
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Redis - Only accessible by application components
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from orchestrator
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow from MCP servers
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: mcp-server
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: agent
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow from API server
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow from Bifrost (LLM gateway)
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: bifrost
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# NATS - Only accessible by orchestrator and agents
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from orchestrator
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+    ports:
+    - protocol: TCP
+      port: 4222  # Client connections
+    - protocol: TCP
+      port: 6222  # Cluster routing
+  # Allow from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: agent
+    ports:
+    - protocol: TCP
+      port: 4222
+  # Allow from API server
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    ports:
+    - protocol: TCP
+      port: 4222
+  # Allow Prometheus to scrape monitoring
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8222  # HTTP monitoring
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Orchestrator - Central coordinator
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orchestrator-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: agent
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow from API server
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: api
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow Prometheus to scrape metrics
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080  # Assuming metrics on same port
+  egress:
+  # Allow to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow to NATS
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: nats
+    ports:
+    - protocol: TCP
+      port: 4222
+  # Allow to Bifrost
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: bifrost
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow to MCP servers (stdio communication)
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: mcp-server
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow to Vault (for secrets)
+  - to:
+    - namespaceSelector: {}  # Vault might be in different namespace
+    ports:
+    - protocol: TCP
+      port: 8200
+
+---
+# MCP Servers - Provide tools to agents
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-servers-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: mcp-server
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from orchestrator (stdio communication)
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+  # Allow Prometheus to scrape metrics
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080  # Assuming metrics on port 8080
+  egress:
+  # Allow to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow to external APIs (CoinGecko, exchanges)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS
+
+---
+# Agents - Trading decision makers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agents-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow Prometheus to scrape metrics
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080  # Assuming metrics on port 8080
+  egress:
+  # Allow to orchestrator
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow to NATS
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: nats
+    ports:
+    - protocol: TCP
+      port: 4222
+  # Allow to Bifrost
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: bifrost
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# API Server - External facing REST/WebSocket API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from ingress controller (external traffic)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow Prometheus to scrape metrics
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  # Allow to orchestrator
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow to NATS
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: nats
+    ports:
+    - protocol: TCP
+      port: 4222
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Bifrost - LLM Gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bifrost-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bifrost
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from orchestrator
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: orchestrator
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow from agents
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: agent
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow Prometheus to scrape metrics
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  # Allow to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # TLS port
+  # Allow to external LLM APIs
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Prometheus - Metrics collection
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from Grafana
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: grafana
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow from AlertManager
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: alertmanager
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow from ingress (for external access)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow to scrape all application components
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8222  # NATS monitoring
+  # Allow to send alerts to AlertManager
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: alertmanager
+    ports:
+    - protocol: TCP
+      port: 9093
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# AlertManager - Alert routing and notification
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from Prometheus
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 9093
+  # Allow from Grafana
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: grafana
+    ports:
+    - protocol: TCP
+      port: 9093
+  # Allow from ingress (for external access)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 9093
+  egress:
+  # Allow to external notification services (Slack, email)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS
+    - protocol: TCP
+      port: 587  # SMTP
+    - protocol: TCP
+      port: 465  # SMTPS
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Grafana - Visualization dashboards
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-allow
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from ingress (for user access)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  # Allow to Prometheus
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow to AlertManager
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: alertmanager
+    ports:
+    - protocol: TCP
+      port: 9093
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53

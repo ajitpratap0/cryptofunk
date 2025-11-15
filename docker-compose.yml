@@ -7,7 +7,7 @@ services:
     container_name: cryptofunk-postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cryptofunk_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD environment variable is required}
       POSTGRES_DB: cryptofunk
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
@@ -97,7 +97,8 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -109,13 +110,47 @@ services:
       - cryptofunk
     restart: unless-stopped
 
+  # AlertManager for alert routing and notification
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: cryptofunk-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deployments/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--log.level=info'
+    environment:
+      # Slack webhook URL
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/YOUR/WEBHOOK/URL}
+      # SMTP configuration
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-cryptofunk-alerts@example.com}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Alert recipients
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-team@example.com}
+      CRITICAL_ALERT_EMAIL_TO: ${CRITICAL_ALERT_EMAIL_TO:-oncall@example.com}
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # Grafana for visualization
   grafana:
     image: grafana/grafana:latest
     container_name: cryptofunk-grafana
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-cryptofunk_grafana}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD environment variable is required}
       GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
     ports:
       - "3000:3000"
@@ -140,7 +175,7 @@ services:
       dockerfile: deployments/docker/Dockerfile.migrate
     container_name: cryptofunk-migrate
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
@@ -156,7 +191,7 @@ services:
       dockerfile: deployments/docker/Dockerfile.orchestrator
     container_name: cryptofunk-orchestrator
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -185,7 +220,7 @@ services:
         SERVER_NAME: market-data
     container_name: cryptofunk-market-data-server
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -209,7 +244,7 @@ services:
         SERVER_NAME: technical-indicators
     container_name: cryptofunk-technical-indicators-server
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
@@ -232,7 +267,7 @@ services:
         SERVER_NAME: risk-analyzer
     container_name: cryptofunk-risk-analyzer-server
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
@@ -255,7 +290,7 @@ services:
         SERVER_NAME: order-executor
     container_name: cryptofunk-order-executor-server
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       BINANCE_API_KEY: ${BINANCE_API_KEY:-}
       BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
@@ -281,7 +316,7 @@ services:
         AGENT_NAME: technical-agent
     container_name: cryptofunk-technical-agent
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -311,7 +346,7 @@ services:
         AGENT_NAME: orderbook-agent
     container_name: cryptofunk-orderbook-agent
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -341,7 +376,7 @@ services:
         AGENT_NAME: sentiment-agent
     container_name: cryptofunk-sentiment-agent
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -371,7 +406,7 @@ services:
         AGENT_NAME: trend-agent
     container_name: cryptofunk-trend-agent
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -401,7 +436,7 @@ services:
         AGENT_NAME: reversion-agent
     container_name: cryptofunk-reversion-agent
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -431,7 +466,7 @@ services:
         AGENT_NAME: risk-agent
     container_name: cryptofunk-risk-agent
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
@@ -459,12 +494,12 @@ services:
       dockerfile: deployments/docker/Dockerfile.api
     container_name: cryptofunk-api
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-cryptofunk_dev_password}@postgres:5432/cryptofunk?sslmode=disable
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       ORCHESTRATOR_URL: http://orchestrator:8080
       API_PORT: 8080
-      JWT_SECRET: ${JWT_SECRET:-changeme_in_production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET environment variable is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
@@ -496,5 +531,7 @@ volumes:
     name: cryptofunk-redis-data
   prometheus-data:
     name: cryptofunk-prometheus-data
+  alertmanager-data:
+    name: cryptofunk-alertmanager-data
   grafana-data:
     name: cryptofunk-grafana-data

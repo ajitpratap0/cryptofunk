@@ -1249,10 +1249,9 @@ func TestFetchFearGreedIndex_InvalidValue(t *testing.T) {
 	}
 
 	fg, err := agent.fetchFearGreedIndex(context.Background())
-	require.NoError(t, err)
-	// Sscanf will return 0 for invalid value
-	assert.Equal(t, 0, fg.Value)
-	assert.Equal(t, "Unknown", fg.Classification)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse fear & greed value")
+	assert.Nil(t, fg)
 }
 
 // TestFetchFearGreedIndex_CacheExpiry tests cache expiry behavior
