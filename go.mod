@@ -1,6 +1,6 @@
 module github.com/ajitpratap0/cryptofunk
 
-go 1.25.3
+go 1.24.0
 
 require (
 	github.com/adshao/go-binance/v2 v2.8.7
