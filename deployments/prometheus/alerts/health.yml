@@ -1,0 +1,122 @@
+groups:
+  - name: health_checks
+    interval: 30s
+    rules:
+      # Component Health Status Alerts
+      - alert: DatabaseHealthCheckFailed
+        expr: health_check_status{component="database"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database health check is failing"
+          description: "The database health check has been failing for more than 2 minutes. Component: {{ $labels.component }}"
+
+      - alert: NATSHealthCheckFailed
+        expr: health_check_status{component="nats"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: nats
+        annotations:
+          summary: "NATS health check is failing"
+          description: "The NATS health check has been failing for more than 2 minutes. Component: {{ $labels.component }}"
+
+      - alert: AgentsHealthCheckDegraded
+        expr: health_check_status{component="agents"} == 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "No active trading agents"
+          description: "There are no active trading agents for more than 5 minutes. Component: {{ $labels.component }}"
+
+      - alert: AgentsHealthCheckFailed
+        expr: health_check_status{component="agents"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: agents
+        annotations:
+          summary: "Agent health check is failing"
+          description: "The agent health check has been failing for more than 2 minutes. Component: {{ $labels.component }}"
+
+      # High Latency Alerts
+      - alert: HealthCheckHighLatency
+        expr: histogram_quantile(0.95, rate(health_check_latency_ms_bucket[5m])) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Health check latency is high"
+          description: "95th percentile health check latency for {{ $labels.component }} is above 1000ms for more than 5 minutes."
+
+      - alert: DatabaseHealthCheckSlowdown
+        expr: histogram_quantile(0.95, rate(health_check_latency_ms_bucket{component="database"}[5m])) > 500
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database health check is slow"
+          description: "Database health check 95th percentile latency is above 500ms. This may indicate database performance issues."
+
+      # High Failure Rate Alerts
+      - alert: HealthCheckFailureRateHigh
+        expr: |
+          (
+            sum(rate(health_check_total{status="failed"}[5m])) by (component)
+            /
+            sum(rate(health_check_total[5m])) by (component)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Health check failure rate is high"
+          description: "Health check failure rate for {{ $labels.component }} is above 50% for more than 5 minutes."
+
+      # Component Flapping Alerts (frequent status changes)
+      - alert: HealthCheckFlapping
+        expr: |
+          (
+            rate(health_check_total{status="failed"}[1m]) > 0
+            and
+            rate(health_check_total{status="ok"}[1m]) > 0
+          )
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Health check status is flapping"
+          description: "Health check for {{ $labels.component }} is alternating between ok and failed states, indicating instability."
+
+      # Critical: All Components Down
+      - alert: AllHealthChecksFailed
+        expr: |
+          (
+            count(health_check_status == 0) == count(health_check_status)
+            and
+            count(health_check_status) > 0
+          )
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "All health checks are failing"
+          description: "All health check components are reporting failed status. The system may be completely down."
+
+      # Warning: System Degraded
+      - alert: SystemDegraded
+        expr: |
+          (
+            count(health_check_status < 1) / count(health_check_status)
+          ) >= 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "System is degraded"
+          description: "At least 50% of health check components are reporting degraded or failed status."
