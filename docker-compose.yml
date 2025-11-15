@@ -97,7 +97,8 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -108,6 +109,40 @@ services:
     networks:
       - cryptofunk
     restart: unless-stopped
+
+  # AlertManager for alert routing and notification
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: cryptofunk-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deployments/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--log.level=info'
+    environment:
+      # Slack webhook URL
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/YOUR/WEBHOOK/URL}
+      # SMTP configuration
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-cryptofunk-alerts@example.com}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Alert recipients
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-team@example.com}
+      CRITICAL_ALERT_EMAIL_TO: ${CRITICAL_ALERT_EMAIL_TO:-oncall@example.com}
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # Grafana for visualization
   grafana:
@@ -496,5 +531,7 @@ volumes:
     name: cryptofunk-redis-data
   prometheus-data:
     name: cryptofunk-prometheus-data
+  alertmanager-data:
+    name: cryptofunk-alertmanager-data
   grafana-data:
     name: cryptofunk-grafana-data

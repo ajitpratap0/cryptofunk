@@ -142,6 +142,25 @@ spec:
   selector:
     app.kubernetes.io/name: prometheus
 ---
+# AlertManager Service (ClusterIP for internal communication, LoadBalancer for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-service
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/component: monitoring
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9093
+    targetPort: 9093
+    protocol: TCP
+    name: http
+  selector:
+    app.kubernetes.io/name: alertmanager
+---
 # Grafana Service (LoadBalancer - external access for dashboards)
 apiVersion: v1
 kind: Service

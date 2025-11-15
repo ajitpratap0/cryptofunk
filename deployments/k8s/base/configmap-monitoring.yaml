@@ -1,0 +1,246 @@
+---
+# Prometheus Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'cryptofunk'
+        environment: 'production'
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['alertmanager-service:9093']
+
+    # Load rules once and periodically evaluate them
+    rule_files:
+      - "alerts/*.yml"
+
+    # Scrape configurations
+    scrape_configs:
+      # Prometheus itself
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # CryptoFunk Orchestrator
+      - job_name: 'orchestrator'
+        static_configs:
+          - targets: ['orchestrator-service:8080']
+        metrics_path: '/metrics'
+        scrape_interval: 10s
+
+      # CryptoFunk API Server
+      - job_name: 'api'
+        static_configs:
+          - targets: ['api-service:8080']
+        metrics_path: '/metrics'
+        scrape_interval: 10s
+
+      # NATS server metrics
+      - job_name: 'nats'
+        static_configs:
+          - targets: ['nats-service:8222']
+        metrics_path: '/varz'
+        scrape_interval: 15s
+---
+# AlertManager Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/component: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      # Slack API URL (set via environment variable)
+      slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+      # SMTP configuration for email alerts
+      smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
+      smtp_from: '${SMTP_FROM}'
+      smtp_auth_username: '${SMTP_USERNAME}'
+      smtp_auth_password: '${SMTP_PASSWORD}'
+      smtp_require_tls: true
+
+    # Route defines how alerts are grouped and sent to receivers
+    route:
+      # Root route - all alerts start here
+      receiver: 'team-notifications'
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s        # Wait 10s before sending first notification
+      group_interval: 5m     # Wait 5m before sending batch of new alerts
+      repeat_interval: 4h    # Repeat notification every 4h if not resolved
+
+      # Child routes for specific alert types
+      routes:
+        # Critical alerts - immediate notification
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          group_wait: 0s
+          repeat_interval: 1h
+          continue: true  # Also send to team-notifications
+
+        # Circuit breaker alerts
+        - match:
+            alertname: CircuitBreakerOpen
+          receiver: 'circuit-breaker-alerts'
+          group_wait: 5s
+          repeat_interval: 15m
+
+        # Trading alerts - high priority
+        - match_re:
+            alertname: '(HighErrorRate|TradingSessionFailure|PositionLimitExceeded|MaxDrawdownExceeded)'
+          receiver: 'trading-alerts'
+          group_wait: 5s
+          repeat_interval: 30m
+
+        # Agent health alerts
+        - match_re:
+            alertname: '(AgentDown|AgentHighLatency|AgentUnhealthy)'
+          receiver: 'agent-alerts'
+          group_wait: 30s
+          repeat_interval: 2h
+
+        # System alerts (disk, memory, CPU)
+        - match_re:
+            alertname: '(HighMemoryUsage|HighCPUUsage|DiskSpaceWarning)'
+          receiver: 'system-alerts'
+          group_wait: 1m
+          repeat_interval: 6h
+
+    # Inhibition rules - prevent duplicate notifications
+    inhibit_rules:
+      # Inhibit warning if critical is firing for same alert
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['alertname', 'cluster', 'service']
+
+      # Don't send agent alerts if orchestrator is down
+      - source_match:
+          alertname: 'OrchestratorDown'
+        target_match_re:
+          alertname: 'Agent.*'
+        equal: ['cluster']
+
+    # Receivers define notification channels
+    receivers:
+      # Default team notifications - Slack + Email
+      - name: 'team-notifications'
+        slack_configs:
+          - channel: '#cryptofunk-alerts'
+            title: 'CryptoFunk Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+            send_resolved: true
+            color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+            fields:
+              - title: 'Severity'
+                value: '{{ .CommonLabels.severity }}'
+                short: true
+              - title: 'Environment'
+                value: '{{ .CommonLabels.environment }}'
+                short: true
+              - title: 'Alert Count'
+                value: '{{ .Alerts | len }}'
+                short: true
+        email_configs:
+          - to: '${ALERT_EMAIL_TO}'
+            headers:
+              Subject: '[CryptoFunk] {{ .GroupLabels.alertname }} - {{ .Status | toUpper }}'
+            html: |
+              <h2>{{ .GroupLabels.alertname }}</h2>
+              <p><strong>Status:</strong> {{ .Status }}</p>
+              <p><strong>Severity:</strong> {{ .CommonLabels.severity }}</p>
+              <p><strong>Environment:</strong> {{ .CommonLabels.environment }}</p>
+              <hr>
+              {{ range .Alerts }}
+              <h3>{{ .Labels.alertname }}</h3>
+              <p>{{ .Annotations.summary }}</p>
+              <p><em>{{ .Annotations.description }}</em></p>
+              <p><small>Started: {{ .StartsAt }}</small></p>
+              {{ end }}
+
+      # Critical alerts - Slack with @channel mention
+      - name: 'critical-alerts'
+        slack_configs:
+          - channel: '#cryptofunk-critical'
+            username: 'CryptoFunk AlertManager'
+            title: ':rotating_light: CRITICAL ALERT'
+            text: '<!channel> {{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+            send_resolved: true
+            color: 'danger'
+            fields:
+              - title: 'Severity'
+                value: 'CRITICAL'
+                short: true
+              - title: 'Service'
+                value: '{{ .CommonLabels.service }}'
+                short: true
+              - title: 'Description'
+                value: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        email_configs:
+          - to: '${CRITICAL_ALERT_EMAIL_TO}'
+            headers:
+              Subject: '[CRITICAL] CryptoFunk - {{ .GroupLabels.alertname }}'
+              Priority: 'urgent'
+
+      # Circuit breaker alerts
+      - name: 'circuit-breaker-alerts'
+        slack_configs:
+          - channel: '#cryptofunk-ops'
+            title: ':no_entry: Circuit Breaker Open'
+            text: '{{ range .Alerts }}Service {{ .Labels.service }} circuit breaker is open\n{{ end }}'
+            color: 'warning'
+            send_resolved: true
+
+      # Trading-specific alerts
+      - name: 'trading-alerts'
+        slack_configs:
+          - channel: '#cryptofunk-trading'
+            title: ':chart_with_downwards_trend: Trading Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+            color: '{{ if eq .CommonLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+            send_resolved: true
+            fields:
+              - title: 'Alert'
+                value: '{{ .GroupLabels.alertname }}'
+                short: true
+              - title: 'Severity'
+                value: '{{ .CommonLabels.severity }}'
+                short: true
+
+      # Agent health alerts
+      - name: 'agent-alerts'
+        slack_configs:
+          - channel: '#cryptofunk-agents'
+            title: ':robot_face: Agent Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+            color: 'warning'
+            send_resolved: true
+
+      # System resource alerts
+      - name: 'system-alerts'
+        slack_configs:
+          - channel: '#cryptofunk-ops'
+            title: ':warning: System Resource Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+            color: '#FFA500'
+            send_resolved: true

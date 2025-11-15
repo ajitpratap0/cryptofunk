@@ -9,6 +9,7 @@ resources:
 
   # Configuration
   - configmap.yaml
+  - configmap-monitoring.yaml
   - secrets.yaml
 
   # Persistent Storage
@@ -20,6 +21,7 @@ resources:
   - deployment-nats.yaml
   - deployment-bifrost.yaml
   - deployment-prometheus.yaml
+  - deployment-alertmanager.yaml
   - deployment-grafana.yaml
 
   # Application Deployments
