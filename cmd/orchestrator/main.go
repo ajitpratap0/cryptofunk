@@ -40,6 +40,14 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Configuration validation failed. Please fix the errors above and try again.")
 	}
+
+	// Perform startup validation (database connectivity, etc.)
+	ctx := context.Background()
+	validator := config.NewValidator(mainCfg, config.DefaultValidatorOptions())
+	if err := validator.ValidateStartup(ctx); err != nil {
+		log.Fatal().Err(err).Msg("Startup validation failed. Please fix the errors above and try again.")
+	}
+
 	log.Info().
 		Str("environment", mainCfg.App.Environment).
 		Str("trading_mode", mainCfg.Trading.Mode).
@@ -225,6 +233,37 @@ func main() {
 // verifyAPIKeys verifies all configured API keys and secrets
 // Returns 0 if all keys are valid, 1 if any keys are invalid or missing
 func verifyAPIKeys() int {
+	log.Info().Msg("Verifying API keys and secrets...")
+
+	// Load main configuration
+	cfg, err := config.Load("")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load configuration")
+		return 1
+	}
+
+	// Create validator with API key verification enabled
+	validatorOptions := config.ValidatorOptions{
+		VerifyConnectivity: true,
+		VerifyAPIKeys:      true,
+		Timeout:            10 * time.Second, // Longer timeout for API calls
+	}
+
+	ctx := context.Background()
+	validator := config.NewValidator(cfg, validatorOptions)
+
+	// Run validation
+	if err := validator.ValidateStartup(ctx); err != nil {
+		log.Error().Err(err).Msg("❌ API key verification failed")
+		return 1
+	}
+
+	log.Info().Msg("✓ All API keys and secrets verified successfully")
+	return 0
+}
+
+// Deprecated old implementation - kept for reference
+func verifyAPIKeysOld() int {
 	log.Info().Msg("Verifying API keys and secrets...")
 
 	// Load main configuration
