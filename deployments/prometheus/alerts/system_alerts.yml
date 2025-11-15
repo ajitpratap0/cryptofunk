@@ -1,0 +1,80 @@
+groups:
+  - name: system_health
+    interval: 15s
+    rules:
+      # High error rate alert
+      - alert: HighErrorRate
+        expr: rate(cryptofunk_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanize }} errors/sec for {{ $labels.component }} (threshold: 0.1/sec)"
+
+      # Critical error rate alert
+      - alert: CriticalErrorRate
+        expr: rate(cryptofunk_errors_total[5m]) > 1.0
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical error rate detected"
+          description: "Error rate is {{ $value | humanize }} errors/sec for {{ $labels.component }} (threshold: 1.0/sec)"
+
+      # API high latency
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(cryptofunk_api_request_duration_ms_bucket[5m])) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API latency is high"
+          description: "95th percentile API latency is {{ $value | humanize }}ms (threshold: 1000ms)"
+
+      # Database connection pool exhaustion
+      - alert: DatabaseConnectionPoolLow
+        expr: cryptofunk_database_connections_idle < 2
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection pool running low"
+          description: "Only {{ $value }} idle database connections available"
+
+      # High database query latency
+      - alert: HighDatabaseQueryLatency
+        expr: histogram_quantile(0.95, rate(cryptofunk_database_query_duration_ms_bucket[5m])) > 500
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database query latency is high"
+          description: "95th percentile query latency is {{ $value | humanize }}ms (threshold: 500ms)"
+
+      # Redis cache hit rate too low
+      - alert: LowRedisCacheHitRate
+        expr: cryptofunk_redis_cache_hit_rate < 0.5
+        for: 10m
+        labels:
+          severity: info
+          component: redis
+        annotations:
+          summary: "Redis cache hit rate is low"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} (threshold: 50%)"
+
+      # Orchestrator high latency
+      - alert: HighOrchestratorLatency
+        expr: histogram_quantile(0.95, rate(cryptofunk_orchestrator_latency_ms_bucket[5m])) > 2000
+        for: 5m
+        labels:
+          severity: warning
+          component: orchestrator
+        annotations:
+          summary: "Orchestrator decision latency is high"
+          description: "95th percentile orchestrator latency is {{ $value | humanize }}ms (threshold: 2000ms)"

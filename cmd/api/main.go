@@ -20,6 +20,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/api"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 type APIServer struct {
@@ -175,6 +176,9 @@ func (s *APIServer) setupMiddleware() {
 	// Add CORS middleware
 	s.router.Use(cors.New(config))
 
+	// Prometheus metrics middleware (before request logger to capture all requests)
+	s.router.Use(metrics.GinMiddleware())
+
 	// Request logging middleware
 	s.router.Use(requestLogger())
 
@@ -183,6 +187,9 @@ func (s *APIServer) setupMiddleware() {
 }
 
 func (s *APIServer) setupRoutes() {
+	// Prometheus metrics endpoint (no API prefix)
+	s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
+
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
 	{

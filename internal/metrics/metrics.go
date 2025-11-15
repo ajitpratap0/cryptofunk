@@ -94,6 +94,19 @@ var (
 
 // System Health Metrics
 var (
+	// Active trading sessions
+	ActiveSessions = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_active_sessions",
+		Help: "Number of currently active trading sessions",
+	})
+
+	// Orchestrator latency
+	OrchestratorLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "cryptofunk_orchestrator_latency_ms",
+		Help:    "Orchestrator decision latency in milliseconds",
+		Buckets: []float64{50, 100, 250, 500, 1000, 2500, 5000},
+	})
+
 	// Database connections
 	DatabaseConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "cryptofunk_database_connections_active",
@@ -364,4 +377,14 @@ func RecordExchangeAPICall(exchange, endpoint string, durationMs float64, err er
 // RecordOrderExecution records order execution latency
 func RecordOrderExecution(durationMs float64) {
 	OrderExecutionLatency.Observe(durationMs)
+}
+
+// UpdateActiveSessions updates the number of active trading sessions
+func UpdateActiveSessions(count int) {
+	ActiveSessions.Set(float64(count))
+}
+
+// RecordOrchestratorLatency records orchestrator decision latency
+func RecordOrchestratorLatency(durationMs float64) {
+	OrchestratorLatency.Observe(durationMs)
 }
