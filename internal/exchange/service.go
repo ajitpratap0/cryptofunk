@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
 	"github.com/rs/zerolog/log"
+	"github.com/sony/gobreaker"
 )
 
 // TradingMode represents the trading mode (paper or live)
@@ -23,6 +25,7 @@ type Service struct {
 	db              *db.DB
 	mode            TradingMode
 	positionManager *PositionManager
+	circuitBreaker  *risk.CircuitBreakerManager
 }
 
 // ServiceConfig contains configuration for the exchange service
@@ -63,11 +66,15 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	// Create position manager
 	positionManager := NewPositionManager(database)
 
+	// Create circuit breaker manager
+	circuitBreaker := risk.NewCircuitBreakerManager()
+
 	return &Service{
 		exchange:        exchange,
 		db:              database,
 		mode:            config.Mode,
 		positionManager: positionManager,
+		circuitBreaker:  circuitBreaker,
 	}, nil
 }
 
@@ -118,11 +125,24 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 		Quantity: quantity,
 	}
 
-	// Place order
-	resp, err := s.exchange.PlaceOrder(ctx, req)
+	// Place order through circuit breaker
+	var resp *PlaceOrderResponse
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.PlaceOrder(ctx, req)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	resp = cbResult.(*PlaceOrderResponse)
 
 	// Get order details
 	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
