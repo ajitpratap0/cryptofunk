@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // responseWriter wraps http.ResponseWriter to capture status code
@@ -49,4 +51,24 @@ func HTTPMiddleware(next http.Handler) http.Handler {
 
 		RecordAPIRequest(r.Method, r.URL.Path, statusCode, duration)
 	})
+}
+
+// GinMiddleware returns a Gin middleware that instruments HTTP requests
+func GinMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+
+		// Process request
+		c.Next()
+
+		// Record metrics after request is processed
+		duration := float64(time.Since(start).Milliseconds())
+		statusCode := strconv.Itoa(c.Writer.Status())
+		path := c.FullPath() // Use FullPath() to get the route pattern instead of actual path
+		if path == "" {
+			path = c.Request.URL.Path // Fallback to actual path if route pattern not available
+		}
+
+		RecordAPIRequest(c.Request.Method, path, statusCode, duration)
+	}
 }

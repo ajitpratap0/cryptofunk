@@ -1,0 +1,127 @@
+groups:
+  - name: critical_errors
+    interval: 10s
+    rules:
+      # Critical errors in any component
+      - alert: CriticalErrors
+        expr: rate(cryptofunk_errors_total{type="critical"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical errors detected in {{ $labels.component }}"
+          description: "Critical error rate: {{ $value | humanize }} errors/sec in {{ $labels.component }}"
+
+      # Database errors
+      - alert: DatabaseErrors
+        expr: rate(cryptofunk_errors_total{type="database"}[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database errors detected"
+          description: "Database error rate: {{ $value | humanize }} errors/sec"
+
+      # API errors (4xx)
+      - alert: HighClientErrorRate
+        expr: rate(cryptofunk_http_requests_total{status_code=~"4.."}[5m]) / rate(cryptofunk_http_requests_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High client error rate (4xx)"
+          description: "Client error rate is {{ $value | humanizePercentage }} (threshold: 10%)"
+
+      # API errors (5xx)
+      - alert: HighServerErrorRate
+        expr: rate(cryptofunk_http_requests_total{status_code=~"5.."}[5m]) / rate(cryptofunk_http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High server error rate (5xx)"
+          description: "Server error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      # MCP tool call failures
+      - alert: MCPToolCallFailures
+        expr: rate(cryptofunk_errors_total{component="mcp"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: mcp
+        annotations:
+          summary: "MCP tool call failures detected"
+          description: "MCP tool failure rate: {{ $value | humanize }} failures/sec"
+
+      # Exchange connection issues
+      - alert: ExchangeConnectionIssues
+        expr: rate(cryptofunk_exchange_api_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: exchange
+        annotations:
+          summary: "Exchange {{ $labels.exchange }} connection issues"
+          description: "Exchange API error rate: {{ $value | humanize }} errors/sec for {{ $labels.exchange }}"
+
+      # NATS connection issues
+      - alert: NATSConnectionIssues
+        expr: rate(cryptofunk_errors_total{component="nats"}[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+          component: nats
+        annotations:
+          summary: "NATS messaging errors"
+          description: "NATS error rate: {{ $value | humanize }} errors/sec"
+
+  - name: infrastructure_health
+    interval: 15s
+    rules:
+      # No active agents
+      - alert: NoActiveAgents
+        expr: cryptofunk_active_agents == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: orchestrator
+        annotations:
+          summary: "No active agents"
+          description: "Zero agents are currently active - system cannot make trading decisions"
+
+      # No active trading sessions
+      - alert: NoActiveSessions
+        expr: cryptofunk_active_sessions == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "No active trading sessions"
+          description: "No trading sessions are currently active"
+
+      # Too many open positions
+      - alert: TooManyOpenPositions
+        expr: cryptofunk_open_positions > 10
+        for: 1m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Too many open positions"
+          description: "Currently {{ $value }} open positions (threshold: 10)"
+
+      # Orchestrator voting consensus issues
+      - alert: LowVotingConsensus
+        expr: rate(cryptofunk_voting_results_total{decision="no_consensus"}[10m]) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          component: orchestrator
+        annotations:
+          summary: "Low voting consensus rate"
+          description: "No consensus rate is {{ $value | humanizePercentage }} (threshold: 30%)"

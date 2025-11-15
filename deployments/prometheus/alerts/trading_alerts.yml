@@ -1,0 +1,127 @@
+groups:
+  - name: trading_performance
+    interval: 15s
+    rules:
+      # High drawdown alert
+      - alert: HighDrawdown
+        expr: cryptofunk_current_drawdown > 0.15
+        for: 1m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "High drawdown detected"
+          description: "Current drawdown is {{ $value | humanizePercentage }} (threshold: 15%)"
+
+      # Critical drawdown alert
+      - alert: CriticalDrawdown
+        expr: cryptofunk_current_drawdown > cryptofunk_max_drawdown_threshold * 0.9
+        for: 30s
+        labels:
+          severity: critical
+          component: trading
+        annotations:
+          summary: "Drawdown approaching maximum threshold"
+          description: "Current drawdown is {{ $value | humanizePercentage }}, close to max threshold"
+
+      # Low win rate alert
+      - alert: LowWinRate
+        expr: cryptofunk_win_rate < 0.40
+        for: 1h
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Win rate is low"
+          description: "Win rate is {{ $value | humanizePercentage }} over the last hour (threshold: 40%)"
+
+      # Negative Sharpe ratio
+      - alert: NegativeSharpeRatio
+        expr: cryptofunk_sharpe_ratio < 0
+        for: 30m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Negative Sharpe ratio detected"
+          description: "Sharpe ratio is {{ $value | humanize }} - underperforming risk-free rate"
+
+      # Large position value
+      - alert: LargePositionValue
+        expr: cryptofunk_position_value_by_symbol > 10000
+        for: 1m
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "Large position opened for {{ $labels.symbol }}"
+          description: "Position value for {{ $labels.symbol }} is ${{ $value | humanize }}"
+
+      # High order execution latency
+      - alert: HighOrderExecutionLatency
+        expr: histogram_quantile(0.95, rate(cryptofunk_order_execution_latency_ms_bucket[5m])) > 5000
+        for: 5m
+        labels:
+          severity: warning
+          component: exchange
+        annotations:
+          summary: "Order execution latency is high"
+          description: "95th percentile order execution latency is {{ $value | humanize }}ms (threshold: 5000ms)"
+
+      # Exchange API errors
+      - alert: HighExchangeAPIErrors
+        expr: rate(cryptofunk_exchange_api_errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: exchange
+        annotations:
+          summary: "High exchange API error rate for {{ $labels.exchange }}"
+          description: "Exchange {{ $labels.exchange }} error rate is {{ $value | humanize }} errors/sec (threshold: 0.05/sec)"
+
+  - name: trade_events
+    interval: 10s
+    rules:
+      # Large trade executed
+      - alert: LargeTradeExecuted
+        expr: increase(cryptofunk_total_trades[1m]) > 0 and abs(delta(cryptofunk_total_pnl[1m])) > 1000
+        for: 30s
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "Large trade executed"
+          description: "Trade with P&L impact of ${{ $value | humanize }} executed"
+
+      # Stop loss hit
+      - alert: StopLossHit
+        expr: increase(cryptofunk_losing_trades_value[1m]) > 0
+        for: 30s
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "Stop loss triggered"
+          description: "Position closed with loss"
+
+      # Profit target hit
+      - alert: ProfitTargetHit
+        expr: increase(cryptofunk_winning_trades_value[1m]) > 500
+        for: 30s
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "Profit target reached"
+          description: "Position closed with profit of ${{ $value | humanize }}"
+
+      # Rapid trading activity
+      - alert: RapidTradingActivity
+        expr: rate(cryptofunk_total_trades[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Rapid trading activity detected"
+          description: "Trading rate is {{ $value | humanize }} trades/sec (threshold: 1/sec)"
