@@ -4,6 +4,10 @@ import (
 	"testing"
 )
 
+const (
+	signalNeutral = "neutral"
+)
+
 func TestCalculateRSI(t *testing.T) {
 	service := NewService()
 
@@ -101,7 +105,7 @@ func TestCalculateRSI(t *testing.T) {
 			}
 
 			if tt.checkSignal {
-				validSignals := map[string]bool{"oversold": true, "overbought": true, "neutral": true}
+				validSignals := map[string]bool{"oversold": true, "overbought": true, signalNeutral: true}
 				if !validSignals[rsiResult.Signal] {
 					t.Errorf("Invalid signal: %s", rsiResult.Signal)
 				}
@@ -113,8 +117,8 @@ func TestCalculateRSI(t *testing.T) {
 				if rsiResult.Value > 70 && rsiResult.Signal != "overbought" {
 					t.Errorf("Expected 'overbought' signal for RSI %.2f, got %s", rsiResult.Value, rsiResult.Signal)
 				}
-				if rsiResult.Value >= 30 && rsiResult.Value <= 70 && rsiResult.Signal != "neutral" {
-					t.Errorf("Expected 'neutral' signal for RSI %.2f, got %s", rsiResult.Value, rsiResult.Signal)
+				if rsiResult.Value >= 30 && rsiResult.Value <= 70 && rsiResult.Signal != signalNeutral {
+					t.Errorf("Expected %q signal for RSI %.2f, got %s", signalNeutral, rsiResult.Value, rsiResult.Signal)
 				}
 			}
 		})
@@ -151,7 +155,7 @@ func TestRSISignals(t *testing.T) {
 				20.0, 21.0, 20.5, 20.0, 21.0, 20.5, 20.0, 21.0,
 				20.5, 20.0, 21.0, 20.5, 20.0, 21.0, 20.5, 20.0,
 			},
-			expectedSignal: "neutral",
+			expectedSignal: signalNeutral,
 		},
 	}
 

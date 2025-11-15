@@ -12,6 +12,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// MCP Tool Names - defined as constants to avoid repetition
+const (
+	toolPlaceMarketOrder = "place_market_order"
+	toolPlaceLimitOrder  = "place_limit_order"
+	toolCancelOrder      = "cancel_order"
+	toolGetOrderStatus   = "get_order_status"
+	toolStartSession     = "start_session"
+	toolStopSession      = "stop_session"
+	toolGetSessionStats  = "get_session_stats"
+)
+
 func main() {
 	// Setup logging to stderr (stdout is reserved for MCP protocol)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -164,7 +175,7 @@ func (s *MCPServer) listTools() interface{} {
 	return map[string]interface{}{
 		"tools": []map[string]interface{}{
 			{
-				"name":        "place_market_order",
+				"name":        toolPlaceMarketOrder,
 				"description": "Place a market order (immediate execution at current market price)",
 				"inputSchema": map[string]interface{}{
 					"type": "object",
@@ -187,7 +198,7 @@ func (s *MCPServer) listTools() interface{} {
 				},
 			},
 			{
-				"name":        "place_limit_order",
+				"name":        toolPlaceLimitOrder,
 				"description": "Place a limit order (executed at specified price or better)",
 				"inputSchema": map[string]interface{}{
 					"type": "object",
@@ -214,7 +225,7 @@ func (s *MCPServer) listTools() interface{} {
 				},
 			},
 			{
-				"name":        "cancel_order",
+				"name":        toolCancelOrder,
 				"description": "Cancel an open or pending order",
 				"inputSchema": map[string]interface{}{
 					"type": "object",
@@ -228,7 +239,7 @@ func (s *MCPServer) listTools() interface{} {
 				},
 			},
 			{
-				"name":        "get_order_status",
+				"name":        toolGetOrderStatus,
 				"description": "Get current status and details of an order",
 				"inputSchema": map[string]interface{}{
 					"type": "object",
@@ -242,7 +253,7 @@ func (s *MCPServer) listTools() interface{} {
 				},
 			},
 			{
-				"name":        "start_session",
+				"name":        toolStartSession,
 				"description": "Start a new trading session for paper trading",
 				"inputSchema": map[string]interface{}{
 					"type": "object",
@@ -264,7 +275,7 @@ func (s *MCPServer) listTools() interface{} {
 				},
 			},
 			{
-				"name":        "stop_session",
+				"name":        toolStopSession,
 				"description": "Stop the current trading session and retrieve final statistics",
 				"inputSchema": map[string]interface{}{
 					"type": "object",
@@ -278,7 +289,7 @@ func (s *MCPServer) listTools() interface{} {
 				},
 			},
 			{
-				"name":        "get_session_stats",
+				"name":        toolGetSessionStats,
 				"description": "Get current statistics for the active trading session",
 				"inputSchema": map[string]interface{}{
 					"type":       "object",
@@ -293,19 +304,19 @@ func (s *MCPServer) listTools() interface{} {
 // callTool executes the specified tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
 	switch name {
-	case "place_market_order":
+	case toolPlaceMarketOrder:
 		return s.service.PlaceMarketOrder(args)
-	case "place_limit_order":
+	case toolPlaceLimitOrder:
 		return s.service.PlaceLimitOrder(args)
-	case "cancel_order":
+	case toolCancelOrder:
 		return s.service.CancelOrder(args)
-	case "get_order_status":
+	case toolGetOrderStatus:
 		return s.service.GetOrderStatus(args)
-	case "start_session":
+	case toolStartSession:
 		return s.service.StartSession(args)
-	case "stop_session":
+	case toolStopSession:
 		return s.service.StopSession(args)
-	case "get_session_stats":
+	case toolGetSessionStats:
 		return s.service.GetSessionStats(args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)

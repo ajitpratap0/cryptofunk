@@ -10,6 +10,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	testCacheKeyBitcoinUSD = "coingecko:price:bitcoin:usd"
+)
+
 func setupMiniRedis(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
 	mr, err := miniredis.Run()
 	if err != nil {
@@ -27,7 +31,7 @@ func TestNewCachedCoinGeckoClient(t *testing.T) {
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -53,10 +57,14 @@ func TestNewCachedCoinGeckoClient(t *testing.T) {
 }
 
 func TestCachedGetPrice_CacheMiss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -80,7 +88,7 @@ func TestCachedGetPrice_CacheMiss(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify data was cached
-	cacheKey := "coingecko:price:bitcoin:usd"
+	cacheKey := testCacheKeyBitcoinUSD
 	cached, err := redisClient.Get(context.Background(), cacheKey).Result()
 	if err != nil {
 		t.Errorf("Expected data to be cached, got error: %v", err)
@@ -100,7 +108,7 @@ func TestCachedGetPrice_CacheHit(t *testing.T) {
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -108,7 +116,7 @@ func TestCachedGetPrice_CacheHit(t *testing.T) {
 	cachedClient := NewCachedCoinGeckoClient(cgClient, redisClient, 60*time.Second)
 
 	// Pre-populate cache with test data
-	cacheKey := "coingecko:price:bitcoin:usd"
+	cacheKey := testCacheKeyBitcoinUSD
 	testResult := &PriceResult{
 		Symbol:   "bitcoin",
 		Price:    50000.0,
@@ -131,10 +139,14 @@ func TestCachedGetPrice_CacheHit(t *testing.T) {
 }
 
 func TestCachedGetMarketChart_CacheMiss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -171,10 +183,14 @@ func TestCachedGetMarketChart_CacheMiss(t *testing.T) {
 }
 
 func TestCachedGetMarketChart_DifferentTTLForHistorical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -204,10 +220,14 @@ func TestCachedGetMarketChart_DifferentTTLForHistorical(t *testing.T) {
 }
 
 func TestCachedGetCoinInfo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -244,10 +264,14 @@ func TestCachedGetCoinInfo(t *testing.T) {
 }
 
 func TestHealth_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -270,7 +294,7 @@ func TestHealth_RedisDown(t *testing.T) {
 		Addr: mr.Addr(),
 	})
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -290,7 +314,7 @@ func TestInvalidateCache(t *testing.T) {
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -299,7 +323,7 @@ func TestInvalidateCache(t *testing.T) {
 
 	// Add some cached data
 	testData := map[string]string{
-		"coingecko:price:bitcoin:usd":  `{"symbol":"bitcoin","price":45000,"currency":"usd"}`,
+		testCacheKeyBitcoinUSD:         `{"symbol":"bitcoin","price":45000,"currency":"usd"}`,
 		"coingecko:chart:bitcoin:7":    `{"prices":[]}`,
 		"coingecko:price:ethereum:usd": `{"symbol":"ethereum","price":3000,"currency":"usd"}`,
 	}
@@ -318,7 +342,7 @@ func TestInvalidateCache(t *testing.T) {
 	}
 
 	// Verify bitcoin keys are gone
-	_, err = redisClient.Get(context.Background(), "coingecko:price:bitcoin:usd").Result()
+	_, err = redisClient.Get(context.Background(), testCacheKeyBitcoinUSD).Result()
 	if err != redis.Nil {
 		t.Error("Expected bitcoin price cache to be invalidated")
 	}
@@ -334,7 +358,7 @@ func TestClearCache(t *testing.T) {
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -343,7 +367,7 @@ func TestClearCache(t *testing.T) {
 
 	// Add some cached data
 	testData := map[string]string{
-		"coingecko:price:bitcoin:usd":  `{"symbol":"bitcoin"}`,
+		testCacheKeyBitcoinUSD:         `{"symbol":"bitcoin"}`,
 		"coingecko:chart:bitcoin:7":    `{"prices":[]}`,
 		"coingecko:price:ethereum:usd": `{"symbol":"ethereum"}`,
 		"other:key":                    `{"other":"data"}`,
@@ -363,7 +387,7 @@ func TestClearCache(t *testing.T) {
 	}
 
 	// Verify all coingecko keys are gone
-	_, err = redisClient.Get(context.Background(), "coingecko:price:bitcoin:usd").Result()
+	_, err = redisClient.Get(context.Background(), testCacheKeyBitcoinUSD).Result()
 	if err != redis.Nil {
 		t.Error("Expected coingecko cache to be cleared")
 	}
@@ -376,10 +400,14 @@ func TestClearCache(t *testing.T) {
 }
 
 func TestCachedGetPrice_InvalidCachedData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	cgClient, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -387,7 +415,7 @@ func TestCachedGetPrice_InvalidCachedData(t *testing.T) {
 	cachedClient := NewCachedCoinGeckoClient(cgClient, redisClient, 60*time.Second)
 
 	// Set invalid JSON in cache
-	cacheKey := "coingecko:price:bitcoin:usd"
+	cacheKey := testCacheKeyBitcoinUSD
 	err = redisClient.Set(context.Background(), cacheKey, "invalid json", 60*time.Second).Err()
 	if err != nil {
 		t.Fatalf("Failed to set cache: %v", err)
