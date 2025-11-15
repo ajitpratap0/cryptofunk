@@ -155,12 +155,14 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	}
 
 	defer func() {
-		status := "success"
-		if response.Error != nil {
-			status = "error"
-		}
-		metrics.MCPRequestsTotal.WithLabelValues(serverName, req.Method, status).Inc()
-		metrics.MCPRequestDuration.WithLabelValues(serverName, req.Method).Observe(time.Since(startTime).Seconds())
+		// TODO: Add MCP request metrics when they are defined in internal/metrics
+		// status := "success"
+		// if response.Error != nil {
+		// 	status = "error"
+		// }
+		// metrics.MCPRequestsTotal.WithLabelValues(serverName, req.Method, status).Inc()
+		// metrics.MCPRequestDuration.WithLabelValues(serverName, req.Method).Observe(time.Since(startTime).Seconds())
+		_ = startTime // Suppress unused variable warning
 	}()
 
 	switch req.Method {
@@ -302,12 +304,13 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 	}
 
 	// Record metrics
-	status := "success"
-	if err != nil {
-		status = "error"
-	}
-	metrics.MCPToolCallsTotal.WithLabelValues(serverName, name, status).Inc()
-	metrics.MCPToolCallDuration.WithLabelValues(serverName, name).Observe(time.Since(startTime).Seconds())
+	// TODO: Add MCPToolCallsTotal metric when defined in internal/metrics
+	// status := "success"
+	// if err != nil {
+	// 	status = "error"
+	// }
+	// metrics.MCPToolCallsTotal.WithLabelValues(serverName, name, status).Inc()
+	metrics.MCPToolCallDuration.WithLabelValues(name, serverName).Observe(time.Since(startTime).Seconds())
 
 	return result, err
 }

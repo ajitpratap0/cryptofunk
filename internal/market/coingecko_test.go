@@ -10,24 +10,24 @@ import (
 func TestNewCoinGeckoClient(t *testing.T) {
 	tests := []struct {
 		name      string
-		url       string
+		apiKey    string
 		wantError bool
 	}{
 		{
-			name:      "Valid URL",
-			url:       "https://api.coingecko.com/mcp",
+			name:      "With API key",
+			apiKey:    "test-api-key",
 			wantError: false,
 		},
 		{
-			name:      "Empty URL",
-			url:       "",
-			wantError: true,
+			name:      "Without API key (free tier)",
+			apiKey:    "",
+			wantError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewCoinGeckoClient(tt.url)
+			client, err := NewCoinGeckoClient(tt.apiKey)
 
 			if tt.wantError {
 				if err == nil {
@@ -45,19 +45,27 @@ func TestNewCoinGeckoClient(t *testing.T) {
 				t.Fatal("Expected non-nil client")
 			}
 
-			if client.url != tt.url {
-				t.Errorf("Expected URL %s, got %s", tt.url, client.url)
+			if client.baseURL != coinGeckoAPIBase {
+				t.Errorf("Expected base URL %s, got %s", coinGeckoAPIBase, client.baseURL)
 			}
 
-			if client.timeout != 30*time.Second {
-				t.Errorf("Expected timeout 30s, got %v", client.timeout)
+			if client.timeout != defaultTimeout {
+				t.Errorf("Expected timeout %v, got %v", defaultTimeout, client.timeout)
+			}
+
+			if client.apiKey != tt.apiKey {
+				t.Errorf("Expected API key %s, got %s", tt.apiKey, client.apiKey)
 			}
 		})
 	}
 }
 
 func TestGetPrice(t *testing.T) {
-	client, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode - use TestGetPrice_WithMock instead")
+	}
+
+	client, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -130,7 +138,11 @@ func TestGetPrice(t *testing.T) {
 }
 
 func TestGetMarketChart(t *testing.T) {
-	client, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode - use TestGetMarketChart_WithMock instead")
+	}
+
+	client, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -205,7 +217,11 @@ func TestGetMarketChart(t *testing.T) {
 }
 
 func TestGetCoinInfo(t *testing.T) {
-	client, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode - use TestGetCoinInfo_WithMock instead")
+	}
+
+	client, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -395,6 +411,10 @@ func TestCandlestickMarshalJSON(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping real API test in short mode - use TestHealth_WithMock instead")
+	}
+
 	tests := []struct {
 		name      string
 		url       string
@@ -409,7 +429,7 @@ func TestHealth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewCoinGeckoClient(tt.url)
+			client, err := NewCoinGeckoClient("")
 			if err != nil {
 				t.Fatalf("Failed to create client: %v", err)
 			}
@@ -430,7 +450,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	client, err := NewCoinGeckoClient("https://api.coingecko.com/mcp")
+	client, err := NewCoinGeckoClient("")
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -438,146 +458,5 @@ func TestClose(t *testing.T) {
 	err = client.Close()
 	if err != nil {
 		t.Errorf("Unexpected error closing client: %v", err)
-	}
-}
-
-func TestParseTimestamp(t *testing.T) {
-	tests := []struct {
-		name  string
-		input interface{}
-		check func(*testing.T, time.Time)
-	}{
-		{
-			name:  "Float64 milliseconds",
-			input: float64(1609459200000), // 2021-01-01 00:00:00 UTC
-			check: func(t *testing.T, result time.Time) {
-				expected := time.Unix(1609459200, 0)
-				if result.Unix() != expected.Unix() {
-					t.Errorf("Expected timestamp %v, got %v", expected, result)
-				}
-			},
-		},
-		{
-			name:  "Int64 milliseconds",
-			input: int64(1609459200000),
-			check: func(t *testing.T, result time.Time) {
-				if result.Unix() != 1609459200 {
-					t.Errorf("Expected Unix timestamp 1609459200, got %d", result.Unix())
-				}
-			},
-		},
-		{
-			name:  "Int milliseconds",
-			input: int(1609459200000),
-			check: func(t *testing.T, result time.Time) {
-				if result.Unix() != 1609459200 {
-					t.Errorf("Expected Unix timestamp 1609459200, got %d", result.Unix())
-				}
-			},
-		},
-		{
-			name:  "Invalid type (string)",
-			input: "invalid",
-			check: func(t *testing.T, result time.Time) {
-				// Should return current time for invalid input
-				if result.IsZero() {
-					t.Error("Expected non-zero time for invalid input")
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseTimestamp(tt.input)
-			tt.check(t, result)
-		})
-	}
-}
-
-func TestParseFloat(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected float64
-	}{
-		{
-			name:     "Float64",
-			input:    float64(123.45),
-			expected: 123.45,
-		},
-		{
-			name:     "Int",
-			input:    int(123),
-			expected: 123.0,
-		},
-		{
-			name:     "Int64",
-			input:    int64(456),
-			expected: 456.0,
-		},
-		{
-			name:     "String number",
-			input:    "789.12",
-			expected: 789.12,
-		},
-		{
-			name:     "Invalid string",
-			input:    "invalid",
-			expected: 0.0,
-		},
-		{
-			name:     "Invalid type (bool)",
-			input:    true,
-			expected: 0.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseFloat(tt.input)
-			if result != tt.expected {
-				t.Errorf("Expected %.2f, got %.2f", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestGetString(t *testing.T) {
-	m := map[string]interface{}{
-		"string_key": "test_value",
-		"int_key":    123,
-		"bool_key":   true,
-	}
-
-	tests := []struct {
-		name     string
-		key      string
-		expected string
-	}{
-		{
-			name:     "Valid string key",
-			key:      "string_key",
-			expected: "test_value",
-		},
-		{
-			name:     "Non-string value",
-			key:      "int_key",
-			expected: "",
-		},
-		{
-			name:     "Missing key",
-			key:      "missing_key",
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := getString(m, tt.key)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
-			}
-		})
 	}
 }

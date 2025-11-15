@@ -56,7 +56,8 @@ func main() {
 		fmt.Printf("  ✓ CoinGecko MCP enabled: %s\n", cfg.MCP.External.CoinGecko.URL)
 
 		// Create CoinGecko client
-		client, err := market.NewCoinGeckoClient(cfg.MCP.External.CoinGecko.URL)
+		// Note: Using free tier (no API key). Set COINGECKO_API_KEY env var for pro tier.
+		client, err := market.NewCoinGeckoClient("")
 		if err != nil {
 			fmt.Printf("  ✗ Failed to create CoinGecko client: %v\n", err)
 		} else {
