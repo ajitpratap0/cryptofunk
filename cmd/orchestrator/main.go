@@ -170,6 +170,15 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize orchestrator")
 	}
 
+	// Start HTTP server for health checks and metrics
+	httpServer := NewHTTPServer(metricsPort, orch)
+	if err := httpServer.Start(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start HTTP server")
+	}
+	log.Info().
+		Int("port", metricsPort).
+		Msg("HTTP server started - health checks available at /health, /readiness, /liveness")
+
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -196,6 +205,13 @@ func main() {
 	// Create shutdown context with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Shutdown HTTP server first
+	if err := httpServer.Stop(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Error during HTTP server shutdown")
+	} else {
+		log.Info().Msg("HTTP server shutdown complete")
+	}
 
 	// Shutdown orchestrator
 	if err := orch.Shutdown(shutdownCtx); err != nil {
