@@ -20,6 +20,14 @@ type HTTPServer struct {
 	port         int
 }
 
+// HealthCheckResult represents the result of a single health check
+type HealthCheckResult struct {
+	Component string `json:"component"`
+	Status    string `json:"status"` // "ok", "failed", "degraded"
+	Message   string `json:"message,omitempty"`
+	Latency   int64  `json:"latency_ms"`
+}
+
 // NewHTTPServer creates a new HTTP server for health checks and metrics
 func NewHTTPServer(port int, orch *orchestrator.Orchestrator) *HTTPServer {
 	return &HTTPServer{
@@ -121,24 +129,40 @@ func (h *HTTPServer) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check orchestrator readiness
-	// TODO: Add actual readiness checks (NATS connected, DB connected, etc.)
-	// For now, return ready if orchestrator exists
 	if h.orchestrator == nil {
 		http.Error(w, `{"status":"not ready","reason":"orchestrator not initialized"}`,
 			http.StatusServiceUnavailable)
 		return
 	}
 
+	// Perform comprehensive health checks
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	checks := h.runHealthChecks(ctx)
+
+	// Determine overall status
+	allHealthy := true
+	for _, check := range checks {
+		if check.Status != "ok" {
+			allHealthy = false
+			break
+		}
+	}
+
 	response := map[string]interface{}{
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
-		"checks": map[string]string{
-			"orchestrator": "ok",
-			// TODO: Add more checks
-			// "database": checkDatabase(),
-			// "nats": checkNATS(),
-			// "redis": checkRedis(),
-		},
+		"checks":    checks,
+	}
+
+	// Return 503 if any check failed
+	if !allHealthy {
+		response["status"] = "not ready"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(response)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -161,17 +185,113 @@ func (h *HTTPServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get orchestrator status
-	// TODO: Implement GetStatus() method in orchestrator
-	response := map[string]interface{}{
-		"status":    "running",
-		"timestamp": time.Now().Unix(),
-		"version":   "1.0.0", // TODO: Get from config
-		// "active_agents": h.orchestrator.GetActiveAgentCount(),
-		// "active_sessions": h.orchestrator.GetActiveSessionCount(),
-		// "uptime_seconds": h.orchestrator.GetUptimeSeconds(),
-	}
+	status := h.orchestrator.GetStatus()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(status)
+}
+
+// runHealthChecks executes all health checks and returns results
+func (h *HTTPServer) runHealthChecks(ctx context.Context) []HealthCheckResult {
+	results := make([]HealthCheckResult, 0)
+
+	// Check database connectivity
+	results = append(results, h.checkDatabase(ctx))
+
+	// Check NATS connectivity
+	results = append(results, h.checkNATS(ctx))
+
+	// Check agent connectivity (at least 1 agent should be active)
+	results = append(results, h.checkAgents(ctx))
+
+	return results
+}
+
+// checkDatabase checks database connectivity
+func (h *HTTPServer) checkDatabase(ctx context.Context) HealthCheckResult {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	db := h.orchestrator.GetDB()
+	if db == nil {
+		return HealthCheckResult{
+			Component: "database",
+			Status:    "failed",
+			Message:   "database connection is nil",
+			Latency:   time.Since(start).Milliseconds(),
+		}
+	}
+
+	err := db.Ping(ctx)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return HealthCheckResult{
+			Component: "database",
+			Status:    "failed",
+			Message:   err.Error(),
+			Latency:   latency,
+		}
+	}
+
+	return HealthCheckResult{
+		Component: "database",
+		Status:    "ok",
+		Latency:   latency,
+	}
+}
+
+// checkNATS checks NATS connectivity
+func (h *HTTPServer) checkNATS(ctx context.Context) HealthCheckResult {
+	start := time.Now()
+
+	natsConn := h.orchestrator.GetNATSConnection()
+	if natsConn == nil {
+		return HealthCheckResult{
+			Component: "nats",
+			Status:    "failed",
+			Message:   "NATS connection is nil",
+			Latency:   time.Since(start).Milliseconds(),
+		}
+	}
+
+	if !natsConn.IsConnected() {
+		return HealthCheckResult{
+			Component: "nats",
+			Status:    "failed",
+			Message:   "NATS not connected",
+			Latency:   time.Since(start).Milliseconds(),
+		}
+	}
+
+	return HealthCheckResult{
+		Component: "nats",
+		Status:    "ok",
+		Latency:   time.Since(start).Milliseconds(),
+	}
+}
+
+// checkAgents checks if at least one agent is active
+func (h *HTTPServer) checkAgents(ctx context.Context) HealthCheckResult {
+	start := time.Now()
+
+	activeCount := h.orchestrator.GetActiveAgentCount()
+
+	if activeCount == 0 {
+		return HealthCheckResult{
+			Component: "agents",
+			Status:    "degraded",
+			Message:   "no active agents",
+			Latency:   time.Since(start).Milliseconds(),
+		}
+	}
+
+	return HealthCheckResult{
+		Component: "agents",
+		Status:    "ok",
+		Message:   fmt.Sprintf("%d active agents", activeCount),
+		Latency:   time.Since(start).Milliseconds(),
+	}
 }

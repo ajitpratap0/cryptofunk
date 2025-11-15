@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 )
 
@@ -163,15 +164,24 @@ func main() {
 		Int("metrics_port", metricsPort).
 		Msg("Orchestrator configuration loaded")
 
-	// Create orchestrator
-	orch, err := orchestrator.NewOrchestrator(&config, log.Logger, metricsPort)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create orchestrator")
-	}
-
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize database connection
+	log.Info().Msg("Connecting to database...")
+	database, err := db.New(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to database")
+	}
+	defer database.Close()
+	log.Info().Msg("✓ Database connection established")
+
+	// Create orchestrator
+	orch, err := orchestrator.NewOrchestrator(&config, log.Logger, database, metricsPort)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create orchestrator")
+	}
 
 	// Initialize orchestrator
 	if err := orch.Initialize(ctx); err != nil {

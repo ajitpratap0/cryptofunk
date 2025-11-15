@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
@@ -165,6 +166,9 @@ type Orchestrator struct {
 	config *OrchestratorConfig
 	log    zerolog.Logger
 
+	// Database Connection
+	db *db.DB
+
 	// Agent Registry
 	agents      map[string]*AgentSession // agent_name -> session
 	agentsMutex sync.RWMutex
@@ -179,9 +183,10 @@ type Orchestrator struct {
 	signalBufferMutex sync.RWMutex
 
 	// State
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	startTime  time.Time
 
 	// Trading control
 	paused      bool
@@ -193,7 +198,7 @@ type Orchestrator struct {
 }
 
 // NewOrchestrator creates a new orchestrator instance
-func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, metricsPort int) (*Orchestrator, error) {
+func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, database *db.DB, metricsPort int) (*Orchestrator, error) {
 	// Create metrics (singleton pattern to avoid Prometheus registration conflicts)
 	orchestratorMetrics := getOrCreateOrchestratorMetrics()
 
@@ -209,11 +214,13 @@ func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, metricsPort
 	return &Orchestrator{
 		config:        config,
 		log:           orchestratorLog,
+		db:            database,
 		agents:        make(map[string]*AgentSession),
 		natsConn:      nil, // Will be set in Initialize()
 		signalBuffer:  make([]*AgentSignal, 0),
 		metrics:       orchestratorMetrics,
 		metricsServer: metricsServer,
+		startTime:     time.Now(),
 	}, nil
 }
 
@@ -946,4 +953,90 @@ func (o *Orchestrator) GetAgentSessions() map[string]*AgentSession {
 	}
 
 	return sessions
+}
+
+// OrchestratorStatus represents the current status of the orchestrator
+type OrchestratorStatus struct {
+	Status         string                 `json:"status"`
+	Version        string                 `json:"version"`
+	Uptime         float64                `json:"uptime_seconds"`
+	ActiveAgents   int                    `json:"active_agents"`
+	TotalSignals   int                    `json:"total_signals"`
+	Timestamp      time.Time              `json:"timestamp"`
+	Configuration  map[string]interface{} `json:"configuration"`
+	AgentSummary   map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
+}
+
+// GetStatus returns the current orchestrator status
+func (o *Orchestrator) GetStatus() *OrchestratorStatus {
+	o.agentsMutex.RLock()
+	defer o.agentsMutex.RUnlock()
+
+	// Calculate uptime
+	uptime := time.Since(o.startTime).Seconds()
+
+	// Count signals in buffer
+	o.signalBufferMutex.RLock()
+	totalSignals := len(o.signalBuffer)
+	o.signalBufferMutex.RUnlock()
+
+	// Count agent health statuses
+	agentSummary := map[string]int{
+		"healthy":   0,
+		"degraded":  0,
+		"unhealthy": 0,
+		"unknown":   0,
+	}
+	for _, agent := range o.agents {
+		switch agent.HealthStatus {
+		case HealthStatusHealthy:
+			agentSummary["healthy"]++
+		case HealthStatusDegraded:
+			agentSummary["degraded"]++
+		case HealthStatusUnhealthy:
+			agentSummary["unhealthy"]++
+		default:
+			agentSummary["unknown"]++
+		}
+	}
+
+	return &OrchestratorStatus{
+		Status:       "running",
+		Version:      "1.0.0", // TODO: Set from build flags
+		Uptime:       uptime,
+		ActiveAgents: len(o.agents),
+		TotalSignals: totalSignals,
+		Timestamp:    time.Now(),
+		Configuration: map[string]interface{}{
+			"min_consensus":  o.config.MinConsensus,
+			"min_confidence": o.config.MinConfidence,
+			"max_signal_age": o.config.MaxSignalAge.String(),
+		},
+		AgentSummary: agentSummary,
+	}
+}
+
+// GetDB returns the database connection
+func (o *Orchestrator) GetDB() *db.DB {
+	return o.db
+}
+
+// GetNATSConnection returns the NATS connection
+func (o *Orchestrator) GetNATSConnection() *nats.Conn {
+	return o.natsConn
+}
+
+// GetActiveAgentCount returns the number of active agents
+func (o *Orchestrator) GetActiveAgentCount() int {
+	o.agentsMutex.RLock()
+	defer o.agentsMutex.RUnlock()
+
+	activeCount := 0
+	for _, agent := range o.agents {
+		if agent.Enabled && agent.HealthStatus == HealthStatusHealthy {
+			activeCount++
+		}
+	}
+
+	return activeCount
 }
