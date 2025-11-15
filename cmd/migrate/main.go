@@ -19,9 +19,15 @@ func main() {
 	migrationsDir := flag.String("migrations", "migrations", "Path to migrations directory")
 	flag.Parse()
 
-	// Use default DATABASE_URL if not provided
+	// DATABASE_URL is required
 	if *dbURL == "" {
-		*dbURL = "postgres://postgres:cryptofunk_dev_password@localhost:5432/cryptofunk?sslmode=disable"
+		fmt.Fprintf(os.Stderr, "ERROR: DATABASE_URL environment variable or --db flag is required\n")
+		fmt.Fprintf(os.Stderr, "\nUsage:\n")
+		fmt.Fprintf(os.Stderr, "  export DATABASE_URL='postgres://user:password@host:port/database?sslmode=disable'\n")
+		fmt.Fprintf(os.Stderr, "  %s --command=migrate\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Or:\n")
+		fmt.Fprintf(os.Stderr, "  %s --db='postgres://user:password@host:port/database' --command=migrate\n", os.Args[0])
+		os.Exit(1)
 	}
 
 	// Connect to database
