@@ -105,13 +105,14 @@ func (v *Validator) validateProductionRequirements() error {
 	var errors []string
 
 	// 1. Vault must be enabled in production
+	const vaultEnabledTrue = "true"
 	vaultEnabled := strings.ToLower(os.Getenv("VAULT_ENABLED"))
-	if vaultEnabled != "true" && vaultEnabled != "1" {
+	if vaultEnabled != vaultEnabledTrue && vaultEnabled != "1" {
 		errors = append(errors, "Vault must be enabled in production (set VAULT_ENABLED=true)")
 	}
 
 	// 2. Check that Vault configuration is provided
-	if vaultEnabled == "true" || vaultEnabled == "1" {
+	if vaultEnabled == vaultEnabledTrue || vaultEnabled == "1" {
 		vaultAddr := os.Getenv("VAULT_ADDR")
 		if vaultAddr == "" {
 			errors = append(errors, "VAULT_ADDR must be set when Vault is enabled")
@@ -126,6 +127,7 @@ func (v *Validator) validateProductionRequirements() error {
 		switch vaultAuthMethod {
 		case "kubernetes":
 			// Kubernetes auth requires K8s service account token
+			// #nosec G101 -- This is the standard Kubernetes service account token path, not a hardcoded credential
 			tokenPath := "/var/run/secrets/kubernetes.io/serviceaccount/token"
 			if _, err := os.Stat(tokenPath); os.IsNotExist(err) {
 				errors = append(errors, fmt.Sprintf("Kubernetes service account token not found at %s", tokenPath))
@@ -213,8 +215,6 @@ func (v *Validator) validateProductionRequirements() error {
 
 // validateEnvironmentVariables checks that required environment variables are set
 func (v *Validator) validateEnvironmentVariables() error {
-	var errors []string
-
 	// Required environment variables based on trading mode and environment
 	requiredVars := make(map[string]string)
 
@@ -262,7 +262,6 @@ func (v *Validator) validateEnvironmentVariables() error {
 		errMsg.WriteString("Required environment variables are missing:\n\n")
 		for varName, description := range requiredVars {
 			errMsg.WriteString(fmt.Sprintf("  - %s: %s\n", varName, description))
-			errors = append(errors, fmt.Sprintf("%s: %s", varName, description))
 		}
 		errMsg.WriteString("\nPlease set these environment variables and try again.\n")
 		return fmt.Errorf("%s", errMsg.String())
@@ -373,7 +372,11 @@ func (v *Validator) checkRedisConnectivity(ctx context.Context) error {
 		Password: v.config.Redis.Password,
 		DB:       v.config.Redis.DB,
 	})
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close Redis client")
+		}
+	}()
 
 	// Ping Redis
 	if err := client.Ping(connCtx).Err(); err != nil {
@@ -460,10 +463,14 @@ func (v *Validator) verifyBinanceAPIKey(ctx context.Context, config ExchangeConf
 	if err != nil {
 		return fmt.Errorf("failed to ping Binance API: %w (check network connectivity)", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Binance API ping failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("binance API ping failed with status: %d", resp.StatusCode)
 	}
 
 	// Note: Full API key verification would require making an authenticated request
@@ -481,10 +488,8 @@ func (v *Validator) verifyBinanceAPIKey(ctx context.Context, config ExchangeConf
 func (v *Validator) verifyLLMAPIKey(ctx context.Context) error {
 	// Check if Bifrost is reachable
 	healthURL := v.config.LLM.Endpoint
-	if strings.Contains(healthURL, "/v1/chat/completions") {
-		// Replace chat endpoint with health endpoint
-		healthURL = strings.Replace(healthURL, "/v1/chat/completions", "/health", 1)
-	}
+	// Replace chat endpoint with health endpoint
+	healthURL = strings.Replace(healthURL, "/v1/chat/completions", "/health", 1)
 
 	reqCtx, cancel := context.WithTimeout(ctx, v.options.Timeout)
 	defer cancel()
@@ -498,7 +503,11 @@ func (v *Validator) verifyLLMAPIKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to ping LLM gateway: %w (Bifrost might not be running)", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("LLM gateway health check failed with status: %d", resp.StatusCode)

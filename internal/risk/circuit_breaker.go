@@ -25,7 +25,7 @@ type CircuitBreakerManager struct {
 
 // CircuitBreakerMetrics holds Prometheus metrics for circuit breakers
 type CircuitBreakerMetrics struct {
-	state   *prometheus.GaugeVec
+	state    *prometheus.GaugeVec
 	requests *prometheus.CounterVec
 	failures *prometheus.CounterVec
 }

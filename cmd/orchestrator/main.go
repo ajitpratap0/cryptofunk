@@ -262,7 +262,8 @@ func verifyAPIKeys() int {
 	return 0
 }
 
-// Deprecated old implementation - kept for reference
+// verifyAPIKeysOld is deprecated - kept for reference only
+// nolint:unused // Kept for historical reference
 func verifyAPIKeysOld() int {
 	log.Info().Msg("Verifying API keys and secrets...")
 

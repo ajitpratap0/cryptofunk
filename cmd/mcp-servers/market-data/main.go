@@ -65,10 +65,10 @@ type MCPServer struct {
 
 // MarketDataServer provides market data from multiple sources
 type MarketDataServer struct {
-	binanceClient    *binance.Client
-	coingeckoClient  *market.CoinGeckoClient
-	logger           zerolog.Logger
-	preferCoinGecko  bool // Use CoinGecko as primary source
+	binanceClient   *binance.Client
+	coingeckoClient *market.CoinGeckoClient
+	logger          zerolog.Logger
+	preferCoinGecko bool // Use CoinGecko as primary source
 }
 
 func main() {
@@ -407,11 +407,11 @@ func (s *MarketDataServer) handleGetCurrentPrice(ctx context.Context, args map[s
 		priceResult, err := s.coingeckoClient.GetPrice(ctx, symbol, vsCurrency)
 		if err == nil {
 			result := map[string]interface{}{
-				"symbol":      priceResult.Symbol,
-				"price":       fmt.Sprintf("%.2f", priceResult.Price),
-				"currency":    priceResult.Currency,
-				"timestamp":   time.Now().Unix(),
-				"source":      "coingecko",
+				"symbol":    priceResult.Symbol,
+				"price":     fmt.Sprintf("%.2f", priceResult.Price),
+				"currency":  priceResult.Currency,
+				"timestamp": time.Now().Unix(),
+				"source":    "coingecko",
 			}
 
 			s.logger.Info().

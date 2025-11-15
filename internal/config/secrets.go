@@ -376,7 +376,7 @@ type VaultClient struct {
 // NewVaultClient creates a new Vault client from configuration
 func NewVaultClient(cfg VaultConfig) (*VaultClient, error) {
 	if !cfg.Enabled {
-		return nil, fmt.Errorf("Vault is not enabled in configuration")
+		return nil, fmt.Errorf("vault is not enabled in configuration")
 	}
 
 	// Create Vault config
@@ -410,7 +410,7 @@ func NewVaultClient(cfg VaultConfig) (*VaultClient, error) {
 	case "kubernetes":
 		// Kubernetes service account authentication
 		if err := authenticateKubernetes(client, cfg); err != nil {
-			return nil, fmt.Errorf("Kubernetes authentication failed: %w", err)
+			return nil, fmt.Errorf("kubernetes authentication failed: %w", err)
 		}
 
 	case "approle":
@@ -588,18 +588,27 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 
 	// These are typically used by Bifrost, set as env vars
 	if anthropicKey, ok := secrets["anthropic_api_key"].(string); ok && anthropicKey != "" {
-		os.Setenv("ANTHROPIC_API_KEY", anthropicKey)
-		log.Info().Msg("✓ Loaded Anthropic API key from Vault")
+		if err := os.Setenv("ANTHROPIC_API_KEY", anthropicKey); err != nil {
+			log.Warn().Err(err).Msg("Failed to set ANTHROPIC_API_KEY environment variable")
+		} else {
+			log.Info().Msg("✓ Loaded Anthropic API key from Vault")
+		}
 	}
 
 	if openaiKey, ok := secrets["openai_api_key"].(string); ok && openaiKey != "" {
-		os.Setenv("OPENAI_API_KEY", openaiKey)
-		log.Info().Msg("✓ Loaded OpenAI API key from Vault")
+		if err := os.Setenv("OPENAI_API_KEY", openaiKey); err != nil {
+			log.Warn().Err(err).Msg("Failed to set OPENAI_API_KEY environment variable")
+		} else {
+			log.Info().Msg("✓ Loaded OpenAI API key from Vault")
+		}
 	}
 
 	if geminiKey, ok := secrets["gemini_api_key"].(string); ok && geminiKey != "" {
-		os.Setenv("GEMINI_API_KEY", geminiKey)
-		log.Info().Msg("✓ Loaded Gemini API key from Vault")
+		if err := os.Setenv("GEMINI_API_KEY", geminiKey); err != nil {
+			log.Warn().Err(err).Msg("Failed to set GEMINI_API_KEY environment variable")
+		} else {
+			log.Info().Msg("✓ Loaded Gemini API key from Vault")
+		}
 	}
 
 	return nil
@@ -632,7 +641,7 @@ func authenticateKubernetes(client *vault.Client, cfg VaultConfig) error {
 	}
 
 	if secret == nil || secret.Auth == nil {
-		return fmt.Errorf("Kubernetes authentication returned no token")
+		return fmt.Errorf("kubernetes authentication returned no token")
 	}
 
 	// Set client token

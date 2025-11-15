@@ -288,12 +288,12 @@ func TestToCandlesticks(t *testing.T) {
 	// Use a time aligned to 5 minutes (no seconds/milliseconds) for predictable truncation
 	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	prices := []PricePoint{
-		{Timestamp: baseTime, Value: 100.0},                           // 12:00
-		{Timestamp: baseTime.Add(5 * time.Minute), Value: 105.0},      // 12:05
-		{Timestamp: baseTime.Add(10 * time.Minute), Value: 110.0},     // 12:10
-		{Timestamp: baseTime.Add(15 * time.Minute), Value: 95.0},      // 12:15
-		{Timestamp: baseTime.Add(20 * time.Minute), Value: 102.0},     // 12:20
-		{Timestamp: baseTime.Add(25 * time.Minute), Value: 108.0},     // 12:25
+		{Timestamp: baseTime, Value: 100.0},                       // 12:00
+		{Timestamp: baseTime.Add(5 * time.Minute), Value: 105.0},  // 12:05
+		{Timestamp: baseTime.Add(10 * time.Minute), Value: 110.0}, // 12:10
+		{Timestamp: baseTime.Add(15 * time.Minute), Value: 95.0},  // 12:15
+		{Timestamp: baseTime.Add(20 * time.Minute), Value: 102.0}, // 12:20
+		{Timestamp: baseTime.Add(25 * time.Minute), Value: 108.0}, // 12:25
 	}
 
 	volumes := []PricePoint{
