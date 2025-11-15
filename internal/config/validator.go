@@ -48,6 +48,11 @@ func NewValidator(config *Config, options ValidatorOptions) *Validator {
 func (v *Validator) ValidateStartup(ctx context.Context) error {
 	log.Info().Msg("Validating configuration...")
 
+	// Step 0: Check production environment requirements
+	if err := v.validateProductionRequirements(); err != nil {
+		return fmt.Errorf("production requirements validation failed: %w", err)
+	}
+
 	// Step 1: Validate required environment variables
 	if err := v.validateEnvironmentVariables(); err != nil {
 		return fmt.Errorf("environment variable validation failed: %w", err)
@@ -80,6 +85,129 @@ func (v *Validator) ValidateStartup(ctx context.Context) error {
 	}
 
 	log.Info().Msg("Configuration validation completed successfully")
+	return nil
+}
+
+// validateProductionRequirements checks production-specific security requirements
+func (v *Validator) validateProductionRequirements() error {
+	// Check if we're running in production
+	appEnv := strings.ToLower(os.Getenv("CRYPTOFUNK_APP_ENVIRONMENT"))
+	isProduction := appEnv == "production" || appEnv == "prod"
+
+	if !isProduction {
+		// Not production, skip validation
+		log.Info().Str("environment", appEnv).Msg("Non-production environment detected, skipping production requirements")
+		return nil
+	}
+
+	log.Info().Msg("Production environment detected - enforcing production security requirements")
+
+	var errors []string
+
+	// 1. Vault must be enabled in production
+	vaultEnabled := strings.ToLower(os.Getenv("VAULT_ENABLED"))
+	if vaultEnabled != "true" && vaultEnabled != "1" {
+		errors = append(errors, "Vault must be enabled in production (set VAULT_ENABLED=true)")
+	}
+
+	// 2. Check that Vault configuration is provided
+	if vaultEnabled == "true" || vaultEnabled == "1" {
+		vaultAddr := os.Getenv("VAULT_ADDR")
+		if vaultAddr == "" {
+			errors = append(errors, "VAULT_ADDR must be set when Vault is enabled")
+		}
+
+		vaultAuthMethod := os.Getenv("VAULT_AUTH_METHOD")
+		if vaultAuthMethod == "" {
+			errors = append(errors, "VAULT_AUTH_METHOD must be set when Vault is enabled (kubernetes, token, or approle)")
+		}
+
+		// Validate auth method specific requirements
+		switch vaultAuthMethod {
+		case "kubernetes":
+			// Kubernetes auth requires K8s service account token
+			tokenPath := "/var/run/secrets/kubernetes.io/serviceaccount/token"
+			if _, err := os.Stat(tokenPath); os.IsNotExist(err) {
+				errors = append(errors, fmt.Sprintf("Kubernetes service account token not found at %s", tokenPath))
+			}
+		case "token":
+			vaultToken := os.Getenv("VAULT_TOKEN")
+			if vaultToken == "" {
+				errors = append(errors, "VAULT_TOKEN must be set when using token auth method")
+			}
+		case "approle":
+			roleID := os.Getenv("VAULT_ROLE_ID")
+			secretID := os.Getenv("VAULT_SECRET_ID")
+			if roleID == "" || secretID == "" {
+				errors = append(errors, "VAULT_ROLE_ID and VAULT_SECRET_ID must be set when using approle auth method")
+			}
+		default:
+			errors = append(errors, fmt.Sprintf("Unknown VAULT_AUTH_METHOD: %s (must be kubernetes, token, or approle)", vaultAuthMethod))
+		}
+	}
+
+	// 3. TLS/SSL must be enforced for database
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL != "" {
+		if strings.Contains(databaseURL, "sslmode=disable") {
+			errors = append(errors, "Database SSL cannot be disabled in production (sslmode=disable found in DATABASE_URL)")
+		}
+		if !strings.Contains(databaseURL, "sslmode=") {
+			errors = append(errors, "Database SSL mode must be explicitly set in production (add sslmode=require to DATABASE_URL)")
+		}
+	}
+
+	// 4. TLS/SSL must be enforced for Redis
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL != "" {
+		if strings.HasPrefix(redisURL, "redis://") && !strings.HasPrefix(redisURL, "rediss://") {
+			errors = append(errors, "Redis TLS must be enabled in production (use rediss:// instead of redis://)")
+		}
+	}
+
+	// 5. JWT secret must not be a placeholder
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret != "" && isPlaceholderValue(jwtSecret) {
+		errors = append(errors, "JWT_SECRET cannot be a placeholder value in production")
+	}
+	if jwtSecret != "" && len(jwtSecret) < 32 {
+		errors = append(errors, "JWT_SECRET must be at least 32 characters in production")
+	}
+
+	// 6. Trading mode should be PAPER initially (warning, not error)
+	tradingMode := strings.ToLower(os.Getenv("TRADING_MODE"))
+	if tradingMode == "live" {
+		log.Warn().Msg("WARNING: Live trading is enabled in production. Ensure this is intentional and all testing is complete.")
+	}
+
+	// 7. Default credentials check
+	postgresPassword := os.Getenv("POSTGRES_PASSWORD")
+	if postgresPassword != "" && isPlaceholderValue(postgresPassword) {
+		errors = append(errors, "POSTGRES_PASSWORD cannot be a placeholder value in production")
+	}
+
+	grafanaPassword := os.Getenv("GRAFANA_ADMIN_PASSWORD")
+	if grafanaPassword != "" && isPlaceholderValue(grafanaPassword) {
+		errors = append(errors, "GRAFANA_ADMIN_PASSWORD cannot be a placeholder value in production")
+	}
+
+	if len(errors) > 0 {
+		var errMsg strings.Builder
+		errMsg.WriteString("\n==========================================================\n")
+		errMsg.WriteString("PRODUCTION SECURITY REQUIREMENTS NOT MET\n")
+		errMsg.WriteString("==========================================================\n\n")
+		errMsg.WriteString("The following production security requirements must be addressed:\n\n")
+		for i, err := range errors {
+			errMsg.WriteString(fmt.Sprintf("  %d. %s\n", i+1, err))
+		}
+		errMsg.WriteString("\n")
+		errMsg.WriteString("Production deployment cannot proceed until these issues are resolved.\n")
+		errMsg.WriteString("See docs/TLS_SETUP.md and docs/SECRET_ROTATION.md for guidance.\n")
+		errMsg.WriteString("==========================================================\n")
+		return fmt.Errorf("%s", errMsg.String())
+	}
+
+	log.Info().Msg("✓ Production security requirements validated successfully")
 	return nil
 }
 

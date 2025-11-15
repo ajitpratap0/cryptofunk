@@ -38,6 +38,9 @@ resources:
   # Ingress
   - ingress.yaml
 
+  # Network Policies
+  - network-policy.yaml
+
 # Common labels applied to all resources
 commonLabels:
   app.kubernetes.io/part-of: cryptofunk-trading-system
