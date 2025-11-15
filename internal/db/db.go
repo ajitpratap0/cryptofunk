@@ -78,3 +78,8 @@ func (db *DB) Pool() *pgxpool.Pool {
 func (db *DB) Health(ctx context.Context) error {
 	return db.pool.Ping(ctx)
 }
+
+// SetPool sets the connection pool (used by tests)
+func (db *DB) SetPool(pool *pgxpool.Pool) {
+	db.pool = pool
+}
