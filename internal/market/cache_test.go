@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -57,14 +58,15 @@ func TestNewCachedCoinGeckoClient(t *testing.T) {
 }
 
 func TestCachedGetPrice_CacheMiss(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("")
+	cgClient, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -139,14 +141,15 @@ func TestCachedGetPrice_CacheHit(t *testing.T) {
 }
 
 func TestCachedGetMarketChart_CacheMiss(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("")
+	cgClient, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -183,14 +186,15 @@ func TestCachedGetMarketChart_CacheMiss(t *testing.T) {
 }
 
 func TestCachedGetMarketChart_DifferentTTLForHistorical(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("")
+	cgClient, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -220,14 +224,15 @@ func TestCachedGetMarketChart_DifferentTTLForHistorical(t *testing.T) {
 }
 
 func TestCachedGetCoinInfo(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("")
+	cgClient, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -264,14 +269,15 @@ func TestCachedGetCoinInfo(t *testing.T) {
 }
 
 func TestHealth_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("")
+	cgClient, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}
@@ -400,14 +406,15 @@ func TestClearCache(t *testing.T) {
 }
 
 func TestCachedGetPrice_InvalidCachedData(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
-	cgClient, err := NewCoinGeckoClient("")
+	cgClient, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create CoinGecko client: %v", err)
 	}

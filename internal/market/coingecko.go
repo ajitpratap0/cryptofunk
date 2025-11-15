@@ -330,15 +330,18 @@ func (m *MarketChart) ToCandlesticks(intervalMinutes int) []Candlestick {
 	var intervalStart time.Time
 
 	for i, pricePoint := range m.Prices {
-		// Start new candle if needed
-		if currentCandle == nil || pricePoint.Timestamp.Sub(intervalStart) >= intervalDuration {
+		// Determine which interval this price point belongs to
+		pointIntervalStart := pricePoint.Timestamp.Truncate(intervalDuration)
+
+		// Start new candle if needed (when we move to a new interval)
+		if currentCandle == nil || !pointIntervalStart.Equal(intervalStart) {
 			// Save previous candle if exists
 			if currentCandle != nil {
 				candlesticks = append(candlesticks, *currentCandle)
 			}
 
 			// Start new candle
-			intervalStart = pricePoint.Timestamp.Truncate(intervalDuration)
+			intervalStart = pointIntervalStart
 			currentCandle = &Candlestick{
 				Timestamp: intervalStart,
 				Open:      pricePoint.Value,

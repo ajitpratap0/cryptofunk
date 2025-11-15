@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 )
@@ -61,11 +62,13 @@ func TestNewCoinGeckoClient(t *testing.T) {
 }
 
 func TestGetPrice(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode - use TestGetPrice_WithMock instead")
+	// Skip real API tests by default to avoid rate limiting
+	// Run with: COINGECKO_API_TEST=1 go test ./internal/market/...
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - use TestGetPrice_WithMock or set COINGECKO_API_TEST=1")
 	}
 
-	client, err := NewCoinGeckoClient("")
+	client, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -138,11 +141,12 @@ func TestGetPrice(t *testing.T) {
 }
 
 func TestGetMarketChart(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode - use TestGetMarketChart_WithMock instead")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - use TestGetMarketChart_WithMock or set COINGECKO_API_TEST=1")
 	}
 
-	client, err := NewCoinGeckoClient("")
+	client, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -217,8 +221,9 @@ func TestGetMarketChart(t *testing.T) {
 }
 
 func TestGetCoinInfo(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode - use TestGetCoinInfo_WithMock instead")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - use TestGetCoinInfo_WithMock or set COINGECKO_API_TEST=1")
 	}
 
 	client, err := NewCoinGeckoClient("")
@@ -280,23 +285,24 @@ func TestGetCoinInfo(t *testing.T) {
 
 func TestToCandlesticks(t *testing.T) {
 	// Create test market chart data
-	now := time.Now()
+	// Use a time aligned to 5 minutes (no seconds/milliseconds) for predictable truncation
+	baseTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	prices := []PricePoint{
-		{Timestamp: now, Value: 100.0},
-		{Timestamp: now.Add(5 * time.Minute), Value: 105.0},
-		{Timestamp: now.Add(10 * time.Minute), Value: 110.0},
-		{Timestamp: now.Add(15 * time.Minute), Value: 95.0},
-		{Timestamp: now.Add(20 * time.Minute), Value: 102.0},
-		{Timestamp: now.Add(25 * time.Minute), Value: 108.0},
+		{Timestamp: baseTime, Value: 100.0},                           // 12:00
+		{Timestamp: baseTime.Add(5 * time.Minute), Value: 105.0},      // 12:05
+		{Timestamp: baseTime.Add(10 * time.Minute), Value: 110.0},     // 12:10
+		{Timestamp: baseTime.Add(15 * time.Minute), Value: 95.0},      // 12:15
+		{Timestamp: baseTime.Add(20 * time.Minute), Value: 102.0},     // 12:20
+		{Timestamp: baseTime.Add(25 * time.Minute), Value: 108.0},     // 12:25
 	}
 
 	volumes := []PricePoint{
-		{Timestamp: now, Value: 1000.0},
-		{Timestamp: now.Add(5 * time.Minute), Value: 1100.0},
-		{Timestamp: now.Add(10 * time.Minute), Value: 1200.0},
-		{Timestamp: now.Add(15 * time.Minute), Value: 900.0},
-		{Timestamp: now.Add(20 * time.Minute), Value: 1050.0},
-		{Timestamp: now.Add(25 * time.Minute), Value: 1150.0},
+		{Timestamp: baseTime, Value: 1000.0},
+		{Timestamp: baseTime.Add(5 * time.Minute), Value: 1100.0},
+		{Timestamp: baseTime.Add(10 * time.Minute), Value: 1200.0},
+		{Timestamp: baseTime.Add(15 * time.Minute), Value: 900.0},
+		{Timestamp: baseTime.Add(20 * time.Minute), Value: 1050.0},
+		{Timestamp: baseTime.Add(25 * time.Minute), Value: 1150.0},
 	}
 
 	chart := &MarketChart{
@@ -323,7 +329,7 @@ func TestToCandlesticks(t *testing.T) {
 		{
 			name:            "15 minute candles",
 			intervalMinutes: 15,
-			expectedCandles: 3,
+			expectedCandles: 2, // 12:00-12:15 and 12:15-12:30
 		},
 	}
 
@@ -411,8 +417,9 @@ func TestCandlestickMarshalJSON(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping real API test in short mode - use TestHealth_WithMock instead")
+	// Skip real API tests by default to avoid rate limiting
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping real API test - use TestHealth_WithMock or set COINGECKO_API_TEST=1")
 	}
 
 	tests := []struct {
@@ -429,7 +436,7 @@ func TestHealth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewCoinGeckoClient("")
+			client, err := NewCoinGeckoClient(os.Getenv("COINGECKO_API_KEY"))
 			if err != nil {
 				t.Fatalf("Failed to create client: %v", err)
 			}
