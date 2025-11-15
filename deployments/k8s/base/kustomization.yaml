@@ -11,6 +11,7 @@ resources:
   - configmap.yaml
   - configmap-monitoring.yaml
   - secrets.yaml
+  - vault-integration.yaml
 
   # Persistent Storage
   - pvc.yaml

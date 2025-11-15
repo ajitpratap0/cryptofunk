@@ -1,0 +1,119 @@
+---
+# ServiceAccount for Vault authentication
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cryptofunk-vault
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/component: vault-auth
+---
+# ClusterRole for Vault token review
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cryptofunk-vault-token-reviewer
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/component: vault-auth
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+---
+# ClusterRoleBinding for Vault token review
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cryptofunk-vault-token-reviewer
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/component: vault-auth
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cryptofunk-vault-token-reviewer
+subjects:
+  - kind: ServiceAccount
+    name: cryptofunk-vault
+    namespace: cryptofunk
+---
+# ConfigMap for Vault configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/component: vault-config
+data:
+  # Vault server address (update for your environment)
+  VAULT_ADDR: "https://vault.example.com:8200"
+
+  # Vault authentication method: token, kubernetes, or approle
+  VAULT_AUTH_METHOD: "kubernetes"
+
+  # Vault KV mount path (usually "secret" for KV v2)
+  VAULT_MOUNT_PATH: "secret"
+
+  # Base path for CryptoFunk secrets in Vault
+  # Example: secret/data/cryptofunk/production/database
+  VAULT_SECRET_PATH: "cryptofunk/production"
+
+  # Kubernetes role for Vault authentication
+  VAULT_K8S_ROLE: "cryptofunk"
+
+  # Enable Vault integration (set to "false" to disable)
+  VAULT_ENABLED: "false"  # Change to "true" when Vault is configured
+
+  # Vault namespace (for Vault Enterprise, leave empty for OSS)
+  VAULT_NAMESPACE: ""
+---
+# Secret for Vault token (alternative to Kubernetes auth)
+# IMPORTANT: Only use this for development! Use Kubernetes auth in production
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-token
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: cryptofunk
+    app.kubernetes.io/component: vault-auth
+type: Opaque
+stringData:
+  # Vault token for authentication
+  # Replace with actual token or use Kubernetes auth method instead
+  VAULT_TOKEN: ""  # Leave empty if using Kubernetes auth
+---
+# Example secret structure in Vault (for reference)
+# These are the secret paths that CryptoFunk expects to find in Vault
+#
+# Path: secret/data/cryptofunk/production/database
+# Data:
+#   {
+#     "password": "<strong-database-password>",
+#     "user": "postgres"
+#   }
+#
+# Path: secret/data/cryptofunk/production/redis
+# Data:
+#   {
+#     "password": "<strong-redis-password>"
+#   }
+#
+# Path: secret/data/cryptofunk/production/exchanges/binance
+# Data:
+#   {
+#     "api_key": "<binance-api-key>",
+#     "secret_key": "<binance-secret-key>"
+#   }
+#
+# Path: secret/data/cryptofunk/production/llm
+# Data:
+#   {
+#     "anthropic_api_key": "<anthropic-api-key>",
+#     "openai_api_key": "<openai-api-key>",
+#     "gemini_api_key": "<gemini-api-key>"
+#   }
