@@ -1,8 +1,8 @@
 # CryptoFunk Implementation Tasks
 
 **Project**: Crypto AI Trading Platform with MCP-Orchestrated Multi-Agent System
-**Version**: 1.0
-**Last Updated**: 2025-11-04 (Phase 12 added after comprehensive review)
+**Version**: 2.0
+**Last Updated**: 2025-11-15 (Phases 13-16 added: Production Gap Closure → Revenue Generation)
 
 ---
 
@@ -15,7 +15,8 @@ This document consolidates all implementation tasks from the architecture and de
 **Original Estimate**: 12 weeks (650 hours, 3 months)
 **Revised with Open-Source Tools & CoinGecko MCP**: **9.5 weeks** (512 hours, ~2.4 months)
 **With Phase 12 Gap Closure**: **13.5 weeks** (697 hours, ~3.4 months)
-**Savings vs Original**: -1.5 weeks but with production readiness
+**With Phases 13-16 (Revenue Generation)**: **25.5 weeks** (1,137 hours, ~6.4 months)
+**Savings vs Original**: Production-ready system with revenue capability
 
 > **📚 See**: [OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md) and [MCP_INTEGRATION.md](docs/MCP_INTEGRATION.md) for detailed analysis
 
@@ -33,6 +34,10 @@ This document consolidates all implementation tasks from the architecture and de
 - Phase 10 (Production Readiness): **4 weeks** *(critical gap closure - MUST DO)*
 - Phase 11 (Advanced Features): **1 week** *(optional enhancements - already complete, can skip)*
 - Phase 12 (Monitoring & Observability): **0.5 weeks** *(final step after production deployment)*
+- Phase 13 (Production Gap Closure & Beta Launch): **4 weeks** *(fix critical bugs, deploy to production, beta users)* ⭐ NEW
+- Phase 14 (User Experience & Differentiation): **3 weeks** *(explainability, strategy marketplace, notifications)* ⭐ NEW
+- Phase 15 (Multi-Exchange & Advanced Trading): **4 weeks** *(Coinbase/Kraken, smart routing, stat-arb)* ⭐ NEW
+- Phase 16 (Scale, Optimize, & Productize): **4 weeks** *(performance, billing, multi-tenancy, revenue)* ⭐ NEW
 
 **Key Accelerators**:
 
@@ -3043,7 +3048,621 @@ This document consolidates all implementation tasks from the architecture and de
 
 ---
 
-## Post-Phase 12: Ongoing Tasks
+## Phase 13: Production Gap Closure & Beta Launch (Weeks 15-18)
+
+**Goal**: Fix all critical production gaps identified in architecture review and launch beta to limited users
+
+**Duration**: 4 weeks (160 hours)
+**Dependencies**: Phase 10, 12
+**Milestone**: Production deployment with 10+ active beta users
+**Business Value**: HIGH - Enables revenue generation and real-world validation
+
+**Context**: The November 2025 architecture review identified critical gaps preventing production deployment:
+- CoinGecko MCP returns placeholder data (not real market data)
+- Technical Indicators MCP server exists but tools not wired to protocol
+- Orchestrator missing HTTP server for K8s health checks
+- Risk Agent uses mock prices instead of real database queries
+- 2 failing tests (sentiment-agent, market/coingecko)
+- 429 instances of context.Background() preventing proper cancellation
+- Missing circuit breaker implementation
+
+### 13.1 Critical Production Fixes (Week 15)
+
+- [ ] **T289** [P0] Fix CoinGecko MCP Real Integration
+  - Remove placeholder stubs in `internal/market/coingecko.go`
+  - Implement actual MCP SDK calls to external CoinGecko server
+  - Add proper error handling and retry logic with exponential backoff
+  - Test with real CoinGecko MCP endpoint (https://mcp.coingecko.com)
+  - Implement rate limiting (50 requests/min free tier)
+  - Add Redis caching (60s for tickers, 5min for OHLCV)
+  - **Acceptance**: Real market data flowing from CoinGecko, cached appropriately
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `internal/market/coingecko.go`, `internal/market/coingecko_test.go`
+
+- [ ] **T290** [P0] Wire Technical Indicators MCP Server
+  - Connect existing indicator implementations to MCP server stdio protocol
+  - Implement tool handlers for RSI, MACD, Bollinger, EMA, ADX
+  - Support variable periods (default: RSI=14, MACD=12,26,9, Bollinger=20,2)
+  - Test all 5 indicators via MCP protocol with sample data
+  - Integration tests for all indicators (verify calculations match cinar/indicator)
+  - **Acceptance**: Technical indicators accessible via MCP from agents, calculations verified
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `cmd/mcp-servers/technical-indicators/main.go`, `internal/indicators/wrappers.go`
+
+- [ ] **T291** [P0] Add Orchestrator HTTP Server
+  - Add HTTP server on port 8080 alongside MCP stdio communication
+  - Implement `/health` endpoint (K8s liveness probe) - returns 200 if running
+  - Implement `/readiness` endpoint (K8s readiness probe) - checks DB/Redis/NATS connectivity
+  - Implement `/metrics` endpoint for Prometheus scraping
+  - Implement `/api/v1/status` - orchestrator state (active agents, sessions)
+  - **Acceptance**: K8s health checks pass, metrics scraped by Prometheus
+  - **Estimate**: 6 hours
+  - **Files Impacted**: `cmd/orchestrator/main.go`, `cmd/orchestrator/http.go` (new)
+
+- [ ] **T292** [P0] Fix Risk Agent Database Integration
+  - Replace mock prices with `internal/db` queries from `candlesticks` hypertable
+  - Implement historical win rate calculation from `trades` table (wins/total trades)
+  - Implement equity curve loading from `performance_metrics` hypertable
+  - Calculate Sharpe ratio from real returns (not hardcoded 1.5)
+  - Implement market regime detection using 30-day rolling volatility (TimescaleDB window functions)
+  - Calculate Value at Risk (VaR) from historical returns (95th percentile)
+  - **Acceptance**: Risk calculations use real historical data, no mock data
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `cmd/agents/risk-agent/main.go`, `internal/risk/calculator.go` (new)
+
+- [ ] **T293** [P0] Wire API Pause Trading to Orchestrator
+  - Implement pause/resume logic in orchestrator (atomic state flag)
+  - Add pause state persistence to database (`orchestrator_state` table with timestamp)
+  - Broadcast pause/resume events to all agents via NATS (`trading.pause`, `trading.resume`)
+  - Add `/api/v1/trading/resume` endpoint (POST)
+  - Agents check pause state before generating signals
+  - Agents subscribe to pause events and halt immediately
+  - **Acceptance**: Can emergency-stop trading via API, agents halt within 1 second
+  - **Estimate**: 8 hours
+  - **Files Impacted**: `internal/orchestrator/state.go`, `cmd/api/handlers/trading.go`, `migrations/005_orchestrator_state.sql`
+
+### 13.2 Test Fixes & Context Propagation (Week 16)
+
+- [ ] **T294** [P0] Fix Failing Tests
+  - Fix sentiment-agent test failures (likely LLM mock issues)
+  - Fix ToCandlesticks test (off-by-one error: expected 3, got 4)
+  - Run full test suite and verify 100% pass rate
+  - Add test for edge case: empty candlestick data
+  - **Acceptance**: All tests pass, no failing tests
+  - **Estimate**: 8 hours
+  - **Files Impacted**: `cmd/agents/sentiment-agent/*_test.go`, `internal/market/coingecko_test.go`
+
+- [ ] **T295** [P0] Implement Context Propagation (Critical Paths)
+  - Replace `context.Background()` with proper context propagation in:
+    - `internal/exchange/service.go` - propagate from agent calls
+    - `internal/orchestrator/orchestrator.go` - propagate from HTTP handlers
+    - `cmd/agents/*/main.go` - create context with timeout for agent loops
+  - Add 30-second timeout for all exchange API calls
+  - Add 60-second timeout for LLM calls (via Bifrost)
+  - Add 10-second timeout for database queries
+  - **Acceptance**: Critical paths propagate context, operations can be cancelled
+  - **Estimate**: 16 hours
+  - **Files Impacted**: 20+ files (focus on critical paths first)
+
+- [ ] **T296** [P0] Implement Circuit Breakers
+  - Add `github.com/sony/gobreaker` dependency
+  - Implement circuit breaker for exchange API calls (5 failures → open 30s)
+  - Implement circuit breaker for LLM gateway calls (3 failures → open 60s)
+  - Implement circuit breaker for database connections (10 failures → open 15s)
+  - Add Prometheus metrics for circuit breaker state (closed/open/half-open)
+  - **Acceptance**: Circuit breakers prevent cascading failures, expose metrics
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `internal/risk/circuit_breaker.go` (new), `internal/exchange/service.go`, `internal/orchestrator/orchestrator.go`
+
+### 13.3 Beta Launch Preparation (Week 17)
+
+- [ ] **T297** [P0] Complete AlertManager Integration
+  - Install and configure Prometheus AlertManager (docker-compose and K8s)
+  - Wire alert rules from `deployments/prometheus/alert-rules.yml` to AlertManager
+  - Configure Slack notification channel (webhook URL from env var)
+  - Configure email notification channel (SMTP from env var)
+  - Test alert delivery end-to-end (trigger test alert)
+  - Document alert escalation procedures in `docs/ALERT_RUNBOOK.md`
+  - **Acceptance**: Alerts fire and notify via Slack/email on critical events (circuit breaker, high error rate)
+  - **Estimate**: 10 hours
+  - **Files Impacted**: `deployments/prometheus/alertmanager.yml` (new), `docker-compose.yml`, `deployments/k8s/alertmanager.yaml`
+
+- [ ] **T298** [P0] Implement Configuration Validation
+  - Add startup configuration validation in `internal/config/validator.go`
+  - Check required environment variables exist (DATABASE_URL, REDIS_URL, NATS_URL)
+  - Validate API keys are present and not empty (BINANCE_API_KEY, BIFROST_API_KEY)
+  - Check database connectivity before starting (ping with 5s timeout)
+  - Implement `--verify-keys` flag to test exchange and LLM API keys (dry run)
+  - Fail fast with clear error messages (e.g., "BINANCE_API_KEY is empty")
+  - **Acceptance**: Invalid config prevents startup with helpful errors, --verify-keys validates API keys
+  - **Estimate**: 8 hours
+  - **Files Impacted**: `internal/config/validator.go` (new), `cmd/orchestrator/main.go`
+
+- [ ] **T299** [P0] Production Secrets Management
+  - Choose: HashiCorp Vault OR AWS Secrets Manager (recommend Vault for K8s)
+  - Add Vault integration to `internal/config/secrets.go`
+  - Update all services to load secrets from Vault (API keys, DB passwords)
+  - Rotate all API keys to production keys (generate new keys for prod)
+  - Update Kubernetes secrets manifests to reference Vault
+  - Document secret rotation procedures in `docs/SECRET_ROTATION.md`
+  - **Acceptance**: All secrets loaded from secure vault, no plaintext secrets in env vars or files
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `internal/config/secrets.go` (new), `deployments/k8s/vault-secrets.yaml`, `go.mod` (add vault SDK)
+
+- [ ] **T300** [P1] Beta User Onboarding Documentation
+  - Create `docs/BETA_USER_GUIDE.md`
+  - Quick start for beta testers (Docker Compose or K8s deployment)
+  - How to configure trading parameters (risk limits, agent weights)
+  - How to interpret agent signals and reasoning (explainability)
+  - How to monitor performance (Grafana dashboards)
+  - FAQ for common beta issues (connection errors, API key issues)
+  - Feedback collection mechanism (GitHub issues or feedback form)
+  - **Acceptance**: Beta users can self-serve onboarding without support calls
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `docs/BETA_USER_GUIDE.md` (new), `README.md` (add beta section)
+
+### 13.4 Staging Deployment & Testing (Week 18)
+
+- [ ] **T301** [P0] Deploy to Staging Environment
+  - Provision staging Kubernetes cluster (2-3 nodes, e.g., GKE/EKS/AKS)
+  - Apply all K8s manifests to staging namespace
+  - Configure staging domain (staging.cryptofunk.io or similar)
+  - Run full smoke test suite (API endpoints, agent decisions, order execution)
+  - 24-hour soak test (monitor for memory leaks, crashes, goroutine leaks with pprof)
+  - Load test: 10 concurrent trading sessions, 100 orders/minute
+  - **Acceptance**: Staging environment running stable for 24+ hours, no crashes or memory leaks
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `deployments/k8s/overlays/staging/` (new kustomize overlay), `scripts/smoke-test.sh`
+
+- [ ] **T302** [P1] Performance Baseline Documentation
+  - Run comprehensive load tests on staging (using k6 or vegeta)
+  - Document API latency baselines (p50, p95, p99 for all endpoints)
+  - Document database query performance (slow query log analysis)
+  - Document MCP tool call latency (average, max)
+  - Document throughput limits (orders/second, decisions/second, concurrent sessions)
+  - Create performance regression test suite (run on every release)
+  - **Acceptance**: Performance baselines documented, regression tests automated in CI
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `docs/PERFORMANCE_BASELINES.md` (new), `scripts/load-test.sh`, `scripts/perf-regression.sh`
+
+- [ ] **T303** [P0] Security Audit & Penetration Testing
+  - Conduct internal security audit using OWASP checklist
+  - Test API authentication bypass (try accessing endpoints without JWT)
+  - Test SQL injection (should be prevented by pgx parameterization)
+  - Test secret exposure in logs (grep logs for API keys, passwords)
+  - Test rate limiting effectiveness (burst 1000 requests, verify 429 errors)
+  - Test WebSocket authentication
+  - Address all critical and high findings
+  - OPTIONAL: Engage third-party security firm ($5K-$10K for professional audit)
+  - **Acceptance**: Security audit complete, no critical vulnerabilities, all findings addressed
+  - **Estimate**: 24 hours (internal) or budget for external firm
+  - **Files Impacted**: Various (based on findings), `docs/SECURITY_AUDIT.md`
+
+### 13.5 Beta Launch (Week 18)
+
+- [ ] **T304** [P1] Beta User Recruitment
+  - Identify 10-20 beta users from crypto trading communities (Reddit r/algotrading, Discord servers)
+  - Onboard beta users with testnet API keys (Binance Testnet, Coinbase Pro Sandbox)
+  - Set up dedicated Slack or Discord channel for beta users
+  - Provide personalized onboarding support (1-on-1 calls if needed)
+  - **Acceptance**: 10+ beta users actively trading (paper mode or testnet)
+  - **Estimate**: 16 hours spread over week
+  - **Files Impacted**: None (operational task)
+
+- [ ] **T305** [P0] Beta Monitoring & Support
+  - Monitor beta user activity daily (active sessions, error rates)
+  - Respond to beta user issues within 4 hours (during business hours)
+  - Track common pain points in GitHub issues (label: beta-feedback)
+  - Weekly beta user feedback calls (30-minute group call)
+  - Collect feature requests and prioritize (voting in GitHub Discussions)
+  - **Acceptance**: <24hr response time, all critical issues resolved within 48hr
+  - **Estimate**: 20 hours/week (ongoing)
+  - **Files Impacted**: None (operational task)
+
+- [ ] **T306** [P1] Beta Performance Analysis
+  - Track beta user trading performance in paper mode (win rate, Sharpe, drawdown)
+  - Compare agent performance across users (which agents work best)
+  - Identify best-performing strategies (trend vs mean reversion)
+  - Analyze common loss scenarios (stop-loss triggers, false signals)
+  - Tune default risk parameters based on data (max position size, drawdown limits)
+  - **Acceptance**: Data-driven insights on strategy performance, parameter tuning recommendations
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `docs/BETA_PERFORMANCE_ANALYSIS.md` (new), SQL analysis queries
+
+### Phase 13 Deliverables
+
+- [ ] All critical production gaps fixed (CoinGecko, Technical Indicators, Risk Agent)
+- [ ] Orchestrator HTTP server with health endpoints
+- [ ] All tests passing (100% pass rate)
+- [ ] Context propagation in critical paths
+- [ ] Circuit breakers implemented
+- [ ] AlertManager integrated with Slack/email
+- [ ] Configuration validation and --verify-keys flag
+- [ ] Secrets management (Vault or AWS Secrets Manager)
+- [ ] Staging environment deployed and stable
+- [ ] Performance baselines documented
+- [ ] Security audit complete (all critical issues fixed)
+- [ ] 10+ beta users onboarded
+- [ ] Beta user guide and support processes
+
+**Exit Criteria**: System running in production (paper trading mode) with 10+ active beta users. All critical bugs fixed within 48hr. Performance meets documented baselines. Security audit shows no critical vulnerabilities. All tests passing.
+
+---
+
+## Phase 14: User Experience & Differentiation (Weeks 19-21)
+
+**Goal**: Build features that differentiate CryptoFunk from competitors and improve user retention
+
+**Duration**: 3 weeks (120 hours)
+**Dependencies**: Phase 13
+**Milestone**: Explainability dashboard live, community strategy marketplace, mobile notifications
+**Business Value**: HIGH - Creates competitive moat, improves user retention
+
+**Market Context**: Most crypto trading bots are "black boxes" - users don't understand why decisions are made. Explainability is a key differentiator. Strategy sharing creates network effects and viral growth.
+
+### 14.1 Explainability Dashboard (Week 19)
+
+- [ ] **T307** [P0] Build Explainability API Endpoints
+  - `GET /api/v1/decisions` - List recent LLM decisions with pagination (limit, offset)
+  - `GET /api/v1/decisions/:id` - Detailed decision (full prompt, LLM response, reasoning, context)
+  - `POST /api/v1/decisions/search` - Semantic search by query using pgvector (cosine similarity)
+  - `GET /api/v1/decisions/stats` - Aggregate statistics (top agents by accuracy, decision distribution)
+  - WebSocket `/ws/decisions` - Real-time decision stream (new decisions as they happen)
+  - Add indexes on `llm_decisions` table for performance (timestamp, agent_id, session_id)
+  - **Acceptance**: API endpoints return LLM decision data, search works with pgvector
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `cmd/api/handlers/decisions.go` (new), `internal/db/decisions.go`, `migrations/006_decisions_indexes.sql`
+
+- [ ] **T308** [P0] Build Explainability Web UI
+  - Choose: React or Vue.js frontend (recommend React with TypeScript)
+  - OR extend Grafana with custom panels (simpler but less flexible)
+  - Decision timeline view (chronological feed, infinite scroll)
+  - Decision detail modal (reasoning, confidence, context, prompt/response)
+  - Semantic search interface ("Why did you buy BTC at 3pm?")
+  - Agent comparison view (technical vs trend vs risk decisions side-by-side)
+  - Filter by agent, symbol, timeframe, confidence (>0.7, etc.)
+  - Export decisions as CSV or JSON
+  - **Acceptance**: Users can browse and search all LLM decisions with full reasoning
+  - **Estimate**: 32 hours
+  - **Files Impacted**: `web/explainability/` (new React app) or Grafana plugin, `web/explainability/package.json`
+
+- [ ] **T309** [P1] Decision Voting & Feedback
+  - Add "Was this decision helpful?" thumbs up/down to each decision
+  - Store user feedback in database (`decision_feedback` table: decision_id, user_id, rating, comment)
+  - Use feedback to improve agent prompts over time (analyze low-rated decisions)
+  - Admin dashboard showing decision quality metrics (average rating, feedback volume)
+  - Flag low-rated decisions for prompt engineering review
+  - **Acceptance**: Users can rate decisions, feedback tracked and analyzed
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `migrations/007_decision_feedback.sql`, `cmd/api/handlers/decisions.go`, web UI updates
+
+### 14.2 Strategy Marketplace (Week 20)
+
+- [ ] **T310** [P1] Strategy Import/Export
+  - Define strategy configuration format (YAML with schema validation)
+  - Export current strategy configuration (agent weights, risk parameters, indicators)
+  - Import strategy from file (validate schema, parameter ranges)
+  - Validate imported strategy (required fields: agents, risk_limits, indicators)
+  - Version strategy configurations (v1, v2, etc. with migration)
+  - **Acceptance**: Users can export and import strategy configs, validation prevents invalid configs
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `internal/strategy/import_export.go` (new), `internal/strategy/schema.go`, `configs/strategy-schema.yaml`
+
+- [ ] **T311** [P2] Community Strategy Sharing
+  - `POST /api/v1/strategies/share` - Upload strategy to community (with description, tags)
+  - `GET /api/v1/strategies/community` - Browse shared strategies (paginated)
+  - Strategy ratings and reviews (5-star rating, text reviews)
+  - Performance statistics for shared strategies (backtested returns, Sharpe, max drawdown)
+  - Filter by risk level (low/medium/high), return (%, annualized), Sharpe ratio (>1.0)
+  - "Fork" strategy (copy and modify)
+  - **Acceptance**: Users can share and discover strategies, view performance stats
+  - **Estimate**: 24 hours
+  - **Files Impacted**: `internal/strategy/marketplace.go` (new), `migrations/008_strategy_marketplace.sql`, API handlers
+
+- [ ] **T312** [P1] Strategy Backtesting UI
+  - Web interface for backtest configuration (start/end date, symbols, initial capital)
+  - Upload historical data (CSV import) or use database candlesticks
+  - Run backtest with parameter grid search (optimize agent weights, risk params)
+  - Interactive equity curve charts (Chart.js or Plotly)
+  - Download HTML report (existing backtest generator)
+  - Compare multiple strategies side-by-side (equity curves, metrics table)
+  - **Acceptance**: Users can backtest strategies from web UI, download reports
+  - **Estimate**: 24 hours
+  - **Files Impacted**: `web/backtest/` (new), `cmd/api/handlers/backtest.go`, frontend components
+
+### 14.3 Mobile Notifications & Alerts (Week 21)
+
+- [ ] **T313** [P1] Push Notification Infrastructure
+  - Integrate Firebase Cloud Messaging (FCM) or OneSignal
+  - Store user device tokens in database (`user_devices` table)
+  - Send notifications on trade execution (filled orders)
+  - Send notifications on significant P&L changes (+/- 5% in session)
+  - Send notifications on circuit breaker triggers (trading halted)
+  - Send notifications on agent consensus failures (no trade executed due to disagreement)
+  - User preferences for notification types (opt-in/opt-out per type)
+  - **Acceptance**: Users receive push notifications on mobile devices
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `internal/notifications/push.go` (new), `migrations/009_user_devices.sql`, `go.mod` (add FCM SDK)
+
+- [ ] **T314** [P1] Telegram Bot Integration
+  - Create Telegram bot (@CryptoFunkBot or similar)
+  - Bot commands:
+    - `/status` - Show active sessions, current positions
+    - `/positions` - List open positions with P&L
+    - `/pl` - Show session P&L (realized + unrealized)
+    - `/pause` - Emergency pause trading
+    - `/resume` - Resume trading after pause
+    - `/decisions` - Show recent agent decisions (last 5)
+  - Subscribe to alerts via Telegram (opt-in per user)
+  - Daily performance summary messages (sent at market close)
+  - **Acceptance**: Users can monitor and control trading via Telegram
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `cmd/telegram-bot/main.go` (new), Telegram Bot API integration
+
+- [ ] **T315** [P2] Slack Integration
+  - Create Slack app for enterprise/team users
+  - Post trade notifications to Slack channel (#cryptofunk-trades)
+  - Interactive commands (slash commands): `/cryptofunk status`, `/cryptofunk pause`
+  - Weekly performance report to Slack (every Monday, summary of prev week)
+  - Configurable per workspace (webhook URL in settings)
+  - **Acceptance**: Teams can monitor trading in Slack workspace
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `internal/integrations/slack.go` (new), Slack App manifest
+
+### Phase 14 Deliverables
+
+- [ ] Explainability Dashboard (web UI + API)
+- [ ] Decision search with semantic similarity (pgvector)
+- [ ] User feedback on decisions (thumbs up/down)
+- [ ] Strategy import/export (YAML format)
+- [ ] Community strategy marketplace (share, rate, fork)
+- [ ] Backtesting web UI (with parameter optimization)
+- [ ] Push notifications (mobile via FCM)
+- [ ] Telegram bot (monitoring and control)
+- [ ] Slack integration (team notifications)
+
+**Exit Criteria**: Users can visualize and understand all trading decisions. Community strategy sharing active with 5+ shared strategies. Mobile notifications working. 80%+ of users viewing decision explanations.
+
+---
+
+## Phase 15: Multi-Exchange & Advanced Trading (Weeks 22-25)
+
+**Goal**: Expand beyond Binance to multi-exchange support and advanced trading strategies
+
+**Duration**: 4 weeks (160 hours)
+**Dependencies**: Phase 13
+**Milestone**: 3+ exchanges integrated, smart order routing, statistical arbitrage agent
+**Business Value**: MEDIUM-HIGH - Expands addressable market, increases liquidity options
+
+**Market Opportunity**: Professional traders demand multi-exchange support for arbitrage and liquidity. Advanced strategies (stat-arb, market making) attract sophisticated users.
+
+### 15.1 Multi-Exchange Support (Weeks 22-23)
+
+- [ ] **T316** [P0] Add Coinbase Pro Integration
+  - Implement Coinbase Pro adapter using CCXT (`ccxt.coinbasepro()`)
+  - Authentication with API keys (key, secret, passphrase)
+  - Market data: tickers, orderbook, OHLCV (1m, 5m, 1h, 1d)
+  - Order execution: market, limit, stop-loss orders
+  - Position tracking (aggregate fills for position)
+  - Fee structure and commission calculation (0.5% taker, 0.5% maker, tiered)
+  - WebSocket subscriptions for real-time tickers and orderbook
+  - **Acceptance**: Can trade on Coinbase Pro, orders execute correctly, fees calculated
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `internal/exchange/coinbase.go` (new), `internal/exchange/coinbase_test.go`
+
+- [ ] **T317** [P0] Add Kraken Integration
+  - Implement Kraken adapter using CCXT (`ccxt.kraken()`)
+  - Handle Kraken-specific quirks (pair naming: XXBTZUSD vs BTC/USD, fee tiers)
+  - Authentication with API keys (key, secret)
+  - Market data: tickers, orderbook, OHLCV
+  - Order execution: market, limit, stop-loss orders
+  - Fee structure (0.26% taker, 0.16% maker, volume-based discounts)
+  - WebSocket subscriptions
+  - **Acceptance**: Can trade on Kraken, pair naming handled correctly
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `internal/exchange/kraken.go` (new), `internal/exchange/kraken_test.go`
+
+- [ ] **T318** [P1] Exchange Routing & Liquidity Aggregation
+  - Smart order routing (SOR) - find best price across exchanges (compare bid/ask)
+  - Aggregate orderbook depth across exchanges (merged orderbook view)
+  - Rebalance positions across exchanges (move BTC from Binance to Coinbase if needed)
+  - Exchange failover (if Binance API down, route orders to Coinbase)
+  - Track order routing decisions (which exchange chosen, why)
+  - **Acceptance**: Automatically routes orders to best exchange, saves 0.05%+ on average
+  - **Estimate**: 24 hours
+  - **Files Impacted**: `internal/exchange/router.go` (new), `internal/exchange/aggregator.go`
+
+- [ ] **T319** [P1] Exchange Configuration UI
+  - Web UI to add/remove exchanges (form with API key, secret, passphrase)
+  - Configure API keys per exchange (encrypted in database)
+  - Enable/disable specific exchanges (toggle switch)
+  - Set position limits per exchange (max BTC per exchange)
+  - Test connectivity before enabling (ping API, verify auth)
+  - Show exchange status (connected/disconnected, last sync time)
+  - **Acceptance**: Users can manage multiple exchanges from UI, API keys encrypted
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `web/exchanges/` (new), `cmd/api/handlers/exchanges.go`, `migrations/010_exchange_configs.sql`
+
+### 15.2 Advanced Trading Strategies (Weeks 24-25)
+
+- [ ] **T320** [P1] Statistical Arbitrage Strategy Agent
+  - Identify correlated pairs (BTC/ETH historical correlation, Pearson coefficient)
+  - Detect divergence from historical relationship (z-score > 2.0)
+  - Enter long/short positions to profit from mean reversion (go long undervalued, short overvalued)
+  - Risk management for pair trades (hedge ratio, stop-loss if correlation breaks)
+  - Backtest on historical data (2023-2024 BTC/ETH pair)
+  - Use MCP tools for correlation calculation, z-score, position sizing
+  - **Acceptance**: Statistical arbitrage agent generates profitable signals (Sharpe > 1.5 in backtest)
+  - **Estimate**: 32 hours
+  - **Files Impacted**: `cmd/agents/stat-arb-agent/main.go` (new), `internal/strategy/stat_arb.go`, agent config
+
+- [ ] **T321** [P2] Market Making Strategy
+  - Place simultaneous bid/ask orders (quote both sides)
+  - Profit from spread (buy at bid, sell at ask)
+  - Inventory management (avoid large directional exposure, target 50/50 long/short)
+  - Adjust quotes based on volatility (widen spread in high volatility)
+  - Cancel and replace orders frequently (sub-second updates)
+  - Skew quotes based on inventory (if long BTC, lower ask to sell faster)
+  - **Acceptance**: Market making agent provides liquidity and earns spread (>0.1% return/day)
+  - **Estimate**: 32 hours
+  - **Files Impacted**: `cmd/agents/market-maker-agent/main.go` (new), `internal/strategy/market_making.go`
+
+- [ ] **T322** [P2] Grid Trading Strategy
+  - Place buy/sell orders at fixed price intervals (grid: $100, $200, $300...)
+  - Profit from ranging markets (buy dips, sell rallies)
+  - Adjust grid based on volatility (wider grid in high volatility)
+  - Stop grid in trending markets (detect trend with ADX > 25)
+  - Dynamic grid adjustment (shift grid if price breaks out)
+  - Risk management (max number of grid levels, position limits)
+  - **Acceptance**: Grid trading agent profitable in sideways markets (>5% return in backtest)
+  - **Estimate**: 24 hours
+  - **Files Impacted**: `cmd/agents/grid-trading-agent/main.go` (new), `internal/strategy/grid_trading.go`
+
+### Phase 15 Deliverables
+
+- [ ] Coinbase Pro integration (market data, orders, positions)
+- [ ] Kraken integration (market data, orders, positions)
+- [ ] Smart order routing (best price across exchanges)
+- [ ] Exchange management UI (add/remove, configure)
+- [ ] Statistical arbitrage agent (pair trading)
+- [ ] Market making agent (OPTIONAL, P2)
+- [ ] Grid trading agent (OPTIONAL, P2)
+
+**Exit Criteria**: Can trade on 3+ exchanges (Binance, Coinbase Pro, Kraken). Smart order routing operational and saving costs. At least 1 advanced strategy live (stat-arb). 30%+ of users trading on multiple exchanges.
+
+---
+
+## Phase 16: Scale, Optimize, & Productize (Weeks 26-29)
+
+**Goal**: Prepare for large-scale deployment and revenue generation
+
+**Duration**: 4 weeks (160 hours)
+**Dependencies**: Phase 13-15
+**Milestone**: 100+ users, $1K+ MRR, multi-tenancy, subscription billing
+**Business Value**: MEDIUM - Enables scaling to hundreds of users and revenue generation
+
+**Revenue Model**: Subscription-based SaaS (Free tier + Pro tier + Enterprise tier)
+
+### 16.1 Performance Optimization (Week 26)
+
+- [ ] **T323** [P0] Database Query Optimization
+  - Profile slow queries with `pg_stat_statements` extension
+  - Add missing indexes found via EXPLAIN ANALYZE (on common WHERE/ORDER BY columns)
+  - Implement query result caching with Redis (cache hot queries for 60s)
+  - Optimize TimescaleDB chunk intervals (currently 1 day, test 12 hours for high-freq data)
+  - Enable TimescaleDB continuous aggregates for metrics (pre-aggregate 1-hour, 1-day metrics)
+  - Implement connection pooling with pgbouncer (between app and PostgreSQL)
+  - **Acceptance**: All queries <50ms p95, continuous aggregates reduce query time by 10x
+  - **Estimate**: 16 hours
+  - **Files Impacted**: Migrations (add indexes), `internal/db/queries.go`, `deployments/k8s/pgbouncer.yaml`
+
+- [ ] **T324** [P1] Agent Decision Latency Optimization
+  - Profile agent code with pprof (CPU and memory profiling)
+  - Parallelize independent LLM calls (use goroutines, wait for all with sync.WaitGroup)
+  - Cache LLM responses with semantic similarity (if similar prompt, use cached response)
+  - Reduce MCP round-trips (batch tool calls where possible)
+  - Optimize indicator calculations (use pre-computed indicators from cache)
+  - **Acceptance**: Agent decisions <500ms p95 (down from 1-2s)
+  - **Estimate**: 16 hours
+  - **Files Impacted**: Agent implementations, `internal/orchestrator/cache.go`
+
+- [ ] **T325** [P1] Horizontal Scaling
+  - Make orchestrator stateless (store session state in DB/Redis, not in-memory)
+  - Add load balancer for multiple orchestrator instances (K8s Service with multiple replicas)
+  - Implement Redis-based session affinity (sticky sessions by session_id)
+  - Tune database connection pooling for multiple orchestrators (increase max connections)
+  - Test with 3 orchestrator replicas (verify load distribution)
+  - **Acceptance**: Can run 3+ orchestrator replicas, requests distributed evenly
+  - **Estimate**: 16 hours
+  - **Files Impacted**: `internal/orchestrator/session.go`, `deployments/k8s/orchestrator.yaml` (replicas: 3)
+
+### 16.2 Subscription & Billing (Weeks 27-28)
+
+- [ ] **T326** [P0] User Authentication System
+  - User registration and login (email + password)
+  - Password hashing with bcrypt (cost factor 12)
+  - JWT token issuance and validation (HS256, 7-day expiry)
+  - OAuth2 integration (Google and GitHub login via oauth2 library)
+  - Email verification (send verification link, verify token)
+  - Password reset flow (send reset link, verify token, update password)
+  - Rate limiting on login attempts (10 attempts/hour per IP)
+  - **Acceptance**: Users can register and login securely, OAuth works
+  - **Estimate**: 24 hours
+  - **Files Impacted**: `internal/auth/` (new), `cmd/api/handlers/auth.go`, `migrations/011_users.sql`
+
+- [ ] **T327** [P0] Multi-Tenancy Support
+  - Tenant isolation (separate trading sessions per user, user_id foreign key everywhere)
+  - Row-level security (RLS) in PostgreSQL (users can only see their own data)
+  - Tenant-specific API keys (each user has own exchange API keys, encrypted)
+  - Resource quotas per tenant (max 5 positions, max 10 orders/minute for free tier)
+  - Tenant-specific rate limiting (100 API calls/hour for free, 1000 for pro)
+  - **Acceptance**: Multiple users can trade independently, data isolated, quotas enforced
+  - **Estimate**: 24 hours
+  - **Files Impacted**: Database migrations (add RLS policies), `internal/tenancy/` (new), middleware
+
+- [ ] **T328** [P1] Subscription Plans & Billing
+  - Define subscription tiers:
+    - **Free**: Paper trading only, max 2 strategies, 100 API calls/day
+    - **Pro** ($99/mo): Live trading, unlimited strategies, 1000 API calls/day, email support
+    - **Enterprise** ($499/mo): Multi-exchange, white-label, dedicated support, custom strategies
+  - Integrate Stripe for payment processing (Stripe Checkout for subscriptions)
+  - Subscription management (upgrade, downgrade, cancel via Stripe Customer Portal)
+  - Usage-based billing (optional: charge per trade or per API call)
+  - Invoice generation (Stripe invoices, auto-email)
+  - Handle webhooks (subscription updated, payment failed)
+  - **Acceptance**: Users can subscribe and pay via Stripe, plans enforced
+  - **Estimate**: 32 hours
+  - **Files Impacted**: `internal/billing/stripe.go` (new), `cmd/api/handlers/billing.go`, `go.mod` (add Stripe SDK)
+
+### 16.3 Compliance & Reporting (Week 29)
+
+- [ ] **T329** [P1] Trade History Export
+  - Export trade history as CSV (all columns: timestamp, symbol, side, quantity, price, fee, P&L)
+  - Export trade history as PDF report (formatted, with logo and summary)
+  - Filter by date range (start_date, end_date), symbol, exchange
+  - Calculate taxable gains (FIFO, LIFO, specific lot identification methods)
+  - Include summary statistics (total P&L, win rate, largest win/loss)
+  - **Acceptance**: Users can export trades for tax reporting (CSV and PDF)
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `cmd/api/handlers/export.go` (new), PDF generation library
+
+- [ ] **T330** [P1] Audit Trail
+  - Log all user actions (API calls, configuration changes, trades)
+  - Immutable audit log (append-only table, no UPDATE or DELETE)
+  - Search and filter audit logs (by user, action type, date range)
+  - Export audit logs for compliance (CSV or JSON)
+  - Retention policy (keep audit logs for 7 years for regulatory compliance)
+  - **Acceptance**: Complete audit trail of all system actions, exportable
+  - **Estimate**: 12 hours
+  - **Files Impacted**: `internal/audit/logger.go` (new), `migrations/012_audit_log.sql`, middleware
+
+- [ ] **T331** [P2] Regulatory Compliance Documentation
+  - Document trading bot disclosure requirements by jurisdiction (US, EU, Asia)
+  - Terms of Service (ToS) template (use GDPR-compliant template)
+  - Privacy Policy template (data collection, storage, sharing)
+  - GDPR compliance checklist (right to access, right to deletion, data portability)
+  - Risk disclosure statements (trading involves risk of loss, past performance not guarantee)
+  - Consult with legal counsel (budget $2K-$5K for lawyer review)
+  - **Acceptance**: Legal documentation ready for review by counsel, ToS and Privacy Policy published
+  - **Estimate**: 16 hours (documentation) + external legal review
+  - **Files Impacted**: `docs/LEGAL_COMPLIANCE.md` (new), `docs/TERMS_OF_SERVICE.md`, `docs/PRIVACY_POLICY.md`
+
+### Phase 16 Deliverables
+
+- [ ] Database and agent performance optimized (<50ms queries, <500ms decisions)
+- [ ] Horizontal scaling support (3+ orchestrator replicas)
+- [ ] User authentication system (email/password + OAuth)
+- [ ] Multi-tenancy support (tenant isolation, quotas)
+- [ ] Subscription billing (Stripe integration, 3 tiers)
+- [ ] Trade history export (CSV and PDF)
+- [ ] Audit trail (immutable logs)
+- [ ] Legal compliance documentation (ToS, Privacy Policy, GDPR checklist)
+
+**Exit Criteria**: System can scale to 100+ concurrent users. Subscription billing operational with 10+ paying users. Compliance documentation ready. $1,000+ monthly recurring revenue (MRR).
+
+---
+
+## Post-Phase 16: Ongoing Tasks
 
 ### Maintenance & Monitoring
 
@@ -3053,32 +3672,61 @@ This document consolidates all implementation tasks from the architecture and de
 - **T235** [P1] Tune agent parameters
 - **T236** [P1] Update strategies based on market changes
 
-### Future Enhancements
+### Future Enhancements (Phase 17-20 Considerations)
 
 - **T237** [P3] Machine learning model integration (Python via gRPC)
-- **T238** [P3] Multi-exchange support (add Coinbase, Kraken)
-- **T239** [P3] Advanced strategies (market making, statistical arbitrage)
+- **T238** [P3] ✅ COMPLETED in Phase 15 - Multi-exchange support (Coinbase, Kraken)
+- **T239** [P3] ✅ COMPLETED in Phase 15 - Advanced strategies (market making, statistical arbitrage, grid trading)
 - **T240** [P3] Portfolio optimization (Markowitz, Black-Litterman)
-- **T241** [P3] Web dashboard (React/Vue frontend)
-- **T242** [P3] Mobile app (iOS/Android)
-- **T243** [P3] Social trading features
-- **T244** [P3] Strategy marketplace
+- **T241** [P3] ✅ PARTIALLY COMPLETED in Phase 14 - Web dashboard (React/Vue frontend - explainability UI)
+- **T242** [P3] Mobile app (iOS/Android native apps - web mobile works)
+- **T243** [P3] Social trading features (copy trading, leaderboards)
+- **T244** [P3] ✅ COMPLETED in Phase 14 - Strategy marketplace
+
+### Phase 17+ Ideas (Post-Revenue Generation)
+
+- **High-Frequency Trading (HFT)**: Ultra-low latency (<1ms), co-location
+- **Options & Derivatives**: Options trading, futures, perpetuals
+- **Reinforcement Learning**: RL agents for strategy optimization
+- **Social Trading**: Copy trading, signal sharing, leaderboards
+- **Native Mobile Apps**: iOS and Android apps (beyond web mobile)
+- **White-Label**: Enterprise white-label solution
+- **API Marketplace**: Third-party integrations and extensions
 
 ---
 
 ## Task Summary Statistics
 
-**Total Tasks**: 288 (244 original + 44 from Phase 12)
-**Critical Path (P0)**: ~150 tasks
-**High Priority (P1)**: ~100 tasks
-**Medium Priority (P2)**: ~28 tasks
-**Nice to Have (P3)**: ~10 tasks
+**Total Tasks**: 331 (288 original + 43 new in Phases 13-16)
 
-**Estimated Total Hours**: ~697 hours (512 original + 185 Phase 12)
-**Estimated Duration**: 13.5 weeks (~3.4 months) with Phase 12 gap closure
+Breakdown by phase:
+- Phases 1-12: 288 tasks
+- Phase 13: 18 tasks (Production Gap Closure & Beta Launch)
+- Phase 14: 9 tasks (User Experience & Differentiation)
+- Phase 15: 7 tasks (Multi-Exchange & Advanced Trading)
+- Phase 16: 9 tasks (Scale, Optimize, & Productize)
+
+**By Priority**:
+- **Critical Path (P0)**: ~175 tasks
+- **High Priority (P1)**: ~120 tasks
+- **Medium Priority (P2)**: ~28 tasks
+- **Nice to Have (P3)**: ~8 tasks
+
+**Estimated Total Hours**: 1,137 hours
+- Phases 1-12: 697 hours (3.4 months)
+- Phases 13-16: 440 hours (3 months additional)
+
+**Estimated Duration**: 25.5 weeks (~6.4 months to revenue generation)
 **Recommended Team**: 2-3 developers
 
-**Note**: Phase 12 addresses production readiness gaps identified in November 2025 comprehensive review. This phase is critical for production deployment.
+**Timeline to Key Milestones**:
+- Week 14: Production monitoring complete (Phase 12)
+- Week 18: Beta launch with 10+ users (Phase 13)
+- Week 21: Explainability & strategy marketplace live (Phase 14)
+- Week 25: Multi-exchange support (Phase 15)
+- Week 29: Revenue generation with subscriptions (Phase 16)
+
+**Note**: Phases 13-16 added November 2025 after comprehensive architecture and product reviews. These phases transform the system from "production ready" to "revenue generating" with real users and subscriptions.
 
 ---
 
@@ -3107,8 +3755,23 @@ Phase 10 (Production Readiness) ← CRITICAL - Fix gaps, testing, deployment
   ↓
   ├─→ Phase 11 (Advanced Features) ← OPTIONAL - Already complete, can skip
   │
-  └─→ Phase 12 (Monitoring & Observability) ← FINAL - After production deployment
+  └─→ Phase 12 (Monitoring & Observability)
+        ↓
+        Phase 13 (Production Gap Closure & Beta Launch) ← CRITICAL - Fix architecture review findings
+          ↓
+          Phase 14 (User Experience & Differentiation) ← Build competitive moat
+            ↓
+            ├─→ Phase 15 (Multi-Exchange & Advanced Trading) ← Expand market reach
+            │     ↓
+            └─────┘
+                  ↓
+                  Phase 16 (Scale, Optimize, & Productize) ← REVENUE GENERATION
+                    ↓
+                    🎯 Production Launch with Paying Users
 ```
+
+**Critical Path**: Phases 1→2→3→4→5→6→7→8→9→10→12→13→16 (revenue)
+**Parallel Opportunities**: Phase 14 and 15 can run partially in parallel after Phase 13
 
 ---
 
@@ -3118,7 +3781,7 @@ Phase 10 (Production Readiness) ← CRITICAL - Fix gaps, testing, deployment
 
 Each phase must meet its exit criteria before moving to the next phase.
 
-### Project Completion Criteria
+### Project Completion Criteria (Phases 1-12)
 
 1. ✅ All 6 agent types operational
 2. ✅ Orchestrator coordinates agents successfully
@@ -3132,6 +3795,22 @@ Each phase must meet its exit criteria before moving to the next phase.
 10. ✅ Documentation complete
 11. ✅ Security hardening complete
 12. ✅ Monitoring & observability in place (Prometheus + Grafana + Alerting)
+
+### Revenue Generation Criteria (Phases 13-16)
+
+13. [ ] All critical production gaps fixed (CoinGecko, Technical Indicators, Risk Agent, Circuit Breakers)
+14. [ ] Beta launch with 10+ active users
+15. [ ] Zero critical bugs in production for 7+ days
+16. [ ] Explainability dashboard live (80%+ users viewing decisions)
+17. [ ] Community strategy marketplace active (5+ shared strategies)
+18. [ ] Multi-exchange support (3+ exchanges: Binance, Coinbase Pro, Kraken)
+19. [ ] Smart order routing saving costs (0.05%+ average improvement)
+20. [ ] Performance optimized (<50ms queries, <500ms agent decisions)
+21. [ ] Subscription billing operational (Stripe integration)
+22. [ ] 10+ paying subscribers (minimum $1,000 MRR)
+23. [ ] Multi-tenancy working (100+ concurrent users supported)
+24. [ ] Legal compliance documentation complete (ToS, Privacy Policy, GDPR)
+25. [ ] System can scale horizontally (3+ orchestrator replicas tested)
 
 ---
 
@@ -3183,8 +3862,100 @@ Each phase must meet its exit criteria before moving to the next phase.
 
 ---
 
+---
+
+## Strategic Roadmap Summary
+
+### Quarter-by-Quarter Timeline (Starting Q1 2026)
+
+**Q1 2026** (Months 1-3):
+- Month 1: Phase 13 (Production Gap Closure)
+- Month 2: Phase 13 (Beta Launch & Support)
+- Month 3: Phase 14 (Explainability & UX)
+- **Milestone**: 10+ beta users, explainability dashboard live
+
+**Q2 2026** (Months 4-6):
+- Month 4: Phase 15 (Multi-Exchange, weeks 1-2)
+- Month 5: Phase 15 (Advanced Strategies, weeks 3-4)
+- Month 6: Phase 16 (Optimization & Billing, weeks 1-2)
+- **Milestone**: 3+ exchanges, first paying users
+
+**Q3 2026** (Months 7-9):
+- Month 7: Phase 16 (Multi-Tenancy & Compliance, weeks 3-4)
+- Month 8: Production Launch (100+ users target)
+- Month 9: Stabilization & iteration based on production metrics
+- **Milestone**: $1K+ MRR, 100+ users
+
+**Q4 2026** (Months 10-12):
+- Growth, marketing, user acquisition
+- Iterate on top user requests
+- Consider Phase 17+ (Mobile Apps, Social Trading, HFT)
+- **Milestone**: $10K+ MRR, product-market fit validation
+
+### Key Decision Points
+
+**After Phase 13** (Week 18):
+- Evaluate beta user feedback → Determine if Phase 14 features align with user needs
+- Decision: Prioritize explainability vs multi-exchange based on beta feedback
+
+**After Phase 14** (Week 21):
+- Measure explainability engagement (target: 80%+ users viewing decisions)
+- Decision: Proceed with full multi-exchange or focus on single-exchange optimization
+
+**After Phase 15** (Week 25):
+- Analyze multi-exchange adoption (target: 30%+ users)
+- Decision: Build more advanced strategies vs optimize existing ones
+
+**After Phase 16** (Week 29):
+- Measure MRR and user growth
+- Decision: Scale aggressively OR iterate on product-market fit
+
+### Success Metrics by Phase
+
+| Phase | Key Metric | Target |
+|-------|-----------|--------|
+| 13 | Beta users | 10+ active |
+| 13 | System uptime | 99%+ |
+| 14 | Decision views | 80%+ of users |
+| 14 | Strategy shares | 5+ strategies |
+| 15 | Multi-exchange | 30%+ adoption |
+| 15 | Order routing savings | 0.05%+ |
+| 16 | Paying users | 10+ subscribers |
+| 16 | MRR | $1,000+ |
+
+### Investment Required
+
+**Phases 13-16** (440 hours):
+- 2-3 developers @ $100/hr = $44K-$66K
+- Infrastructure costs (GCP/AWS) = $500-$1K/month
+- Third-party services (Stripe, SendGrid, etc.) = $200/month
+- Optional security audit = $5K-$10K
+- Optional legal review = $2K-$5K
+
+**Total estimated investment**: $50K-$80K to revenue generation
+
+**Expected ROI**:
+- 10 paying users @ $99/mo = $990 MRR → $11,880/year
+- Break-even in months 10-12 with continued growth
+- Target 100 users @ $99/mo = $9,900 MRR → $118,800/year
+
+---
+
 **End of TASKS.md**
 
-**Status**: Ready for implementation
-**Next**: Begin Phase 1 tasks
-**Contact**: [Your team contact info]
+**Version**: 2.0 (November 2025)
+**Status**: Ready for Phase 13 implementation
+**Next Actions**:
+1. Review and approve Phases 13-16 roadmap
+2. Provision staging Kubernetes cluster
+3. Begin Phase 13, Task T289 (Fix CoinGecko MCP Integration)
+4. Set up GitHub Project board for Phase 13 tracking
+
+**For Questions or Collaboration**:
+- Open GitHub issue with label `roadmap-question`
+- Review architecture findings in [November 2025 review document]
+- Consult CLAUDE.md for development guidance
+
+---
+
+*This document represents a comprehensive 6.4-month roadmap from foundation to revenue generation for the CryptoFunk AI Trading Platform.*
