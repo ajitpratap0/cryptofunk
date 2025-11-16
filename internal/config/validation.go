@@ -389,6 +389,101 @@ func (c *Config) validateExchanges() ValidationErrors {
 				Message: "Rate limit must be non-negative",
 			})
 		}
+
+		// Validate fee configuration
+		errors = append(errors, c.validateFees(exchangeName, exchangeConfig.Fees)...)
+	}
+
+	return errors
+}
+
+func (c *Config) validateFees(exchangeName string, fees FeeConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate maker fee
+	if fees.Maker < 0 {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.maker", exchangeName),
+			Message: "Maker fee must be non-negative",
+		})
+	}
+	if fees.Maker > 0.1 { // 10% seems unreasonable
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.maker", exchangeName),
+			Message: fmt.Sprintf("Maker fee of %.2f%% seems unusually high (expected < 10%%)", fees.Maker*100),
+		})
+	}
+
+	// Validate taker fee
+	if fees.Taker < 0 {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.taker", exchangeName),
+			Message: "Taker fee must be non-negative",
+		})
+	}
+	if fees.Taker > 0.1 { // 10% seems unreasonable
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.taker", exchangeName),
+			Message: fmt.Sprintf("Taker fee of %.2f%% seems unusually high (expected < 10%%)", fees.Taker*100),
+		})
+	}
+
+	// Validate base slippage
+	if fees.BaseSlippage < 0 {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.base_slippage", exchangeName),
+			Message: "Base slippage must be non-negative",
+		})
+	}
+	if fees.BaseSlippage > 0.05 { // 5% slippage seems excessive
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.base_slippage", exchangeName),
+			Message: fmt.Sprintf("Base slippage of %.2f%% seems unusually high (expected < 5%%)", fees.BaseSlippage*100),
+		})
+	}
+
+	// Validate market impact
+	if fees.MarketImpact < 0 {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.market_impact", exchangeName),
+			Message: "Market impact must be non-negative",
+		})
+	}
+	if fees.MarketImpact > 0.01 { // 1% market impact seems high
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.market_impact", exchangeName),
+			Message: fmt.Sprintf("Market impact of %.2f%% seems unusually high (expected < 1%%)", fees.MarketImpact*100),
+		})
+	}
+
+	// Validate max slippage
+	if fees.MaxSlippage < 0 {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.max_slippage", exchangeName),
+			Message: "Max slippage must be non-negative",
+		})
+	}
+	if fees.MaxSlippage > 0.1 { // 10% max slippage seems excessive
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.max_slippage", exchangeName),
+			Message: fmt.Sprintf("Max slippage of %.2f%% seems unusually high (expected < 10%%)", fees.MaxSlippage*100),
+		})
+	}
+
+	// Validate logical constraints
+	if fees.MaxSlippage < fees.BaseSlippage {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees", exchangeName),
+			Message: "Max slippage must be >= base slippage",
+		})
+	}
+
+	// Validate withdrawal fee (optional field)
+	if fees.Withdrawal < 0 {
+		errors = append(errors, ValidationError{
+			Field:   fmt.Sprintf("exchanges.%s.fees.withdrawal", exchangeName),
+			Message: "Withdrawal fee must be non-negative",
+		})
 	}
 
 	return errors

@@ -464,11 +464,25 @@ func (e *Engine) calculatePositionSize(price float64) float64 {
 		return dollarAmount / price
 
 	case "kelly":
-		// Kelly Criterion (simplified)
-		// For now, use fixed percentage
-		// TODO: Implement proper Kelly Criterion with win rate and average win/loss
+		// Kelly Criterion - calculate position size based on historical performance
 		equity := e.GetCurrentEquity()
-		dollarAmount := equity * 0.02 // 2% of equity
+
+		// Calculate stats from closed positions
+		stats := CalculateStatsFromTrades(e.ClosedPositions)
+
+		// Use quarter Kelly (0.25) for conservative sizing
+		// Can be made configurable via BacktestConfig if needed
+		kellyFraction := 0.25
+		if e.PositionSize > 0 && e.PositionSize <= 1.0 {
+			// Allow custom Kelly fraction via PositionSize field
+			// e.g., 0.5 for half Kelly, 0.25 for quarter Kelly
+			kellyFraction = e.PositionSize
+		}
+
+		// Create Kelly calculator (no DB needed for backtest)
+		kc := NewKellyCalculator(nil)
+		dollarAmount := kc.CalculatePositionSize(stats, equity, kellyFraction)
+
 		return dollarAmount / price
 
 	default:

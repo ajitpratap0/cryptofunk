@@ -79,15 +79,18 @@ func TestGetAgentStatus(t *testing.T) {
 
 	ctx := context.Background()
 	agentName := "test-agent-" + uuid.New().String()[:8]
+	now := time.Now()
 
 	// First, upsert a status
 	err := db.UpsertAgentStatus(ctx, &AgentStatus{
-		Name:       agentName,
-		Status:     "running",
-		LastSeenAt: time.Now(),
-		IsHealthy:  true,
+		Name:          agentName,
+		Type:          "technical",
+		Status:        "RUNNING",
+		StartedAt:     &now,
+		LastHeartbeat: &now,
+		TotalSignals:  0,
+		ErrorCount:    0,
 		Metadata: map[string]interface{}{
-			"type":    "technical",
 			"version": "1.0.0",
 			"config":  map[string]interface{}{"test": "value"},
 			"metrics": map[string]interface{}{"uptime": 100},
@@ -101,8 +104,8 @@ func TestGetAgentStatus(t *testing.T) {
 	require.NotNil(t, status)
 
 	assert.Equal(t, agentName, status.Name)
-	assert.Equal(t, "running", status.Status)
-	assert.True(t, status.IsHealthy)
+	assert.Equal(t, "RUNNING", status.Status)
+	assert.Equal(t, "technical", status.Type)
 }
 
 func TestGetAgentStatus_NotFound(t *testing.T) {
@@ -122,30 +125,35 @@ func TestGetAllAgentStatuses(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
+	now := time.Now()
 
 	// Insert multiple agents
 	agent1 := "test-agent-1-" + uuid.New().String()[:8]
 	agent2 := "test-agent-2-" + uuid.New().String()[:8]
 
 	err := db.UpsertAgentStatus(ctx, &AgentStatus{
-		Name:       agent1,
-		Status:     "running",
-		LastSeenAt: time.Now(),
-		IsHealthy:  true,
+		Name:          agent1,
+		Type:          "technical",
+		Status:        "RUNNING",
+		StartedAt:     &now,
+		LastHeartbeat: &now,
+		TotalSignals:  0,
+		ErrorCount:    0,
 		Metadata: map[string]interface{}{
-			"type":    "technical",
 			"version": "1.0.0",
 		},
 	})
 	require.NoError(t, err)
 
 	err = db.UpsertAgentStatus(ctx, &AgentStatus{
-		Name:       agent2,
-		Status:     "running",
-		LastSeenAt: time.Now(),
-		IsHealthy:  true,
+		Name:          agent2,
+		Type:          "strategy",
+		Status:        "RUNNING",
+		StartedAt:     &now,
+		LastHeartbeat: &now,
+		TotalSignals:  0,
+		ErrorCount:    0,
 		Metadata: map[string]interface{}{
-			"type":    "strategy",
 			"version": "1.0.0",
 		},
 	})
@@ -177,15 +185,18 @@ func TestUpsertAgentStatus(t *testing.T) {
 
 	ctx := context.Background()
 	agentName := "test-agent-" + uuid.New().String()[:8]
+	now := time.Now()
 
 	// Insert
 	err := db.UpsertAgentStatus(ctx, &AgentStatus{
-		Name:       agentName,
-		Status:     "starting",
-		LastSeenAt: time.Now(),
-		IsHealthy:  false,
+		Name:          agentName,
+		Type:          "technical",
+		Status:        "STARTING",
+		StartedAt:     &now,
+		LastHeartbeat: &now,
+		TotalSignals:  0,
+		ErrorCount:    0,
 		Metadata: map[string]interface{}{
-			"type":    "technical",
 			"version": "1.0.0",
 		},
 	})
@@ -194,17 +205,19 @@ func TestUpsertAgentStatus(t *testing.T) {
 	// Verify insert
 	status, err := db.GetAgentStatus(ctx, agentName)
 	require.NoError(t, err)
-	assert.Equal(t, "starting", status.Status)
-	assert.False(t, status.IsHealthy)
+	assert.Equal(t, "STARTING", status.Status)
 
 	// Update
+	updatedNow := time.Now()
 	err = db.UpsertAgentStatus(ctx, &AgentStatus{
-		Name:       agentName,
-		Status:     "running",
-		LastSeenAt: time.Now(),
-		IsHealthy:  true,
+		Name:          agentName,
+		Type:          "technical",
+		Status:        "RUNNING",
+		StartedAt:     &now,
+		LastHeartbeat: &updatedNow,
+		TotalSignals:  10,
+		ErrorCount:    0,
 		Metadata: map[string]interface{}{
-			"type":    "technical",
 			"version": "1.0.0",
 		},
 	})
@@ -213,8 +226,8 @@ func TestUpsertAgentStatus(t *testing.T) {
 	// Verify update
 	status, err = db.GetAgentStatus(ctx, agentName)
 	require.NoError(t, err)
-	assert.Equal(t, "running", status.Status)
-	assert.True(t, status.IsHealthy)
+	assert.Equal(t, "RUNNING", status.Status)
+	assert.Equal(t, 10, status.TotalSignals)
 }
 
 func TestUpsertAgentStatus_WithMetadata(t *testing.T) {
@@ -223,9 +236,9 @@ func TestUpsertAgentStatus_WithMetadata(t *testing.T) {
 
 	ctx := context.Background()
 	agentName := "test-agent-" + uuid.New().String()[:8]
+	now := time.Now()
 
 	metadata := map[string]interface{}{
-		"type":    "technical",
 		"version": "1.0.0",
 		"config": map[string]interface{}{
 			"symbol":    "BTC/USDT",
@@ -246,11 +259,14 @@ func TestUpsertAgentStatus_WithMetadata(t *testing.T) {
 	}
 
 	err := db.UpsertAgentStatus(ctx, &AgentStatus{
-		Name:       agentName,
-		Status:     "running",
-		LastSeenAt: time.Now(),
-		IsHealthy:  true,
-		Metadata:   metadata,
+		Name:          agentName,
+		Type:          "technical",
+		Status:        "RUNNING",
+		StartedAt:     &now,
+		LastHeartbeat: &now,
+		TotalSignals:  42,
+		ErrorCount:    0,
+		Metadata:      metadata,
 	})
 	require.NoError(t, err)
 
@@ -262,6 +278,5 @@ func TestUpsertAgentStatus_WithMetadata(t *testing.T) {
 	// Check specific values from metadata
 	metadataMap, ok := status.Metadata.(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "technical", metadataMap["type"])
 	assert.Equal(t, "1.0.0", metadataMap["version"])
 }

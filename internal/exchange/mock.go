@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -24,6 +25,8 @@ type MockExchange struct {
 	baseSlippage float64 // Base slippage percentage
 	marketImpact float64 // Market impact per unit of quantity
 	maxSlippage  float64 // Maximum slippage percentage
+	makerFee     float64 // Maker fee percentage
+	takerFee     float64 // Taker fee percentage
 
 	// Database for persistence
 	db *db.DB
@@ -32,19 +35,38 @@ type MockExchange struct {
 	currentSessionID *uuid.UUID
 }
 
-// NewMockExchange creates a new mock exchange
+// NewMockExchange creates a new mock exchange with default fee configuration
 func NewMockExchange(database *db.DB) *MockExchange {
-	log.Info().Msg("Mock exchange initialized (paper trading mode)")
+	// Use default Binance-like fees
+	defaultFees := config.FeeConfig{
+		Maker:        0.001,  // 0.1%
+		Taker:        0.001,  // 0.1%
+		BaseSlippage: 0.0005, // 0.05%
+		MarketImpact: 0.0001, // 0.01%
+		MaxSlippage:  0.003,  // 0.3%
+	}
+	return NewMockExchangeWithFees(database, defaultFees)
+}
+
+// NewMockExchangeWithFees creates a new mock exchange with custom fee configuration
+func NewMockExchangeWithFees(database *db.DB, fees config.FeeConfig) *MockExchange {
+	log.Info().
+		Float64("maker_fee", fees.Maker).
+		Float64("taker_fee", fees.Taker).
+		Float64("base_slippage", fees.BaseSlippage).
+		Msg("Mock exchange initialized (paper trading mode)")
 
 	return &MockExchange{
 		orders:       make(map[string]*Order),
 		fills:        make(map[string][]Fill),
 		marketPrices: make(map[string]float64),
 
-		// Realistic market simulation parameters
-		baseSlippage: 0.0005, // 0.05% base slippage
-		marketImpact: 0.0001, // 0.01% per unit of normalized quantity
-		maxSlippage:  0.003,  // 0.3% maximum slippage
+		// Configurable market simulation parameters
+		baseSlippage: fees.BaseSlippage,
+		marketImpact: fees.MarketImpact,
+		maxSlippage:  fees.MaxSlippage,
+		makerFee:     fees.Maker,
+		takerFee:     fees.Taker,
 
 		db: database,
 	}
@@ -453,6 +475,14 @@ func (m *MockExchange) persistTradeInDB(ctx context.Context, orderID string, fil
 	orderUUID, _ := uuid.Parse(orderID)
 	order := m.orders[orderID]
 
+	// Calculate commission based on order type
+	// Market orders are always taker, limit orders can be maker or taker
+	isMaker := order.Type == OrderTypeLimit
+	commission := fill.Price * fill.Quantity * m.takerFee
+	if isMaker {
+		commission = fill.Price * fill.Quantity * m.makerFee
+	}
+
 	dbTrade := &db.Trade{
 		ID:              uuid.New(),
 		OrderID:         orderUUID,
@@ -463,10 +493,10 @@ func (m *MockExchange) persistTradeInDB(ctx context.Context, orderID string, fil
 		Price:           fill.Price,
 		Quantity:        fill.Quantity,
 		QuoteQuantity:   fill.Price * fill.Quantity,
-		Commission:      0.0, // No commission in paper trading
+		Commission:      commission,
 		CommissionAsset: nil,
 		ExecutedAt:      fill.Timestamp,
-		IsMaker:         false,
+		IsMaker:         isMaker,
 		Metadata:        nil,
 		CreatedAt:       fill.Timestamp,
 	}

@@ -36,7 +36,7 @@ func (db *DB) InsertLLMDecision(ctx context.Context, decision *LLMDecision) erro
 	query := `
 		INSERT INTO llm_decisions (
 			id, session_id, decision_type, symbol, prompt, prompt_embedding,
-			response, model, tokens_used, latency_ms, outcome, pnl,
+			response, model, tokens_used, latency_ms, outcome, outcome_pnl,
 			context, agent_name, confidence, created_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
@@ -73,7 +73,7 @@ func (db *DB) InsertLLMDecision(ctx context.Context, decision *LLMDecision) erro
 func (db *DB) UpdateLLMDecisionOutcome(ctx context.Context, id uuid.UUID, outcome string, pnl float64) error {
 	query := `
 		UPDATE llm_decisions
-		SET outcome = $2, pnl = $3
+		SET outcome = $2, outcome_pnl = $3
 		WHERE id = $1
 	`
 
@@ -86,7 +86,7 @@ func (db *DB) GetLLMDecisionsByAgent(ctx context.Context, agentName string, limi
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt,
-			response, model, tokens_used, latency_ms, outcome, pnl,
+			response, model, tokens_used, latency_ms, outcome, outcome_pnl,
 			context, agent_name, confidence, created_at
 		FROM llm_decisions
 		WHERE agent_name = $1
@@ -134,7 +134,7 @@ func (db *DB) GetLLMDecisionsBySymbol(ctx context.Context, symbol string, limit 
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt,
-			response, model, tokens_used, latency_ms, outcome, pnl,
+			response, model, tokens_used, latency_ms, outcome, outcome_pnl,
 			context, agent_name, confidence, created_at
 		FROM llm_decisions
 		WHERE symbol = $1
@@ -182,13 +182,13 @@ func (db *DB) GetSuccessfulLLMDecisions(ctx context.Context, agentName string, l
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt,
-			response, model, tokens_used, latency_ms, outcome, pnl,
+			response, model, tokens_used, latency_ms, outcome, outcome_pnl,
 			context, agent_name, confidence, created_at
 		FROM llm_decisions
 		WHERE agent_name = $1
 		  AND outcome = 'SUCCESS'
-		  AND pnl > 0
-		ORDER BY pnl DESC, created_at DESC
+		  AND outcome_pnl > 0
+		ORDER BY outcome_pnl DESC, created_at DESC
 		LIMIT $2
 	`
 
@@ -235,8 +235,8 @@ func (db *DB) GetLLMDecisionStats(ctx context.Context, agentName string, since t
 			COUNT(CASE WHEN outcome = 'SUCCESS' THEN 1 END) as successful,
 			COUNT(CASE WHEN outcome = 'FAILURE' THEN 1 END) as failed,
 			COUNT(CASE WHEN outcome IS NULL THEN 1 END) as pending,
-			AVG(CASE WHEN pnl IS NOT NULL THEN pnl END) as avg_pnl,
-			SUM(CASE WHEN pnl IS NOT NULL THEN pnl ELSE 0 END) as total_pnl,
+			AVG(CASE WHEN outcome_pnl IS NOT NULL THEN outcome_pnl END) as avg_pnl,
+			SUM(CASE WHEN outcome_pnl IS NOT NULL THEN outcome_pnl ELSE 0 END) as total_pnl,
 			AVG(latency_ms) as avg_latency_ms,
 			AVG(tokens_used) as avg_tokens_used,
 			AVG(confidence) as avg_confidence
@@ -332,7 +332,7 @@ func (db *DB) FindSimilarDecisions(ctx context.Context, symbol string, contextJS
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt,
-			response, model, tokens_used, latency_ms, outcome, pnl,
+			response, model, tokens_used, latency_ms, outcome, outcome_pnl,
 			context, agent_name, confidence, created_at
 		FROM llm_decisions
 		WHERE symbol = $1
@@ -487,7 +487,7 @@ func (db *DB) findRecentDecisions(ctx context.Context, symbol string, limit int)
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt,
-			response, model, tokens_used, latency_ms, outcome, pnl,
+			response, model, tokens_used, latency_ms, outcome, outcome_pnl,
 			context, agent_name, confidence, created_at
 		FROM llm_decisions
 		WHERE symbol = $1

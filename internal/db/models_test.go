@@ -166,17 +166,24 @@ func TestLLMDecision_Initialization(t *testing.T) {
 
 // TestAgentStatus_Initialization tests AgentStatus initialization
 func TestAgentStatus_Initialization(t *testing.T) {
+	now := time.Now()
 	status := &AgentStatus{
-		Name:       "risk-agent",
-		Status:     "active",
-		IsHealthy:  true,
-		LastSeenAt: time.Now(),
+		Name:          "risk-agent",
+		Type:          "risk",
+		Status:        "RUNNING",
+		StartedAt:     &now,
+		LastHeartbeat: &now,
+		TotalSignals:  10,
+		ErrorCount:    0,
 	}
 
 	assert.Equal(t, "risk-agent", status.Name)
-	assert.Equal(t, "active", status.Status)
-	assert.True(t, status.IsHealthy)
-	assert.False(t, status.LastSeenAt.IsZero())
+	assert.Equal(t, "risk", status.Type)
+	assert.Equal(t, "RUNNING", status.Status)
+	assert.NotNil(t, status.StartedAt)
+	assert.NotNil(t, status.LastHeartbeat)
+	assert.Equal(t, 10, status.TotalSignals)
+	assert.Equal(t, 0, status.ErrorCount)
 }
 
 // TestConvertOrderSide_EdgeCases tests ConvertOrderSide edge cases

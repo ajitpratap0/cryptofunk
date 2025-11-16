@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/api"
+	"github.com/ajitpratap0/cryptofunk/internal/audit"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
@@ -43,76 +43,7 @@ var defaultOrchestratorClient = &http.Client{
 	},
 }
 
-// rateLimiterEntry tracks request timestamps for an IP address
-type rateLimiterEntry struct {
-	requests []time.Time
-	mu       sync.Mutex
-}
-
-// controlEndpointRateLimiter is a simple token bucket rate limiter for control endpoints
-// It allows N requests per time window per IP address
-type controlEndpointRateLimiter struct {
-	entries     sync.Map // map[string]*rateLimiterEntry
-	maxRequests int
-	window      time.Duration
-}
-
-// newControlEndpointRateLimiter creates a new rate limiter
-func newControlEndpointRateLimiter(maxRequests int, window time.Duration) *controlEndpointRateLimiter {
-	return &controlEndpointRateLimiter{
-		maxRequests: maxRequests,
-		window:      window,
-	}
-}
-
-// allow checks if a request from the given IP is allowed
-func (rl *controlEndpointRateLimiter) allow(ip string) bool {
-	now := time.Now()
-
-	// Get or create entry for this IP
-	val, _ := rl.entries.LoadOrStore(ip, &rateLimiterEntry{
-		requests: make([]time.Time, 0, rl.maxRequests),
-	})
-	entry := val.(*rateLimiterEntry)
-
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
-	// Remove expired requests (outside the time window)
-	cutoff := now.Add(-rl.window)
-	validRequests := make([]time.Time, 0, len(entry.requests))
-	for _, req := range entry.requests {
-		if req.After(cutoff) {
-			validRequests = append(validRequests, req)
-		}
-	}
-	entry.requests = validRequests
-
-	// Check if we're at the limit
-	if len(entry.requests) >= rl.maxRequests {
-		return false
-	}
-
-	// Add this request
-	entry.requests = append(entry.requests, now)
-	return true
-}
-
-// Middleware returns a Gin middleware that applies rate limiting
-func (rl *controlEndpointRateLimiter) Middleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		if !rl.allow(ip) {
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error":   "rate limit exceeded",
-				"message": fmt.Sprintf("Maximum %d requests per %v allowed", rl.maxRequests, rl.window),
-			})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
+// NOTE: Rate limiting code moved to middleware.go for better organization
 
 func main() {
 	// Setup logging
@@ -179,6 +110,10 @@ func (s *APIServer) setupMiddleware() {
 	// Prometheus metrics middleware (before request logger to capture all requests)
 	s.router.Use(metrics.GinMiddleware())
 
+	// Audit logging middleware (logs security-relevant events)
+	auditLogger := audit.NewLogger(s.db.Pool(), true)
+	s.router.Use(AuditLoggingMiddleware(auditLogger))
+
 	// Request logging middleware
 	s.router.Use(requestLogger())
 
@@ -187,65 +122,78 @@ func (s *APIServer) setupMiddleware() {
 }
 
 func (s *APIServer) setupRoutes() {
-	// Prometheus metrics endpoint (no API prefix)
+	// Initialize comprehensive rate limiting middleware
+	rateLimiter := NewRateLimiterMiddleware(DefaultRateLimiterConfig())
+
+	// Start cleanup worker to remove stale IP entries (runs every 5 minutes)
+	rateLimiter.StartCleanupWorker(5 * time.Minute)
+
+	// Apply global rate limiting to all API requests
+	s.router.Use(rateLimiter.GlobalMiddleware())
+
+	// Prometheus metrics endpoint (no API prefix, no rate limiting)
 	s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
 
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
 	{
-		// Health and status
+		// Health and status (no additional rate limiting beyond global)
 		v1.GET("/health", s.handleHealth)
 		v1.GET("/status", s.handleStatus)
 
-		// WebSocket endpoint
+		// WebSocket endpoint (no rate limiting - uses connection limits)
 		v1.GET("/ws", s.handleWebSocket)
 
-		// Agent routes
+		// Agent routes (read-only, apply read rate limiter)
 		agents := v1.Group("/agents")
+		agents.Use(rateLimiter.ReadMiddleware())
 		{
 			agents.GET("", s.handleListAgents)
 			agents.GET("/:name", s.handleGetAgent)
 			agents.GET("/:name/status", s.handleGetAgentStatus)
 		}
 
-		// Position routes
+		// Position routes (read-only, apply read rate limiter)
 		positions := v1.Group("/positions")
+		positions.Use(rateLimiter.ReadMiddleware())
 		{
 			positions.GET("", s.handleListPositions)
 			positions.GET("/:symbol", s.handleGetPosition)
 		}
 
-		// Order routes
+		// Order routes (mixed read/write, apply appropriate limiters)
 		orders := v1.Group("/orders")
 		{
-			orders.GET("", s.handleListOrders)
-			orders.GET("/:id", s.handleGetOrder)
-			orders.POST("", s.handlePlaceOrder)
-			orders.DELETE("/:id", s.handleCancelOrder)
+			// Read operations (higher limit)
+			orders.GET("", rateLimiter.ReadMiddleware(), s.handleListOrders)
+			orders.GET("/:id", rateLimiter.ReadMiddleware(), s.handleGetOrder)
+
+			// Write operations (lower limit to prevent order spam)
+			orders.POST("", rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
+			orders.DELETE("/:id", rateLimiter.OrderMiddleware(), s.handleCancelOrder)
 		}
 
-		// Trading control routes
-		// Rate limiter: max 10 requests per minute per IP for control endpoints
-		controlRateLimiter := newControlEndpointRateLimiter(10, time.Minute)
+		// Trading control routes (critical ops, strictest rate limiting)
 		trade := v1.Group("/trade")
+		trade.Use(rateLimiter.ControlMiddleware())
 		{
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
-			// Apply rate limiting to pause/resume to prevent DOS
-			trade.POST("/pause", controlRateLimiter.Middleware(), s.handlePauseTrading)
-			trade.POST("/resume", controlRateLimiter.Middleware(), s.handleResumeTrading)
+			trade.POST("/pause", s.handlePauseTrading)
+			trade.POST("/resume", s.handleResumeTrading)
 		}
 
-		// Configuration routes
+		// Configuration routes (admin ops, apply control rate limiter)
 		config := v1.Group("/config")
 		{
-			config.GET("", s.handleGetConfig)
-			config.PATCH("", s.handleUpdateConfig)
+			config.GET("", rateLimiter.ReadMiddleware(), s.handleGetConfig)
+			config.PATCH("", rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
 		}
 
-		// Decision explainability routes
+		// Decision explainability routes (read-only, apply read rate limiter)
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
+		// Note: RegisterRoutes should apply read middleware internally if needed
 		decisionHandler.RegisterRoutes(v1)
 	}
 
@@ -391,10 +339,13 @@ func (s *APIServer) handleGetAgentStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"name":         agent.Name,
-		"status":       agent.Status,
-		"last_seen_at": agent.LastSeenAt,
-		"healthy":      agent.IsHealthy,
+		"name":           agent.Name,
+		"type":           agent.Type,
+		"status":         agent.Status,
+		"last_heartbeat": agent.LastHeartbeat,
+		"started_at":     agent.StartedAt,
+		"total_signals":  agent.TotalSignals,
+		"error_count":    agent.ErrorCount,
 	})
 }
 
@@ -1249,11 +1200,14 @@ func (s *APIServer) BroadcastOrderUpdate(order *db.Order) error {
 // BroadcastAgentStatus broadcasts agent status change
 func (s *APIServer) BroadcastAgentStatus(agent *db.AgentStatus) error {
 	data := map[string]interface{}{
-		"name":         agent.Name,
-		"status":       agent.Status,
-		"last_seen_at": agent.LastSeenAt,
-		"is_healthy":   agent.IsHealthy,
-		"metadata":     agent.Metadata,
+		"name":           agent.Name,
+		"type":           agent.Type,
+		"status":         agent.Status,
+		"last_heartbeat": agent.LastHeartbeat,
+		"started_at":     agent.StartedAt,
+		"total_signals":  agent.TotalSignals,
+		"error_count":    agent.ErrorCount,
+		"metadata":       agent.Metadata,
 	}
 
 	return s.hub.Broadcast(MessageTypeAgentStatus, data)

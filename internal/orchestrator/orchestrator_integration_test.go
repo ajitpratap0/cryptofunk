@@ -44,7 +44,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 	logger := zerolog.Nop()
 
 	// Create orchestrator
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	// Create context with timeout
@@ -291,7 +291,7 @@ func TestIntegration_AgentHealthMonitoring(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -365,7 +365,7 @@ func TestIntegration_EventDrivenCoordination(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
