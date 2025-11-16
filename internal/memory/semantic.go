@@ -9,6 +9,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog/log"
 )
 
@@ -149,6 +150,12 @@ func (sm *SemanticMemory) Store(ctx context.Context, item *KnowledgeItem) error 
 	}
 	item.UpdatedAt = time.Now()
 
+	// Convert []float32 to pgvector.Vector for proper database storage
+	var embedding pgvector.Vector
+	if item.Embedding != nil {
+		embedding = pgvector.NewVector(item.Embedding)
+	}
+
 	query := `
 		INSERT INTO semantic_memory (
 			id, type, content, embedding, confidence, importance, access_count,
@@ -178,7 +185,7 @@ func (sm *SemanticMemory) Store(ctx context.Context, item *KnowledgeItem) error 
 		item.ID,
 		item.Type,
 		item.Content,
-		item.Embedding,
+		embedding,
 		item.Confidence,
 		item.Importance,
 		item.AccessCount,
@@ -215,9 +222,12 @@ func (sm *SemanticMemory) FindSimilar(ctx context.Context, embedding []float32, 
 		return nil, fmt.Errorf("embedding must be 1536 dimensions, got %d", len(embedding))
 	}
 
+	// Convert []float32 to pgvector.Vector
+	vec := pgvector.NewVector(embedding)
+
 	// Build WHERE clause from filters
 	whereClause := "WHERE embedding IS NOT NULL"
-	args := []interface{}{embedding, limit}
+	args := []interface{}{vec, limit}
 	argIndex := 3 // Start from $3 (after embedding and limit)
 
 	for _, filter := range filters {
@@ -235,10 +245,10 @@ func (sm *SemanticMemory) FindSimilar(ctx context.Context, embedding []float32, 
 			source, source_id, agent_name, symbol, context,
 			validation_count, success_count, failure_count, last_validated,
 			created_at, updated_at, expires_at,
-			embedding <=> $1::vector as distance
+			embedding <=> $1 as distance
 		FROM semantic_memory
 		%s
-		ORDER BY embedding <=> $1::vector
+		ORDER BY embedding <=> $1
 		LIMIT $2
 	`, whereClause)
 
@@ -253,12 +263,13 @@ func (sm *SemanticMemory) FindSimilar(ctx context.Context, embedding []float32, 
 		var item KnowledgeItem
 		var distance float32
 		var lastValidated *time.Time
+		var embeddingVec *pgvector.Vector
 
 		err := rows.Scan(
 			&item.ID,
 			&item.Type,
 			&item.Content,
-			&item.Embedding,
+			&embeddingVec,
 			&item.Confidence,
 			&item.Importance,
 			&item.AccessCount,
@@ -278,6 +289,11 @@ func (sm *SemanticMemory) FindSimilar(ctx context.Context, embedding []float32, 
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan knowledge item: %w", err)
+		}
+
+		// Convert pgvector.Vector to []float32 (handle NULL)
+		if embeddingVec != nil {
+			item.Embedding = embeddingVec.Slice()
 		}
 
 		if lastValidated != nil {
@@ -520,16 +536,16 @@ func (sm *SemanticMemory) GetStats(ctx context.Context) (map[string]interface{},
 	`
 
 	var stats struct {
-		TotalItems     int
-		Facts          int
-		Patterns       int
-		Experiences    int
-		Strategies     int
-		RiskKnowledge  int
+		TotalItems     int64
+		Facts          int64
+		Patterns       int64
+		Experiences    int64
+		Strategies     int64
+		RiskKnowledge  int64
 		AvgConfidence  *float64
 		AvgImportance  *float64
 		AvgSuccessRate *float64
-		TotalAccesses  int
+		TotalAccesses  int64
 	}
 
 	err := sm.pool.QueryRow(ctx, query).Scan(
@@ -582,12 +598,13 @@ func (sm *SemanticMemory) scanKnowledgeItems(rows interface {
 	for rows.Next() {
 		var item KnowledgeItem
 		var lastValidated *time.Time
+		var embeddingVec *pgvector.Vector
 
 		err := rows.Scan(
 			&item.ID,
 			&item.Type,
 			&item.Content,
-			&item.Embedding,
+			&embeddingVec,
 			&item.Confidence,
 			&item.Importance,
 			&item.AccessCount,
@@ -606,6 +623,11 @@ func (sm *SemanticMemory) scanKnowledgeItems(rows interface {
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan knowledge item: %w", err)
+		}
+
+		// Convert pgvector.Vector to []float32 (handle NULL)
+		if embeddingVec != nil {
+			item.Embedding = embeddingVec.Slice()
 		}
 
 		if lastValidated != nil {

@@ -3,8 +3,10 @@
 -- Created: 2025-11-16
 
 -- Create audit_logs table
+-- Note: For TimescaleDB hypertables partitioned by time, the PRIMARY KEY
+-- must include the partitioning column (timestamp)
 CREATE TABLE IF NOT EXISTS audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     event_type VARCHAR(50) NOT NULL,
     severity VARCHAR(20) NOT NULL,
@@ -31,7 +33,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     )),
     CONSTRAINT audit_logs_severity_check CHECK (severity IN (
         'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-    ))
+    )),
+
+    -- Composite primary key including partitioning column
+    -- Required for TimescaleDB hypertables partitioned by timestamp
+    PRIMARY KEY (id, timestamp)
 );
 
 -- Create indexes for efficient querying
