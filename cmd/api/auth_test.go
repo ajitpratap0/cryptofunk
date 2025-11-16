@@ -40,13 +40,8 @@ func TestRateLimiterDifferentIPs(t *testing.T) {
 
 // TestRateLimiterMiddlewareIntegration tests the rate limiter as Gin middleware
 func TestRateLimiterMiddlewareIntegration(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupMiddleware()
 	server.setupRoutes()
@@ -83,13 +78,8 @@ func TestRateLimiterMiddlewareIntegration(t *testing.T) {
 
 // TestUnauthorizedAccess tests accessing protected endpoints without authentication
 func TestUnauthorizedAccess(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	protectedEndpoints := []struct {
 		method   string
@@ -120,13 +110,8 @@ func TestUnauthorizedAccess(t *testing.T) {
 
 // TestMalformedAuthHeader tests handling of malformed Authorization headers
 func TestMalformedAuthHeader(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	malformedHeaders := []string{
 		"Bearer",                    // Missing token
@@ -153,13 +138,8 @@ func TestMalformedAuthHeader(t *testing.T) {
 
 // TestConcurrentRequests tests handling of concurrent requests
 func TestConcurrentRequests(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupMiddleware()
 	server.setupRoutes()
@@ -186,13 +166,8 @@ func TestConcurrentRequests(t *testing.T) {
 
 // TestRecoveryMiddleware tests panic recovery
 func TestRecoveryMiddleware(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupMiddleware()
 
@@ -215,13 +190,8 @@ func TestRecoveryMiddleware(t *testing.T) {
 
 // TestRequestLogging tests that requests are logged
 func TestRequestLogging(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupMiddleware()
 	server.setupRoutes()
@@ -239,13 +209,8 @@ func TestRequestLogging(t *testing.T) {
 
 // TestPrometheusMetricsEndpoint tests the /metrics endpoint
 func TestPrometheusMetricsEndpoint(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupMiddleware()
 	server.setupRoutes()
@@ -266,13 +231,8 @@ func TestPrometheusMetricsEndpoint(t *testing.T) {
 
 // TestGracefulShutdown tests graceful shutdown doesn't leave hanging connections
 func TestGracefulShutdown(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	// This test verifies the server structure is set up correctly for graceful shutdown
 	assert.NotNil(t, server.router, "Router should be initialized")
@@ -281,13 +241,8 @@ func TestGracefulShutdown(t *testing.T) {
 
 // TestRootEndpoint tests the root / endpoint
 func TestRootEndpoint(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupRoutes()
 

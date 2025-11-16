@@ -13,13 +13,8 @@ import (
 
 // TestInputValidationSQLInjection tests SQL injection prevention
 func TestInputValidationSQLInjection(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	tests := []struct {
 		name     string
@@ -69,13 +64,8 @@ func TestInputValidationSQLInjection(t *testing.T) {
 
 // TestInputValidationXSS tests XSS prevention
 func TestInputValidationXSS(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	xssPayloads := []string{
 		"<script>alert('XSS')</script>",
@@ -112,13 +102,8 @@ func TestInputValidationXSS(t *testing.T) {
 
 // TestInputValidationOversizedPayload tests protection against large payloads
 func TestInputValidationOversizedPayload(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	// Create a 10MB payload (should be rejected)
 	largePayload := strings.Repeat("A", 10*1024*1024)
@@ -140,13 +125,8 @@ func TestInputValidationOversizedPayload(t *testing.T) {
 
 // TestInputValidationInvalidJSON tests invalid JSON handling
 func TestInputValidationInvalidJSON(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	invalidJSONPayloads := []string{
 		"{invalid json}",
@@ -179,13 +159,8 @@ func TestInputValidationInvalidJSON(t *testing.T) {
 
 // TestInputValidationCommandInjection tests command injection prevention
 func TestInputValidationCommandInjection(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	commandInjectionPayloads := []string{
 		"; ls -la",
@@ -212,13 +187,8 @@ func TestInputValidationCommandInjection(t *testing.T) {
 
 // TestInputValidationPathTraversal tests path traversal prevention
 func TestInputValidationPathTraversal(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	pathTraversalPayloads := []string{
 		"../../etc/passwd",
@@ -246,13 +216,8 @@ func TestInputValidationPathTraversal(t *testing.T) {
 
 // TestHTTPMethodRestrictions tests that endpoints only accept correct HTTP methods
 func TestHTTPMethodRestrictions(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	tests := []struct {
 		endpoint      string
@@ -294,13 +259,8 @@ func TestHTTPMethodRestrictions(t *testing.T) {
 
 // TestCORSHeaders tests CORS header configuration
 func TestCORSHeaders(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	server.setupMiddleware()
 	server.setupRoutes()
@@ -324,13 +284,8 @@ func TestCORSHeaders(t *testing.T) {
 
 // TestContentTypeValidation tests Content-Type header validation
 func TestContentTypeValidation(t *testing.T) {
-	server, hasDB := setupTestAPIServer(t)
-	if !hasDB {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	if server.db != nil {
-		defer server.db.Close()
-	}
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
 	// Valid JSON request with wrong Content-Type
 	body := map[string]interface{}{

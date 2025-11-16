@@ -11,16 +11,23 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestServer creates a test API server with mocked dependencies
-func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) *APIServer {
+// setupTestServer creates a test API server with mocked dependencies and testcontainers database
+func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) (*APIServer, *testhelpers.PostgresContainer) {
+	t.Helper()
 	// Set Gin to test mode
 	gin.SetMode(gin.TestMode)
+
+	// Setup testcontainers database
+	tc := testhelpers.SetupTestDatabase(t)
+	err := tc.ApplyMigrations("../../migrations")
+	require.NoError(t, err, "Failed to apply migrations")
 
 	// Create test config
 	cfg := &config.Config{
@@ -31,14 +38,6 @@ func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) *APIServer
 		},
 	}
 
-	// Create test database connection (requires test database)
-	// Skip if DATABASE_URL is not set
-	ctx := context.Background()
-	database, err := db.New(ctx)
-	if err != nil {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-
 	// Create test hub
 	hub := NewHub()
 	go hub.Run()
@@ -46,7 +45,7 @@ func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) *APIServer
 	// Create server
 	server := &APIServer{
 		router:             gin.New(),
-		db:                 database,
+		db:                 tc.DB,
 		config:             cfg,
 		hub:                hub,
 		port:               "8081",
@@ -56,7 +55,7 @@ func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) *APIServer
 	// Setup routes
 	server.setupRoutes()
 
-	return server
+	return server, tc
 }
 
 // TestPauseTrading_Success tests successful pause operation
@@ -74,7 +73,8 @@ func TestPauseTrading_Success(t *testing.T) {
 	defer mockOrchestrator.Close()
 
 	// Setup test server
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Create a test trading session
@@ -118,7 +118,8 @@ func TestPauseTrading_InvalidSessionID(t *testing.T) {
 	}))
 	defer mockOrchestrator.Close()
 
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Request with invalid UUID
@@ -147,7 +148,8 @@ func TestPauseTrading_NonExistentSession(t *testing.T) {
 	}))
 	defer mockOrchestrator.Close()
 
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Request with valid UUID but non-existent session
@@ -184,7 +186,8 @@ func TestResumeTrading_Success(t *testing.T) {
 	defer mockOrchestrator.Close()
 
 	// Setup test server
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Create a test trading session
@@ -229,7 +232,8 @@ func TestOrchestratorFailure(t *testing.T) {
 	}))
 	defer mockOrchestrator.Close()
 
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Create a test trading session
@@ -274,7 +278,8 @@ func TestRateLimiting(t *testing.T) {
 	}))
 	defer mockOrchestrator.Close()
 
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Create a test trading session
@@ -331,7 +336,8 @@ func TestConcurrentPauseResume(t *testing.T) {
 	}))
 	defer mockOrchestrator.Close()
 
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Create test sessions
@@ -450,7 +456,8 @@ func TestOrchestratorRetry(t *testing.T) {
 	}))
 	defer mockOrchestrator.Close()
 
-	server := setupTestServer(t, mockOrchestrator)
+	server, tc := setupTestServer(t, mockOrchestrator)
+	_ = tc // testcontainers handles cleanup automatically
 	defer server.db.Close()
 
 	// Create a test trading session
