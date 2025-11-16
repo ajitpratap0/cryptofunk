@@ -87,7 +87,7 @@ checkpoints/
 *.pth
 
 .claude/skills/
-api
+/api
 
 # Test artifacts
 /tmp/test_output.txt

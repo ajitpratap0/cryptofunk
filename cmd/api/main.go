@@ -391,10 +391,13 @@ func (s *APIServer) handleGetAgentStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"name":         agent.Name,
-		"status":       agent.Status,
-		"last_seen_at": agent.LastSeenAt,
-		"healthy":      agent.IsHealthy,
+		"name":           agent.Name,
+		"type":           agent.Type,
+		"status":         agent.Status,
+		"last_heartbeat": agent.LastHeartbeat,
+		"started_at":     agent.StartedAt,
+		"total_signals":  agent.TotalSignals,
+		"error_count":    agent.ErrorCount,
 	})
 }
 
@@ -1249,11 +1252,14 @@ func (s *APIServer) BroadcastOrderUpdate(order *db.Order) error {
 // BroadcastAgentStatus broadcasts agent status change
 func (s *APIServer) BroadcastAgentStatus(agent *db.AgentStatus) error {
 	data := map[string]interface{}{
-		"name":         agent.Name,
-		"status":       agent.Status,
-		"last_seen_at": agent.LastSeenAt,
-		"is_healthy":   agent.IsHealthy,
-		"metadata":     agent.Metadata,
+		"name":           agent.Name,
+		"type":           agent.Type,
+		"status":         agent.Status,
+		"last_heartbeat": agent.LastHeartbeat,
+		"started_at":     agent.StartedAt,
+		"total_signals":  agent.TotalSignals,
+		"error_count":    agent.ErrorCount,
+		"metadata":       agent.Metadata,
 	}
 
 	return s.hub.Broadcast(MessageTypeAgentStatus, data)
