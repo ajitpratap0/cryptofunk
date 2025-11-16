@@ -56,13 +56,14 @@ CREATE INDEX idx_audit_logs_id ON audit_logs (id);
 
 **Priority**: P0 - Must fix before any other DB tests
 
-### 2. API Integration Tests (30+ failing) ❌
+### 2. API Integration Tests (7 failing out of 15) ❌
 
-**Status**: All HTTP mock-based tests failing
-**Cause**: Using httptest instead of real testcontainers
-**Impact**: 0% coverage for `internal/api`
+**Status**: Tests exist and use testcontainers, but 46% are failing
+**Cause**: Multiple issues - response validation, error handling, route registration
+**Impact**: Unknown coverage (tests fail before measurement)
+**Details**: See API_TEST_ANALYSIS.md for comprehensive breakdown
 
-**Action**: Convert to testcontainers pattern like database tests
+**Action**: Fix individual test failures or defer to separate sprint (8-12 hour effort)
 
 ---
 
@@ -349,12 +350,17 @@ func TestAPI_PlaceOrder_Integration(t *testing.T) {
 3. Strategy agent tests (trend, reversion, arbitrage)
 4. Target: Agent coverage 22-45% → 60%
 
-### Sprint 4: API Integration (Days 8-9)
-1. Convert HTTP mock tests to testcontainers
-2. Add missing endpoint tests
-3. Test authentication/authorization
-4. Test rate limiting
-5. Target: API coverage 0% → 60%
+### Sprint 4: API Integration (Days 8-9) - UPDATED AFTER ANALYSIS
+**Status**: Tests already use testcontainers, need debugging not conversion
+
+1. Fix 7 failing tests (response validation, error handling, route panic)
+2. Add missing endpoint tests (order placement, cancellation, position close)
+3. Test authentication/authorization (partially done)
+4. Test rate limiting (exists but panics - needs fix)
+5. Target: API coverage unknown → 70%
+6. **Estimated Effort**: 8-12 hours (see API_TEST_ANALYSIS.md)
+
+**Recommendation**: Consider deferring API work to separate sprint after audit/memory/metrics packages
 
 ### Sprint 5: Polish & Optimize (Day 10)
 1. Supporting package tests (market, exchange, audit, memory)
@@ -451,13 +457,75 @@ func StartTestAPIServer(t *testing.T, db *db.DB, redisClient *redis.Client) (*ht
 
 ---
 
+## Sprint Progress Update
+
+### ✅ Sprint 1: Complete (Database Foundation)
+**Status**: EXCEEDED EXPECTATIONS
+- ✅ Fixed migration blocker (005_audit_logs.sql)
+- ✅ All 14 testcontainer integration tests passing
+- ✅ Coverage improved 8.4% → 57.9% (+49.5%)
+- ✅ Comprehensive documentation created
+- ✅ PR #17 created and merged
+
+**Time**: 1 hour (vs 6-8 hours estimated for writing new tests)
+**ROI**: ⭐⭐⭐⭐⭐ Exceptional
+
+### 📊 Sprint 2: API Analysis (Complete)
+**Status**: ANALYSIS COMPLETE - DEFER TO FUTURE SPRINT
+- ✅ Analyzed all API test files
+- ✅ Identified 7 failing tests (46% failure rate)
+- ✅ Documented issues in API_TEST_ANALYSIS.md
+- ✅ Estimated fix effort: 8-12 hours
+
+**Key Finding**: Unlike database (single blocker), API requires individual debugging of 7+ issues
+
+**Decision**: Defer API test fixes to dedicated sprint, focus on easier wins next
+
+### 🎯 Next Recommended Sprints
+
+**Sprint 3: Audit Package** (Recommended Next)
+- **Current**: 26.1% coverage
+- **Target**: 60%
+- **Effort**: 4-6 hours
+- **Method**: Testcontainers pattern (proven success)
+- **Priority**: High (security/compliance critical)
+- **ROI**: ⭐⭐⭐⭐ High
+
+**Sprint 4: Memory Package**
+- **Current**: 32.4% coverage
+- **Target**: 60%
+- **Effort**: 6-8 hours
+- **Method**: Testcontainers + semantic search tests
+- **ROI**: ⭐⭐⭐ Medium
+
+**Sprint 5: Metrics Package**
+- **Current**: 32.3% coverage
+- **Target**: 60%
+- **Effort**: 4-6 hours
+- **Method**: Integration tests with Prometheus
+- **ROI**: ⭐⭐⭐ Medium
+
+**Sprint 6: API Package** (Defer to later)
+- **Current**: Unknown (tests failing)
+- **Target**: 70%
+- **Effort**: 8-12 hours
+- **Method**: Debug 7 failing tests + add missing endpoints
+- **ROI**: ⭐⭐⭐ Medium (important but time-consuming)
+
 ## Next Steps
 
-1. **Fix Migration**: Resolve 005_audit_logs.sql issue
-2. **Verify Baseline**: Ensure all existing tests pass
-3. **Begin Sprint 1**: Database coverage improvements
-4. **Regular Updates**: Commit incrementally with clear messages
-5. **Create PR**: When coverage targets met
+### Immediate (Recommended)
+1. ✅ **Complete**: Database migration fix
+2. ✅ **Complete**: API test analysis
+3. **Next**: Choose sprint focus - audit, memory, or metrics package
+4. **Future**: API test fixes in dedicated sprint
+
+### Original Next Steps (Reference)
+1. ~~**Fix Migration**: Resolve 005_audit_logs.sql issue~~ ✅ DONE
+2. ~~**Verify Baseline**: Ensure all existing tests pass~~ ✅ DONE (for DB)
+3. ~~**Begin Sprint 1**: Database coverage improvements~~ ✅ COMPLETE
+4. **Regular Updates**: Commit incrementally with clear messages ✅ Ongoing
+5. **Create PR**: When coverage targets met ✅ PR #17 created
 
 ---
 
