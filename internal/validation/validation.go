@@ -268,7 +268,7 @@ func (v *TradingSessionValidator) ValidateExchange(exchange string) {
 // ValidateInitialCapital validates initial capital amount
 func (v *TradingSessionValidator) ValidateInitialCapital(capital float64) {
 	v.Positive("initial_capital", capital)
-	v.MinValue("initial_capital", capital, 100)     // Minimum $100
+	v.MinValue("initial_capital", capital, 100)      // Minimum $100
 	v.MaxValue("initial_capital", capital, 10000000) // Max $10M
 }
 

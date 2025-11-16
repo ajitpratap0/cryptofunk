@@ -126,8 +126,8 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 		ip := c.ClientIP()
 		if !rl.allow(ip) {
 			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error":   "rate limit exceeded",
-				"message": fmt.Sprintf("Maximum %d requests per %v allowed", rl.maxRequests, rl.window),
+				"error":       "rate limit exceeded",
+				"message":     fmt.Sprintf("Maximum %d requests per %v allowed", rl.maxRequests, rl.window),
 				"retry_after": rl.window.Seconds(),
 			})
 			c.Abort()

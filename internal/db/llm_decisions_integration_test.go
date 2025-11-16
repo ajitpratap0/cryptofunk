@@ -51,21 +51,21 @@ func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 		require.NoError(t, err)
 
 		decision := &db.LLMDecision{
-			ID:          uuid.New(),
-			SessionID:   &session.ID,
+			ID:           uuid.New(),
+			SessionID:    &session.ID,
 			DecisionType: "trading_signal",
-			Symbol:      "BTC/USDT",
-			Prompt:      "Analyze BTC/USDT for entry signal. Current RSI: 30.5, MACD: bullish",
-			Response:    "Strong buy signal detected. RSI oversold, MACD bullish crossover, recommend entry at current price.",
-			Model:       "claude-3-sonnet",
-			TokensUsed:  1500,
-			LatencyMs:   250,
-			Outcome:     &outcome,
-			PnL:         &pnl,
-			Context:     contextJSON,
-			AgentName:   "technical-agent",
-			Confidence:  0.85,
-			CreatedAt:   time.Now(),
+			Symbol:       "BTC/USDT",
+			Prompt:       "Analyze BTC/USDT for entry signal. Current RSI: 30.5, MACD: bullish",
+			Response:     "Strong buy signal detected. RSI oversold, MACD bullish crossover, recommend entry at current price.",
+			Model:        "claude-3-sonnet",
+			TokensUsed:   1500,
+			LatencyMs:    250,
+			Outcome:      &outcome,
+			PnL:          &pnl,
+			Context:      contextJSON,
+			AgentName:    "technical-agent",
+			Confidence:   0.85,
+			CreatedAt:    time.Now(),
 		}
 
 		err = tc.DB.InsertLLMDecision(ctx, decision)
@@ -228,13 +228,13 @@ func TestLLMDecisionQueryMethodsWithTestcontainers(t *testing.T) {
 
 	// Set up test data - create multiple decisions for different agents and symbols
 	testData := []struct {
-		agentName string
-		symbol    string
-		outcome   string
-		pnl       float64
-		model     string
-		tokens    int
-		latency   int
+		agentName  string
+		symbol     string
+		outcome    string
+		pnl        float64
+		model      string
+		tokens     int
+		latency    int
 		confidence float64
 	}{
 		{"technical-agent", "BTC/USDT", "SUCCESS", 100.0, "claude-3-sonnet", 1500, 250, 0.85},

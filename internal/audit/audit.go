@@ -41,7 +41,7 @@ const (
 	EventTypeAgentFailed  EventType = "AGENT_FAILED"
 
 	// Security events
-	EventTypeRateLimitExceeded EventType = "RATE_LIMIT_EXCEEDED"
+	EventTypeRateLimitExceeded  EventType = "RATE_LIMIT_EXCEEDED"
 	EventTypeUnauthorizedAccess EventType = "UNAUTHORIZED_ACCESS"
 	EventTypeInvalidInput       EventType = "INVALID_INPUT"
 
@@ -62,20 +62,20 @@ const (
 
 // Event represents a single audit log event
 type Event struct {
-	ID          uuid.UUID              `json:"id"`
-	Timestamp   time.Time              `json:"timestamp"`
-	EventType   EventType              `json:"event_type"`
-	Severity    Severity               `json:"severity"`
-	UserID      string                 `json:"user_id,omitempty"`      // User/API key if authenticated
-	IPAddress   string                 `json:"ip_address"`             // Client IP
-	UserAgent   string                 `json:"user_agent,omitempty"`   // Browser/client info
-	Resource    string                 `json:"resource,omitempty"`     // Affected resource (order ID, session ID, etc.)
-	Action      string                 `json:"action"`                 // Human-readable action description
-	Success     bool                   `json:"success"`                // Whether action succeeded
-	ErrorMsg    string                 `json:"error_message,omitempty"`// Error if failed
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`     // Additional context
-	RequestID   string                 `json:"request_id,omitempty"`   // Request correlation ID
-	Duration    int64                  `json:"duration_ms,omitempty"`  // Action duration in ms
+	ID        uuid.UUID              `json:"id"`
+	Timestamp time.Time              `json:"timestamp"`
+	EventType EventType              `json:"event_type"`
+	Severity  Severity               `json:"severity"`
+	UserID    string                 `json:"user_id,omitempty"`       // User/API key if authenticated
+	IPAddress string                 `json:"ip_address"`              // Client IP
+	UserAgent string                 `json:"user_agent,omitempty"`    // Browser/client info
+	Resource  string                 `json:"resource,omitempty"`      // Affected resource (order ID, session ID, etc.)
+	Action    string                 `json:"action"`                  // Human-readable action description
+	Success   bool                   `json:"success"`                 // Whether action succeeded
+	ErrorMsg  string                 `json:"error_message,omitempty"` // Error if failed
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`      // Additional context
+	RequestID string                 `json:"request_id,omitempty"`    // Request correlation ID
+	Duration  int64                  `json:"duration_ms,omitempty"`   // Action duration in ms
 }
 
 // Logger handles audit logging operations

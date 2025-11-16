@@ -76,15 +76,15 @@ func TestCalculateStatsFromTrades(t *testing.T) {
 				TotalTrades:   5,
 				WinningTrades: 3,
 				LosingTrades:  2,
-				AvgWin:        150,  // (100 + 200 + 150) / 3
-				AvgLoss:       75,   // (50 + 100) / 2
-				WinRate:       0.6,  // 3/5
-				TotalProfit:   450,  // 100 + 200 + 150
-				TotalLoss:     150,  // 50 + 100
-				AvgReturn:     60,   // (450 - 150) / 5
-				LargestWin:    200,  // max win
-				LargestLoss:   100,  // max loss
-				WinLossRatio:  2.0,  // 150 / 75
+				AvgWin:        150, // (100 + 200 + 150) / 3
+				AvgLoss:       75,  // (50 + 100) / 2
+				WinRate:       0.6, // 3/5
+				TotalProfit:   450, // 100 + 200 + 150
+				TotalLoss:     150, // 50 + 100
+				AvgReturn:     60,  // (450 - 150) / 5
+				LargestWin:    200, // max win
+				LargestLoss:   100, // max loss
+				WinLossRatio:  2.0, // 150 / 75
 			},
 		},
 	}
@@ -140,11 +140,11 @@ func TestKellyCalculator_CalculatePositionSize(t *testing.T) {
 	capital := 10000.0
 
 	tests := []struct {
-		name              string
-		stats             *TradingStats
-		kellyFraction     float64
-		wantMin           float64
-		wantMax           float64
+		name               string
+		stats              *TradingStats
+		kellyFraction      float64
+		wantMin            float64
+		wantMax            float64
 		expectConservative bool
 	}{
 		{
@@ -157,9 +157,9 @@ func TestKellyCalculator_CalculatePositionSize(t *testing.T) {
 				AvgLoss:       50,
 				WinLossRatio:  2.0,
 			},
-			kellyFraction:     0.25,
-			wantMin:           900,  // ~10% of 10k
-			wantMax:           1100, // ~10% of 10k
+			kellyFraction:      0.25,
+			wantMin:            900,  // ~10% of 10k
+			wantMax:            1100, // ~10% of 10k
 			expectConservative: true,
 		},
 		{
@@ -272,9 +272,9 @@ func TestKellyCalculator_CalculatePositionSize(t *testing.T) {
 				AvgWin:        0,
 				AvgLoss:       100,
 			},
-			kellyFraction:     0.25,
-			wantMin:           900,  // Conservative 10%
-			wantMax:           1100,
+			kellyFraction:      0.25,
+			wantMin:            900, // Conservative 10%
+			wantMax:            1100,
 			expectConservative: true,
 		},
 		{
@@ -287,9 +287,9 @@ func TestKellyCalculator_CalculatePositionSize(t *testing.T) {
 				AvgWin:        100,
 				AvgLoss:       0,
 			},
-			kellyFraction:     0.25,
-			wantMin:           900,  // Conservative 10%
-			wantMax:           1100,
+			kellyFraction:      0.25,
+			wantMin:            900, // Conservative 10%
+			wantMax:            1100,
 			expectConservative: true,
 		},
 	}

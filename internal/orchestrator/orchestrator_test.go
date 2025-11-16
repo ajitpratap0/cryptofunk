@@ -27,7 +27,7 @@ func TestNewOrchestrator(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := NewOrchestrator(config, logger, 9100)
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
 
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
@@ -51,7 +51,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := NewOrchestrator(config, logger, 9100)
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -235,7 +235,7 @@ func TestCheckConsensus(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := NewOrchestrator(config, logger, 9100)
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -368,7 +368,7 @@ func TestGenerateDecision(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := NewOrchestrator(config, logger, 9100)
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -453,7 +453,7 @@ func TestMetricsIncrement(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := NewOrchestrator(config, logger, 9100)
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
 
@@ -479,7 +479,7 @@ func TestShutdownCleanup(t *testing.T) {
 	}
 
 	logger := zerolog.Nop()
-	orch, err := NewOrchestrator(config, logger, 9100)
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
 	require.NoError(t, err)
 
 	// Create a context for shutdown

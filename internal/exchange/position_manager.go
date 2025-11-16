@@ -17,7 +17,7 @@ type PositionManager struct {
 	mu               sync.RWMutex
 	openPositions    map[string]*db.Position // symbol -> position
 	currentSessionID *uuid.UUID
-	feeRate          float64                 // Average fee rate for calculations
+	feeRate          float64 // Average fee rate for calculations
 }
 
 // NewPositionManager creates a new position manager with default fee rate

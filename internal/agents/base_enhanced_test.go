@@ -21,8 +21,8 @@ func TestBaseAgent_GetterMethods(t *testing.T) {
 		StepInterval: 1 * time.Second,
 		Enabled:      true,
 		Config: map[string]interface{}{
-			"symbol":    "BTC/USDT",
-			"threshold": 0.75,
+			"symbol":     "BTC/USDT",
+			"threshold":  0.75,
 			"indicators": []string{"RSI", "MACD", "BB"},
 		},
 	}
@@ -363,7 +363,7 @@ func TestAgentConfig_Validation(t *testing.T) {
 					Command: "bin/server1",
 					Args:    []string{"--config", "config.json"},
 					Env: map[string]string{
-						"API_KEY":    "key123",
+						"API_KEY":   "key123",
 						"LOG_LEVEL": "debug",
 					},
 				},

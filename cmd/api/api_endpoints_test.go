@@ -96,7 +96,7 @@ func TestStatusEndpoint(t *testing.T) {
 
 // TestRateLimiter tests the rate limiting middleware
 func TestRateLimiter(t *testing.T) {
-	rl := NewRateLimiter("test",3, 1*time.Second)
+	rl := NewRateLimiter("test", 3, 1*time.Second)
 
 	// First 3 requests should be allowed
 	assert.True(t, rl.allow("192.168.1.1"))
@@ -112,7 +112,7 @@ func TestRateLimiter(t *testing.T) {
 
 // TestRateLimiterExpiration tests that rate limiter resets after time window
 func TestRateLimiterExpiration(t *testing.T) {
-	rl := NewRateLimiter("test",2, 100*time.Millisecond)
+	rl := NewRateLimiter("test", 2, 100*time.Millisecond)
 
 	// Use up the quota
 	assert.True(t, rl.allow("192.168.1.1"))

@@ -33,9 +33,9 @@ type HealthCheckResult struct {
 
 // HealthCheckMetrics holds Prometheus metrics for health checks
 type HealthCheckMetrics struct {
-	Status   *prometheus.GaugeVec
-	Latency  *prometheus.HistogramVec
-	Total    *prometheus.CounterVec
+	Status  *prometheus.GaugeVec
+	Latency *prometheus.HistogramVec
+	Total   *prometheus.CounterVec
 }
 
 var (

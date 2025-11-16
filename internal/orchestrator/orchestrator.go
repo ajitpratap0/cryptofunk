@@ -183,10 +183,10 @@ type Orchestrator struct {
 	signalBufferMutex sync.RWMutex
 
 	// State
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	startTime  time.Time
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	startTime time.Time
 
 	// Trading control
 	paused      bool
@@ -957,14 +957,14 @@ func (o *Orchestrator) GetAgentSessions() map[string]*AgentSession {
 
 // OrchestratorStatus represents the current status of the orchestrator
 type OrchestratorStatus struct {
-	Status         string                 `json:"status"`
-	Version        string                 `json:"version"`
-	Uptime         float64                `json:"uptime_seconds"`
-	ActiveAgents   int                    `json:"active_agents"`
-	TotalSignals   int                    `json:"total_signals"`
-	Timestamp      time.Time              `json:"timestamp"`
-	Configuration  map[string]interface{} `json:"configuration"`
-	AgentSummary   map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
+	Status        string                 `json:"status"`
+	Version       string                 `json:"version"`
+	Uptime        float64                `json:"uptime_seconds"`
+	ActiveAgents  int                    `json:"active_agents"`
+	TotalSignals  int                    `json:"total_signals"`
+	Timestamp     time.Time              `json:"timestamp"`
+	Configuration map[string]interface{} `json:"configuration"`
+	AgentSummary  map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
 }
 
 // GetStatus returns the current orchestrator status

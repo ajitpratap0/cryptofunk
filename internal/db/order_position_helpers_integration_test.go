@@ -34,49 +34,49 @@ func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 	t.Run("GetOrdersBySymbol", func(t *testing.T) {
 		// Create orders with different symbols
 		btcOrder1 := &db.Order{
-			ID:           uuid.New(),
-			SessionID:    &session.ID,
-			Symbol:       "BTC/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideBuy,
-			Type:         db.OrderTypeMarket,
-			Quantity:     0.1,
-			Status:       db.OrderStatusNew,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        uuid.New(),
+			SessionID: &session.ID,
+			Symbol:    "BTC/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideBuy,
+			Type:      db.OrderTypeMarket,
+			Quantity:  0.1,
+			Status:    db.OrderStatusNew,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err := tc.DB.InsertOrder(ctx, btcOrder1)
 		require.NoError(t, err)
 
 		btcOrder2 := &db.Order{
-			ID:           uuid.New(),
-			SessionID:    &session.ID,
-			Symbol:       "BTC/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideSell,
-			Type:         db.OrderTypeLimit,
-			Quantity:     0.2,
-			Status:       db.OrderStatusFilled,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        uuid.New(),
+			SessionID: &session.ID,
+			Symbol:    "BTC/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideSell,
+			Type:      db.OrderTypeLimit,
+			Quantity:  0.2,
+			Status:    db.OrderStatusFilled,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err = tc.DB.InsertOrder(ctx, btcOrder2)
 		require.NoError(t, err)
 
 		ethOrder := &db.Order{
-			ID:           uuid.New(),
-			SessionID:    &session.ID,
-			Symbol:       "ETH/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideBuy,
-			Type:         db.OrderTypeMarket,
-			Quantity:     1.0,
-			Status:       db.OrderStatusNew,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        uuid.New(),
+			SessionID: &session.ID,
+			Symbol:    "ETH/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideBuy,
+			Type:      db.OrderTypeMarket,
+			Quantity:  1.0,
+			Status:    db.OrderStatusNew,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err = tc.DB.InsertOrder(ctx, ethOrder)
 		require.NoError(t, err)
@@ -103,49 +103,49 @@ func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 	t.Run("GetOrdersByStatus", func(t *testing.T) {
 		// Create orders with different statuses
 		newOrder := &db.Order{
-			ID:           uuid.New(),
-			SessionID:    &session.ID,
-			Symbol:       "SOL/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideBuy,
-			Type:         db.OrderTypeMarket,
-			Quantity:     10.0,
-			Status:       db.OrderStatusNew,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        uuid.New(),
+			SessionID: &session.ID,
+			Symbol:    "SOL/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideBuy,
+			Type:      db.OrderTypeMarket,
+			Quantity:  10.0,
+			Status:    db.OrderStatusNew,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err := tc.DB.InsertOrder(ctx, newOrder)
 		require.NoError(t, err)
 
 		filledOrder := &db.Order{
-			ID:           uuid.New(),
-			SessionID:    &session.ID,
-			Symbol:       "SOL/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideSell,
-			Type:         db.OrderTypeMarket,
-			Quantity:     5.0,
-			Status:       db.OrderStatusFilled,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        uuid.New(),
+			SessionID: &session.ID,
+			Symbol:    "SOL/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideSell,
+			Type:      db.OrderTypeMarket,
+			Quantity:  5.0,
+			Status:    db.OrderStatusFilled,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err = tc.DB.InsertOrder(ctx, filledOrder)
 		require.NoError(t, err)
 
 		canceledOrder := &db.Order{
-			ID:           uuid.New(),
-			SessionID:    &session.ID,
-			Symbol:       "SOL/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideBuy,
-			Type:         db.OrderTypeLimit,
-			Quantity:     15.0,
-			Status:       db.OrderStatusCanceled,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        uuid.New(),
+			SessionID: &session.ID,
+			Symbol:    "SOL/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideBuy,
+			Type:      db.OrderTypeLimit,
+			Quantity:  15.0,
+			Status:    db.OrderStatusCanceled,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err = tc.DB.InsertOrder(ctx, canceledOrder)
 		require.NoError(t, err)
@@ -177,17 +177,17 @@ func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 		// Create multiple orders with different timestamps
 		for i := 0; i < 10; i++ {
 			order := &db.Order{
-				ID:           uuid.New(),
-				SessionID:    &session.ID,
-				Symbol:       "ADA/USDT",
-				Exchange:     "binance",
-				Side:         db.OrderSideBuy,
-				Type:         db.OrderTypeMarket,
-				Quantity:     100.0,
-				Status:       db.OrderStatusNew,
-				PlacedAt:     time.Now().Add(time.Duration(-i) * time.Minute),
-				CreatedAt:    time.Now().Add(time.Duration(-i) * time.Minute),
-				UpdatedAt:    time.Now().Add(time.Duration(-i) * time.Minute),
+				ID:        uuid.New(),
+				SessionID: &session.ID,
+				Symbol:    "ADA/USDT",
+				Exchange:  "binance",
+				Side:      db.OrderSideBuy,
+				Type:      db.OrderTypeMarket,
+				Quantity:  100.0,
+				Status:    db.OrderStatusNew,
+				PlacedAt:  time.Now().Add(time.Duration(-i) * time.Minute),
+				CreatedAt: time.Now().Add(time.Duration(-i) * time.Minute),
+				UpdatedAt: time.Now().Add(time.Duration(-i) * time.Minute),
 			}
 			err := tc.DB.InsertOrder(ctx, order)
 			require.NoError(t, err)
@@ -212,18 +212,18 @@ func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 		orderID := uuid.New()
 		price := 45000.0
 		order := &db.Order{
-			ID:           orderID,
-			SessionID:    &session.ID,
-			Symbol:       "BTC/USDT",
-			Exchange:     "binance",
-			Side:         db.OrderSideBuy,
-			Type:         db.OrderTypeLimit,
-			Quantity:     0.5,
-			Price:        &price,
-			Status:       db.OrderStatusNew,
-			PlacedAt:     time.Now(),
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:        orderID,
+			SessionID: &session.ID,
+			Symbol:    "BTC/USDT",
+			Exchange:  "binance",
+			Side:      db.OrderSideBuy,
+			Type:      db.OrderTypeLimit,
+			Quantity:  0.5,
+			Price:     &price,
+			Status:    db.OrderStatusNew,
+			PlacedAt:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		err := tc.DB.InsertOrder(ctx, order)
 		require.NoError(t, err)

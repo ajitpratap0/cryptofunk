@@ -43,8 +43,8 @@ func TestKellyIntegration_BacktestWithKellySizing(t *testing.T) {
 
 	// Create a simple trend-following strategy
 	strategy := &SimpleTrendStrategy{
-		Symbol:    "BTC",
-		BuyThreshold: 0,   // Buy when price increases
+		Symbol:        "BTC",
+		BuyThreshold:  0,   // Buy when price increases
 		SellThreshold: 0.5, // Sell when confidence high
 	}
 

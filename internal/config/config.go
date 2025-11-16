@@ -140,21 +140,21 @@ type RiskConfig struct {
 
 // ExchangeConfig contains exchange-specific settings
 type ExchangeConfig struct {
-	APIKey      string     `mapstructure:"api_key"`
-	SecretKey   string     `mapstructure:"secret_key"`
-	Testnet     bool       `mapstructure:"testnet"`
-	RateLimitMS int        `mapstructure:"rate_limit_ms"`
-	Fees        FeeConfig  `mapstructure:"fees"`
+	APIKey      string    `mapstructure:"api_key"`
+	SecretKey   string    `mapstructure:"secret_key"`
+	Testnet     bool      `mapstructure:"testnet"`
+	RateLimitMS int       `mapstructure:"rate_limit_ms"`
+	Fees        FeeConfig `mapstructure:"fees"`
 }
 
 // FeeConfig contains exchange fee structure
 type FeeConfig struct {
-	Maker           float64 `mapstructure:"maker"`              // Maker fee percentage (e.g., 0.001 = 0.1%)
-	Taker           float64 `mapstructure:"taker"`              // Taker fee percentage (e.g., 0.001 = 0.1%)
-	BaseSlippage    float64 `mapstructure:"base_slippage"`      // Base slippage percentage (e.g., 0.0005 = 0.05%)
-	MarketImpact    float64 `mapstructure:"market_impact"`      // Market impact per unit (e.g., 0.0001 = 0.01%)
-	MaxSlippage     float64 `mapstructure:"max_slippage"`       // Maximum slippage percentage (e.g., 0.003 = 0.3%)
-	Withdrawal      float64 `mapstructure:"withdrawal"`         // Withdrawal fee percentage (optional)
+	Maker        float64 `mapstructure:"maker"`         // Maker fee percentage (e.g., 0.001 = 0.1%)
+	Taker        float64 `mapstructure:"taker"`         // Taker fee percentage (e.g., 0.001 = 0.1%)
+	BaseSlippage float64 `mapstructure:"base_slippage"` // Base slippage percentage (e.g., 0.0005 = 0.05%)
+	MarketImpact float64 `mapstructure:"market_impact"` // Market impact per unit (e.g., 0.0001 = 0.01%)
+	MaxSlippage  float64 `mapstructure:"max_slippage"`  // Maximum slippage percentage (e.g., 0.003 = 0.3%)
+	Withdrawal   float64 `mapstructure:"withdrawal"`    // Withdrawal fee percentage (optional)
 }
 
 // APIConfig contains REST API settings

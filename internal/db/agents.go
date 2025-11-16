@@ -7,21 +7,21 @@ import (
 
 // AgentStatus represents an agent's status
 type AgentStatus struct {
-	ID          string    `db:"id" json:"id"`
-	Name        string    `db:"agent_name" json:"agent_name"`
-	Type        string    `db:"agent_type" json:"agent_type"`
-	Status      string    `db:"status" json:"status"`
-	PID         *int      `db:"pid" json:"pid,omitempty"`
-	StartedAt   *time.Time `db:"started_at" json:"started_at,omitempty"`
+	ID            string     `db:"id" json:"id"`
+	Name          string     `db:"agent_name" json:"agent_name"`
+	Type          string     `db:"agent_type" json:"agent_type"`
+	Status        string     `db:"status" json:"status"`
+	PID           *int       `db:"pid" json:"pid,omitempty"`
+	StartedAt     *time.Time `db:"started_at" json:"started_at,omitempty"`
 	LastHeartbeat *time.Time `db:"last_heartbeat" json:"last_heartbeat,omitempty"`
-	TotalSignals  int      `db:"total_signals" json:"total_signals"`
-	AvgConfidence *float64 `db:"avg_confidence" json:"avg_confidence,omitempty"`
-	ErrorCount    int      `db:"error_count" json:"error_count"`
-	LastError     *string  `db:"last_error" json:"last_error,omitempty"`
-	Config        any      `db:"config" json:"config,omitempty"`
-	Metadata      any      `db:"metadata" json:"metadata,omitempty"`
-	CreatedAt     time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
+	TotalSignals  int        `db:"total_signals" json:"total_signals"`
+	AvgConfidence *float64   `db:"avg_confidence" json:"avg_confidence,omitempty"`
+	ErrorCount    int        `db:"error_count" json:"error_count"`
+	LastError     *string    `db:"last_error" json:"last_error,omitempty"`
+	Config        any        `db:"config" json:"config,omitempty"`
+	Metadata      any        `db:"metadata" json:"metadata,omitempty"`
+	CreatedAt     time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time  `db:"updated_at" json:"updated_at"`
 }
 
 // GetAgentStatus retrieves a specific agent's status

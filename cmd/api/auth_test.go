@@ -115,10 +115,10 @@ func TestMalformedAuthHeader(t *testing.T) {
 	_ = tc // testcontainers handles cleanup automatically
 
 	malformedHeaders := []string{
-		"Bearer",                    // Missing token
-		"Bearer ",                   // Empty token
-		"NotBearer token123",        // Wrong scheme
-		"Bearer token with spaces",  // Invalid token format
+		"Bearer",                   // Missing token
+		"Bearer ",                  // Empty token
+		"NotBearer token123",       // Wrong scheme
+		"Bearer token with spaces", // Invalid token format
 		"Basic dXNlcjpwYXNz",       // Wrong auth type
 	}
 
