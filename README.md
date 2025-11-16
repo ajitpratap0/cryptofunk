@@ -296,6 +296,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed deployment instruction
 
 ### Operations & Deployment
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - ⭐ Production deployment (Docker + Kubernetes)
+- **[CI/CD Alternatives](docs/CI_CD_ALTERNATIVES.md)** - ⭐ Free CI/CD options for private repos
 - **[Phase 10 Status](docs/PHASE_10_STATUS.md)** - Production readiness checklist
 - **[Production Checklist](docs/PRODUCTION_CHECKLIST.md)** - Pre-deployment verification
 - **[Disaster Recovery](docs/DISASTER_RECOVERY.md)** - Backup and recovery procedures

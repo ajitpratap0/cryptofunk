@@ -1,0 +1,369 @@
+# CryptoFunk GitLab CI/CD Pipeline
+# Provides 50,000 free CI/CD minutes per month for comprehensive testing
+#
+# To use this:
+# 1. Create project on GitLab.com
+# 2. Mirror this repository: Settings → Repository → Mirroring repositories
+# 3. Add CI/CD variables: Settings → CI/CD → Variables
+#    - DATABASE_URL (if needed)
+#    - BINANCE_API_KEY, BINANCE_API_SECRET (for integration tests)
+# 4. Push to GitLab and watch pipelines run
+
+stages:
+  - lint       # Fast feedback (go fmt, vet, golangci-lint)
+  - test       # Unit tests with coverage
+  - build      # Build all components
+  - integration # Integration tests with full services
+  - security   # Security scanning
+  - deploy     # Docker builds and deployment
+
+variables:
+  GO_VERSION: "1.21"
+  POSTGRES_DB: cryptofunk_test
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_HOST_AUTH_METHOD: trust
+
+# Reusable templates for Go caching
+.go-cache:
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-go
+    paths:
+      - .go/pkg/mod/
+      - .cache/go-build/
+  before_script:
+    - mkdir -p .go .cache/go-build
+    - export GOPATH=$CI_PROJECT_DIR/.go
+    - export GOCACHE=$CI_PROJECT_DIR/.cache/go-build
+
+# ============================================================================
+# LINT STAGE - Fast feedback on code quality
+# ============================================================================
+
+lint:fmt:
+  stage: lint
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  script:
+    - echo "Checking Go code formatting..."
+    - gofmt -l . | tee /tmp/fmt-output
+    - |
+      if [ -s /tmp/fmt-output ]; then
+        echo "❌ Go code is not formatted. Run 'go fmt ./...' to fix:"
+        gofmt -d .
+        exit 1
+      fi
+    - echo "✅ All Go code is properly formatted"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+lint:vet:
+  stage: lint
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  script:
+    - echo "Running go vet..."
+    - go vet ./...
+    - echo "✅ go vet passed with no warnings"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+lint:golangci-lint:
+  stage: lint
+  image: golangci/golangci-lint:v1.62
+  extends: .go-cache
+  script:
+    - echo "Running golangci-lint..."
+    - golangci-lint run --timeout=5m
+    - echo "✅ golangci-lint passed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+  allow_failure: false
+
+# ============================================================================
+# TEST STAGE - Comprehensive unit testing with coverage
+# ============================================================================
+
+test:unit:
+  stage: test
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+
+  services:
+    - name: timescale/timescaledb-ha:pg15-latest
+      alias: postgres
+    - name: redis:7-alpine
+      alias: redis
+    - name: nats:2.10-alpine
+      alias: nats
+
+  variables:
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/cryptofunk_test?sslmode=disable"
+    REDIS_URL: "redis:6379"
+    NATS_URL: "nats://nats:4222"
+
+  before_script:
+    - echo "Installing PostgreSQL client..."
+    - apt-get update && apt-get install -y postgresql-client
+    - mkdir -p .go .cache/go-build
+    - export GOPATH=$CI_PROJECT_DIR/.go
+    - export GOCACHE=$CI_PROJECT_DIR/.cache/go-build
+
+    - echo "Waiting for PostgreSQL..."
+    - until pg_isready -h postgres -U postgres; do
+        echo "PostgreSQL is unavailable - sleeping"
+        sleep 1
+      done
+    - echo "✅ PostgreSQL is ready"
+
+    - echo "Setting up TimescaleDB and pgvector extensions..."
+    - psql -h postgres -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+    - psql -h postgres -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    - echo "✅ Extensions created"
+
+    - echo "Running database migrations..."
+    - go run cmd/migrate/main.go up
+    - echo "✅ Migrations applied"
+
+  script:
+    - echo "Running unit tests with race detector and coverage..."
+    - go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+    - echo ""
+    - echo "📊 Test Coverage Summary:"
+    - go tool cover -func=coverage.out | grep total | awk '{print "Total Coverage: " $3}'
+    - echo ""
+    - |
+      COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+      echo "Coverage: ${COVERAGE}%"
+      if (( $(echo "$COVERAGE < 50" | bc -l) )); then
+        echo "❌ Test coverage ${COVERAGE}% is below minimum threshold 50%"
+        exit 1
+      fi
+      echo "✅ Test coverage meets minimum threshold"
+
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.out
+    paths:
+      - coverage.out
+    expire_in: 7 days
+
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+# ============================================================================
+# BUILD STAGE - Build all components in parallel
+# ============================================================================
+
+build:components:
+  stage: build
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  parallel:
+    matrix:
+      - COMPONENT:
+          - cmd/orchestrator
+          - cmd/api
+          - cmd/migrate
+          - cmd/mcp-servers/market-data
+          - cmd/mcp-servers/technical-indicators
+          - cmd/mcp-servers/risk-analyzer
+          - cmd/mcp-servers/order-executor
+          - cmd/agents/technical-agent
+          - cmd/agents/trend-agent
+          - cmd/agents/risk-agent
+  script:
+    - echo "Building ${COMPONENT}..."
+    - go build -v -o /tmp/binary ./${COMPONENT}
+    - echo "✅ ${COMPONENT} built successfully"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+
+# ============================================================================
+# INTEGRATION STAGE - E2E and integration tests
+# ============================================================================
+
+integration:tests:
+  stage: integration
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+
+  services:
+    - name: timescale/timescaledb-ha:pg15-latest
+      alias: postgres
+    - name: redis:7-alpine
+      alias: redis
+    - name: nats:2.10-alpine
+      alias: nats
+
+  variables:
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/cryptofunk_test?sslmode=disable"
+    REDIS_URL: "redis:6379"
+    NATS_URL: "nats://nats:4222"
+
+  before_script:
+    - echo "Setting up integration test environment..."
+    - apt-get update && apt-get install -y postgresql-client
+    - mkdir -p .go .cache/go-build
+    - export GOPATH=$CI_PROJECT_DIR/.go
+    - export GOCACHE=$CI_PROJECT_DIR/.cache/go-build
+
+    - until pg_isready -h postgres -U postgres; do sleep 1; done
+    - psql -h postgres -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+    - psql -h postgres -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    - go run cmd/migrate/main.go up
+    - echo "✅ Integration test environment ready"
+
+  script:
+    - echo "Running integration tests..."
+    - go test -v -race -tags=integration ./...
+    - echo "✅ Integration tests passed"
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+  needs: ["test:unit", "build:components"]
+
+# ============================================================================
+# SECURITY STAGE - Security scanning with gosec
+# ============================================================================
+
+security:gosec:
+  stage: security
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  script:
+    - echo "Installing gosec..."
+    - go install github.com/securego/gosec/v2/cmd/gosec@latest
+    - echo "Running gosec security scan..."
+    - $GOPATH/bin/gosec -fmt sarif -out gosec-results.sarif ./... || true
+    - echo "✅ Security scan completed"
+    - |
+      if [ -f gosec-results.sarif ]; then
+        echo "SARIF report generated: gosec-results.sarif"
+      fi
+  artifacts:
+    reports:
+      sast: gosec-results.sarif
+    paths:
+      - gosec-results.sarif
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+security:dependency-scan:
+  stage: security
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  script:
+    - echo "Scanning for vulnerable dependencies..."
+    - go list -json -m all | go install golang.org/x/vuln/cmd/govulncheck@latest || true
+    - $GOPATH/bin/govulncheck ./... || true
+    - echo "✅ Dependency scan completed"
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# ============================================================================
+# DEPLOY STAGE - Docker builds and deployment
+# ============================================================================
+
+docker:build:orchestrator:
+  stage: deploy
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - echo "Logging into GitLab Container Registry..."
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - echo "Building orchestrator Docker image..."
+    - docker build -f deployments/docker/Dockerfile.orchestrator -t $CI_REGISTRY_IMAGE/orchestrator:$CI_COMMIT_SHORT_SHA -t $CI_REGISTRY_IMAGE/orchestrator:latest .
+    - docker push $CI_REGISTRY_IMAGE/orchestrator:$CI_COMMIT_SHORT_SHA
+    - docker push $CI_REGISTRY_IMAGE/orchestrator:latest
+    - echo "✅ Orchestrator image built and pushed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+  needs: ["integration:tests", "security:gosec"]
+
+docker:build:api:
+  stage: deploy
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - echo "Building API Docker image..."
+    - docker build -f deployments/docker/Dockerfile.api -t $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA -t $CI_REGISTRY_IMAGE/api:latest .
+    - docker push $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA
+    - docker push $CI_REGISTRY_IMAGE/api:latest
+    - echo "✅ API image built and pushed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+  needs: ["integration:tests", "security:gosec"]
+
+# Optional: Deploy to staging (customize for your infrastructure)
+deploy:staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - echo "Deploying to staging environment..."
+    - echo "Configure kubectl context and run deployment commands here"
+    - echo "Example:"
+    - echo "kubectl set image deployment/orchestrator orchestrator=$CI_REGISTRY_IMAGE/orchestrator:$CI_COMMIT_SHORT_SHA"
+    - echo "kubectl set image deployment/api api=$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA"
+    - echo "✅ Staging deployment completed"
+  environment:
+    name: staging
+    url: https://staging.cryptofunk.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: manual
+  needs: ["docker:build:orchestrator", "docker:build:api"]
+
+deploy:production:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - echo "Deploying to production environment..."
+    - echo "Configure kubectl context and run deployment commands here"
+    - echo "⚠️  This is a production deployment - ensure all tests pass!"
+    - echo "✅ Production deployment completed"
+  environment:
+    name: production
+    url: https://cryptofunk.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+  needs: ["docker:build:orchestrator", "docker:build:api"]
