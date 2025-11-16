@@ -9,7 +9,7 @@
 [![MCP](https://img.shields.io/badge/MCP-Official%20SDK-7C3AED?style=flat)](https://github.com/modelcontextprotocol/go-sdk)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)](https://github.com/ajitpratap0/cryptofunk)
-[![Test Coverage](https://img.shields.io/badge/Test%20Coverage-96.4%25-brightgreen)](https://github.com/ajitpratap0/cryptofunk)
+[![Test Coverage](https://img.shields.io/badge/Test%20Pass%20Rate-100%25-brightgreen)](https://github.com/ajitpratap0/cryptofunk)
 [![Code Quality](https://img.shields.io/badge/golangci--lint-passing-brightgreen)](https://github.com/ajitpratap0/cryptofunk)
 
 [Documentation](#documentation) •
