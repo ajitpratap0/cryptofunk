@@ -48,7 +48,8 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 		orchestratorClient: defaultOrchestratorClient,
 	}
 
-	server.setupRoutes()
+	server.setupMiddleware()  // Set up middleware first (includes recovery)
+	server.setupRoutes()      // Then set up routes
 
 	return server, tc
 }
@@ -70,7 +71,7 @@ func TestHealthEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "healthy", response["status"])
-	assert.NotEmpty(t, response["timestamp"])
+	assert.NotEmpty(t, response["uptime"]) // Handler returns uptime, not timestamp
 	assert.NotEmpty(t, response["version"])
 }
 
@@ -91,7 +92,14 @@ func TestStatusEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, response, "uptime")
-	assert.Contains(t, response, "active_sessions")
+	assert.Contains(t, response, "status")
+	assert.Contains(t, response, "components")
+	assert.Contains(t, response, "websocket")
+	// Verify components structure
+	components := response["components"].(map[string]interface{})
+	assert.Equal(t, "healthy", components["database"])
+	assert.Equal(t, "healthy", components["api"])
+	assert.Equal(t, "healthy", components["websocket"])
 }
 
 // TestRateLimiter tests the rate limiting middleware
@@ -142,12 +150,14 @@ func TestGetConfigEndpoint(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	// Should contain config data
-	assert.Contains(t, response, "api")
+	// Response is wrapped in "config" key
+	assert.Contains(t, response, "config")
+	config := response["config"].(map[string]interface{})
+	assert.Contains(t, config, "api")
 }
 
-// TestListAgents_NoDatabase tests list agents endpoint without database
-func TestListAgents_NoDatabase(t *testing.T) {
+// TestListAgents_Empty tests list agents endpoint with empty database
+func TestListAgents_Empty(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
@@ -156,12 +166,21 @@ func TestListAgents_NoDatabase(t *testing.T) {
 
 	server.router.ServeHTTP(w, req)
 
-	// Should return error when database is not available
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	// Should return OK with list of agents (may be empty or contain agents from other tests)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Contains(t, response, "agents")
+	assert.Contains(t, response, "count")
+	// Count should be >= 0 (database may have agents from other tests or heartbeats)
+	assert.GreaterOrEqual(t, int(response["count"].(float64)), 0)
 }
 
-// TestListPositions_NoDatabase tests list positions endpoint without database
-func TestListPositions_NoDatabase(t *testing.T) {
+// TestListPositions_Empty tests list positions endpoint with empty database
+func TestListPositions_Empty(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
@@ -170,12 +189,18 @@ func TestListPositions_NoDatabase(t *testing.T) {
 
 	server.router.ServeHTTP(w, req)
 
-	// Should return error when database is not available
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	// Should return OK with empty list when no positions exist
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Contains(t, response, "positions")
 }
 
-// TestListOrders_NoDatabase tests list orders endpoint without database
-func TestListOrders_NoDatabase(t *testing.T) {
+// TestListOrders_Empty tests list orders endpoint with empty database
+func TestListOrders_Empty(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
@@ -184,8 +209,14 @@ func TestListOrders_NoDatabase(t *testing.T) {
 
 	server.router.ServeHTTP(w, req)
 
-	// Should return error when database is not available
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	// Should return OK with empty list when no orders exist
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	assert.Contains(t, response, "orders")
 }
 
 // TestPlaceOrder_InvalidRequest tests place order with invalid request body

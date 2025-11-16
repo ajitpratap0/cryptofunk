@@ -44,8 +44,7 @@ func TestRateLimiterMiddlewareIntegration(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	server.setupMiddleware()
-	server.setupRoutes()
+	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
 	// Make 10 rapid requests to a rate-limited endpoint
 	successCount := 0
@@ -122,8 +121,12 @@ func TestMalformedAuthHeader(t *testing.T) {
 		"Basic dXNlcjpwYXNz",       // Wrong auth type
 	}
 
-	for _, header := range malformedHeaders {
-		t.Run("Header_"+header[:10], func(t *testing.T) {
+	for i, header := range malformedHeaders {
+		testName := header
+		if len(testName) > 15 {
+			testName = testName[:15]
+		}
+		t.Run("Header_"+testName, func(t *testing.T) {
 			req := httptest.NewRequest("POST", "/api/v1/orders", nil)
 			req.Header.Set("Authorization", header)
 			w := httptest.NewRecorder()
@@ -133,6 +136,7 @@ func TestMalformedAuthHeader(t *testing.T) {
 			// Should handle malformed auth gracefully
 			assert.NotEqual(t, http.StatusInternalServerError, w.Code,
 				"Should not crash on malformed auth header")
+			t.Logf("Test %d: %q returned status %d", i+1, header, w.Code)
 		})
 	}
 }
@@ -142,8 +146,7 @@ func TestConcurrentRequests(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	server.setupMiddleware()
-	server.setupRoutes()
+	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
 	// Launch 50 concurrent requests
 	done := make(chan bool, 50)
@@ -170,7 +173,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	server.setupMiddleware()
+	// setupTestAPIServer already initializes middleware and routes
 
 	// Add a route that panics
 	server.router.GET("/api/v1/panic", func(c *gin.Context) {
@@ -194,8 +197,7 @@ func TestRequestLogging(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	server.setupMiddleware()
-	server.setupRoutes()
+	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
 	req := httptest.NewRequest("GET", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
@@ -213,8 +215,7 @@ func TestPrometheusMetricsEndpoint(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	server.setupMiddleware()
-	server.setupRoutes()
+	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -245,7 +246,7 @@ func TestRootEndpoint(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	server.setupRoutes()
+	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
