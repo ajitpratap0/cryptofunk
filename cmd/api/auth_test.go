@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,7 @@ import (
 
 // TestRateLimiterBasic tests basic rate limiter functionality
 func TestRateLimiterBasic(t *testing.T) {
-	rl := newControlEndpointRateLimiter(3, 1000) // 3 requests per second
+	rl := NewRateLimiter("test", 3, 1*time.Second) // 3 requests per second
 
 	// First 3 requests should succeed
 	for i := 0; i < 3; i++ {
@@ -25,7 +26,7 @@ func TestRateLimiterBasic(t *testing.T) {
 
 // TestRateLimiterDifferentIPs tests rate limiter with different IPs
 func TestRateLimiterDifferentIPs(t *testing.T) {
-	rl := newControlEndpointRateLimiter(2, 1000)
+	rl := NewRateLimiter("test", 2, 1*time.Second)
 
 	// IP 1 uses its quota
 	assert.True(t, rl.allow("192.168.1.1"))

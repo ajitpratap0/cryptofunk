@@ -12,7 +12,7 @@ import (
 
 // TestRateLimiter_Allow tests the rate limiter allow method
 func TestRateLimiter_Allow(t *testing.T) {
-	rl := newControlEndpointRateLimiter(3, 1*time.Second)
+	rl := NewRateLimiter("test", 3, 1*time.Second)
 
 	// First 3 requests should be allowed
 	assert.True(t, rl.allow("192.168.1.1"))
@@ -28,7 +28,7 @@ func TestRateLimiter_Allow(t *testing.T) {
 
 // TestRateLimiter_Expiration tests that rate limiter resets after time window
 func TestRateLimiter_Expiration(t *testing.T) {
-	rl := newControlEndpointRateLimiter(2, 100*time.Millisecond)
+	rl := NewRateLimiter("test",2, 100*time.Millisecond)
 
 	// Use up the quota
 	assert.True(t, rl.allow("192.168.1.1"))
@@ -44,7 +44,7 @@ func TestRateLimiter_Expiration(t *testing.T) {
 
 // TestRateLimiter_MultipleIPs tests rate limiting with multiple IPs
 func TestRateLimiter_MultipleIPs(t *testing.T) {
-	rl := newControlEndpointRateLimiter(2, 1*time.Second)
+	rl := NewRateLimiter("test",2, 1*time.Second)
 
 	// IP 1 uses quota
 	assert.True(t, rl.allow("192.168.1.1"))
@@ -183,7 +183,7 @@ func TestCallOrchestratorWithRetry_NetworkFailure(t *testing.T) {
 
 // TestRateLimiterMiddleware tests the rate limiter middleware
 func TestRateLimiterMiddleware(t *testing.T) {
-	rl := newControlEndpointRateLimiter(2, 1*time.Second)
+	rl := NewRateLimiter("test",2, 1*time.Second)
 
 	middleware := rl.Middleware()
 
@@ -208,7 +208,7 @@ func TestDefaultOrchestratorClient(t *testing.T) {
 
 // TestNewControlEndpointRateLimiter tests rate limiter creation
 func TestNewControlEndpointRateLimiter(t *testing.T) {
-	rl := newControlEndpointRateLimiter(5, 10*time.Second)
+	rl := NewRateLimiter("test",5, 10*time.Second)
 
 	assert.NotNil(t, rl)
 	assert.Equal(t, 5, rl.maxRequests)
@@ -217,7 +217,7 @@ func TestNewControlEndpointRateLimiter(t *testing.T) {
 
 // TestRateLimiter_ConcurrentAccess tests rate limiter with concurrent requests
 func TestRateLimiter_ConcurrentAccess(t *testing.T) {
-	rl := newControlEndpointRateLimiter(10, 1*time.Second)
+	rl := NewRateLimiter("test",10, 1*time.Second)
 
 	// Make concurrent requests from same IP
 	done := make(chan bool, 20)
