@@ -70,6 +70,14 @@ func getValidConfig() *Config {
 				SecretKey:   "test_secret_key",
 				Testnet:     true,
 				RateLimitMS: 100,
+				Fees: FeeConfig{
+					Maker:        0.001,
+					Taker:        0.001,
+					BaseSlippage: 0.0005,
+					MarketImpact: 0.0001,
+					MaxSlippage:  0.003,
+					Withdrawal:   0.0,
+				},
 			},
 		},
 		API: APIConfig{
@@ -729,6 +737,135 @@ func TestValidateCaseInsensitiveTradingMode(t *testing.T) {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateFees(t *testing.T) {
+	tests := []struct {
+		name        string
+		fees        FeeConfig
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "valid fees",
+			fees: FeeConfig{
+				Maker:        0.001,
+				Taker:        0.001,
+				BaseSlippage: 0.0005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.003,
+				Withdrawal:   0.0,
+			},
+			expectError: false,
+		},
+		{
+			name: "negative maker fee",
+			fees: FeeConfig{
+				Maker:        -0.001,
+				Taker:        0.001,
+				BaseSlippage: 0.0005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.003,
+			},
+			expectError: true,
+			errorMsg:    "Maker fee must be non-negative",
+		},
+		{
+			name: "negative taker fee",
+			fees: FeeConfig{
+				Maker:        0.001,
+				Taker:        -0.001,
+				BaseSlippage: 0.0005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.003,
+			},
+			expectError: true,
+			errorMsg:    "Taker fee must be non-negative",
+		},
+		{
+			name: "excessive maker fee",
+			fees: FeeConfig{
+				Maker:        0.15, // 15%
+				Taker:        0.001,
+				BaseSlippage: 0.0005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.003,
+			},
+			expectError: true,
+			errorMsg:    "unusually high",
+		},
+		{
+			name: "negative base slippage",
+			fees: FeeConfig{
+				Maker:        0.001,
+				Taker:        0.001,
+				BaseSlippage: -0.0005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.003,
+			},
+			expectError: true,
+			errorMsg:    "Base slippage must be non-negative",
+		},
+		{
+			name: "max slippage less than base slippage",
+			fees: FeeConfig{
+				Maker:        0.001,
+				Taker:        0.001,
+				BaseSlippage: 0.005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.001, // Less than base
+			},
+			expectError: true,
+			errorMsg:    "Max slippage must be >= base slippage",
+		},
+		{
+			name: "negative market impact",
+			fees: FeeConfig{
+				Maker:        0.001,
+				Taker:        0.001,
+				BaseSlippage: 0.0005,
+				MarketImpact: -0.0001,
+				MaxSlippage:  0.003,
+			},
+			expectError: true,
+			errorMsg:    "Market impact must be non-negative",
+		},
+		{
+			name: "negative withdrawal fee",
+			fees: FeeConfig{
+				Maker:        0.001,
+				Taker:        0.001,
+				BaseSlippage: 0.0005,
+				MarketImpact: 0.0001,
+				MaxSlippage:  0.003,
+				Withdrawal:   -0.01,
+			},
+			expectError: true,
+			errorMsg:    "Withdrawal fee must be non-negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := getValidConfig()
+			cfg.Exchanges["binance"] = ExchangeConfig{
+				APIKey:      "test_key",
+				SecretKey:   "test_secret",
+				Testnet:     true,
+				RateLimitMS: 100,
+				Fees:        tt.fees,
+			}
+
+			err := cfg.Validate()
+
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
