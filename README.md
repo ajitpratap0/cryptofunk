@@ -282,10 +282,11 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed deployment instruction
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ### Architecture & Design
-- **[Architecture Document](ARCHITECTURE.md)** - Comprehensive system design with LLM integration
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture with hybrid MCP integration
 - **[LLM Agent Architecture](docs/LLM_AGENT_ARCHITECTURE.md)** - ⭐ LLM-powered multi-agent design
 - **[Future Agent Architecture](docs/AGENT_ARCHITECTURE_FUTURE.md)** - Custom RL models (post-MVP)
-- **[MCP Integration](docs/MCP_INTEGRATION.md)** - Model Context Protocol details
+- **[MCP Integration](docs/MCP_INTEGRATION.md)** - Model Context Protocol overview
+- **[MCP Server API Reference](docs/MCP_SERVERS.md)** - Complete API specs for all MCP servers
 - **[Open Source Tools](docs/OPEN_SOURCE_TOOLS.md)** - ⭐ Technology choices rationale
 
 ### Development
@@ -297,10 +298,17 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed deployment instruction
 ### Operations & Deployment
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - ⭐ Production deployment (Docker + Kubernetes)
 - **[CI/CD Alternatives](docs/CI_CD_ALTERNATIVES.md)** - ⭐ Free CI/CD options for private repos
-- **[Phase 10 Status](docs/PHASE_10_STATUS.md)** - Production readiness checklist
 - **[Production Checklist](docs/PRODUCTION_CHECKLIST.md)** - Pre-deployment verification
+- **[Production Security Checklist](docs/PRODUCTION_SECURITY_CHECKLIST.md)** - Security hardening checklist
 - **[Disaster Recovery](docs/DISASTER_RECOVERY.md)** - Backup and recovery procedures
 - **[Metrics Integration](docs/METRICS_INTEGRATION.md)** - Prometheus + Grafana setup
+- **[Alert Runbook](docs/ALERT_RUNBOOK.md)** - Production alert response procedures
+
+### Security
+- **[Security Audit](docs/SECURITY_AUDIT.md)** - Comprehensive security audit (Jan 2025)
+- **[Security Logging Audit](docs/SECURITY_LOGGING_AUDIT.md)** - Logging security review (Nov 2025)
+- **[Secret Rotation](docs/SECRET_ROTATION.md)** - API key and secret rotation procedures
+- **[TLS Setup](docs/TLS_SETUP.md)** - TLS/SSL configuration for production
 
 ---
 
