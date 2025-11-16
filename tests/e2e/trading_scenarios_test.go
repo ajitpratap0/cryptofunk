@@ -44,7 +44,7 @@ func TestE2E_PaperTradingWorkflow(t *testing.T) {
 	logger := zerolog.Nop()
 
 	// Create and initialize orchestrator
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -154,7 +154,7 @@ func TestE2E_ErrorRecovery(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -302,7 +302,7 @@ func TestE2E_CircuitBreakers(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -465,7 +465,7 @@ func TestE2E_MultiSymbolTrading(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
