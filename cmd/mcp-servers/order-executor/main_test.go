@@ -486,8 +486,8 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 		"quantity": 0.1,
 	}
 	placeResp := server.handleRequest(&placeReq)
-	placeResult := placeResp.Result.(map[string]interface{})
-	orderID := placeResult["order_id"].(string)
+	placeOrder := placeResp.Result.(*exchange.Order)
+	orderID := placeOrder.ID
 
 	// Get order status
 	req := MCPRequest{
@@ -572,8 +572,8 @@ func TestCancelOrder_ValidInput(t *testing.T) {
 		"price":    40000.0, // Low price to avoid fill
 	}
 	placeResp := server.handleRequest(&placeReq)
-	placeResult := placeResp.Result.(map[string]interface{})
-	orderID := placeResult["order_id"].(string)
+	placeOrder := placeResp.Result.(*exchange.Order)
+	orderID := placeOrder.ID
 
 	// Cancel order
 	req := MCPRequest{
