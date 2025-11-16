@@ -2,6 +2,7 @@ package memory_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -106,6 +107,10 @@ func TestSemanticMemory_FindByType(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
 	// Store items of different types
 	types := []memory.KnowledgeType{
 		memory.KnowledgeFact,
@@ -153,6 +158,10 @@ func TestSemanticMemory_FindByAgent(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
 	// Store items from different agents
 	agents := []string{"technical-agent", "risk-agent", "technical-agent", "trend-agent"}
 	for _, agentName := range agents {
@@ -187,6 +196,10 @@ func TestSemanticMemory_GetMostRelevant(t *testing.T) {
 
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
+
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
 
 	// Store items with different relevance scores
 	now := time.Now()
@@ -256,6 +269,10 @@ func TestSemanticMemory_RecordAccess(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
 	// Store an item
 	item := &memory.KnowledgeItem{
 		Type:       memory.KnowledgeFact,
@@ -290,6 +307,10 @@ func TestSemanticMemory_RecordValidation(t *testing.T) {
 
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
+
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
 
 	// Store an item
 	item := &memory.KnowledgeItem{
@@ -338,6 +359,10 @@ func TestSemanticMemory_UpdateConfidence(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
 	// Store an item
 	item := &memory.KnowledgeItem{
 		Type:       memory.KnowledgeFact,
@@ -371,6 +396,10 @@ func TestSemanticMemory_Delete(t *testing.T) {
 
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
+
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
 
 	// Store two items
 	item1 := &memory.KnowledgeItem{
@@ -422,9 +451,13 @@ func TestSemanticMemory_PruneExpired(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
-	now := time.Now()
-	pastTime := now.Add(-1 * time.Hour)
-	futureTime := now.Add(1 * time.Hour)
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	pastTime := now.Add(-24 * time.Hour) // 24 hours in the past to be sure
+	futureTime := now.Add(24 * time.Hour) // 24 hours in the future
 
 	// Store items with different expiration
 	items := []*memory.KnowledgeItem{
@@ -485,6 +518,10 @@ func TestSemanticMemory_PruneLowQuality(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
 	// Store items with different quality (success rates)
 	items := []*memory.KnowledgeItem{
 		{
@@ -538,6 +575,10 @@ func TestSemanticMemory_GetStats(t *testing.T) {
 
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
+
+	// Clear sample data from migration
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
 
 	// Store items of different types
 	types := []memory.KnowledgeType{
