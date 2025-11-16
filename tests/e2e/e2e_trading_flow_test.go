@@ -43,7 +43,7 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 	logger := zerolog.Nop()
 
 	// Create and initialize orchestrator
-	orch, err := orchestrator.NewOrchestrator(config, logger, 0)
+	orch, err := orchestrator.NewOrchestrator(config, logger, nil, 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
