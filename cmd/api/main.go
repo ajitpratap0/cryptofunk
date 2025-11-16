@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/api"
+	"github.com/ajitpratap0/cryptofunk/internal/audit"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
@@ -108,6 +109,10 @@ func (s *APIServer) setupMiddleware() {
 
 	// Prometheus metrics middleware (before request logger to capture all requests)
 	s.router.Use(metrics.GinMiddleware())
+
+	// Audit logging middleware (logs security-relevant events)
+	auditLogger := audit.NewLogger(s.db.Pool(), true)
+	s.router.Use(AuditLoggingMiddleware(auditLogger))
 
 	// Request logging middleware
 	s.router.Use(requestLogger())

@@ -6,7 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/audit"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -231,4 +233,129 @@ func (rlm *RateLimiterMiddleware) StartCleanupWorker(interval time.Duration) {
 			log.Debug().Msg("Rate limiter cleanup completed")
 		}
 	}()
+}
+
+// AuditLoggingMiddleware creates middleware that logs all requests to the audit log
+func AuditLoggingMiddleware(auditLogger *audit.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Generate request ID for correlation
+		requestID := uuid.New().String()
+		c.Set("request_id", requestID)
+
+		// Record start time
+		start := time.Now()
+
+		// Extract request info
+		ipAddress := c.ClientIP()
+		userAgent := c.GetHeader("User-Agent")
+		method := c.Request.Method
+		path := c.Request.URL.Path
+
+		// Process request
+		c.Next()
+
+		// Calculate duration
+		duration := time.Since(start).Milliseconds()
+
+		// Get response status
+		statusCode := c.Writer.Status()
+		success := statusCode >= 200 && statusCode < 400
+
+		// Determine event type based on path and method
+		eventType := determineEventType(method, path)
+		if eventType == "" {
+			// Skip audit logging for non-critical endpoints
+			return
+		}
+
+		// Determine severity
+		severity := audit.SeverityInfo
+		if !success {
+			if statusCode >= 500 {
+				severity = audit.SeverityError
+			} else if statusCode >= 400 {
+				severity = audit.SeverityWarning
+			}
+		}
+
+		// Get error message if any
+		var errorMsg string
+		if !success {
+			if err, exists := c.Get("error"); exists {
+				errorMsg = fmt.Sprintf("%v", err)
+			}
+		}
+
+		// Get user ID if authenticated (placeholder for now)
+		userID, _ := c.Get("user_id")
+		userIDStr := ""
+		if userID != nil {
+			userIDStr = fmt.Sprintf("%v", userID)
+		}
+
+		// Get resource ID if available
+		resource, _ := c.Get("resource_id")
+		resourceStr := ""
+		if resource != nil {
+			resourceStr = fmt.Sprintf("%v", resource)
+		}
+
+		// Create audit event
+		event := &audit.Event{
+			EventType: eventType,
+			Severity:  severity,
+			UserID:    userIDStr,
+			IPAddress: ipAddress,
+			UserAgent: userAgent,
+			Resource:  resourceStr,
+			Action:    fmt.Sprintf("%s %s", method, path),
+			Success:   success,
+			ErrorMsg:  errorMsg,
+			RequestID: requestID,
+			Duration:  duration,
+		}
+
+		// Log asynchronously to avoid blocking the response
+		go func() {
+			if err := auditLogger.Log(c.Request.Context(), event); err != nil {
+				log.Error().Err(err).Msg("Failed to log audit event")
+			}
+		}()
+	}
+}
+
+// determineEventType maps HTTP paths to audit event types
+func determineEventType(method, path string) audit.EventType {
+	// Trading control endpoints
+	if path == "/api/v1/trade/start" {
+		return audit.EventTypeTradingStart
+	}
+	if path == "/api/v1/trade/stop" {
+		return audit.EventTypeTradingStop
+	}
+	if path == "/api/v1/trade/pause" {
+		return audit.EventTypeTradingPause
+	}
+	if path == "/api/v1/trade/resume" {
+		return audit.EventTypeTradingResume
+	}
+
+	// Order endpoints
+	if path == "/api/v1/orders" && method == "POST" {
+		return audit.EventTypeOrderPlaced
+	}
+	if method == "DELETE" && len(path) > len("/api/v1/orders/") && path[:len("/api/v1/orders/")] == "/api/v1/orders/" {
+		return audit.EventTypeOrderCanceled
+	}
+
+	// Configuration endpoints
+	if path == "/api/v1/config" && method == "PATCH" {
+		return audit.EventTypeConfigUpdated
+	}
+	if path == "/api/v1/config" && method == "GET" {
+		return audit.EventTypeConfigViewed
+	}
+
+	// Return empty for non-critical endpoints (health checks, status, etc.)
+	return ""
 }
