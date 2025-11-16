@@ -48,8 +48,8 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 		orchestratorClient: defaultOrchestratorClient,
 	}
 
-	server.setupMiddleware()  // Set up middleware first (includes recovery)
-	server.setupRoutes()      // Then set up routes
+	server.setupMiddleware() // Set up middleware first (includes recovery)
+	server.setupRoutes()     // Then set up routes
 
 	return server, tc
 }

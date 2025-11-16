@@ -25,19 +25,19 @@ func TestInputValidationSQLInjection(t *testing.T) {
 	}{
 		{
 			name:     "SQL injection in order ID",
-			endpoint: "/api/v1/orders/1",  // Simplified to avoid httptest.NewRequest parsing issues
+			endpoint: "/api/v1/orders/1", // Simplified to avoid httptest.NewRequest parsing issues
 			method:   "GET",
 			expected: http.StatusNotFound,
 		},
 		{
 			name:     "SQL injection in symbol",
-			endpoint: "/api/v1/positions/BTC",  // Simplified
+			endpoint: "/api/v1/positions/BTC", // Simplified
 			method:   "GET",
-			expected: http.StatusOK,  // Returns empty list
+			expected: http.StatusOK, // Returns empty list
 		},
 		{
 			name:     "SQL injection in agent name",
-			endpoint: "/api/v1/agents/nonexistent",  // Simplified
+			endpoint: "/api/v1/agents/nonexistent", // Simplified
 			method:   "GET",
 			expected: http.StatusNotFound, // Should safely return 404, not execute query
 		},
@@ -165,10 +165,10 @@ func TestInputValidationCommandInjection(t *testing.T) {
 	// Simplified test payloads that don't break httptest.NewRequest
 	// Real command injection would be URL-encoded, but these test the principle
 	commandInjectionPayloads := []string{
-		"agent-name",      // Normal agent name (should return 404)
-		"agent%20name",    // URL encoded space
-		"agent%3Bls",      // URL encoded semicolon (;)
-		"agent%7Cwhoami",  // URL encoded pipe (|)
+		"agent-name",     // Normal agent name (should return 404)
+		"agent%20name",   // URL encoded space
+		"agent%3Bls",     // URL encoded semicolon (;)
+		"agent%7Cwhoami", // URL encoded pipe (|)
 	}
 
 	for i, payload := range commandInjectionPayloads {
