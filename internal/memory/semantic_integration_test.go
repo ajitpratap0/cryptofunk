@@ -587,7 +587,25 @@ func TestSemanticMemory_GetStats(t *testing.T) {
 func generateTestEmbedding() []float32 {
 	embedding := make([]float32, 1536)
 	for i := range embedding {
-		embedding[i] = 0.1 // Simple test value
+		// Generate varied test values to create unique embeddings
+		embedding[i] = float32(i) / 1536.0
 	}
 	return embedding
+}
+
+// Helper to format embedding as pgvector string
+func formatEmbeddingForPgvector(embedding []float32) string {
+	if len(embedding) == 0 {
+		return "[]"
+	}
+
+	result := "["
+	for i, val := range embedding {
+		if i > 0 {
+			result += ","
+		}
+		result += fmt.Sprintf("%f", val)
+	}
+	result += "]"
+	return result
 }
