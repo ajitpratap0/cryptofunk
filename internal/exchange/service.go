@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 	"github.com/rs/zerolog/log"
@@ -34,6 +35,7 @@ type ServiceConfig struct {
 	BinanceAPIKey  string
 	BinanceSecret  string
 	BinanceTestnet bool
+	Fees           config.FeeConfig // Exchange fee configuration
 }
 
 // NewService creates a new exchange service with specified trading mode
@@ -58,13 +60,14 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	case TradingModePaper:
 		fallthrough
 	default:
-		// Create mock exchange for paper trading
-		exchange = NewMockExchange(database)
+		// Create mock exchange for paper trading with configured fees
+		exchange = NewMockExchangeWithFees(database, config.Fees)
 		log.Info().Msg("Exchange service initialized (PAPER trading)")
 	}
 
-	// Create position manager
-	positionManager := NewPositionManager(database)
+	// Create position manager with configured fee rate (average of maker/taker)
+	avgFeeRate := (config.Fees.Maker + config.Fees.Taker) / 2.0
+	positionManager := NewPositionManagerWithFees(database, avgFeeRate)
 
 	// Create circuit breaker manager
 	circuitBreaker := risk.NewCircuitBreakerManager()
@@ -78,9 +81,20 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	}, nil
 }
 
-// NewServicePaper creates a service in paper trading mode (for backward compatibility)
+// NewServicePaper creates a service in paper trading mode with default fees (for backward compatibility)
 func NewServicePaper(database *db.DB) *Service {
-	service, _ := NewService(database, ServiceConfig{Mode: TradingModePaper})
+	// Default Binance-like fees
+	defaultFees := config.FeeConfig{
+		Maker:        0.001,  // 0.1%
+		Taker:        0.001,  // 0.1%
+		BaseSlippage: 0.0005, // 0.05%
+		MarketImpact: 0.0001, // 0.01%
+		MaxSlippage:  0.003,  // 0.3%
+	}
+	service, _ := NewService(database, ServiceConfig{
+		Mode: TradingModePaper,
+		Fees: defaultFees,
+	})
 	return service
 }
 

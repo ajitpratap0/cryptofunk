@@ -140,10 +140,21 @@ type RiskConfig struct {
 
 // ExchangeConfig contains exchange-specific settings
 type ExchangeConfig struct {
-	APIKey      string `mapstructure:"api_key"`
-	SecretKey   string `mapstructure:"secret_key"`
-	Testnet     bool   `mapstructure:"testnet"`
-	RateLimitMS int    `mapstructure:"rate_limit_ms"`
+	APIKey      string     `mapstructure:"api_key"`
+	SecretKey   string     `mapstructure:"secret_key"`
+	Testnet     bool       `mapstructure:"testnet"`
+	RateLimitMS int        `mapstructure:"rate_limit_ms"`
+	Fees        FeeConfig  `mapstructure:"fees"`
+}
+
+// FeeConfig contains exchange fee structure
+type FeeConfig struct {
+	Maker           float64 `mapstructure:"maker"`              // Maker fee percentage (e.g., 0.001 = 0.1%)
+	Taker           float64 `mapstructure:"taker"`              // Taker fee percentage (e.g., 0.001 = 0.1%)
+	BaseSlippage    float64 `mapstructure:"base_slippage"`      // Base slippage percentage (e.g., 0.0005 = 0.05%)
+	MarketImpact    float64 `mapstructure:"market_impact"`      // Market impact per unit (e.g., 0.0001 = 0.01%)
+	MaxSlippage     float64 `mapstructure:"max_slippage"`       // Maximum slippage percentage (e.g., 0.003 = 0.3%)
+	Withdrawal      float64 `mapstructure:"withdrawal"`         // Withdrawal fee percentage (optional)
 }
 
 // APIConfig contains REST API settings
@@ -292,6 +303,14 @@ func setDefaults(v *viper.Viper) {
 	// Monitoring defaults
 	v.SetDefault("monitoring.prometheus_port", 9100)
 	v.SetDefault("monitoring.enable_metrics", true)
+
+	// Exchange fee defaults (Binance-like structure)
+	v.SetDefault("exchanges.binance.fees.maker", 0.001)          // 0.1% maker fee
+	v.SetDefault("exchanges.binance.fees.taker", 0.001)          // 0.1% taker fee
+	v.SetDefault("exchanges.binance.fees.base_slippage", 0.0005) // 0.05% base slippage
+	v.SetDefault("exchanges.binance.fees.market_impact", 0.0001) // 0.01% market impact
+	v.SetDefault("exchanges.binance.fees.max_slippage", 0.003)   // 0.3% max slippage
+	v.SetDefault("exchanges.binance.fees.withdrawal", 0.0)       // No withdrawal fee by default
 }
 
 // Note: Comprehensive validation is now in validation.go

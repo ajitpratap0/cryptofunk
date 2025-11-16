@@ -17,13 +17,21 @@ type PositionManager struct {
 	mu               sync.RWMutex
 	openPositions    map[string]*db.Position // symbol -> position
 	currentSessionID *uuid.UUID
+	feeRate          float64                 // Average fee rate for calculations
 }
 
-// NewPositionManager creates a new position manager
+// NewPositionManager creates a new position manager with default fee rate
 func NewPositionManager(database *db.DB) *PositionManager {
+	// Default to 0.1% fee (average of maker/taker)
+	return NewPositionManagerWithFees(database, 0.001)
+}
+
+// NewPositionManagerWithFees creates a new position manager with custom fee configuration
+func NewPositionManagerWithFees(database *db.DB, feeRate float64) *PositionManager {
 	return &PositionManager{
 		db:            database,
 		openPositions: make(map[string]*db.Position),
+		feeRate:       feeRate,
 	}
 }
 
@@ -78,8 +86,8 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 	for _, fill := range fills {
 		totalValue += fill.Price * fill.Quantity
 		totalQty += fill.Quantity
-		// Assume 0.1% maker/taker fee for paper trading
-		totalFees += fill.Price * fill.Quantity * 0.001
+		// Use configured fee rate
+		totalFees += fill.Price * fill.Quantity * pm.feeRate
 	}
 
 	avgFillPrice := totalValue / totalQty
