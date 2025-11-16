@@ -112,7 +112,7 @@ func TestStartSession_ValidInput(t *testing.T) {
 	assert.Contains(t, result, "session_id")
 	assert.Equal(t, "BTCUSDT", result["symbol"])
 	assert.Equal(t, "PAPER", result["exchange"])
-	assert.Equal(t, "paper", result["mode"])
+	assert.Equal(t, "PAPER", result["mode"]) // Mode is uppercase in db.TradingMode
 	assert.Equal(t, 10000.0, result["initial_capital"])
 }
 
@@ -209,13 +209,14 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 	assert.Equal(t, 6, resp.ID)
 	assert.Nil(t, resp.Error)
 
-	result, ok := resp.Result.(map[string]interface{})
-	require.True(t, ok)
-	assert.Contains(t, result, "order_id")
-	assert.Equal(t, "BTCUSDT", result["symbol"])
-	assert.Equal(t, "buy", result["side"])
-	assert.Equal(t, "market", result["type"])
-	assert.Equal(t, 0.1, result["quantity"])
+	// PlaceMarketOrder now returns *exchange.Order directly
+	order, ok := resp.Result.(*exchange.Order)
+	require.True(t, ok, "Expected Result to be *exchange.Order")
+	assert.NotEmpty(t, order.ID)
+	assert.Equal(t, "BTCUSDT", order.Symbol)
+	assert.Equal(t, exchange.OrderSideBuy, order.Side)
+	assert.Equal(t, exchange.OrderTypeMarket, order.Type)
+	assert.Equal(t, 0.1, order.Quantity)
 }
 
 func TestPlaceMarketOrder_MissingSymbol(t *testing.T) {
@@ -341,14 +342,15 @@ func TestPlaceLimitOrder_ValidInput(t *testing.T) {
 	assert.Equal(t, 11, resp.ID)
 	assert.Nil(t, resp.Error)
 
-	result, ok := resp.Result.(map[string]interface{})
-	require.True(t, ok)
-	assert.Contains(t, result, "order_id")
-	assert.Equal(t, "BTCUSDT", result["symbol"])
-	assert.Equal(t, "sell", result["side"])
-	assert.Equal(t, "limit", result["type"])
-	assert.Equal(t, 0.1, result["quantity"])
-	assert.Equal(t, 50000.0, result["price"])
+	// PlaceLimitOrder now returns *exchange.Order directly
+	order, ok := resp.Result.(*exchange.Order)
+	require.True(t, ok, "Expected Result to be *exchange.Order")
+	assert.NotEmpty(t, order.ID)
+	assert.Equal(t, "BTCUSDT", order.Symbol)
+	assert.Equal(t, exchange.OrderSideSell, order.Side)
+	assert.Equal(t, exchange.OrderTypeLimit, order.Type)
+	assert.Equal(t, 0.1, order.Quantity)
+	assert.Equal(t, 50000.0, order.Price)
 }
 
 func TestPlaceLimitOrder_MissingPrice(t *testing.T) {
