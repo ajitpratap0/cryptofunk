@@ -1,5 +1,5 @@
 # golangci-lint configuration for cryptofunk
-# Compatible with golangci-lint v2.6.0+
+# Compatible with golangci-lint v2.1.0+
 
 version: "2"
 
