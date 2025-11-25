@@ -73,8 +73,12 @@ func (m *Migrator) loadMigrations() ([]Migration, error) {
 	}
 
 	for _, entry := range entries {
-		// Skip directories and non-SQL files
+		// Skip directories, non-SQL files, and DOWN migrations
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		// Skip DOWN migration files (e.g., 001_initial_schema_down.sql)
+		if strings.HasSuffix(entry.Name(), "_down.sql") {
 			continue
 		}
 
