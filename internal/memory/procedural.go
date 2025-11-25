@@ -348,6 +348,8 @@ func (pm *ProceduralMemory) GetPoliciesByAgent(ctx context.Context, agentName st
 
 // GetBestPolicies retrieves the best performing policies
 func (pm *ProceduralMemory) GetBestPolicies(ctx context.Context, limit int) ([]*Policy, error) {
+	// Sort by sharpe ratio first, then avg_pnl, then win_rate (calculated from success_count/times_applied)
+	// for a comprehensive ranking of policy performance
 	query := `
 		SELECT
 			id, type, name, description, conditions, actions, parameters,
@@ -359,7 +361,8 @@ func (pm *ProceduralMemory) GetBestPolicies(ctx context.Context, limit int) ([]*
 		FROM procedural_memory_policies
 		WHERE is_active = true
 		  AND times_applied >= 5
-		ORDER BY sharpe DESC, avg_pnl DESC
+		ORDER BY sharpe DESC NULLS LAST, avg_pnl DESC NULLS LAST,
+		         CASE WHEN times_applied > 0 THEN success_count::float / times_applied ELSE 0 END DESC
 		LIMIT $1
 	`
 
@@ -547,19 +550,28 @@ func (pm *ProceduralMemory) RecordSkillUsage(ctx context.Context, id uuid.UUID, 
 			WHERE id = $1
 		`
 	} else {
+		// Note: failure case doesn't use accuracy in the update, but we still
+		// need sequential parameters for PostgreSQL - $3 is a placeholder
 		query = `
 			UPDATE procedural_memory_skills
 			SET times_used = times_used + 1,
 			    failure_count = failure_count + 1,
 			    avg_duration = (avg_duration * times_used + $2) / (times_used + 1),
 			    proficiency = GREATEST(0.0, proficiency - 0.02),
-			    last_used = $4,
-			    updated_at = $4
+			    last_used = $3,
+			    updated_at = $3
 			WHERE id = $1
 		`
 	}
 
-	_, err := pm.pool.Exec(ctx, query, id, duration, accuracy, now)
+	// For success: id, duration, accuracy, now
+	// For failure: id, duration, now (accuracy not used but we keep consistent signature)
+	var err error
+	if success {
+		_, err = pm.pool.Exec(ctx, query, id, duration, accuracy, now)
+	} else {
+		_, err = pm.pool.Exec(ctx, query, id, duration, now)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to record skill usage: %w", err)
 	}

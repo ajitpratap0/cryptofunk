@@ -317,8 +317,11 @@ func AuditLoggingMiddleware(auditLogger *audit.Logger) gin.HandlerFunc {
 		}
 
 		// Log asynchronously to avoid blocking the response
+		// Capture context before goroutine to avoid race condition - the request
+		// context may be modified or become invalid after ServeHTTP returns
+		ctx := c.Request.Context()
 		go func() {
-			if err := auditLogger.Log(c.Request.Context(), event); err != nil {
+			if err := auditLogger.Log(ctx, event); err != nil {
 				log.Error().Err(err).Msg("Failed to log audit event")
 			}
 		}()
