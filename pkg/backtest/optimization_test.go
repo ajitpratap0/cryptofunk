@@ -10,6 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test constants for trading signals
+const (
+	testSignalBuy  = "BUY"
+	testSignalSell = "SELL"
+	testSignalHold = "HOLD"
+)
+
 // ============================================================================
 // MOCK STRATEGY FOR TESTING
 // ============================================================================
@@ -55,11 +62,11 @@ func (s *ParameterizedStrategy) GenerateSignals(engine *Engine) ([]*Signal, erro
 
 		var side string
 		if shortSMA > longSMA*(1+s.threshold) {
-			side = "BUY"
+			side = testSignalBuy
 		} else if shortSMA < longSMA*(1-s.threshold) {
-			side = "SELL"
+			side = testSignalSell
 		} else {
-			side = "HOLD"
+			side = testSignalHold
 		}
 
 		signals = append(signals, &Signal{

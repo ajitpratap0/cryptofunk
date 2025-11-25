@@ -15,6 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test constants
+const testDefaultVsCurrency = "usd"
+
 // MockBinanceClient mocks the Binance API client
 type MockBinanceClient struct {
 	prices      []*binance.SymbolPrice
@@ -1153,7 +1156,7 @@ func TestMarketDataServer_HandleGetCurrentPrice_VsCurrency(t *testing.T) {
 	}
 
 	// Verify vs_currency is correctly extracted
-	vsCurrency := "usd" // default
+	vsCurrency := testDefaultVsCurrency // default
 	if vs, ok := args["vs_currency"].(string); ok {
 		vsCurrency = vs
 	}
@@ -1165,12 +1168,12 @@ func TestMarketDataServer_HandleGetCurrentPrice_VsCurrency(t *testing.T) {
 		"symbol": "BTCUSDT",
 	}
 
-	vsCurrencyDefault := "usd"
+	vsCurrencyDefault := testDefaultVsCurrency
 	if vs, ok := argsNoVsCurrency["vs_currency"].(string); ok {
 		vsCurrencyDefault = vs
 	}
 
-	assert.Equal(t, "usd", vsCurrencyDefault)
+	assert.Equal(t, testDefaultVsCurrency, vsCurrencyDefault)
 }
 
 // TestMCPRequest_JSONParsing tests MCP request JSON parsing

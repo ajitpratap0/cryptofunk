@@ -39,7 +39,9 @@ func TestKellyIntegration_BacktestWithKellySizing(t *testing.T) {
 		}
 	}
 
-	engine.LoadHistoricalData("BTC", candles)
+	if err := engine.LoadHistoricalData("BTC", candles); err != nil {
+		t.Fatalf("Failed to load historical data: %v", err)
+	}
 
 	// Create a simple trend-following strategy
 	strategy := &SimpleTrendStrategy{
@@ -131,7 +133,7 @@ func (s *SimpleTrendStrategy) GenerateSignals(engine *Engine) ([]*Signal, error)
 
 		// Buy signal if price is rising
 		if priceChange > 0.001 && len(engine.Positions) < engine.MaxPositions {
-			signal.Side = "BUY"
+			signal.Side = testSignalBuy
 			signal.Confidence = 0.6
 			signal.Reasoning = "Upward trend detected"
 			signals = append(signals, signal)
@@ -139,7 +141,7 @@ func (s *SimpleTrendStrategy) GenerateSignals(engine *Engine) ([]*Signal, error)
 
 		// Sell signal if we have a position and decent confidence
 		if len(engine.Positions) > 0 && priceChange < -0.001 {
-			signal.Side = "SELL"
+			signal.Side = testSignalSell
 			signal.Confidence = 0.7
 			signal.Reasoning = "Taking profit"
 			signals = append(signals, signal)
@@ -263,7 +265,9 @@ func TestKellyIntegration_CompareSizingMethods(t *testing.T) {
 				Volume:    1000,
 			}
 		}
-		engine.LoadHistoricalData("BTC", candles)
+		if err := engine.LoadHistoricalData("BTC", candles); err != nil {
+			t.Fatalf("Failed to load historical data: %v", err)
+		}
 
 		// Run with simple strategy
 		strategy := &SimpleTrendStrategy{Symbol: "BTC"}

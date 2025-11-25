@@ -14,6 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test constants for LLM decision outcomes
+const (
+	testOutcomeSuccess = "SUCCESS"
+	testOutcomeFailure = "FAILURE"
+)
+
 // TestLLMDecisionBasicCRUDWithTestcontainers tests core CRUD operations for LLM decisions
 func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
@@ -35,7 +41,7 @@ func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create LLM decision with all fields populated
-		outcome := "SUCCESS"
+		outcome := testOutcomeSuccess
 		pnl := 150.50
 		contextData := map[string]interface{}{
 			"market_conditions": map[string]interface{}{
@@ -155,7 +161,7 @@ func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Update outcome to SUCCESS with P&L
-		err = tc.DB.UpdateLLMDecisionOutcome(ctx, decision.ID, "SUCCESS", 75.25)
+		err = tc.DB.UpdateLLMDecisionOutcome(ctx, decision.ID, testOutcomeSuccess, 75.25)
 		require.NoError(t, err)
 
 		// Verify update
@@ -196,7 +202,7 @@ func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Update outcome to FAILURE with negative P&L
-		err = tc.DB.UpdateLLMDecisionOutcome(ctx, decision.ID, "FAILURE", -50.00)
+		err = tc.DB.UpdateLLMDecisionOutcome(ctx, decision.ID, testOutcomeFailure, -50.00)
 		require.NoError(t, err)
 
 		// Verify update
@@ -553,12 +559,12 @@ func TestLLMDecisionConcurrencyWithTestcontainers(t *testing.T) {
 			go func(index int) {
 				defer wg.Done()
 
-				outcome := "SUCCESS"
+				outcome := testOutcomeSuccess
 				if index%2 == 0 {
-					outcome = "FAILURE"
+					outcome = testOutcomeFailure
 				}
 				pnl := float64(index * 10)
-				if outcome == "FAILURE" {
+				if outcome == testOutcomeFailure {
 					pnl = -pnl
 				}
 
@@ -588,9 +594,10 @@ func TestLLMDecisionConcurrencyWithTestcontainers(t *testing.T) {
 		failureCount := 0
 		for _, d := range decisions {
 			if d.Outcome != nil {
-				if *d.Outcome == "SUCCESS" {
+				switch *d.Outcome {
+				case testOutcomeSuccess:
 					successCount++
-				} else if *d.Outcome == "FAILURE" {
+				case testOutcomeFailure:
 					failureCount++
 				}
 			}

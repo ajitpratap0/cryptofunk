@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -57,9 +59,10 @@ func TestRateLimiterMiddlewareIntegration(t *testing.T) {
 
 		server.router.ServeHTTP(w, req)
 
-		if w.Code == http.StatusOK || w.Code == http.StatusNotImplemented || w.Code == http.StatusBadRequest {
+		switch w.Code {
+		case http.StatusOK, http.StatusNotImplemented, http.StatusBadRequest:
 			successCount++
-		} else if w.Code == http.StatusTooManyRequests {
+		case http.StatusTooManyRequests:
 			rateLimitedCount++
 
 			// Check error message
