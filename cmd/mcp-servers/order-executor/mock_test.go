@@ -3,8 +3,9 @@ package main
 import (
 	"testing"
 
-	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
 
 // TestCallTool_PlaceMarketOrder tests calling place_market_order tool

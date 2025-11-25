@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog/log"
+	"github.com/sony/gobreaker"
+
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
-	"github.com/rs/zerolog/log"
-	"github.com/sony/gobreaker"
 )
 
 // TradingMode represents the trading mode (paper or live)

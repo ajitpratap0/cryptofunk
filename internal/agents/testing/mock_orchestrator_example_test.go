@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/agents/testing"
 	"github.com/nats-io/nats.go"
+
+	"github.com/ajitpratap0/cryptofunk/internal/agents/testing"
 )
 
 // ExampleMockOrchestrator demonstrates basic usage of the MockOrchestrator

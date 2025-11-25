@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	agenttest "github.com/ajitpratap0/cryptofunk/internal/agents/testing"
 	"github.com/nats-io/nats.go"
+
+	agenttest "github.com/ajitpratap0/cryptofunk/internal/agents/testing"
 )
 
 // BenchmarkMockOrchestrator_SignalProcessing measures signal processing latency

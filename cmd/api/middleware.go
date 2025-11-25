@@ -6,10 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/audit"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/audit"
 )
 
 // RateLimiterConfig defines rate limiting configuration for different endpoint types

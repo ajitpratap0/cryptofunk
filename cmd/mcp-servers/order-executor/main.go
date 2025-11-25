@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
-	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
 
 // MCP Tool Names - defined as constants to avoid repetition
