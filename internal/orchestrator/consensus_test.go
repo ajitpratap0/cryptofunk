@@ -261,7 +261,11 @@ func TestStartContractNet(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Pre-assign task ID to avoid race condition between goroutine reading task.ID
+	// and StartContractNet writing to it
+	taskID := uuid.New()
 	task := &ContractNetTask{
+		ID:          taskID,
 		Description: "Analyze market data",
 		Requirements: map[string]interface{}{
 			"data_source": "binance",
@@ -278,9 +282,9 @@ func TestStartContractNet(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 
-		// Agent 1 bid
+		// Agent 1 bid - use captured taskID to avoid race
 		bid1 := &Bid{
-			TaskID:    task.ID,
+			TaskID:    taskID,
 			AgentName: "agent1",
 			Cost:      10.0,
 			Quality:   0.8,
@@ -289,9 +293,9 @@ func TestStartContractNet(t *testing.T) {
 		}
 		_ = cm.SubmitBid(ctx, bid1) // Test setup
 
-		// Agent 2 bid
+		// Agent 2 bid - use captured taskID to avoid race
 		bid2 := &Bid{
-			TaskID:    task.ID,
+			TaskID:    taskID,
 			AgentName: "agent2",
 			Cost:      8.0,
 			Quality:   0.9, // Higher quality
@@ -300,9 +304,9 @@ func TestStartContractNet(t *testing.T) {
 		}
 		_ = cm.SubmitBid(ctx, bid2) // Test setup
 
-		// Agent 3 bid
+		// Agent 3 bid - use captured taskID to avoid race
 		bid3 := &Bid{
-			TaskID:    task.ID,
+			TaskID:    taskID,
 			AgentName: "agent3",
 			Cost:      12.0,
 			Quality:   0.7,

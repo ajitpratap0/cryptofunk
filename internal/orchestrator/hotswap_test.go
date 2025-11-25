@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -397,9 +398,9 @@ func TestPauseAndResumeAgent(t *testing.T) {
 
 	_ = hsc.RegisterAgent(ctx, agent) // Test setup - error handled by test
 
-	// Subscribe to control messages
-	receivedPause := false
-	receivedResume := false
+	// Subscribe to control messages - use atomic booleans to avoid race conditions
+	var receivedPause atomic.Bool
+	var receivedResume atomic.Bool
 
 	_, _ = mb.Subscribe("test-agent", "control", func(msg *AgentMessage) error { // Test subscription
 		var payload map[string]interface{}
@@ -408,9 +409,9 @@ func TestPauseAndResumeAgent(t *testing.T) {
 		if command, ok := payload["command"].(string); ok {
 			switch command {
 			case "pause":
-				receivedPause = true
+				receivedPause.Store(true)
 			case "resume":
-				receivedResume = true
+				receivedResume.Store(true)
 			}
 		}
 		return nil
@@ -426,7 +427,7 @@ func TestPauseAndResumeAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	time.Sleep(50 * time.Millisecond)
-	assert.True(t, receivedPause)
+	assert.True(t, receivedPause.Load())
 
 	registered, _ := hsc.GetAgent("test-agent")
 	assert.Equal(t, AgentStatusPaused, registered.Status)
@@ -436,7 +437,7 @@ func TestPauseAndResumeAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	time.Sleep(50 * time.Millisecond)
-	assert.True(t, receivedResume)
+	assert.True(t, receivedResume.Load())
 
 	registered, _ = hsc.GetAgent("test-agent")
 	assert.Equal(t, AgentStatusActive, registered.Status)
