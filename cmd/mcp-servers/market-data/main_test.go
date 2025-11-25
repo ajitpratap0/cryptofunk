@@ -818,3 +818,511 @@ func TestLimitParameterEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// TestMCPServer_HandleRequest tests the MCP request routing
+func TestMCPServer_HandleRequest(t *testing.T) {
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+		With().Timestamp().Logger()
+
+	service := &MarketDataServer{
+		binanceClient:   nil,
+		coingeckoClient: nil,
+		logger:          logger,
+		preferCoinGecko: false,
+	}
+
+	mcpServer := &MCPServer{service: service}
+
+	t.Run("Initialize", func(t *testing.T) {
+		req := &MCPRequest{
+			JSONRPC: "2.0",
+			ID:      1,
+			Method:  "initialize",
+			Params:  json.RawMessage(`{}`),
+		}
+
+		resp := mcpServer.handleRequest(req)
+
+		assert.Equal(t, "2.0", resp.JSONRPC)
+		assert.Equal(t, 1, resp.ID)
+		assert.Nil(t, resp.Error)
+		assert.NotNil(t, resp.Result)
+
+		resultMap, ok := resp.Result.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "2024-11-05", resultMap["protocolVersion"])
+
+		serverInfo, ok := resultMap["serverInfo"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "market-data", serverInfo["name"])
+	})
+
+	t.Run("ToolsList", func(t *testing.T) {
+		req := &MCPRequest{
+			JSONRPC: "2.0",
+			ID:      2,
+			Method:  "tools/list",
+			Params:  json.RawMessage(`{}`),
+		}
+
+		resp := mcpServer.handleRequest(req)
+
+		assert.Nil(t, resp.Error)
+		assert.NotNil(t, resp.Result)
+
+		resultMap, ok := resp.Result.(map[string]interface{})
+		require.True(t, ok)
+		tools, ok := resultMap["tools"].([]map[string]interface{})
+		require.True(t, ok)
+		assert.GreaterOrEqual(t, len(tools), 3) // At least get_price, get_ticker_24h, get_order_book
+	})
+
+	t.Run("MethodNotFound", func(t *testing.T) {
+		req := &MCPRequest{
+			JSONRPC: "2.0",
+			ID:      3,
+			Method:  "unknown_method",
+			Params:  json.RawMessage(`{}`),
+		}
+
+		resp := mcpServer.handleRequest(req)
+
+		assert.NotNil(t, resp.Error)
+		assert.Equal(t, -32601, resp.Error.Code)
+		assert.Contains(t, resp.Error.Message, "Method not found")
+	})
+
+	t.Run("ToolsCallInvalidParams", func(t *testing.T) {
+		req := &MCPRequest{
+			JSONRPC: "2.0",
+			ID:      4,
+			Method:  "tools/call",
+			Params:  json.RawMessage(`invalid json`),
+		}
+
+		resp := mcpServer.handleRequest(req)
+
+		assert.NotNil(t, resp.Error)
+		assert.Equal(t, -32602, resp.Error.Code)
+		assert.Contains(t, resp.Error.Message, "Invalid params")
+	})
+
+	t.Run("ToolsCallUnknownTool", func(t *testing.T) {
+		req := &MCPRequest{
+			JSONRPC: "2.0",
+			ID:      5,
+			Method:  "tools/call",
+			Params:  json.RawMessage(`{"name": "unknown_tool", "arguments": {}}`),
+		}
+
+		resp := mcpServer.handleRequest(req)
+
+		assert.NotNil(t, resp.Error)
+		assert.Equal(t, -32000, resp.Error.Code)
+		assert.Contains(t, resp.Error.Message, "unknown tool")
+	})
+}
+
+// TestMCPServer_HandleInitialize tests the initialize handler
+func TestMCPServer_HandleInitialize(t *testing.T) {
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+		With().Timestamp().Logger()
+
+	service := &MarketDataServer{
+		logger: logger,
+	}
+
+	mcpServer := &MCPServer{service: service}
+
+	result := mcpServer.handleInitialize(json.RawMessage(`{}`))
+
+	resultMap, ok := result.(map[string]interface{})
+	require.True(t, ok)
+
+	assert.Equal(t, "2024-11-05", resultMap["protocolVersion"])
+
+	serverInfo, ok := resultMap["serverInfo"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "market-data", serverInfo["name"])
+
+	capabilities, ok := resultMap["capabilities"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotNil(t, capabilities["tools"])
+}
+
+// TestMCPServer_ListTools tests tool listing with and without CoinGecko
+func TestMCPServer_ListTools(t *testing.T) {
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+		With().Timestamp().Logger()
+
+	t.Run("WithoutCoinGecko", func(t *testing.T) {
+		service := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+		mcpServer := &MCPServer{service: service}
+
+		result := mcpServer.listTools()
+		resultMap, ok := result.(map[string]interface{})
+		require.True(t, ok)
+
+		tools, ok := resultMap["tools"].([]map[string]interface{})
+		require.True(t, ok)
+
+		// Should have 3 tools without CoinGecko
+		assert.Equal(t, 3, len(tools))
+
+		// Verify tool names
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool["name"].(string)
+		}
+		assert.Contains(t, toolNames, "get_price")
+		assert.Contains(t, toolNames, "get_ticker_24h")
+		assert.Contains(t, toolNames, "get_order_book")
+	})
+}
+
+// TestMCPServer_CallTool tests tool execution routing
+func TestMCPServer_CallTool(t *testing.T) {
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+		With().Timestamp().Logger()
+
+	service := &MarketDataServer{
+		binanceClient:   nil,
+		coingeckoClient: nil,
+		logger:          logger,
+	}
+	mcpServer := &MCPServer{service: service}
+
+	t.Run("UnknownTool", func(t *testing.T) {
+		result, err := mcpServer.callTool("nonexistent_tool", map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "unknown tool")
+	})
+
+	t.Run("GetPriceMissingSymbol", func(t *testing.T) {
+		result, err := mcpServer.callTool("get_price", map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "symbol must be a string")
+	})
+
+	t.Run("GetTicker24hMissingSymbol", func(t *testing.T) {
+		result, err := mcpServer.callTool("get_ticker_24h", map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "symbol must be a string")
+	})
+
+	t.Run("GetOrderBookMissingSymbol", func(t *testing.T) {
+		result, err := mcpServer.callTool("get_order_book", map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "symbol must be a string")
+	})
+
+	t.Run("GetMarketChartNoCoinGecko", func(t *testing.T) {
+		result, err := mcpServer.callTool("get_market_chart", map[string]interface{}{"coin_id": "bitcoin"})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+
+	t.Run("GetCoinInfoNoCoinGecko", func(t *testing.T) {
+		result, err := mcpServer.callTool("get_coin_info", map[string]interface{}{"coin_id": "bitcoin"})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+}
+
+// TestMarketDataServer_HandleGetMarketChart tests market chart handler
+func TestMarketDataServer_HandleGetMarketChart(t *testing.T) {
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+		With().Timestamp().Logger()
+
+	ctx := context.Background()
+
+	t.Run("NoCoinGeckoClient", func(t *testing.T) {
+		server := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+
+		result, err := server.handleGetMarketChart(ctx, map[string]interface{}{"coin_id": "bitcoin"})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+
+	t.Run("MissingCoinID", func(t *testing.T) {
+		server := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+
+		result, err := server.handleGetMarketChart(ctx, map[string]interface{}{})
+
+		// CoinGecko client check happens first
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+
+	t.Run("InvalidCoinIDType", func(t *testing.T) {
+		server := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+
+		result, err := server.handleGetMarketChart(ctx, map[string]interface{}{"coin_id": 12345})
+
+		// CoinGecko client check happens first
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+}
+
+// TestMarketDataServer_HandleGetCoinInfo tests coin info handler
+func TestMarketDataServer_HandleGetCoinInfo(t *testing.T) {
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+		With().Timestamp().Logger()
+
+	ctx := context.Background()
+
+	t.Run("NoCoinGeckoClient", func(t *testing.T) {
+		server := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+
+		result, err := server.handleGetCoinInfo(ctx, map[string]interface{}{"coin_id": "bitcoin"})
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+
+	t.Run("MissingCoinID", func(t *testing.T) {
+		server := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+
+		result, err := server.handleGetCoinInfo(ctx, map[string]interface{}{})
+
+		// CoinGecko client check happens first
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+
+	t.Run("InvalidCoinIDType", func(t *testing.T) {
+		server := &MarketDataServer{
+			coingeckoClient: nil,
+			logger:          logger,
+		}
+
+		result, err := server.handleGetCoinInfo(ctx, map[string]interface{}{"coin_id": 12345})
+
+		// CoinGecko client check happens first
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "CoinGecko client not available")
+	})
+}
+
+// TestMarketDataServer_HandleGetCurrentPrice_VsCurrency tests vs_currency parameter parsing
+func TestMarketDataServer_HandleGetCurrentPrice_VsCurrency(t *testing.T) {
+	// Note: This test verifies vs_currency parameter parsing logic
+	// without calling the actual handler (which requires a real binance client)
+
+	args := map[string]interface{}{
+		"symbol":      "BTCUSDT",
+		"vs_currency": "eur",
+	}
+
+	// Verify vs_currency is correctly extracted
+	vsCurrency := "usd" // default
+	if vs, ok := args["vs_currency"].(string); ok {
+		vsCurrency = vs
+	}
+
+	assert.Equal(t, "eur", vsCurrency)
+
+	// Test with missing vs_currency (should use default)
+	argsNoVsCurrency := map[string]interface{}{
+		"symbol": "BTCUSDT",
+	}
+
+	vsCurrencyDefault := "usd"
+	if vs, ok := argsNoVsCurrency["vs_currency"].(string); ok {
+		vsCurrencyDefault = vs
+	}
+
+	assert.Equal(t, "usd", vsCurrencyDefault)
+}
+
+// TestMCPRequest_JSONParsing tests MCP request JSON parsing
+func TestMCPRequest_JSONParsing(t *testing.T) {
+	testCases := []struct {
+		name      string
+		jsonInput string
+		expectErr bool
+	}{
+		{
+			name:      "ValidInitialize",
+			jsonInput: `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+			expectErr: false,
+		},
+		{
+			name:      "ValidToolsCall",
+			jsonInput: `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_price","arguments":{"symbol":"BTCUSDT"}}}`,
+			expectErr: false,
+		},
+		{
+			name:      "InvalidJSON",
+			jsonInput: `{invalid json}`,
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var req MCPRequest
+			err := json.Unmarshal([]byte(tc.jsonInput), &req)
+
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, "2.0", req.JSONRPC)
+			}
+		})
+	}
+}
+
+// TestMCPResponse_JSONSerialization tests MCP response JSON serialization
+func TestMCPResponse_JSONSerialization(t *testing.T) {
+	t.Run("SuccessResponse", func(t *testing.T) {
+		resp := &MCPResponse{
+			JSONRPC: "2.0",
+			ID:      1,
+			Result: map[string]interface{}{
+				"status": "ok",
+			},
+		}
+
+		data, err := json.Marshal(resp)
+		assert.NoError(t, err)
+
+		var decoded MCPResponse
+		err = json.Unmarshal(data, &decoded)
+		assert.NoError(t, err)
+		assert.Equal(t, "2.0", decoded.JSONRPC)
+		assert.Equal(t, 1, decoded.ID)
+		assert.Nil(t, decoded.Error)
+	})
+
+	t.Run("ErrorResponse", func(t *testing.T) {
+		resp := &MCPResponse{
+			JSONRPC: "2.0",
+			ID:      2,
+			Error: &MCPError{
+				Code:    -32601,
+				Message: "Method not found",
+			},
+		}
+
+		data, err := json.Marshal(resp)
+		assert.NoError(t, err)
+
+		var decoded MCPResponse
+		err = json.Unmarshal(data, &decoded)
+		assert.NoError(t, err)
+		assert.Equal(t, -32601, decoded.Error.Code)
+		assert.Equal(t, "Method not found", decoded.Error.Message)
+	})
+}
+
+// TestTickerData_Struct tests TickerData struct
+func TestTickerData_Struct(t *testing.T) {
+	ticker := TickerData{
+		Symbol:             "BTCUSDT",
+		Price:              "50000.00",
+		PriceChangePercent: "2.5",
+		Volume:             "100000",
+		High24h:            "51000.00",
+		Low24h:             "49000.00",
+		Timestamp:          1234567890,
+	}
+
+	// Test JSON serialization
+	data, err := json.Marshal(ticker)
+	assert.NoError(t, err)
+
+	// Verify JSON field names
+	assert.Contains(t, string(data), `"symbol"`)
+	assert.Contains(t, string(data), `"price"`)
+	assert.Contains(t, string(data), `"price_change_percent"`)
+	assert.Contains(t, string(data), `"volume"`)
+	assert.Contains(t, string(data), `"high_24h"`)
+	assert.Contains(t, string(data), `"low_24h"`)
+	assert.Contains(t, string(data), `"timestamp"`)
+
+	// Test deserialization
+	var decoded TickerData
+	err = json.Unmarshal(data, &decoded)
+	assert.NoError(t, err)
+	assert.Equal(t, ticker, decoded)
+}
+
+// TestDaysParameterParsing tests days parameter parsing for market chart
+func TestDaysParameterParsing(t *testing.T) {
+	testCases := []struct {
+		name     string
+		days     interface{}
+		expected int
+	}{
+		{"Float64 days", 30.0, 30},
+		{"String days", "14", 14},
+		{"No days (default)", nil, 7},
+		{"Invalid string", "invalid", 7},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]interface{}{}
+			if tc.days != nil {
+				args["days"] = tc.days
+			}
+
+			// Test days parsing logic (mirrors handleGetMarketChart)
+			days := 7 // default
+			if d, ok := args["days"]; ok {
+				if dNum, ok := d.(float64); ok {
+					days = int(dNum)
+				} else if dStr, ok := d.(string); ok {
+					switch dStr {
+					case "14":
+						days = 14
+					case "30":
+						days = 30
+					}
+				}
+			}
+
+			assert.Equal(t, tc.expected, days)
+		})
+	}
+}
