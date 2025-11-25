@@ -148,6 +148,19 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	}
 
 	switch req.Method {
+	case "initialize":
+		resp.Result = map[string]interface{}{
+			"protocolVersion": "2024-11-05",
+			"capabilities": map[string]interface{}{
+				"tools": map[string]bool{
+					"listChanged": true,
+				},
+			},
+			"serverInfo": map[string]string{
+				"name":    "order-executor",
+				"version": "1.0.0",
+			},
+		}
 	case "tools/list":
 		resp.Result = s.listTools()
 	case "tools/call":

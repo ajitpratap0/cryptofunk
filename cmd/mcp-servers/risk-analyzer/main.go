@@ -96,6 +96,19 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	}
 
 	switch req.Method {
+	case "initialize":
+		resp.Result = map[string]interface{}{
+			"protocolVersion": "2024-11-05",
+			"capabilities": map[string]interface{}{
+				"tools": map[string]bool{
+					"listChanged": true,
+				},
+			},
+			"serverInfo": map[string]string{
+				"name":    "risk-analyzer",
+				"version": "1.0.0",
+			},
+		}
 	case "tools/list":
 		resp.Result = s.listTools()
 	case "tools/call":
@@ -467,9 +480,9 @@ func (s *MCPServer) calculateVaR(args map[string]interface{}) (interface{}, erro
 	}
 	stdDev := 0.0
 	if len(returns) > 1 {
-		stdDev = sumSquaredDiff / float64(len(returns)-1)
-		if stdDev > 0 {
-			stdDev = 1.0 / (1.0 + (-0.5 * (sumSquaredDiff / float64(len(returns)-1)))) // approximation for sqrt
+		variance := sumSquaredDiff / float64(len(returns)-1)
+		if variance > 0 {
+			stdDev = math.Sqrt(variance)
 		}
 	}
 
