@@ -1,16 +1,16 @@
 # PostgreSQL with TimescaleDB and pgvector for CI testing
-# Based on TimescaleDB image, adds pgvector extension
+# Based on TimescaleDB image (Alpine), adds pgvector extension
 
 FROM timescale/timescaledb:latest-pg15
 
-# Install build dependencies for pgvector
+# Install build dependencies for pgvector (Alpine uses apk, not apt-get)
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+RUN apk add --no-cache --virtual .build-deps \
+    build-base \
     git \
-    postgresql-server-dev-15 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    clang15 \
+    llvm15-dev \
+    && apk add --no-cache postgresql15-dev
 
 # Clone and install pgvector
 RUN cd /tmp \
@@ -22,8 +22,6 @@ RUN cd /tmp \
     && rm -rf /tmp/pgvector
 
 # Clean up build dependencies to reduce image size
-RUN apt-get purge -y --auto-remove build-essential git postgresql-server-dev-15 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk del .build-deps
 
 USER postgres
