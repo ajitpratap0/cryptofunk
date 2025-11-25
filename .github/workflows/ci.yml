@@ -114,7 +114,8 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
-          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          # pgvector is optional - skip if not available (timescaledb-ha image doesn't include it)
+          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;" || echo "⚠️  pgvector extension not available - vector tests will be skipped"
 
       - name: Run database migrations
         env:
@@ -232,7 +233,8 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
-          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          # pgvector is optional - skip if not available (timescaledb-ha image doesn't include it)
+          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;" || echo "⚠️  pgvector extension not available - vector tests will be skipped"
 
       - name: Run database migrations
         env:
