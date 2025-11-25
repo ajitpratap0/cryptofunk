@@ -462,7 +462,7 @@ func TestSemanticMemory_PruneExpired(t *testing.T) {
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
-	pastTime := now.Add(-24 * time.Hour) // 24 hours in the past to be sure
+	pastTime := now.Add(-24 * time.Hour)  // 24 hours in the past to be sure
 	futureTime := now.Add(24 * time.Hour) // 24 hours in the future
 
 	// Store items with different expiration
@@ -539,8 +539,8 @@ func TestSemanticMemory_PruneLowQuality(t *testing.T) {
 			Source:          "test",
 			AgentName:       "test-agent",
 			ValidationCount: 10,
-			SuccessCount:    2,  // 20% success rate
-			FailureCount:    8,  // Low quality
+			SuccessCount:    2, // 20% success rate
+			FailureCount:    8, // Low quality
 		},
 		{
 			Type:            memory.KnowledgeFact,
@@ -551,8 +551,8 @@ func TestSemanticMemory_PruneLowQuality(t *testing.T) {
 			Source:          "test",
 			AgentName:       "test-agent",
 			ValidationCount: 10,
-			SuccessCount:    9,  // 90% success rate
-			FailureCount:    1,  // High quality
+			SuccessCount:    9, // 90% success rate
+			FailureCount:    1, // High quality
 		},
 	}
 
