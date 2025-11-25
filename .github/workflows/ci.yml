@@ -102,7 +102,8 @@ jobs:
           echo "PostgreSQL is up"
 
           echo "Waiting for Redis..."
-          until redis-cli -h localhost -p 6379 ping; do
+          # Use nc (netcat) to check port since redis-cli may not be installed
+          until nc -z localhost 6379; do
             echo "Redis is unavailable - sleeping"
             sleep 1
           done
