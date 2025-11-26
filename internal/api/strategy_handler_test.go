@@ -1143,7 +1143,7 @@ func TestGetCurrentStrategy_NeedsDBReload_NoRepo(t *testing.T) {
 	router.GET("/strategies/current", handler.GetCurrentStrategy)
 
 	// Make request
-	req, _ := http.NewRequest(http.MethodGet, "/strategies/current", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1185,7 +1185,7 @@ func TestGetCurrentStrategy_ConcurrentReloadRequests(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			req, _ := http.NewRequest(http.MethodGet, "/strategies/current", nil)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
@@ -1221,7 +1221,7 @@ func TestNeedsDBReload_ClearedAfterSuccessfulUpdate(t *testing.T) {
 	newStrategy := strategy.NewDefaultStrategy("New Strategy After Recovery")
 	body, _ := json.Marshal(newStrategy)
 
-	req, _ := http.NewRequest(http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
