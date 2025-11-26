@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/agents"
 )
 
 // AgentTestHelper provides utilities for testing agents

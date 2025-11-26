@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
-	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 )
 
 // TestOrderHelperMethodsWithTestcontainers tests uncovered order helper methods

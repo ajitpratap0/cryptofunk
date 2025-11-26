@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // KnowledgeType represents the type of knowledge stored in semantic memory

@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ajitpratap0/cryptofunk/internal/config"
-	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 )
 
 func main() {

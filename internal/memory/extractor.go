@@ -7,10 +7,11 @@ import (
 	"math"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // KnowledgeExtractor extracts knowledge from historical data and stores it in semantic memory

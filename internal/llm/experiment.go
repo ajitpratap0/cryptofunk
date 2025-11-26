@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // ExperimentManager manages A/B testing experiments for LLMs

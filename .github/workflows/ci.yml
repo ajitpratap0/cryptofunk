@@ -35,49 +35,14 @@ jobs:
         run: go vet ./...
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.62
+          version: v2.1.6
           args: --timeout=5m
 
   test:
     name: Test
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: timescale/timescaledb-ha:pg15-latest
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: cryptofunk_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      nats:
-        image: nats:2.10-alpine
-        ports:
-          - 4222:4222
-        options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8222/healthz || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -89,26 +54,31 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Start CI services
+        run: |
+          docker compose -f docker/ci/docker-compose.yml up -d --build --wait
+          echo "Services started successfully"
+
       - name: Install dependencies
         run: go mod download
 
-      - name: Wait for services
+      - name: Verify services are ready
         run: |
-          echo "Waiting for PostgreSQL..."
+          echo "Verifying PostgreSQL..."
           until pg_isready -h localhost -p 5432 -U postgres; do
             echo "PostgreSQL is unavailable - sleeping"
-            sleep 1
+            sleep 2
           done
           echo "PostgreSQL is up"
 
-          echo "Waiting for Redis..."
-          until redis-cli -h localhost -p 6379 ping; do
+          echo "Verifying Redis..."
+          until nc -z localhost 6379; do
             echo "Redis is unavailable - sleeping"
-            sleep 1
+            sleep 2
           done
           echo "Redis is up"
 
-      - name: Setup TimescaleDB extension
+      - name: Setup database extensions
         env:
           PGPASSWORD: postgres
         run: |
@@ -155,6 +125,11 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
+      - name: Stop CI services
+        if: always()
+        run: |
+          docker compose -f docker/ci/docker-compose.yml down -v
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -191,31 +166,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test, build]
 
-    services:
-      postgres:
-        image: timescale/timescaledb-ha:pg15-latest
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: cryptofunk_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-
-      nats:
-        image: nats:2.10-alpine
-        ports:
-          - 4222:4222
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -226,7 +176,21 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Setup TimescaleDB extension
+      - name: Start CI services
+        run: |
+          docker compose -f docker/ci/docker-compose.yml up -d --build --wait
+          echo "Services started successfully"
+
+      - name: Verify services are ready
+        run: |
+          echo "Verifying PostgreSQL..."
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "PostgreSQL is up"
+
+      - name: Setup database extensions
         env:
           PGPASSWORD: postgres
         run: |
@@ -247,6 +211,11 @@ jobs:
         run: |
           # Run tests with integration tag
           go test -v -race -tags=integration ./...
+
+      - name: Stop CI services
+        if: always()
+        run: |
+          docker compose -f docker/ci/docker-compose.yml down -v
 
   security:
     name: Security Scan

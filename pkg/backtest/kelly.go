@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // TradingStats holds statistical data for Kelly Criterion calculation

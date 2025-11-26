@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // PositionManager handles position tracking and P&L calculation

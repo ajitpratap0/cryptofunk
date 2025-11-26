@@ -9,10 +9,11 @@ import (
 	"time"
 
 	binance "github.com/adshao/go-binance/v2"
-	"github.com/ajitpratap0/cryptofunk/internal/alerts"
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/alerts"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // BinanceExchange implements Exchange interface for real Binance trading

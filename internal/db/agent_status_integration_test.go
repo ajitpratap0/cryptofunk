@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
-	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 )
 
 // TestAgentStatusCRUDWithTestcontainers tests complete CRUD operations for agent status

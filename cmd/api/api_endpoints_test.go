@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -488,6 +490,7 @@ func TestPlaceOrderWithDatabase(t *testing.T) {
 
 	server.router.ServeHTTP(w, req)
 
-	// Should succeed or fail gracefully
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusInternalServerError)
+	// Should succeed (201 Created for new order) or fail gracefully (500)
+	assert.True(t, w.Code == http.StatusCreated || w.Code == http.StatusOK || w.Code == http.StatusInternalServerError,
+		"Expected status 200, 201, or 500, got %d", w.Code)
 }

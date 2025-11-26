@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // PostgresContainer holds the testcontainer instance and connection details
@@ -49,14 +51,14 @@ func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	// Get connection string
 	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		container.Terminate(ctx)
+		_ = container.Terminate(ctx)
 		t.Fatalf("Failed to get connection string: %v", err)
 	}
 
 	// Create test database connection
 	config, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
-		container.Terminate(ctx)
+		_ = container.Terminate(ctx)
 		t.Fatalf("Failed to parse connection string: %v", err)
 	}
 
@@ -69,14 +71,14 @@ func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	// Create pool
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
-		container.Terminate(ctx)
+		_ = container.Terminate(ctx)
 		t.Fatalf("Failed to create connection pool: %v", err)
 	}
 
 	// Test connection
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		container.Terminate(ctx)
+		_ = container.Terminate(ctx)
 		t.Fatalf("Failed to ping database: %v", err)
 	}
 
@@ -106,10 +108,19 @@ func (tc *PostgresContainer) ApplyMigrations(migrationsPath string) error {
 	ctx := context.Background()
 	pool := tc.DB.Pool()
 
-	// Read all migration files in order
-	files, err := filepath.Glob(filepath.Join(migrationsPath, "*.sql"))
+	// Read all migration files in order (only UP migrations, not _down.sql files)
+	allFiles, err := filepath.Glob(filepath.Join(migrationsPath, "*.sql"))
 	if err != nil {
 		return fmt.Errorf("failed to list migration files: %w", err)
+	}
+
+	// Filter out DOWN migrations
+	files := make([]string, 0, len(allFiles))
+	for _, f := range allFiles {
+		base := filepath.Base(f)
+		if !strings.HasSuffix(base, "_down.sql") {
+			files = append(files, f)
+		}
 	}
 
 	// Sort files to ensure they run in order (001, 002, 003, etc.)
@@ -131,7 +142,7 @@ func (tc *PostgresContainer) ApplyMigrations(migrationsPath string) error {
 	for _, migrationFile := range files {
 		tc.t.Logf("Applying migration: %s", filepath.Base(migrationFile))
 
-		sqlBytes, err := os.ReadFile(migrationFile)
+		sqlBytes, err := os.ReadFile(migrationFile) // #nosec G304 -- Test helper: migration path from trusted glob pattern
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", migrationFile, err)
 		}

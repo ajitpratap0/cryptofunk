@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 // TestRateLimiter_Allow tests the rate limiter allow method

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,19 +15,8 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 )
 
-// mockDB is a mock database for testing
-type mockDB struct {
-	shouldFail bool
-}
-
-func (m *mockDB) Ping(ctx context.Context) error {
-	if m.shouldFail {
-		return context.DeadlineExceeded
-	}
-	return nil
-}
-
-func (m *mockDB) Close() {}
+// statusFailed is a constant for the "failed" status string
+const statusFailed = "failed"
 
 // createTestOrchestrator creates a test orchestrator with optional mock DB
 func createTestOrchestrator(t *testing.T, withDB bool, dbShouldFail bool) *orchestrator.Orchestrator {
@@ -190,7 +180,7 @@ func TestCheckDatabase(t *testing.T) {
 	}
 
 	// We expect "failed" since DB is nil or not connected
-	if result.Status != "failed" {
+	if result.Status != statusFailed {
 		t.Log("Database check status:", result.Status)
 	}
 
@@ -212,7 +202,7 @@ func TestCheckNATS(t *testing.T) {
 	}
 
 	// We expect "failed" since NATS is not connected in tests
-	if result.Status != "failed" {
+	if result.Status != statusFailed {
 		t.Logf("Unexpected NATS status: %s", result.Status)
 	}
 }
@@ -366,21 +356,32 @@ func TestHTTPServerStartStop(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test that we can make a request
-	resp, err := http.Get("http://localhost:18081/health")
+	reqCtx, reqCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "http://localhost:18081/health", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to make request to server: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 
 	// Stop the server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
 
-	if err := server.Stop(ctx); err != nil {
+	if err := server.Stop(stopCtx); err != nil {
 		t.Fatalf("Failed to stop HTTP server: %v", err)
 	}
 
@@ -388,8 +389,17 @@ func TestHTTPServerStartStop(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify server is stopped (request should fail)
-	_, err = http.Get("http://localhost:18081/health")
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer verifyCancel()
+
+	verifyReq, _ := http.NewRequestWithContext(verifyCtx, http.MethodGet, "http://localhost:18081/health", nil)
+	verifyResp, err := http.DefaultClient.Do(verifyReq)
 	if err == nil {
+		// Close body if request unexpectedly succeeded
+		if verifyResp != nil {
+			_, _ = io.Copy(io.Discard, verifyResp.Body)
+			_ = verifyResp.Body.Close()
+		}
 		t.Error("Expected request to fail after server stop, but it succeeded")
 	}
 }

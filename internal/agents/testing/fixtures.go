@@ -3,8 +3,9 @@ package testing
 import (
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ajitpratap0/cryptofunk/internal/agents"
 )
 
 // TestAgentConfig creates a standard test agent configuration

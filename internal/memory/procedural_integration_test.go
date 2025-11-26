@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 // TODO: These integration tests from PR #17 are currently failing.
 // They need to be fixed in a separate PR. Skipping for now to unblock Phase 14 PR.
@@ -429,37 +428,37 @@ func TestProceduralMemory_GetBestPolicies(t *testing.T) {
 	// Store policies with different performance
 	policies := []*memory.Policy{
 		{
-			Type:          memory.PolicyEntry,
-			Name:          "High Success Policy",
-			AgentName:     "test-agent",
-			Priority:      10,
-			Conditions:    []byte(`{}`),
-			Actions:       []byte(`{}`),
-			IsActive:      true,
-			TimesApplied:  100,
-			SuccessCount:  90, // 90% success rate
+			Type:         memory.PolicyEntry,
+			Name:         "High Success Policy",
+			AgentName:    "test-agent",
+			Priority:     10,
+			Conditions:   []byte(`{}`),
+			Actions:      []byte(`{}`),
+			IsActive:     true,
+			TimesApplied: 100,
+			SuccessCount: 90, // 90% success rate
 		},
 		{
-			Type:          memory.PolicyEntry,
-			Name:          "Low Success Policy",
-			AgentName:     "test-agent",
-			Priority:      10,
-			Conditions:    []byte(`{}`),
-			Actions:       []byte(`{}`),
-			IsActive:      true,
-			TimesApplied:  100,
-			SuccessCount:  30, // 30% success rate
+			Type:         memory.PolicyEntry,
+			Name:         "Low Success Policy",
+			AgentName:    "test-agent",
+			Priority:     10,
+			Conditions:   []byte(`{}`),
+			Actions:      []byte(`{}`),
+			IsActive:     true,
+			TimesApplied: 100,
+			SuccessCount: 30, // 30% success rate
 		},
 		{
-			Type:          memory.PolicyEntry,
-			Name:          "Medium Success Policy",
-			AgentName:     "test-agent",
-			Priority:      10,
-			Conditions:    []byte(`{}`),
-			Actions:       []byte(`{}`),
-			IsActive:      true,
-			TimesApplied:  100,
-			SuccessCount:  60, // 60% success rate
+			Type:         memory.PolicyEntry,
+			Name:         "Medium Success Policy",
+			AgentName:    "test-agent",
+			Priority:     10,
+			Conditions:   []byte(`{}`),
+			Actions:      []byte(`{}`),
+			IsActive:     true,
+			TimesApplied: 100,
+			SuccessCount: 60, // 60% success rate
 		},
 	}
 

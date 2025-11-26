@@ -25,10 +25,17 @@ func TestRiskAnalyzerServer_Initialize(t *testing.T) {
 
 	assert.Equal(t, "2.0", resp.JSONRPC)
 	assert.Equal(t, 1, resp.ID)
-	// Risk-analyzer doesn't implement "initialize" method - should return error
-	assert.NotNil(t, resp.Error)
-	assert.Equal(t, -32601, resp.Error.Code)
-	assert.Contains(t, resp.Error.Message, "Method not found")
+	assert.Nil(t, resp.Error)
+
+	// Verify initialize response contains required fields
+	result, ok := resp.Result.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "2024-11-05", result["protocolVersion"])
+
+	serverInfo, ok := result["serverInfo"].(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "risk-analyzer", serverInfo["name"])
+	assert.Equal(t, "1.0.0", serverInfo["version"])
 }
 
 func TestRiskAnalyzerServer_ListTools(t *testing.T) {
@@ -410,10 +417,8 @@ func TestStdioIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "2.0", decodedResp.JSONRPC)
-	// Risk-analyzer doesn't implement "initialize" method - should return error
-	assert.NotNil(t, decodedResp.Error)
-	assert.Equal(t, -32601, decodedResp.Error.Code)
-	assert.Contains(t, decodedResp.Error.Message, "Method not found")
+	assert.Nil(t, decodedResp.Error)
+	assert.NotNil(t, decodedResp.Result)
 }
 
 // Edge case tests to improve coverage

@@ -1,5 +1,5 @@
 # golangci-lint configuration for cryptofunk
-# Compatible with golangci-lint v2.6.0+
+# Compatible with golangci-lint v2.x
 
 version: "2"
 
@@ -8,13 +8,9 @@ run:
   tests: true
   modules-download-mode: readonly
   allow-parallel-runners: true
-  skip-dirs:
-    - cmd/agents/orderbook-agent
-    - cmd/agents/arbitrage-agent
-    - cmd/agents/reversion-agent
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck      # Check for unchecked errors
     - govet         # Standard go vet checks
@@ -28,89 +24,80 @@ linters:
     - noctx         # Detect HTTP requests without context
     - rowserrcheck  # Check SQL rows.Err is checked
     - sqlclosecheck # Check SQL rows/statements are closed
+  settings:
+    errcheck:
+      check-blank: false
+      check-type-assertions: false
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (handled by errcheck)
+        - G304  # File path provided as input (false positives in config loading)
+    govet:
+      enable:
+        - asmdecl
+        - assign
+        - atomic
+        - bools
+        - buildtag
+        - cgocall
+        - composites
+        - copylocks
+        - errorsas
+        - httpresponse
+        - ifaceassert
+        - loopclosure
+        - lostcancel
+        - nilfunc
+        - printf
+        - shift
+        - stdmethods
+        - structtag
+        - tests
+        - unmarshal
+        - unreachable
+        - unsafeptr
+        - unusedresult
+    staticcheck:
+      checks: ["all"]
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    paths:
+      - cmd/agents/orderbook-agent
+      - cmd/agents/arbitrage-agent
+      - cmd/agents/reversion-agent
+      - ".*\\.pb\\.go"
+    rules:
+      # Exclude some linters from running on tests files
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - errcheck
+          - gosec
+          - goconst
+      # Ignore main packages (they handle errors with log.Fatal)
+      - path: cmd/
+        text: "Error return value"
+        linters:
+          - errcheck
 
 formatters:
   enable:
     - gofmt         # Format code
     - goimports     # Organize imports
-
-linters-settings:
-  errcheck:
-    check-blank: false
-    check-type-assertions: false
-    exclude-functions:
-      - (io.Closer).Close
-      - (*database/sql.Rows).Close
-      - (*database/sql.Stmt).Close
-
-  gosec:
-    excludes:
-      - G104  # Audit errors not checked (handled by errcheck)
-      - G304  # File path provided as input (false positives in config loading)
-
-  govet:
-    check-shadowing: false
-    enable:
-      - asmdecl
-      - assign
-      - atomic
-      - bools
-      - buildtag
-      - cgocall
-      - composites
-      - copylocks
-      - errorsas
-      - httpresponse
-      - ifaceassert
-      - loopclosure
-      - lostcancel
-      - nilfunc
-      - printf
-      - shift
-      - stdmethods
-      - structtag
-      - tests
-      - unmarshal
-      - unreachable
-      - unsafeptr
-      - unusedresult
-
-  staticcheck:
-    checks: ["all"]
-
-  unused:
-    check-exported: false
-
-formatters-settings:
-  goimports:
-    local-prefixes: github.com/ajitpratap0/cryptofunk
-
-issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - gosec
-        - goconst
-
-    # Exclude known issues in generated code
-    - path: ".*\\.pb\\.go"
-      linters:
-        - all
-
-    # Ignore main packages (they handle errors with log.Fatal)
-    - path: cmd/
-      text: "Error return value"
-      linters:
-        - errcheck
-
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ajitpratap0/cryptofunk
 
 output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-  sort-results: true
+  formats:
+    text:
+      path: stdout
+      colors: true

@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 // Integration tests for audit package - run with: go test -tags=integration ./internal/audit
 

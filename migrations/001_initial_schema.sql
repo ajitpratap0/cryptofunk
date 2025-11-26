@@ -418,20 +418,9 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
 
 -- =============================================================================
--- SCHEMA VERSION
--- =============================================================================
-
-CREATE TABLE schema_version (
-    version INTEGER PRIMARY KEY,
-    applied_at TIMESTAMPTZ DEFAULT NOW(),
-    description TEXT
-);
-
-INSERT INTO schema_version (version, description) VALUES
-    (1, 'Initial schema with TimescaleDB and pgvector support');
-
--- =============================================================================
 -- COMPLETED
 -- =============================================================================
+-- Note: schema_version table is managed by the migration system (internal/db/migrate.go)
+-- Do not create schema_version here as the migrator handles it automatically.
 
 SELECT 'Schema created successfully!' AS status;

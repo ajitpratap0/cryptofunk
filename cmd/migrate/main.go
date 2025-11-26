@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	_ "github.com/lib/pq"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 func main() {

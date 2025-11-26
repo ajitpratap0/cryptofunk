@@ -634,7 +634,10 @@ func (cm *ConsensusManager) StartContractNet(ctx context.Context, task *Contract
 		return nil, fmt.Errorf("too many eligible agents: got %d, max %d", len(eligibleAgents), cm.config.MaxParticipants)
 	}
 
-	task.ID = uuid.New()
+	// Only generate a new ID if one isn't already set (supports pre-assigned IDs for testing)
+	if task.ID == uuid.Nil {
+		task.ID = uuid.New()
+	}
 
 	log.Info().
 		Str("task_id", task.ID.String()).
