@@ -36,8 +36,13 @@ export class DecisionApiError extends Error {
   }
 }
 
+// API limits matching backend constants
+const MAX_LIST_LIMIT = 500;
+const MAX_SEARCH_QUERY_LENGTH = 500;
+
 /**
  * Helper function to build query string from filter object
+ * Includes client-side validation to match backend constraints
  */
 function buildQueryString(filter: DecisionFilter): string {
   const params = new URLSearchParams();
@@ -48,11 +53,28 @@ function buildQueryString(filter: DecisionFilter): string {
   if (filter.model) params.append('model', filter.model);
   if (filter.from_date) params.append('from_date', filter.from_date);
   if (filter.to_date) params.append('to_date', filter.to_date);
-  if (filter.limit !== undefined) params.append('limit', filter.limit.toString());
-  if (filter.offset !== undefined) params.append('offset', filter.offset.toString());
+
+  // Validate and clamp limit to backend constraints (1-500)
+  if (filter.limit !== undefined) {
+    const limit = Math.max(1, Math.min(MAX_LIST_LIMIT, filter.limit));
+    params.append('limit', limit.toString());
+  }
+
+  // Validate offset is non-negative
+  if (filter.offset !== undefined) {
+    const offset = Math.max(0, filter.offset);
+    params.append('offset', offset.toString());
+  }
 
   const query = params.toString();
   return query ? `?${query}` : '';
+}
+
+/**
+ * Validates and truncates a search query to the maximum allowed length
+ */
+export function validateSearchQuery(query: string): string {
+  return query.slice(0, MAX_SEARCH_QUERY_LENGTH);
 }
 
 /**

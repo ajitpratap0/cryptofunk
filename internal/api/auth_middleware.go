@@ -1,3 +1,33 @@
+// Package api provides HTTP API handlers and middleware for the CryptoFunk trading system.
+//
+// # Authentication Middleware
+//
+// This package includes a complete API key authentication system (auth_middleware.go)
+// that provides:
+//   - API key validation via SHA-256 hashing
+//   - Permission-based authorization
+//   - Configurable authentication (enabled/disabled via config)
+//   - Support for X-API-Key header and Authorization: Bearer tokens
+//
+// # Enabling Authentication
+//
+// To enable authentication for decision endpoints:
+//
+//  1. Run migration 009_api_keys.sql to create the api_keys table
+//  2. Set api.auth.enabled = true in config.yaml
+//  3. Create API keys using the create_api_key() PostgreSQL function
+//  4. Wire up AuthMiddleware in cmd/api/main.go setupRoutes()
+//
+// Example configuration (config.yaml):
+//
+//	api:
+//	  auth:
+//	    enabled: true
+//	    header_name: "X-API-Key"
+//	    require_https: true
+//
+// The auth middleware is currently NOT enabled by default to allow for easier
+// development and testing. Enable it before production deployment.
 package api
 
 import (
@@ -5,6 +35,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -96,6 +128,13 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 
 	if err != nil {
 		return nil, err // Key not found or DB error
+	}
+
+	// Unmarshal permissions JSON into slice
+	if len(permissions) > 0 {
+		if err := json.Unmarshal(permissions, &apiKey.Permissions); err != nil {
+			return nil, fmt.Errorf("invalid permissions JSON: %w", err)
+		}
 	}
 
 	// Check if key is revoked
