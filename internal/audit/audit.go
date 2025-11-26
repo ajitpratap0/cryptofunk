@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // EventType represents the type of audit event
@@ -102,8 +104,12 @@ func NewLogger(db *pgxpool.Pool, enabled bool) *Logger {
 // Log records an audit event
 func (l *Logger) Log(ctx context.Context, event *Event) error {
 	if !l.enabled {
+		// Record that audit was skipped (for observability consistency)
+		metrics.RecordAuditLog(string(event.EventType), true, 0)
 		return nil
 	}
+
+	start := time.Now()
 
 	// Set defaults
 	if event.ID == uuid.Nil {
@@ -144,9 +150,21 @@ func (l *Logger) Log(ctx context.Context, event *Event) error {
 	}
 
 	// Persist to database if pool is available
+	// Note: If db is nil, we still logged to stderr above, so this is considered
+	// a successful audit (stderr-only mode). Metrics reflect this partial success.
 	if l.db != nil {
-		return l.persistEvent(ctx, event)
+		if err := l.persistEvent(ctx, event); err != nil {
+			// Record failure metrics
+			durationMs := float64(time.Since(start).Milliseconds())
+			metrics.RecordAuditLog(string(event.EventType), false, durationMs)
+			metrics.RecordAuditLogFailure("persist_error", string(event.EventType))
+			return err
+		}
 	}
+
+	// Record success metrics (either persisted to DB or logged to stderr only)
+	durationMs := float64(time.Since(start).Milliseconds())
+	metrics.RecordAuditLog(string(event.EventType), true, durationMs)
 
 	return nil
 }

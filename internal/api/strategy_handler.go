@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -23,6 +24,22 @@ import (
 const (
 	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
 	MaxStrategyUploadSize = 10 * 1024 * 1024
+
+	// MinStrategyUploadSize is the minimum allowed size for strategy files (50 bytes)
+	// This is a sanity check to reject obviously empty/corrupted files, NOT a guarantee
+	// that the content is valid. Actual validation happens during YAML/JSON parsing.
+	//
+	// Rationale for 50 bytes (with ~2x safety margin):
+	// - Theoretical minimum valid YAML: "metadata:\n  name: x\n" (~20 bytes)
+	// - Theoretical minimum valid JSON: {"metadata":{"name":"x"}} (~25 bytes)
+	// - Safety margin rationale:
+	//   * Real strategies need schema_version, so add ~15-20 bytes
+	//   * BOM markers or encoding headers may add bytes
+	//   * Whitespace/formatting variations
+	// - 50 bytes = ~2x theoretical minimum provides reasonable buffer
+	// - Files smaller than 50 bytes are almost certainly empty, truncated, or corrupted
+	// - A practical minimal strategy with required fields is typically 100-200 bytes
+	MinStrategyUploadSize = 50
 
 	// DefaultAuditTimeout is the default timeout for audit logging operations
 	DefaultAuditTimeout = 5 * time.Second
@@ -49,11 +66,17 @@ var filenameRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
 // StrategyHandler handles HTTP requests for strategy import/export
 type StrategyHandler struct {
-	// mu protects concurrent access to currentStrategy
+	// mu protects concurrent access to currentStrategy and needsDBReload
 	mu sync.RWMutex
 
 	// currentStrategy holds the active strategy (in-memory cache)
 	currentStrategy *strategy.StrategyConfig
+
+	// needsDBReload indicates that the in-memory state may be stale after a failed
+	// DB write. When true, GetCurrentStrategy will attempt to reload from the database
+	// to ensure consistency. This provides a recovery mechanism for the case where
+	// a DB persist fails but a previous update had already persisted a newer version.
+	needsDBReload bool
 
 	// repo handles database persistence (optional - if nil, uses in-memory only)
 	repo *db.StrategyRepository
@@ -140,6 +163,149 @@ func isAllowedExtension(filename string) bool {
 	return AllowedStrategyExtensions[ext]
 }
 
+// isAllowedMIMEType validates that the detected MIME type is consistent with the file extension.
+//
+// SECURITY NOTE: This is defense-in-depth only, NOT a security boundary.
+// http.DetectContentType only reads the first 512 bytes and cannot reliably
+// distinguish between text file types (YAML, JSON, scripts all return "text/plain").
+// The primary security controls are:
+// 1. File extension whitelist (.yaml, .yml, .json)
+// 2. File size limits (50 bytes - 10MB)
+// 3. Subsequent YAML/JSON parsing which validates structure
+// 4. Strategy validation which checks business rules
+//
+// This function catches obvious mismatches (e.g., binary file with .yaml extension)
+// but should not be relied upon for security against sophisticated attacks.
+func isAllowedMIMEType(detectedType, filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// http.DetectContentType returns "text/plain; charset=utf-8" for text files
+	// which includes YAML and JSON files
+	if strings.HasPrefix(detectedType, "text/plain") {
+		return true
+	}
+
+	// Also accept application/json for .json files
+	if ext == ".json" && strings.HasPrefix(detectedType, "application/json") {
+		return true
+	}
+
+	// Accept application/octet-stream as fallback only for YAML files
+	// JSON files should be reliably detected, so we're stricter with them
+	if strings.HasPrefix(detectedType, "application/octet-stream") && (ext == ".yaml" || ext == ".yml") {
+		return true
+	}
+
+	return false
+}
+
+// knownBinaryMagicNumbers contains magic number signatures for common binary file types.
+// These are used to quickly reject files that are definitely not text-based config files.
+var knownBinaryMagicNumbers = [][]byte{
+	{0x89, 0x50, 0x4E, 0x47},             // PNG
+	{0xFF, 0xD8, 0xFF},                   // JPEG
+	{0x47, 0x49, 0x46, 0x38},             // GIF
+	{0x50, 0x4B, 0x03, 0x04},             // ZIP/JAR/Office
+	{0x25, 0x50, 0x44, 0x46},             // PDF
+	{0x7F, 0x45, 0x4C, 0x46},             // ELF
+	{0x4D, 0x5A},                         // Windows EXE/DLL
+	{0x1F, 0x8B},                         // GZIP
+	{0x42, 0x5A, 0x68},                   // BZIP2
+	{0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00}, // XZ
+	{0x52, 0x61, 0x72, 0x21},             // RAR
+	{0x00, 0x00, 0x00},                   // Various binary formats (starts with nulls)
+}
+
+// isBinaryFile performs magic number checking to detect binary files.
+// This catches obvious binary files that should be rejected regardless of extension.
+func isBinaryFile(data []byte) bool {
+	if len(data) < 2 {
+		return false
+	}
+
+	for _, magic := range knownBinaryMagicNumbers {
+		if bytes.HasPrefix(data, magic) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// FileValidationError represents a file validation failure with structured details
+type FileValidationError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
+func (e *FileValidationError) Error() string {
+	if e.Details != "" {
+		return fmt.Sprintf("%s: %s", e.Message, e.Details)
+	}
+	return e.Message
+}
+
+// ValidateUploadedFile performs comprehensive validation on an uploaded file.
+// This consolidates all file validation checks into a single reusable function.
+//
+// Validation checks performed:
+// 1. File extension whitelist
+// 2. File size bounds (min/max)
+// 3. Binary file detection via magic numbers
+// 4. MIME type consistency
+//
+// Returns nil if validation passes, or a FileValidationError with details.
+func ValidateUploadedFile(filename string, data []byte) *FileValidationError {
+	// Check extension
+	if !isAllowedExtension(filename) {
+		return &FileValidationError{
+			Code:    "invalid_extension",
+			Message: "Invalid file extension",
+			Details: fmt.Sprintf("Allowed extensions: .yaml, .yml, .json. Got: %s", filepath.Ext(filename)),
+		}
+	}
+
+	// Check minimum size
+	if len(data) < MinStrategyUploadSize {
+		return &FileValidationError{
+			Code:    "file_too_small",
+			Message: "File too small",
+			Details: fmt.Sprintf("Minimum file size is %d bytes. File appears to be empty or corrupted.", MinStrategyUploadSize),
+		}
+	}
+
+	// Check maximum size
+	if len(data) > MaxStrategyUploadSize {
+		return &FileValidationError{
+			Code:    "file_too_large",
+			Message: "File too large",
+			Details: fmt.Sprintf("Maximum file size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
+		}
+	}
+
+	// Check for binary file magic numbers
+	if isBinaryFile(data) {
+		return &FileValidationError{
+			Code:    "binary_file_detected",
+			Message: "Binary file detected",
+			Details: "Strategy files must be text-based YAML or JSON. Binary files are not allowed.",
+		}
+	}
+
+	// Check MIME type consistency
+	detectedType := http.DetectContentType(data)
+	if !isAllowedMIMEType(detectedType, filename) {
+		return &FileValidationError{
+			Code:    "invalid_content_type",
+			Message: "Invalid file content",
+			Details: fmt.Sprintf("File content does not match expected type for %s", filepath.Ext(filename)),
+		}
+	}
+
+	return nil
+}
+
 // logAuditEvent is a helper to log audit events if the logger is configured
 func (h *StrategyHandler) logAuditEvent(c *gin.Context, eventType audit.EventType, strategyID, strategyName string, metadata map[string]interface{}, success bool, errorMsg string) {
 	if h.auditLogger == nil {
@@ -209,9 +375,18 @@ func (h *StrategyHandler) RegisterRoutes(router *gin.RouterGroup) {
 // @Success 200 {object} strategy.StrategyConfig
 // @Router /api/v1/strategies/current [get]
 func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
+	// Fast path: read current state under read lock
 	h.mu.RLock()
 	currentStrategy := h.currentStrategy
+	needsReload := h.needsDBReload
 	h.mu.RUnlock()
+
+	// If a previous DB write failed, attempt to reload from database to ensure consistency.
+	// This provides recovery from the scenario where in-memory state became stale after
+	// a failed DB persist (but a previous update had already persisted a newer version).
+	if needsReload && h.repo != nil {
+		currentStrategy = h.reloadFromDB(c.Request.Context())
+	}
 
 	if currentStrategy == nil {
 		h.mu.Lock()
@@ -224,6 +399,42 @@ func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, currentStrategy)
+}
+
+// reloadFromDB attempts to reload the strategy from database after a failed write.
+// Returns the current strategy (reloaded or existing).
+func (h *StrategyHandler) reloadFromDB(parentCtx context.Context) *strategy.StrategyConfig {
+	// Create timeout context for DB operation BEFORE acquiring lock
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	defer cancel()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Double-check after acquiring write lock (another goroutine may have reloaded)
+	if !h.needsDBReload {
+		return h.currentStrategy
+	}
+
+	reloaded, err := h.repo.GetActive(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to reload strategy from database after previous write failure")
+		// Keep using in-memory state, leave needsDBReload=true for retry on next request
+		return h.currentStrategy
+	}
+
+	if reloaded != nil {
+		h.currentStrategy = reloaded
+		h.needsDBReload = false
+		log.Info().
+			Str("strategy_id", reloaded.Metadata.ID).
+			Msg("Successfully reloaded strategy from database after previous write failure")
+		return reloaded
+	}
+
+	// No active strategy in DB - clear the reload flag, return current
+	h.needsDBReload = false
+	return h.currentStrategy
 }
 
 // UpdateCurrentStrategy updates the current strategy
@@ -275,25 +486,99 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// Update timestamps
 	newStrategy.Metadata.UpdatedAt = time.Now()
 
-	h.mu.Lock()
-	h.currentStrategy = &newStrategy
-	h.mu.Unlock()
-
-	// Persist to database if configured
-	if err := h.persistStrategy(c.Request.Context(), &newStrategy, true); err != nil {
-		log.Warn().Err(err).Msg("Failed to persist strategy to database")
-		// Continue anyway - in-memory update succeeded
+	// Create a deep copy to ensure complete independence from the input
+	// and to prevent any shared references that could cause data races
+	strategyCopy := newStrategy.DeepCopy()
+	if strategyCopy == nil {
+		// DeepCopy only returns nil on JSON marshal/unmarshal errors, which
+		// indicates a serious internal error (e.g., unexportable fields).
+		// This should never happen with valid StrategyConfig structs.
+		log.Error().Str("strategy_name", newStrategy.Metadata.Name).Msg("DeepCopy returned nil - internal error")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Internal error: failed to create strategy copy",
+		})
+		return
 	}
 
-	// Log successful update
-	h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, true, "")
+	// Persist to database FIRST (without lock) to avoid lock contention
+	// during slow database operations. This allows readers to continue
+	// accessing the current state while we write to DB.
+	//
+	// CONSISTENCY MODEL: Last-Write-Wins (LWW)
+	// ========================================
+	// This implementation uses last-write-wins semantics for concurrent updates:
+	//
+	// 1. No optimistic locking: If two users update simultaneously, the last one
+	//    to complete the DB write wins. There's no version checking or conflict detection.
+	//
+	// 2. Eventual consistency window: There's a brief window (~1-10ms during DB write)
+	//    where the database has the new strategy but in-memory state has the old one.
+	//    During this window, concurrent readers will get stale (but consistent) data.
+	//
+	// 3. Lock ordering: We intentionally do NOT hold the mu lock during DB operations
+	//    to avoid lock inversion issues. The order is always: DB write -> memory update.
+	//    This prevents deadlocks between API handlers and background DB operations.
+	//
+	// LOST-UPDATE RISK (known limitation):
+	// ------------------------------------
+	// Scenario: User A reads strategy v1, User B reads strategy v1
+	//           User A modifies and saves -> v2
+	//           User B modifies (based on v1) and saves -> v3 (overwrites A's changes!)
+	//
+	// This is a classic lost-update problem. User A's changes are silently overwritten.
+	// We accept this risk because:
+	// - Strategy updates are rare (seconds/minutes apart, not milliseconds)
+	// - Single-user or small-team usage is the expected deployment model
+	// - The simplicity benefit outweighs the edge case risk
+	//
+	// To implement optimistic concurrency control (OCC), add:
+	// 1. A version/etag field to StrategyConfig (e.g., Metadata.Version int64)
+	// 2. Include version in update request
+	// 3. Use DB WHERE clause: UPDATE ... WHERE id=? AND version=?
+	// 4. Return 409 Conflict if version mismatch
+	//
+	// Why LWW is acceptable for strategy updates:
+	// - Strategy updates are infrequent (user-initiated, typically seconds/minutes apart)
+	// - Readers always get a complete, consistent strategy (just potentially stale)
+	// - The DB is the source of truth; on restart, the correct strategy loads
+	// - Lock contention would cause much worse latency spikes for all readers
+	if h.repo != nil {
+		if err := h.repo.SaveAndActivate(c.Request.Context(), strategyCopy); err != nil {
+			log.Error().Err(err).Msg("Failed to persist strategy to database")
+
+			// Mark that in-memory state may be stale. If a previous update had already
+			// persisted a newer version to DB, our in-memory state is now inconsistent.
+			// The next GetCurrentStrategy call will attempt to reload from DB.
+			h.mu.Lock()
+			h.needsDBReload = true
+			h.mu.Unlock()
+
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to persist strategy",
+				"details": err.Error(),
+			})
+			return
+		}
+	}
+
+	// Update in-memory state AFTER successful database persistence
+	// This brief lock only covers the pointer assignment, not I/O
+	h.mu.Lock()
+	h.currentStrategy = strategyCopy
+	h.needsDBReload = false // Clear any stale flag on successful update
+	h.mu.Unlock()
+
+	// Log successful update (outside lock to avoid holding it during I/O)
+	h.logAuditEvent(c, audit.EventTypeStrategyUpdated, strategyCopy.Metadata.ID, strategyCopy.Metadata.Name, nil, true, "")
 
 	log.Info().
-		Str("strategy_name", newStrategy.Metadata.Name).
-		Str("strategy_id", newStrategy.Metadata.ID).
+		Str("strategy_name", strategyCopy.Metadata.Name).
+		Str("strategy_id", strategyCopy.Metadata.ID).
 		Msg("Strategy updated")
 
-	c.JSON(http.StatusOK, &newStrategy)
+	// Return the deep copy - this is completely independent from h.currentStrategy
+	// so concurrent readers cannot cause data races with this response
+	c.JSON(http.StatusOK, strategyCopy)
 }
 
 // ExportStrategy exports the current strategy as YAML
@@ -449,6 +734,16 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 	contentType := c.GetHeader("Content-Type")
 
 	if strings.Contains(contentType, "multipart/form-data") {
+		// Explicitly limit multipart form memory to prevent DoS attacks
+		// This ensures the entire multipart form (including all fields) stays within limits
+		if err := c.Request.ParseMultipartForm(MaxStrategyUploadSize); err != nil {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error":   "Form data too large or malformed",
+				"details": err.Error(),
+			})
+			return
+		}
+
 		// Handle file upload
 		file, header, fileErr := c.Request.FormFile("file")
 		if fileErr != nil {
@@ -498,6 +793,26 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 				"error":    "File too large",
 				"details":  fmt.Sprintf("Maximum file size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
 				"max_size": MaxStrategyUploadSize,
+			})
+			return
+		}
+
+		// Check minimum file size
+		if len(data) < MinStrategyUploadSize {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":    "File too small",
+				"details":  fmt.Sprintf("Minimum file size is %d bytes. File appears to be empty or corrupted.", MinStrategyUploadSize),
+				"min_size": MinStrategyUploadSize,
+			})
+			return
+		}
+
+		// MIME validation for defense-in-depth (content sniffing)
+		detectedType := http.DetectContentType(data)
+		if !isAllowedMIMEType(detectedType, header.Filename) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid file content",
+				"details": fmt.Sprintf("File content does not match expected type for %s", filepath.Ext(header.Filename)),
 			})
 			return
 		}

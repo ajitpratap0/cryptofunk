@@ -1,9 +1,96 @@
 package metrics
 
 import (
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+// Bounded cardinality constants for metric labels.
+// These ensure metrics don't have unbounded label values which can cause memory issues.
+const (
+	// Circuit breaker reasons (bounded set)
+	ReasonMaxDrawdown    = "max_drawdown"
+	ReasonHighVolatility = "high_volatility"
+	ReasonRateLimit      = "rate_limit"
+	ReasonManualHalt     = "manual_halt"
+	ReasonOther          = "other"
+
+	// Strategy validation failure reasons (bounded set)
+	ValidationReasonSchemaInvalid   = "schema_invalid"
+	ValidationReasonFieldMissing    = "field_missing"
+	ValidationReasonValueOutOfRange = "value_out_of_range"
+	ValidationReasonIncompatible    = "incompatible"
+	ValidationReasonOther           = "other"
+
+	// Exchange API error categories (bounded set)
+	ExchangeErrorTimeout     = "timeout"
+	ExchangeErrorRateLimit   = "rate_limit"
+	ExchangeErrorAuth        = "authentication"
+	ExchangeErrorNetwork     = "network"
+	ExchangeErrorInvalidReq  = "invalid_request"
+	ExchangeErrorServerError = "server_error"
+	ExchangeErrorOther       = "other"
+)
+
+// NormalizeCircuitBreakerReason maps arbitrary reasons to bounded set
+func NormalizeCircuitBreakerReason(reason string) string {
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "drawdown"):
+		return ReasonMaxDrawdown
+	case strings.Contains(lower, "volatility"):
+		return ReasonHighVolatility
+	case strings.Contains(lower, "rate") || strings.Contains(lower, "limit"):
+		return ReasonRateLimit
+	case strings.Contains(lower, "manual") || strings.Contains(lower, "halt"):
+		return ReasonManualHalt
+	default:
+		return ReasonOther
+	}
+}
+
+// NormalizeValidationReason maps arbitrary validation failures to bounded set
+func NormalizeValidationReason(reason string) string {
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "schema") || strings.Contains(lower, "version"):
+		return ValidationReasonSchemaInvalid
+	case strings.Contains(lower, "missing") || strings.Contains(lower, "required"):
+		return ValidationReasonFieldMissing
+	case strings.Contains(lower, "range") || strings.Contains(lower, "value") || strings.Contains(lower, "invalid"):
+		return ValidationReasonValueOutOfRange
+	case strings.Contains(lower, "compatible") || strings.Contains(lower, "migration"):
+		return ValidationReasonIncompatible
+	default:
+		return ValidationReasonOther
+	}
+}
+
+// NormalizeExchangeError maps arbitrary error messages to bounded set
+func NormalizeExchangeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline"):
+		return ExchangeErrorTimeout
+	case strings.Contains(errStr, "rate") || strings.Contains(errStr, "429"):
+		return ExchangeErrorRateLimit
+	case strings.Contains(errStr, "auth") || strings.Contains(errStr, "401") || strings.Contains(errStr, "403"):
+		return ExchangeErrorAuth
+	case strings.Contains(errStr, "network") || strings.Contains(errStr, "connection"):
+		return ExchangeErrorNetwork
+	case strings.Contains(errStr, "400") || strings.Contains(errStr, "invalid"):
+		return ExchangeErrorInvalidReq
+	case strings.Contains(errStr, "500") || strings.Contains(errStr, "502") || strings.Contains(errStr, "503"):
+		return ExchangeErrorServerError
+	default:
+		return ExchangeErrorOther
+	}
+}
 
 // Trading Performance Metrics
 var (
@@ -249,6 +336,40 @@ var (
 	}, []string{"breaker_type", "reason"})
 )
 
+// Audit Metrics
+var (
+	// Audit log operations
+	AuditLogOperations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_audit_log_operations_total",
+		Help: "Total number of audit log operations by event type and status",
+	}, []string{"event_type", "status"})
+
+	// Audit log failures
+	AuditLogFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_audit_log_failures_total",
+		Help: "Total number of audit log failures by error type",
+	}, []string{"error_type", "event_type"})
+
+	// Audit log latency
+	AuditLogLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "cryptofunk_audit_log_latency_ms",
+		Help:    "Audit log operation latency in milliseconds",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500},
+	})
+
+	// Strategy operations metrics
+	StrategyOperations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_strategy_operations_total",
+		Help: "Total number of strategy operations by type and status",
+	}, []string{"operation", "status"})
+
+	// Strategy validation failures
+	StrategyValidationFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_strategy_validation_failures_total",
+		Help: "Total number of strategy validation failures by reason",
+	}, []string{"reason"})
+)
+
 // Exchange Metrics
 var (
 	// Exchange API latency
@@ -361,16 +482,18 @@ func UpdateCircuitBreaker(breakerType string, active bool) {
 	CircuitBreakerStatus.WithLabelValues(breakerType).Set(status)
 }
 
-// RecordCircuitBreakerTrip records a circuit breaker trip
+// RecordCircuitBreakerTrip records a circuit breaker trip with normalized reason
 func RecordCircuitBreakerTrip(breakerType, reason string) {
-	CircuitBreakerTrips.WithLabelValues(breakerType, reason).Inc()
+	normalizedReason := NormalizeCircuitBreakerReason(reason)
+	CircuitBreakerTrips.WithLabelValues(breakerType, normalizedReason).Inc()
 }
 
-// RecordExchangeAPICall records an exchange API call
+// RecordExchangeAPICall records an exchange API call with normalized error category
 func RecordExchangeAPICall(exchange, endpoint string, durationMs float64, err error) {
 	ExchangeAPILatency.WithLabelValues(exchange, endpoint).Observe(durationMs)
 	if err != nil {
-		ExchangeAPIErrors.WithLabelValues(exchange, err.Error()).Inc()
+		errorCategory := NormalizeExchangeError(err)
+		ExchangeAPIErrors.WithLabelValues(exchange, errorCategory).Inc()
 	}
 }
 
@@ -387,4 +510,34 @@ func UpdateActiveSessions(count int) {
 // RecordOrchestratorLatency records orchestrator decision latency
 func RecordOrchestratorLatency(durationMs float64) {
 	OrchestratorLatency.Observe(durationMs)
+}
+
+// RecordAuditLog records an audit log operation
+func RecordAuditLog(eventType string, success bool, durationMs float64) {
+	status := "success"
+	if !success {
+		status = "failure"
+	}
+	AuditLogOperations.WithLabelValues(eventType, status).Inc()
+	AuditLogLatency.Observe(durationMs)
+}
+
+// RecordAuditLogFailure records an audit log failure with error type
+func RecordAuditLogFailure(errorType, eventType string) {
+	AuditLogFailures.WithLabelValues(errorType, eventType).Inc()
+}
+
+// RecordStrategyOperation records a strategy operation
+func RecordStrategyOperation(operation string, success bool) {
+	status := "success"
+	if !success {
+		status = "failure"
+	}
+	StrategyOperations.WithLabelValues(operation, status).Inc()
+}
+
+// RecordStrategyValidationFailure records a strategy validation failure with normalized reason
+func RecordStrategyValidationFailure(reason string) {
+	normalizedReason := NormalizeValidationReason(reason)
+	StrategyValidationFailures.WithLabelValues(normalizedReason).Inc()
 }

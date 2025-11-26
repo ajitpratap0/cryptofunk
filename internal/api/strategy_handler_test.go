@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +23,20 @@ import (
 func init() {
 	gin.SetMode(gin.TestMode)
 }
+
+// =============================================================================
+// Test Constants
+// =============================================================================
+
+const (
+	// Concurrent test parameters
+	testConcurrentUpdates = 20
+	testConcurrentReads   = 50
+	testConcurrentClones  = 10
+
+	// Test success rate requirement (100% with proper locking)
+	testSuccessRateThreshold = 1.0
+)
 
 // =============================================================================
 // Helper Functions
@@ -660,4 +676,560 @@ func TestNewStrategyHandlerWithDB_NilRepo(t *testing.T) {
 	require.NotNil(t, handler)
 	require.NotNil(t, handler.currentStrategy)
 	assert.Equal(t, "Default Strategy", handler.currentStrategy.Metadata.Name)
+}
+
+// =============================================================================
+// Additional Concurrent Access Tests
+// =============================================================================
+
+func TestConcurrentUpdateAndRead(t *testing.T) {
+	router, handler := setupStrategyRouter()
+
+	// Pre-populate with a strategy
+	initialStrategy := strategy.NewDefaultStrategy("Initial Strategy")
+	handler.mu.Lock()
+	handler.currentStrategy = initialStrategy
+	handler.mu.Unlock()
+
+	total := testConcurrentUpdates + testConcurrentReads
+
+	var wg sync.WaitGroup
+	wg.Add(total)
+
+	successCount := int32(0)
+	failCount := int32(0)
+
+	// Launch concurrent updates
+	for i := 0; i < testConcurrentUpdates; i++ {
+		go func(idx int) {
+			defer wg.Done()
+
+			newStrategy := strategy.NewDefaultStrategy("Update Strategy")
+			// Use a field that won't cause validation conflicts
+			// MaxDrawdown has constraints with MaxDailyLoss and CircuitBreaker.DrawdownHalt
+			// Instead, vary the strategy description which has no validation constraints
+			newStrategy.Metadata.Description = "Concurrent update test - iteration " + string(rune('A'+idx))
+			body, _ := json.Marshal(newStrategy)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code == http.StatusOK {
+				atomic.AddInt32(&successCount, 1)
+			} else {
+				atomic.AddInt32(&failCount, 1)
+				t.Logf("Update %d failed with status %d: %s", idx, w.Code, w.Body.String())
+			}
+		}(i)
+	}
+
+	// Launch concurrent reads
+	for i := 0; i < testConcurrentReads; i++ {
+		go func(idx int) {
+			defer wg.Done()
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code == http.StatusOK {
+				atomic.AddInt32(&successCount, 1)
+			} else {
+				atomic.AddInt32(&failCount, 1)
+				t.Logf("Read %d failed with status %d: %s", idx, w.Code, w.Body.String())
+			}
+		}(i)
+	}
+
+	// Wait for completion
+	wg.Wait()
+
+	// With proper locking, all operations should succeed
+	successRate := float64(successCount) / float64(total)
+	t.Logf("Concurrent test: %d/%d operations succeeded, %d failed (%.1f%% success rate)", successCount, total, failCount, successRate*100)
+
+	// Require 100% success rate - with proper locking, there should be no failures
+	assert.Equal(t, testSuccessRateThreshold, successRate, "Expected 100%% success rate in concurrent operations with proper locking")
+}
+
+func TestConcurrentCloneOperations(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	done := make(chan struct{}, testConcurrentClones)
+
+	for i := 0; i < testConcurrentClones; i++ {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+
+			cloneReq := CloneRequest{
+				Name:        "Cloned Strategy",
+				Description: "Concurrent clone test",
+			}
+			body, _ := json.Marshal(cloneReq)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/clone", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+		}(i)
+	}
+
+	for i := 0; i < testConcurrentClones; i++ {
+		<-done
+	}
+}
+
+func TestConcurrentImportAndExport(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	numOperations := 20
+	done := make(chan struct{}, numOperations)
+
+	// Create a valid strategy for import
+	validStrategy := strategy.NewDefaultStrategy("Import Test Strategy")
+	yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+	for i := 0; i < numOperations; i++ {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+
+			if idx%2 == 0 {
+				// Export operation
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/export", nil)
+				router.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code)
+			} else {
+				// Import operation
+				importReq := ImportRequest{
+					Data:     string(yamlData),
+					ApplyNow: false,
+				}
+				body, _ := json.Marshal(importReq)
+
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", bytes.NewBuffer(body))
+				req.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code)
+			}
+		}(i)
+	}
+
+	for i := 0; i < numOperations; i++ {
+		<-done
+	}
+}
+
+// =============================================================================
+// File Upload Integration Tests
+// =============================================================================
+
+func TestFileUploadWithValidation(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Test YAML file upload
+	t.Run("YAML file upload", func(t *testing.T) {
+		validStrategy := strategy.NewDefaultStrategy("Upload YAML Strategy")
+		yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+		body, contentType := createMultipartForm(t, "strategy.yaml", yamlData, map[string]string{
+			"apply_now": "true",
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+		req.Header.Set("Content-Type", contentType)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Equal(t, true, response["applied"])
+	})
+
+	// Test JSON file upload
+	t.Run("JSON file upload", func(t *testing.T) {
+		validStrategy := strategy.NewDefaultStrategy("Upload JSON Strategy")
+		jsonData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "json"})
+
+		body, contentType := createMultipartForm(t, "strategy.json", jsonData, nil)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+		req.Header.Set("Content-Type", contentType)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	// Test YML extension
+	t.Run("YML file upload", func(t *testing.T) {
+		validStrategy := strategy.NewDefaultStrategy("Upload YML Strategy")
+		yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+		body, contentType := createMultipartForm(t, "strategy.yml", yamlData, nil)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+		req.Header.Set("Content-Type", contentType)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestFileUploadInvalidExtension(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	body, contentType := createMultipartForm(t, "strategy.txt", []byte("invalid content"), nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response["error"], "Invalid file extension")
+}
+
+func TestFileUploadInvalidContent(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	body, contentType := createMultipartForm(t, "strategy.yaml", []byte("invalid: yaml: content: [}"), nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestFileUploadWithStrictValidation(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	validStrategy := strategy.NewDefaultStrategy("Strict Validation Strategy")
+	yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+	body, contentType := createMultipartForm(t, "strategy.yaml", yamlData, map[string]string{
+		"validate_strict": "true",
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestFileUploadFileTooSmall(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Create a file that's too small (less than MinStrategyUploadSize = 50 bytes)
+	// This is clearly not a valid strategy configuration
+	tinyContent := []byte("metadata:\n  name: x") // Only 19 bytes
+
+	body, contentType := createMultipartForm(t, "strategy.yaml", tinyContent, nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response["error"], "File too small")
+	assert.Contains(t, response, "min_size")
+}
+
+func TestFileUploadFileSizeConstants(t *testing.T) {
+	// Verify file size constants are sensible
+	assert.Greater(t, MaxStrategyUploadSize, MinStrategyUploadSize,
+		"Max size should be greater than min size")
+	assert.Equal(t, 10*1024*1024, MaxStrategyUploadSize,
+		"Max size should be 10MB")
+	assert.Equal(t, 50, MinStrategyUploadSize,
+		"Min size should be 50 bytes (realistic minimum for valid strategy)")
+}
+
+// createMultipartForm creates a multipart form request body for file uploads
+func createMultipartForm(t *testing.T, filename string, content []byte, fields map[string]string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add file
+	part, err := writer.CreateFormFile("file", filename)
+	require.NoError(t, err)
+	n, writeErr := part.Write(content)
+	require.NoError(t, writeErr)
+	require.Equal(t, len(content), n, "partial write occurred")
+
+	// Add additional fields
+	for key, value := range fields {
+		err = writer.WriteField(key, value)
+		require.NoError(t, err)
+	}
+
+	err = writer.Close()
+	require.NoError(t, err)
+
+	return body, writer.FormDataContentType()
+}
+
+// =============================================================================
+// Rate Limiter Integration Tests
+// =============================================================================
+
+func TestRateLimiterMiddlewareIntegration(t *testing.T) {
+	router := gin.New()
+	handler := NewStrategyHandler()
+
+	// Create a simple rate limiter for testing (3 requests per second)
+	readMiddleware := func(c *gin.Context) {
+		// Simulate rate limiter passing
+		c.Next()
+	}
+	writeMiddleware := func(c *gin.Context) {
+		c.Next()
+	}
+
+	// Register routes with rate limiting
+	api := router.Group("/api/v1")
+	handler.RegisterRoutesWithRateLimiter(api, readMiddleware, writeMiddleware)
+
+	// Test that routes work with middleware
+	t.Run("read endpoint with rate limiter", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/strategies/current", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("write endpoint with rate limiter", func(t *testing.T) {
+		newStrategy := strategy.NewDefaultStrategy("Rate Limited Strategy")
+		body, _ := json.Marshal(newStrategy)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/strategies/current", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// =============================================================================
+// Deep Copy Independence Tests
+// =============================================================================
+
+func TestUpdateStrategyReturnsIndependentCopy(t *testing.T) {
+	router, handler := setupStrategyRouter()
+
+	// Create a strategy with nested data that could be shared
+	originalStrategy := strategy.NewDefaultStrategy("Test Strategy")
+	originalStrategy.Metadata.Tags = []string{"tag1", "tag2", "tag3"}
+	originalStrategy.Indicators.EMA.Periods = []int{9, 21, 50, 200}
+
+	// Update the strategy
+	body, _ := json.Marshal(originalStrategy)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Unmarshal the returned strategy
+	var returnedStrategy strategy.StrategyConfig
+	err := json.Unmarshal(w.Body.Bytes(), &returnedStrategy)
+	require.NoError(t, err)
+
+	// Modify the returned strategy's slices
+	returnedStrategy.Metadata.Tags[0] = "modified"
+	returnedStrategy.Indicators.EMA.Periods[0] = 999
+
+	// Verify the handler's internal state was NOT affected
+	handler.mu.RLock()
+	internalStrategy := handler.currentStrategy
+	handler.mu.RUnlock()
+
+	// The internal strategy should still have original values
+	assert.Equal(t, "tag1", internalStrategy.Metadata.Tags[0],
+		"Internal strategy tags should not be affected by modifying returned copy")
+	assert.Equal(t, 9, internalStrategy.Indicators.EMA.Periods[0],
+		"Internal strategy EMA periods should not be affected by modifying returned copy")
+}
+
+func TestDeepCopyIndependence(t *testing.T) {
+	// Test the DeepCopy method directly
+	original := strategy.NewDefaultStrategy("Original Strategy")
+	original.Metadata.Tags = []string{"tag1", "tag2"}
+	original.Indicators.EMA.Periods = []int{9, 21, 50}
+
+	// Create deep copy
+	copied := original.DeepCopy()
+
+	// Modify the copy's slices
+	copied.Metadata.Tags[0] = "modified_tag"
+	copied.Metadata.Tags = append(copied.Metadata.Tags, "new_tag")
+	copied.Indicators.EMA.Periods[0] = 999
+
+	// Verify original was not affected
+	assert.Equal(t, "tag1", original.Metadata.Tags[0],
+		"Original tags should not be affected by modifying copy")
+	assert.Len(t, original.Metadata.Tags, 2,
+		"Original tags length should not change when appending to copy")
+	assert.Equal(t, 9, original.Indicators.EMA.Periods[0],
+		"Original EMA periods should not be affected by modifying copy")
+}
+
+func TestDeepCopyWithNilPointers(t *testing.T) {
+	// Test DeepCopy with nil nested pointers
+	original := strategy.NewDefaultStrategy("Strategy Without Optional Fields")
+	// Explicitly set pointers to nil
+	original.Agents.Technical = nil
+	original.Agents.Sentiment = nil
+	original.Agents.Arbitrage = nil
+
+	// This should not panic
+	copied := original.DeepCopy()
+
+	assert.NotNil(t, copied)
+	assert.Nil(t, copied.Agents.Technical)
+	assert.Nil(t, copied.Agents.Sentiment)
+	assert.Nil(t, copied.Agents.Arbitrage)
+}
+
+func TestDeepCopyNil(t *testing.T) {
+	var nilStrategy *strategy.StrategyConfig
+	copied := nilStrategy.DeepCopy()
+	assert.Nil(t, copied, "DeepCopy of nil should return nil")
+}
+
+// =============================================================================
+// needsDBReload Recovery Tests
+// =============================================================================
+
+func TestGetCurrentStrategy_NeedsDBReload_NoRepo(t *testing.T) {
+	// Test that when needsDBReload is true but repo is nil,
+	// GetCurrentStrategy returns the in-memory strategy without error
+
+	router := gin.New()
+	handler := NewStrategyHandler() // No DB repo
+
+	// Set up a known strategy
+	testStrategy := strategy.NewDefaultStrategy("Test Strategy Before Reload")
+	handler.mu.Lock()
+	handler.currentStrategy = testStrategy
+	handler.needsDBReload = true // Simulate failed DB write
+	handler.mu.Unlock()
+
+	router.GET("/strategies/current", handler.GetCurrentStrategy)
+
+	// Make request
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Should succeed with the in-memory strategy
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response strategy.StrategyConfig
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, "Test Strategy Before Reload", response.Metadata.Name)
+
+	// needsDBReload should still be true (no repo to reload from)
+	handler.mu.RLock()
+	assert.True(t, handler.needsDBReload)
+	handler.mu.RUnlock()
+}
+
+func TestGetCurrentStrategy_ConcurrentReloadRequests(t *testing.T) {
+	// Test that concurrent requests when needsDBReload=true
+	// don't cause race conditions (all should get valid strategy)
+
+	router := gin.New()
+	handler := NewStrategyHandler()
+
+	testStrategy := strategy.NewDefaultStrategy("Concurrent Reload Test")
+	handler.mu.Lock()
+	handler.currentStrategy = testStrategy
+	handler.needsDBReload = true
+	handler.mu.Unlock()
+
+	router.GET("/strategies/current", handler.GetCurrentStrategy)
+
+	const numConcurrent = 20
+	var wg sync.WaitGroup
+	var successCount int32
+
+	wg.Add(numConcurrent)
+	for i := 0; i < numConcurrent; i++ {
+		go func() {
+			defer wg.Done()
+
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code == http.StatusOK {
+				var response strategy.StrategyConfig
+				if json.Unmarshal(w.Body.Bytes(), &response) == nil {
+					if response.Metadata.Name == "Concurrent Reload Test" {
+						atomic.AddInt32(&successCount, 1)
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	assert.Equal(t, int32(numConcurrent), successCount, "All concurrent requests should succeed")
+}
+
+func TestNeedsDBReload_ClearedAfterSuccessfulUpdate(t *testing.T) {
+	// Test that needsDBReload is cleared after a successful UpdateCurrentStrategy
+
+	router := gin.New()
+	handler := NewStrategyHandler()
+
+	// Simulate previous failed write
+	handler.mu.Lock()
+	handler.needsDBReload = true
+	handler.mu.Unlock()
+
+	router.PUT("/strategies/current", handler.UpdateCurrentStrategy)
+
+	// Create a valid strategy update
+	newStrategy := strategy.NewDefaultStrategy("New Strategy After Recovery")
+	body, _ := json.Marshal(newStrategy)
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// needsDBReload should be cleared after successful update
+	handler.mu.RLock()
+	assert.False(t, handler.needsDBReload, "needsDBReload should be cleared after successful update")
+	handler.mu.RUnlock()
 }

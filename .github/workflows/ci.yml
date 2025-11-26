@@ -5,6 +5,9 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Run nightly at 2 AM UTC for thorough race detection
+    - cron: '0 2 * * *'
 
 env:
   GO_VERSION: '1.21.x'
@@ -101,8 +104,39 @@ jobs:
 
       - name: Check test coverage
         run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          # Validate coverage file exists and is not empty
+          if [ ! -f coverage.out ]; then
+            echo "❌ Error: coverage.out file not found"
+            exit 1
+          fi
+
+          if [ ! -s coverage.out ]; then
+            echo "❌ Error: coverage.out file is empty"
+            exit 1
+          fi
+
+          # Extract coverage with validation
+          COVERAGE_LINE=$(go tool cover -func=coverage.out | grep -E '^total:' || echo "")
+
+          if [ -z "$COVERAGE_LINE" ]; then
+            echo "❌ Error: Could not find total coverage line"
+            echo "Coverage output:"
+            go tool cover -func=coverage.out | tail -20
+            exit 1
+          fi
+
+          # Extract percentage with robust parsing
+          COVERAGE=$(echo "$COVERAGE_LINE" | awk '{print $NF}' | tr -d '%')
+
+          # Validate extracted value is a number
+          if ! echo "$COVERAGE" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+            echo "❌ Error: Invalid coverage value extracted: '$COVERAGE'"
+            echo "Coverage line was: $COVERAGE_LINE"
+            exit 1
+          fi
+
           echo "Total test coverage: ${COVERAGE}%"
+          echo "COVERAGE=${COVERAGE}" >> $GITHUB_OUTPUT
 
           # Minimum coverage threshold (gradually increasing to 80%)
           THRESHOLD=50
@@ -124,6 +158,26 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
+
+      - name: Run concurrent tests with race detector (stress test)
+        # Only run expensive stress tests on main branch, PRs targeting main, or scheduled runs
+        if: github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'schedule'
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
+          REDIS_URL: "localhost:6379"
+        run: |
+          # Race detection is probabilistic - more iterations catch rarer races
+          # PR checks: -count=20 (~1-2 minutes) - good coverage for common races
+          # Nightly: -count=100 (~5-10 minutes) - thorough coverage for rare races
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            RACE_COUNT=100
+            echo "Running NIGHTLY race detection with -count=100 for thorough coverage..."
+          else
+            RACE_COUNT=20
+            echo "Running PR race detection with -count=20..."
+          fi
+          go test -v -race -count=$RACE_COUNT -run "Concurrent" ./internal/api/... ./internal/strategy/...
+          echo "✅ No race conditions detected in concurrent tests"
 
       - name: Stop CI services
         if: always()
