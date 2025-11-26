@@ -249,6 +249,40 @@ var (
 	}, []string{"breaker_type", "reason"})
 )
 
+// Audit Metrics
+var (
+	// Audit log operations
+	AuditLogOperations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_audit_log_operations_total",
+		Help: "Total number of audit log operations by event type and status",
+	}, []string{"event_type", "status"})
+
+	// Audit log failures
+	AuditLogFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_audit_log_failures_total",
+		Help: "Total number of audit log failures by error type",
+	}, []string{"error_type", "event_type"})
+
+	// Audit log latency
+	AuditLogLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "cryptofunk_audit_log_latency_ms",
+		Help:    "Audit log operation latency in milliseconds",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500},
+	})
+
+	// Strategy operations metrics
+	StrategyOperations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_strategy_operations_total",
+		Help: "Total number of strategy operations by type and status",
+	}, []string{"operation", "status"})
+
+	// Strategy validation failures
+	StrategyValidationFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_strategy_validation_failures_total",
+		Help: "Total number of strategy validation failures by reason",
+	}, []string{"reason"})
+)
+
 // Exchange Metrics
 var (
 	// Exchange API latency
@@ -387,4 +421,33 @@ func UpdateActiveSessions(count int) {
 // RecordOrchestratorLatency records orchestrator decision latency
 func RecordOrchestratorLatency(durationMs float64) {
 	OrchestratorLatency.Observe(durationMs)
+}
+
+// RecordAuditLog records an audit log operation
+func RecordAuditLog(eventType string, success bool, durationMs float64) {
+	status := "success"
+	if !success {
+		status = "failure"
+	}
+	AuditLogOperations.WithLabelValues(eventType, status).Inc()
+	AuditLogLatency.Observe(durationMs)
+}
+
+// RecordAuditLogFailure records an audit log failure with error type
+func RecordAuditLogFailure(errorType, eventType string) {
+	AuditLogFailures.WithLabelValues(errorType, eventType).Inc()
+}
+
+// RecordStrategyOperation records a strategy operation
+func RecordStrategyOperation(operation string, success bool) {
+	status := "success"
+	if !success {
+		status = "failure"
+	}
+	StrategyOperations.WithLabelValues(operation, status).Inc()
+}
+
+// RecordStrategyValidationFailure records a strategy validation failure
+func RecordStrategyValidationFailure(reason string) {
+	StrategyValidationFailures.WithLabelValues(reason).Inc()
 }

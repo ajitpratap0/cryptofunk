@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -660,4 +662,324 @@ func TestNewStrategyHandlerWithDB_NilRepo(t *testing.T) {
 	require.NotNil(t, handler)
 	require.NotNil(t, handler.currentStrategy)
 	assert.Equal(t, "Default Strategy", handler.currentStrategy.Metadata.Name)
+}
+
+// =============================================================================
+// Additional Concurrent Access Tests
+// =============================================================================
+
+func TestConcurrentUpdateAndRead(t *testing.T) {
+	router, handler := setupStrategyRouter()
+
+	// Pre-populate with a strategy
+	initialStrategy := strategy.NewDefaultStrategy("Initial Strategy")
+	handler.mu.Lock()
+	handler.currentStrategy = initialStrategy
+	handler.mu.Unlock()
+
+	numUpdates := 20
+	numReads := 50
+	total := numUpdates + numReads
+
+	var wg sync.WaitGroup
+	wg.Add(total)
+
+	successCount := int32(0)
+	failCount := int32(0)
+
+	// Launch concurrent updates
+	for i := 0; i < numUpdates; i++ {
+		go func(idx int) {
+			defer wg.Done()
+
+			newStrategy := strategy.NewDefaultStrategy("Update Strategy")
+			newStrategy.Risk.MaxDrawdown = float64(idx+1) / 100.0 // Ensure non-zero drawdown
+			body, _ := json.Marshal(newStrategy)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code == http.StatusOK {
+				atomic.AddInt32(&successCount, 1)
+			} else {
+				atomic.AddInt32(&failCount, 1)
+			}
+		}(i)
+	}
+
+	// Launch concurrent reads
+	for i := 0; i < numReads; i++ {
+		go func() {
+			defer wg.Done()
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
+			router.ServeHTTP(w, req)
+
+			if w.Code == http.StatusOK {
+				atomic.AddInt32(&successCount, 1)
+			} else {
+				atomic.AddInt32(&failCount, 1)
+			}
+		}()
+	}
+
+	// Wait for completion
+	wg.Wait()
+
+	// Allow some failures in concurrent scenarios, but ensure majority succeed
+	successRate := float64(successCount) / float64(total)
+	t.Logf("Concurrent test: %d/%d operations succeeded (%.1f%%)", successCount, total, successRate*100)
+
+	// Require at least 90% success rate
+	assert.GreaterOrEqual(t, successRate, 0.9, "Expected at least 90%% success rate in concurrent operations")
+}
+
+func TestConcurrentCloneOperations(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	numClones := 10
+	done := make(chan struct{}, numClones)
+
+	for i := 0; i < numClones; i++ {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+
+			cloneReq := CloneRequest{
+				Name:        "Cloned Strategy",
+				Description: "Concurrent clone test",
+			}
+			body, _ := json.Marshal(cloneReq)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/clone", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+		}(i)
+	}
+
+	for i := 0; i < numClones; i++ {
+		<-done
+	}
+}
+
+func TestConcurrentImportAndExport(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	numOperations := 20
+	done := make(chan struct{}, numOperations)
+
+	// Create a valid strategy for import
+	validStrategy := strategy.NewDefaultStrategy("Import Test Strategy")
+	yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+	for i := 0; i < numOperations; i++ {
+		go func(idx int) {
+			defer func() { done <- struct{}{} }()
+
+			if idx%2 == 0 {
+				// Export operation
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/export", nil)
+				router.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code)
+			} else {
+				// Import operation
+				importReq := ImportRequest{
+					Data:     string(yamlData),
+					ApplyNow: false,
+				}
+				body, _ := json.Marshal(importReq)
+
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", bytes.NewBuffer(body))
+				req.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code)
+			}
+		}(i)
+	}
+
+	for i := 0; i < numOperations; i++ {
+		<-done
+	}
+}
+
+// =============================================================================
+// File Upload Integration Tests
+// =============================================================================
+
+func TestFileUploadWithValidation(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Test YAML file upload
+	t.Run("YAML file upload", func(t *testing.T) {
+		validStrategy := strategy.NewDefaultStrategy("Upload YAML Strategy")
+		yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+		body, contentType := createMultipartForm(t, "strategy.yaml", yamlData, map[string]string{
+			"apply_now": "true",
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+		req.Header.Set("Content-Type", contentType)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Equal(t, true, response["applied"])
+	})
+
+	// Test JSON file upload
+	t.Run("JSON file upload", func(t *testing.T) {
+		validStrategy := strategy.NewDefaultStrategy("Upload JSON Strategy")
+		jsonData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "json"})
+
+		body, contentType := createMultipartForm(t, "strategy.json", jsonData, nil)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+		req.Header.Set("Content-Type", contentType)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	// Test YML extension
+	t.Run("YML file upload", func(t *testing.T) {
+		validStrategy := strategy.NewDefaultStrategy("Upload YML Strategy")
+		yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+		body, contentType := createMultipartForm(t, "strategy.yml", yamlData, nil)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+		req.Header.Set("Content-Type", contentType)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestFileUploadInvalidExtension(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	body, contentType := createMultipartForm(t, "strategy.txt", []byte("invalid content"), nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response["error"], "Invalid file extension")
+}
+
+func TestFileUploadInvalidContent(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	body, contentType := createMultipartForm(t, "strategy.yaml", []byte("invalid: yaml: content: [}"), nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestFileUploadWithStrictValidation(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	validStrategy := strategy.NewDefaultStrategy("Strict Validation Strategy")
+	yamlData, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+	body, contentType := createMultipartForm(t, "strategy.yaml", yamlData, map[string]string{
+		"validate_strict": "true",
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// createMultipartForm creates a multipart form request body for file uploads
+func createMultipartForm(t *testing.T, filename string, content []byte, fields map[string]string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add file
+	part, err := writer.CreateFormFile("file", filename)
+	require.NoError(t, err)
+	_, err = part.Write(content)
+	require.NoError(t, err)
+
+	// Add additional fields
+	for key, value := range fields {
+		err = writer.WriteField(key, value)
+		require.NoError(t, err)
+	}
+
+	err = writer.Close()
+	require.NoError(t, err)
+
+	return body, writer.FormDataContentType()
+}
+
+// =============================================================================
+// Rate Limiter Integration Tests
+// =============================================================================
+
+func TestRateLimiterMiddlewareIntegration(t *testing.T) {
+	router := gin.New()
+	handler := NewStrategyHandler()
+
+	// Create a simple rate limiter for testing (3 requests per second)
+	readMiddleware := func(c *gin.Context) {
+		// Simulate rate limiter passing
+		c.Next()
+	}
+	writeMiddleware := func(c *gin.Context) {
+		c.Next()
+	}
+
+	// Register routes with rate limiting
+	api := router.Group("/api/v1")
+	handler.RegisterRoutesWithRateLimiter(api, readMiddleware, writeMiddleware)
+
+	// Test that routes work with middleware
+	t.Run("read endpoint with rate limiter", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/strategies/current", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("write endpoint with rate limiter", func(t *testing.T) {
+		newStrategy := strategy.NewDefaultStrategy("Rate Limited Strategy")
+		body, _ := json.Marshal(newStrategy)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/strategies/current", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
 }

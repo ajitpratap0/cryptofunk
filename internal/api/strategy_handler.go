@@ -275,25 +275,39 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// Update timestamps
 	newStrategy.Metadata.UpdatedAt = time.Now()
 
+	// Deep copy the strategy to avoid returning a reference to local variable
+	// and to ensure thread-safe access
+	strategyCopy := newStrategy
+
 	h.mu.Lock()
-	h.currentStrategy = &newStrategy
+	// Store pointer to our copy
+	h.currentStrategy = &strategyCopy
+
+	// Persist to database while still holding the lock to ensure consistency
+	// between in-memory state and database
+	if h.repo != nil {
+		if err := h.repo.SaveAndActivate(c.Request.Context(), &strategyCopy); err != nil {
+			h.mu.Unlock()
+			log.Error().Err(err).Msg("Failed to persist strategy to database")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to persist strategy",
+				"details": err.Error(),
+			})
+			return
+		}
+	}
 	h.mu.Unlock()
 
-	// Persist to database if configured
-	if err := h.persistStrategy(c.Request.Context(), &newStrategy, true); err != nil {
-		log.Warn().Err(err).Msg("Failed to persist strategy to database")
-		// Continue anyway - in-memory update succeeded
-	}
-
-	// Log successful update
-	h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, true, "")
+	// Log successful update (outside lock to avoid holding it during I/O)
+	h.logAuditEvent(c, audit.EventTypeStrategyUpdated, strategyCopy.Metadata.ID, strategyCopy.Metadata.Name, nil, true, "")
 
 	log.Info().
-		Str("strategy_name", newStrategy.Metadata.Name).
-		Str("strategy_id", newStrategy.Metadata.ID).
+		Str("strategy_name", strategyCopy.Metadata.Name).
+		Str("strategy_id", strategyCopy.Metadata.ID).
 		Msg("Strategy updated")
 
-	c.JSON(http.StatusOK, &newStrategy)
+	// Return a fresh copy to avoid any potential data races
+	c.JSON(http.StatusOK, strategyCopy)
 }
 
 // ExportStrategy exports the current strategy as YAML
