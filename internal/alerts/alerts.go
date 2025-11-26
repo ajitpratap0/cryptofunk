@@ -131,7 +131,7 @@ func (l *LogAlerter) Send(ctx context.Context, alert Alert) error {
 	return nil
 }
 
-// ConsoleAlerter prints alerts to console with prominent formatting
+// ConsoleAlerter prints alerts to console with prominent formatting using zerolog
 type ConsoleAlerter struct{}
 
 // NewConsoleAlerter creates a new console-based alerter
@@ -139,7 +139,7 @@ func NewConsoleAlerter() *ConsoleAlerter {
 	return &ConsoleAlerter{}
 }
 
-// Send sends an alert by printing to console
+// Send sends an alert by logging to console with prominent formatting
 func (c *ConsoleAlerter) Send(ctx context.Context, alert Alert) error {
 	banner := ""
 	switch alert.Severity {
@@ -151,24 +151,33 @@ func (c *ConsoleAlerter) Send(ctx context.Context, alert Alert) error {
 		banner = "ℹ️  INFO ALERT ℹ️"
 	}
 
-	fmt.Println()
-	fmt.Println("========================================")
-	fmt.Println(banner)
-	fmt.Println("========================================")
-	fmt.Printf("Title: %s\n", alert.Title)
-	fmt.Printf("Message: %s\n", alert.Message)
-	fmt.Printf("Severity: %s\n", alert.Severity)
-	fmt.Printf("Time: %s\n", alert.Timestamp.Format(time.RFC3339))
+	// Build the formatted alert message
+	message := fmt.Sprintf("\n========================================\n%s\n========================================\nTitle: %s\nMessage: %s\nSeverity: %s\nTime: %s",
+		banner,
+		alert.Title,
+		alert.Message,
+		alert.Severity,
+		alert.Timestamp.Format(time.RFC3339),
+	)
 
 	if len(alert.Metadata) > 0 {
-		fmt.Println("Metadata:")
+		message += "\nMetadata:"
 		for key, value := range alert.Metadata {
-			fmt.Printf("  - %s: %v\n", key, value)
+			message += fmt.Sprintf("\n  - %s: %v", key, value)
 		}
 	}
 
-	fmt.Println("========================================")
-	fmt.Println()
+	message += "\n========================================"
+
+	// Log at appropriate level based on severity
+	switch alert.Severity {
+	case SeverityCritical:
+		log.Error().Msg(message)
+	case SeverityWarning:
+		log.Warn().Msg(message)
+	default:
+		log.Info().Msg(message)
+	}
 
 	return nil
 }

@@ -109,8 +109,6 @@ jobs:
     name: Dependency Review
     runs-on: ubuntu-latest
     if: github.event.pull_request.base.ref == 'main'
-    # Continue on error - Dependency Graph may not be enabled
-    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -147,51 +145,28 @@ jobs:
             fi
           fi
 
-  # Verify no debug code in changed files
+  # Verify no debug code
   debug-check:
     name: Check for Debug Code
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.base_ref }}
-
-      - name: Check for debug statements in changed files
+      - name: Check for debug statements
         run: |
-          # Get changed Go files in internal/ and pkg/ (excluding tests)
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E "^(internal|pkg)/.*\.go$" | grep -v "_test.go" || true)
-
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "✅ No library Go files changed"
-            exit 0
-          fi
-
-          echo "Checking changed files: $CHANGED_FILES"
-
-          # Check for common debug patterns in changed files only
-          DEBUG_PATTERNS=""
-          for file in $CHANGED_FILES; do
-            if [ -f "$file" ]; then
-              FOUND=$(grep -n "fmt.Println\|log.Println\|print(\|println(" "$file" 2>/dev/null || true)
-              if [ -n "$FOUND" ]; then
-                DEBUG_PATTERNS="$DEBUG_PATTERNS\n$file:\n$FOUND"
-              fi
-            fi
-          done
+          # Check for common debug patterns (excluding cmd/ since those are CLIs)
+          DEBUG_PATTERNS=$(grep -rn "fmt.Println\|log.Println\|print(\|println(" --include="*.go" internal/ pkg/ 2>/dev/null | grep -v "_test.go" || true)
 
           if [ -n "$DEBUG_PATTERNS" ]; then
-            echo "❌ Found debug print statements in changed library code:"
-            echo -e "$DEBUG_PATTERNS"
+            echo "❌ Found debug print statements in library code:"
+            echo "$DEBUG_PATTERNS"
             echo ""
             echo "Please remove debug statements or use proper logging (zerolog)."
             exit 1
           fi
 
-          echo "✅ No debug statements found in changed library code"
+          echo "✅ No debug statements found in library code"
 
   # Check documentation
   docs-check:
