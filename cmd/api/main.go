@@ -200,6 +200,10 @@ func (s *APIServer) setupRoutes() {
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())
 		feedbackHandler := api.NewFeedbackHandler(feedbackRepo)
 		feedbackHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
+
+		// Strategy import/export routes (T310) with rate limiting
+		strategyHandler := api.NewStrategyHandler()
+		strategyHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
 	}
 
 	// Root endpoint
