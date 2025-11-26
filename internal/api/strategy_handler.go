@@ -375,6 +375,7 @@ func (h *StrategyHandler) RegisterRoutes(router *gin.RouterGroup) {
 // @Success 200 {object} strategy.StrategyConfig
 // @Router /api/v1/strategies/current [get]
 func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
+	// Fast path: read current state under read lock
 	h.mu.RLock()
 	currentStrategy := h.currentStrategy
 	needsReload := h.needsDBReload
@@ -384,30 +385,7 @@ func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
 	// This provides recovery from the scenario where in-memory state became stale after
 	// a failed DB persist (but a previous update had already persisted a newer version).
 	if needsReload && h.repo != nil {
-		h.mu.Lock()
-		// Double-check after acquiring write lock (another goroutine may have reloaded)
-		if h.needsDBReload {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
-			defer cancel()
-
-			if reloaded, err := h.repo.GetActive(ctx); err != nil {
-				log.Warn().Err(err).Msg("Failed to reload strategy from database after previous write failure")
-				// Keep using in-memory state, but leave needsDBReload=true for retry
-			} else if reloaded != nil {
-				h.currentStrategy = reloaded
-				h.needsDBReload = false
-				currentStrategy = reloaded
-				log.Info().
-					Str("strategy_id", reloaded.Metadata.ID).
-					Msg("Successfully reloaded strategy from database after previous write failure")
-			} else {
-				// No active strategy in DB - clear the reload flag
-				h.needsDBReload = false
-			}
-		} else {
-			currentStrategy = h.currentStrategy
-		}
-		h.mu.Unlock()
+		currentStrategy = h.reloadFromDB(c.Request.Context())
 	}
 
 	if currentStrategy == nil {
@@ -421,6 +399,42 @@ func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, currentStrategy)
+}
+
+// reloadFromDB attempts to reload the strategy from database after a failed write.
+// Returns the current strategy (reloaded or existing).
+func (h *StrategyHandler) reloadFromDB(parentCtx context.Context) *strategy.StrategyConfig {
+	// Create timeout context for DB operation BEFORE acquiring lock
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	defer cancel()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// Double-check after acquiring write lock (another goroutine may have reloaded)
+	if !h.needsDBReload {
+		return h.currentStrategy
+	}
+
+	reloaded, err := h.repo.GetActive(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to reload strategy from database after previous write failure")
+		// Keep using in-memory state, leave needsDBReload=true for retry on next request
+		return h.currentStrategy
+	}
+
+	if reloaded != nil {
+		h.currentStrategy = reloaded
+		h.needsDBReload = false
+		log.Info().
+			Str("strategy_id", reloaded.Metadata.ID).
+			Msg("Successfully reloaded strategy from database after previous write failure")
+		return reloaded
+	}
+
+	// No active strategy in DB - clear the reload flag, return current
+	h.needsDBReload = false
+	return h.currentStrategy
 }
 
 // UpdateCurrentStrategy updates the current strategy
@@ -505,14 +519,29 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	//    to avoid lock inversion issues. The order is always: DB write -> memory update.
 	//    This prevents deadlocks between API handlers and background DB operations.
 	//
-	// Why this is acceptable for strategy updates:
+	// LOST-UPDATE RISK (known limitation):
+	// ------------------------------------
+	// Scenario: User A reads strategy v1, User B reads strategy v1
+	//           User A modifies and saves -> v2
+	//           User B modifies (based on v1) and saves -> v3 (overwrites A's changes!)
+	//
+	// This is a classic lost-update problem. User A's changes are silently overwritten.
+	// We accept this risk because:
+	// - Strategy updates are rare (seconds/minutes apart, not milliseconds)
+	// - Single-user or small-team usage is the expected deployment model
+	// - The simplicity benefit outweighs the edge case risk
+	//
+	// To implement optimistic concurrency control (OCC), add:
+	// 1. A version/etag field to StrategyConfig (e.g., Metadata.Version int64)
+	// 2. Include version in update request
+	// 3. Use DB WHERE clause: UPDATE ... WHERE id=? AND version=?
+	// 4. Return 409 Conflict if version mismatch
+	//
+	// Why LWW is acceptable for strategy updates:
 	// - Strategy updates are infrequent (user-initiated, typically seconds/minutes apart)
 	// - Readers always get a complete, consistent strategy (just potentially stale)
 	// - The DB is the source of truth; on restart, the correct strategy loads
 	// - Lock contention would cause much worse latency spikes for all readers
-	//
-	// If stronger consistency is required (e.g., optimistic concurrency control),
-	// consider adding a version field and using compare-and-swap at the DB level.
 	if h.repo != nil {
 		if err := h.repo.SaveAndActivate(c.Request.Context(), strategyCopy); err != nil {
 			log.Error().Err(err).Msg("Failed to persist strategy to database")

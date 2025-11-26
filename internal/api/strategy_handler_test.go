@@ -1121,3 +1121,115 @@ func TestDeepCopyNil(t *testing.T) {
 	copied := nilStrategy.DeepCopy()
 	assert.Nil(t, copied, "DeepCopy of nil should return nil")
 }
+
+// =============================================================================
+// needsDBReload Recovery Tests
+// =============================================================================
+
+func TestGetCurrentStrategy_NeedsDBReload_NoRepo(t *testing.T) {
+	// Test that when needsDBReload is true but repo is nil,
+	// GetCurrentStrategy returns the in-memory strategy without error
+
+	router := gin.New()
+	handler := NewStrategyHandler() // No DB repo
+
+	// Set up a known strategy
+	testStrategy := strategy.NewDefaultStrategy("Test Strategy Before Reload")
+	handler.mu.Lock()
+	handler.currentStrategy = testStrategy
+	handler.needsDBReload = true // Simulate failed DB write
+	handler.mu.Unlock()
+
+	router.GET("/strategies/current", handler.GetCurrentStrategy)
+
+	// Make request
+	req, _ := http.NewRequest(http.MethodGet, "/strategies/current", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Should succeed with the in-memory strategy
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response strategy.StrategyConfig
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Equal(t, "Test Strategy Before Reload", response.Metadata.Name)
+
+	// needsDBReload should still be true (no repo to reload from)
+	handler.mu.RLock()
+	assert.True(t, handler.needsDBReload)
+	handler.mu.RUnlock()
+}
+
+func TestGetCurrentStrategy_ConcurrentReloadRequests(t *testing.T) {
+	// Test that concurrent requests when needsDBReload=true
+	// don't cause race conditions (all should get valid strategy)
+
+	router := gin.New()
+	handler := NewStrategyHandler()
+
+	testStrategy := strategy.NewDefaultStrategy("Concurrent Reload Test")
+	handler.mu.Lock()
+	handler.currentStrategy = testStrategy
+	handler.needsDBReload = true
+	handler.mu.Unlock()
+
+	router.GET("/strategies/current", handler.GetCurrentStrategy)
+
+	const numConcurrent = 20
+	var wg sync.WaitGroup
+	var successCount int32
+
+	wg.Add(numConcurrent)
+	for i := 0; i < numConcurrent; i++ {
+		go func() {
+			defer wg.Done()
+
+			req, _ := http.NewRequest(http.MethodGet, "/strategies/current", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code == http.StatusOK {
+				var response strategy.StrategyConfig
+				if json.Unmarshal(w.Body.Bytes(), &response) == nil {
+					if response.Metadata.Name == "Concurrent Reload Test" {
+						atomic.AddInt32(&successCount, 1)
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	assert.Equal(t, int32(numConcurrent), successCount, "All concurrent requests should succeed")
+}
+
+func TestNeedsDBReload_ClearedAfterSuccessfulUpdate(t *testing.T) {
+	// Test that needsDBReload is cleared after a successful UpdateCurrentStrategy
+
+	router := gin.New()
+	handler := NewStrategyHandler()
+
+	// Simulate previous failed write
+	handler.mu.Lock()
+	handler.needsDBReload = true
+	handler.mu.Unlock()
+
+	router.PUT("/strategies/current", handler.UpdateCurrentStrategy)
+
+	// Create a valid strategy update
+	newStrategy := strategy.NewDefaultStrategy("New Strategy After Recovery")
+	body, _ := json.Marshal(newStrategy)
+
+	req, _ := http.NewRequest(http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// needsDBReload should be cleared after successful update
+	handler.mu.RLock()
+	assert.False(t, handler.needsDBReload, "needsDBReload should be cleared after successful update")
+	handler.mu.RUnlock()
+}
