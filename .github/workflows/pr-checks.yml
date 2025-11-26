@@ -266,12 +266,21 @@ jobs:
           NATS_URL: "nats://localhost:4222"
         run: |
           go test -coverprofile=coverage-new.out -covermode=atomic ./...
+          # Extract coverage percentage BEFORE switching branches (files must exist)
+          NEW_COVERAGE=$(go tool cover -func=coverage-new.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "NEW_COVERAGE=${NEW_COVERAGE}" >> $GITHUB_ENV
+          echo "PR branch coverage: ${NEW_COVERAGE}%"
 
       - name: Get base branch coverage
         run: |
           git fetch origin ${{ github.base_ref }}
           git checkout origin/${{ github.base_ref }}
           go test -coverprofile=coverage-base.out -covermode=atomic ./... || echo "Base coverage not available"
+          if [ -f coverage-base.out ]; then
+            BASE_COVERAGE=$(go tool cover -func=coverage-base.out | grep total | awk '{print $3}' | sed 's/%//')
+            echo "BASE_COVERAGE=${BASE_COVERAGE}" >> $GITHUB_ENV
+            echo "Base branch coverage: ${BASE_COVERAGE}%"
+          fi
         env:
           DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
           REDIS_URL: "localhost:6379"
@@ -279,10 +288,7 @@ jobs:
 
       - name: Compare coverage
         run: |
-          if [ -f coverage-base.out ]; then
-            BASE_COVERAGE=$(go tool cover -func=coverage-base.out | grep total | awk '{print $3}' | sed 's/%//')
-            NEW_COVERAGE=$(go tool cover -func=coverage-new.out | grep total | awk '{print $3}' | sed 's/%//')
-
+          if [ -n "$BASE_COVERAGE" ] && [ -n "$NEW_COVERAGE" ]; then
             echo "Base coverage: ${BASE_COVERAGE}%"
             echo "New coverage: ${NEW_COVERAGE}%"
 
