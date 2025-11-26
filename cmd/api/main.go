@@ -195,6 +195,11 @@ func (s *APIServer) setupRoutes() {
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
 		// Note: RegisterRoutes should apply read middleware internally if needed
 		decisionHandler.RegisterRoutes(v1)
+
+		// Decision feedback routes (T309)
+		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())
+		feedbackHandler := api.NewFeedbackHandler(feedbackRepo)
+		feedbackHandler.RegisterRoutes(v1)
 	}
 
 	// Root endpoint
