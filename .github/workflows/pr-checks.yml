@@ -239,12 +239,11 @@ jobs:
       - name: Setup database
         env:
           PGPASSWORD: postgres
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
         run: |
           psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
           psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
           go run cmd/migrate/main.go up
-        env:
-          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
 
       - name: Run tests with coverage
         env:
