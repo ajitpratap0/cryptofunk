@@ -198,3 +198,73 @@ func TestMigrate_AppliesVersionUpgrade(t *testing.T) {
 	// Should be updated to current version
 	assert.Equal(t, SchemaVersion, s.Metadata.SchemaVersion)
 }
+
+func TestRegisteredMigrations_NoContinuityGaps(t *testing.T) {
+	// This test validates that the registered migrations form a continuous chain
+	// with no gaps. The actual gap detection happens at init() time via log.Fatal(),
+	// but this test provides additional runtime validation and documentation.
+
+	// Note: registeredMigrations is package-private, so we test indirectly via
+	// GetMigrationPath which relies on the same validated migration list.
+
+	// Test that we can get a valid migration path from oldest to newest version
+	// If there were gaps, the path would be incomplete or missing migrations
+	path, err := GetMigrationPath("0.9", SchemaVersion)
+	require.NoError(t, err, "Migration path should be valid for oldest to current version")
+
+	// Verify each migration in the path has valid version format
+	for _, m := range path {
+		assert.NotEmpty(t, m.FromVersion, "FromVersion should not be empty")
+		assert.NotEmpty(t, m.ToVersion, "ToVersion should not be empty")
+		assert.NotEmpty(t, m.Name, "Migration name should not be empty")
+		assert.NotNil(t, m.Migrate, "Migration function should not be nil")
+
+		// Verify ToVersion is greater than FromVersion
+		cmp, err := CompareVersions(m.FromVersion, m.ToVersion)
+		require.NoError(t, err, "Version comparison should succeed")
+		assert.Less(t, cmp, 0, "ToVersion (%s) should be greater than FromVersion (%s)", m.ToVersion, m.FromVersion)
+	}
+
+	// If there are multiple migrations, verify they form a continuous chain
+	if len(path) > 1 {
+		for i := 1; i < len(path); i++ {
+			prevTo := path[i-1].ToVersion
+			currFrom := path[i].FromVersion
+
+			// The previous migration's ToVersion should match the current migration's FromVersion
+			cmp, err := CompareVersions(prevTo, currFrom)
+			require.NoError(t, err, "Version comparison should succeed")
+			assert.Equal(t, 0, cmp, "Migration chain gap detected: %s ends at %s but %s starts at %s",
+				path[i-1].Name, prevTo, path[i].Name, currFrom)
+		}
+	}
+}
+
+func TestGetMigrationPath_NoMigrationsNeeded(t *testing.T) {
+	// Test various scenarios where no migrations should be needed
+
+	tests := []struct {
+		name        string
+		fromVersion string
+		toVersion   string
+	}{
+		{
+			name:        "already at current version",
+			fromVersion: SchemaVersion,
+			toVersion:   SchemaVersion,
+		},
+		{
+			name:        "downgrade not supported",
+			fromVersion: "2.0",
+			toVersion:   "1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, err := GetMigrationPath(tt.fromVersion, tt.toVersion)
+			require.NoError(t, err)
+			assert.Empty(t, path, "No migrations should be needed")
+		})
+	}
+}

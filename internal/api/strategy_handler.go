@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -212,17 +213,8 @@ func isBinaryFile(data []byte) bool {
 	}
 
 	for _, magic := range knownBinaryMagicNumbers {
-		if len(data) >= len(magic) {
-			match := true
-			for i, b := range magic {
-				if data[i] != b {
-					match = false
-					break
-				}
-			}
-			if match {
-				return true
-			}
+		if bytes.HasPrefix(data, magic) {
+			return true
 		}
 	}
 
@@ -456,17 +448,29 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// during slow database operations. This allows readers to continue
 	// accessing the current state while we write to DB.
 	//
-	// CONSISTENCY TRADE-OFF: There is a brief window (~1-10ms during DB write)
-	// where the database has the new strategy but in-memory state has the old one.
-	// During this window, concurrent readers will get stale (but consistent) data.
-	// This is acceptable because:
-	// 1. Strategy updates are infrequent (user-initiated)
-	// 2. Readers always get a complete, consistent strategy (just potentially stale)
-	// 3. The DB is the source of truth; on restart, the correct strategy loads
-	// 4. Lock contention would cause much worse latency spikes for all readers
+	// CONSISTENCY MODEL: Last-Write-Wins (LWW)
+	// ========================================
+	// This implementation uses last-write-wins semantics for concurrent updates:
 	//
-	// If stronger consistency is required, use sync.RWMutex and hold write lock
-	// during both DB persist and memory update (at cost of increased latency).
+	// 1. No optimistic locking: If two users update simultaneously, the last one
+	//    to complete the DB write wins. There's no version checking or conflict detection.
+	//
+	// 2. Eventual consistency window: There's a brief window (~1-10ms during DB write)
+	//    where the database has the new strategy but in-memory state has the old one.
+	//    During this window, concurrent readers will get stale (but consistent) data.
+	//
+	// 3. Lock ordering: We intentionally do NOT hold the mu lock during DB operations
+	//    to avoid lock inversion issues. The order is always: DB write -> memory update.
+	//    This prevents deadlocks between API handlers and background DB operations.
+	//
+	// Why this is acceptable for strategy updates:
+	// - Strategy updates are infrequent (user-initiated, typically seconds/minutes apart)
+	// - Readers always get a complete, consistent strategy (just potentially stale)
+	// - The DB is the source of truth; on restart, the correct strategy loads
+	// - Lock contention would cause much worse latency spikes for all readers
+	//
+	// If stronger consistency is required (e.g., optimistic concurrency control),
+	// consider adding a version field and using compare-and-swap at the DB level.
 	if h.repo != nil {
 		if err := h.repo.SaveAndActivate(c.Request.Context(), strategyCopy); err != nil {
 			log.Error().Err(err).Msg("Failed to persist strategy to database")
