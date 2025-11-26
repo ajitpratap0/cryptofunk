@@ -1,7 +1,8 @@
-//go:build !integration
+//go:build integration
 
-// This test is excluded from CI integration tests due to flaky race conditions
-// in the split_vote_no_consensus subtest. Run locally with `go test -v ./internal/orchestrator/...`
+// This test requires the 'integration' build tag to run.
+// It is excluded from CI due to flaky race conditions in the split_vote_no_consensus subtest.
+// Run locally with: go test -v -tags=integration ./internal/orchestrator/...
 package orchestrator_test
 
 import (
