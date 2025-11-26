@@ -1,10 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -180,6 +185,7 @@ type MockDecisionRepository struct {
 	GetDecisionFunc          func(ctx context.Context, id uuid.UUID) (*Decision, error)
 	GetDecisionStatsFunc     func(ctx context.Context, filter DecisionFilter) (*DecisionStats, error)
 	FindSimilarDecisionsFunc func(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error)
+	SearchDecisionsFunc      func(ctx context.Context, req SearchRequest) ([]SearchResult, error)
 }
 
 func (m *MockDecisionRepository) ListDecisions(ctx context.Context, filter DecisionFilter) ([]Decision, error) {
@@ -210,6 +216,13 @@ func (m *MockDecisionRepository) FindSimilarDecisions(ctx context.Context, id uu
 	return []Decision{}, nil
 }
 
+func (m *MockDecisionRepository) SearchDecisions(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	if m.SearchDecisionsFunc != nil {
+		return m.SearchDecisionsFunc(ctx, req)
+	}
+	return []SearchResult{}, nil
+}
+
 // Example of how to use MockDecisionRepository in tests
 func TestMockRepository(t *testing.T) {
 	mock := &MockDecisionRepository{
@@ -232,4 +245,380 @@ func TestMockRepository(t *testing.T) {
 	assert.Len(t, decisions, 1)
 	assert.Equal(t, "signal", decisions[0].DecisionType)
 	assert.Equal(t, "BTC/USDT", decisions[0].Symbol)
+}
+
+// =============================================================================
+// Handler Tests with Mock Repository
+// =============================================================================
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+// setupTestRouter creates a router with the decision handler using a mock repository
+func setupTestRouter(mock *MockDecisionRepository) *gin.Engine {
+	router := gin.New()
+	handler := &DecisionHandler{repo: mock}
+	v1 := router.Group("/api/v1")
+	handler.RegisterRoutes(v1)
+	return router
+}
+
+// TestHandlerListDecisions tests the list decisions endpoint
+func TestHandlerListDecisions(t *testing.T) {
+	testDecisions := []Decision{
+		{
+			ID:           uuid.New(),
+			DecisionType: "signal",
+			Symbol:       "BTC/USDT",
+			Model:        "claude-sonnet-4",
+			Prompt:       "Analyze BTC/USDT",
+			Response:     `{"action": "BUY"}`,
+			CreatedAt:    time.Now(),
+		},
+		{
+			ID:           uuid.New(),
+			DecisionType: "risk_approval",
+			Symbol:       "ETH/USDT",
+			Model:        "gpt-4",
+			Prompt:       "Evaluate risk",
+			Response:     `{"approved": true}`,
+			CreatedAt:    time.Now(),
+		},
+	}
+
+	mock := &MockDecisionRepository{
+		ListDecisionsFunc: func(ctx context.Context, filter DecisionFilter) ([]Decision, error) {
+			// Filter by symbol if provided
+			if filter.Symbol != "" {
+				filtered := make([]Decision, 0)
+				for _, d := range testDecisions {
+					if d.Symbol == filter.Symbol {
+						filtered = append(filtered, d)
+					}
+				}
+				return filtered, nil
+			}
+			return testDecisions, nil
+		},
+	}
+
+	router := setupTestRouter(mock)
+
+	t.Run("list all decisions", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		decisions := response["decisions"].([]interface{})
+		assert.Len(t, decisions, 2)
+		assert.Equal(t, float64(2), response["count"])
+	})
+
+	t.Run("list decisions with symbol filter", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions?symbol=BTC/USDT", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		decisions := response["decisions"].([]interface{})
+		assert.Len(t, decisions, 1)
+	})
+
+	t.Run("list decisions with pagination", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions?limit=1&offset=0", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		// Verify filter is returned
+		filter := response["filter"].(map[string]interface{})
+		assert.Equal(t, float64(1), filter["Limit"])
+	})
+}
+
+// TestHandlerGetDecision tests getting a single decision
+func TestHandlerGetDecision(t *testing.T) {
+	testID := uuid.New()
+	confidence := 0.85
+	testDecision := &Decision{
+		ID:           testID,
+		DecisionType: "signal",
+		Symbol:       "BTC/USDT",
+		Model:        "claude-sonnet-4",
+		Confidence:   &confidence,
+		Prompt:       "Test prompt",
+		Response:     "Test response",
+		CreatedAt:    time.Now(),
+	}
+
+	mock := &MockDecisionRepository{
+		GetDecisionFunc: func(ctx context.Context, id uuid.UUID) (*Decision, error) {
+			if id == testID {
+				return testDecision, nil
+			}
+			return nil, nil // Not found
+		},
+	}
+
+	router := setupTestRouter(mock)
+
+	t.Run("get existing decision", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/"+testID.String(), nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var decision Decision
+		err := json.Unmarshal(w.Body.Bytes(), &decision)
+		require.NoError(t, err)
+
+		assert.Equal(t, testID, decision.ID)
+		assert.Equal(t, "BTC/USDT", decision.Symbol)
+		assert.Equal(t, 0.85, *decision.Confidence)
+	})
+
+	t.Run("get non-existent decision", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		nonExistentID := uuid.New()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/"+nonExistentID.String(), nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("get decision with invalid ID", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/invalid-uuid", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// TestHandlerGetStats tests the statistics endpoint
+func TestHandlerGetStats(t *testing.T) {
+	mock := &MockDecisionRepository{
+		GetDecisionStatsFunc: func(ctx context.Context, filter DecisionFilter) (*DecisionStats, error) {
+			return &DecisionStats{
+				TotalDecisions: 100,
+				ByType: map[string]int{
+					"signal":        60,
+					"risk_approval": 40,
+				},
+				ByOutcome: map[string]int{
+					"SUCCESS": 70,
+					"FAILURE": 30,
+				},
+				ByModel: map[string]int{
+					"claude-sonnet-4": 50,
+					"gpt-4":           50,
+				},
+				AvgConfidence: 0.75,
+				AvgLatencyMs:  120.5,
+				AvgTokensUsed: 150,
+				SuccessRate:   0.70,
+				TotalPnL:      5000.0,
+				AvgPnL:        71.43,
+			}, nil
+		},
+	}
+
+	router := setupTestRouter(mock)
+
+	t.Run("get stats without filters", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/stats", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var stats DecisionStats
+		err := json.Unmarshal(w.Body.Bytes(), &stats)
+		require.NoError(t, err)
+
+		assert.Equal(t, 100, stats.TotalDecisions)
+		assert.Equal(t, 0.75, stats.AvgConfidence)
+		assert.Equal(t, 0.70, stats.SuccessRate)
+		assert.Equal(t, 60, stats.ByType["signal"])
+	})
+
+	t.Run("get stats with symbol filter", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/stats?symbol=BTC/USDT", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// TestHandlerSearchDecisions tests the search endpoint
+func TestHandlerSearchDecisions(t *testing.T) {
+	mock := &MockDecisionRepository{}
+	router := setupTestRouter(mock)
+
+	t.Run("search with text query", func(t *testing.T) {
+		body := SearchRequest{
+			Query: "buy signal BTC",
+			Limit: 10,
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/search", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		assert.Equal(t, "text", response["search_type"])
+	})
+
+	t.Run("search with missing query and embedding", func(t *testing.T) {
+		body := SearchRequest{
+			Limit: 10,
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/search", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("search with invalid embedding dimension", func(t *testing.T) {
+		body := SearchRequest{
+			Embedding: make([]float32, 100), // Wrong dimension
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/search", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Contains(t, response["error"], "Invalid embedding dimension")
+	})
+
+	t.Run("search with invalid JSON", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/search", bytes.NewBufferString("invalid json"))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// TestHandlerSimilarDecisions tests the similar decisions endpoint
+func TestHandlerSimilarDecisions(t *testing.T) {
+	testID := uuid.New()
+
+	mock := &MockDecisionRepository{
+		FindSimilarDecisionsFunc: func(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error) {
+			if id == testID {
+				return []Decision{
+					{
+						ID:           uuid.New(),
+						DecisionType: "signal",
+						Symbol:       "BTC/USDT",
+						Model:        "claude-sonnet-4",
+					},
+					{
+						ID:           uuid.New(),
+						DecisionType: "signal",
+						Symbol:       "ETH/USDT",
+						Model:        "gpt-4",
+					},
+				}, nil
+			}
+			return []Decision{}, nil
+		},
+	}
+
+	router := setupTestRouter(mock)
+
+	t.Run("get similar decisions", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/"+testID.String()+"/similar", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		similar := response["similar"].([]interface{})
+		assert.Len(t, similar, 2)
+		assert.Equal(t, float64(2), response["count"])
+	})
+
+	t.Run("get similar with limit", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/decisions/"+testID.String()+"/similar?limit=5", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// TestSearchRequest validates SearchRequest struct
+func TestSearchRequest(t *testing.T) {
+	now := time.Now()
+	req := SearchRequest{
+		Query:     "buy signal",
+		Embedding: make([]float32, 1536),
+		Symbol:    "BTC/USDT",
+		FromDate:  &now,
+		ToDate:    &now,
+		Limit:     20,
+	}
+
+	assert.Equal(t, "buy signal", req.Query)
+	assert.Len(t, req.Embedding, 1536)
+	assert.Equal(t, "BTC/USDT", req.Symbol)
+	assert.Equal(t, 20, req.Limit)
+}
+
+// TestSearchResult validates SearchResult struct
+func TestSearchResult(t *testing.T) {
+	result := SearchResult{
+		Decision: Decision{
+			ID:     uuid.New(),
+			Symbol: "BTC/USDT",
+		},
+		Score: 0.95,
+	}
+
+	assert.Equal(t, 0.95, result.Score)
+	assert.Equal(t, "BTC/USDT", result.Decision.Symbol)
 }

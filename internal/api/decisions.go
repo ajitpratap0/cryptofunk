@@ -68,7 +68,7 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt, response,
-			model, tokens_used, latency_ms, confidence, outcome, pnl,
+			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at
 		FROM llm_decisions
 		WHERE 1=1
@@ -151,7 +151,7 @@ func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*De
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, prompt, response,
-			model, tokens_used, latency_ms, confidence, outcome, pnl,
+			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at
 		FROM llm_decisions
 		WHERE id = $1
@@ -184,8 +184,8 @@ func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter Decisi
 			AVG(COALESCE(tokens_used, 0)) as avg_tokens,
 			SUM(CASE WHEN outcome = 'SUCCESS' THEN 1 ELSE 0 END)::FLOAT /
 				NULLIF(COUNT(CASE WHEN outcome IS NOT NULL THEN 1 END), 0) as success_rate,
-			SUM(COALESCE(pnl, 0)) as total_pnl,
-			AVG(COALESCE(pnl, 0)) as avg_pnl
+			SUM(COALESCE(outcome_pnl, 0)) as total_pnl,
+			AVG(COALESCE(outcome_pnl, 0)) as avg_pnl
 		FROM llm_decisions
 		WHERE 1=1
 	`
@@ -312,7 +312,7 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 		)
 		SELECT
 			d.id, d.session_id, d.decision_type, d.symbol, d.prompt, d.response,
-			d.model, d.tokens_used, d.latency_ms, d.confidence, d.outcome, d.pnl,
+			d.model, d.tokens_used, d.latency_ms, d.confidence, d.outcome, d.outcome_pnl,
 			d.created_at,
 			d.prompt_embedding <=> t.prompt_embedding as distance
 		FROM llm_decisions d, target t
@@ -345,6 +345,241 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 	}
 
 	return decisions, rows.Err()
+}
+
+// SearchRequest contains parameters for searching decisions
+type SearchRequest struct {
+	Query     string     `json:"query"`               // Text search query
+	Embedding []float32  `json:"embedding,omitempty"` // Pre-computed embedding vector (1536 dim)
+	Symbol    string     `json:"symbol,omitempty"`    // Filter by symbol
+	FromDate  *time.Time `json:"from_date,omitempty"` // Filter by date range
+	ToDate    *time.Time `json:"to_date,omitempty"`
+	Limit     int        `json:"limit,omitempty"` // Max results (default 20, max 100)
+}
+
+// SearchResult represents a search result with relevance score
+type SearchResult struct {
+	Decision Decision `json:"decision"`
+	Score    float64  `json:"score"` // Relevance score (0-1)
+}
+
+// SearchDecisions performs semantic search on decisions
+// If embedding is provided, uses pgvector similarity search
+// Otherwise, falls back to text search on prompt and response fields
+func (r *DecisionRepository) SearchDecisions(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	// Set default limit
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+	if req.Limit > 100 {
+		req.Limit = 100
+	}
+
+	// If embedding is provided, use vector similarity search
+	if len(req.Embedding) == 1536 {
+		return r.searchByEmbedding(ctx, req)
+	}
+
+	// Otherwise, use text search
+	return r.searchByText(ctx, req)
+}
+
+// searchByEmbedding performs vector similarity search using pgvector
+func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	query := `
+		SELECT
+			id, session_id, decision_type, symbol, prompt, response,
+			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
+			created_at,
+			1 - (prompt_embedding <=> $1::vector) as similarity
+		FROM llm_decisions
+		WHERE prompt_embedding IS NOT NULL
+	`
+	args := []interface{}{req.Embedding}
+	argPos := 2
+
+	// Add filters
+	if req.Symbol != "" {
+		query += ` AND symbol = $` + itoa(argPos)
+		args = append(args, req.Symbol)
+		argPos++
+	}
+	if req.FromDate != nil {
+		query += ` AND created_at >= $` + itoa(argPos)
+		args = append(args, *req.FromDate)
+		argPos++
+	}
+	if req.ToDate != nil {
+		query += ` AND created_at <= $` + itoa(argPos)
+		args = append(args, *req.ToDate)
+		argPos++
+	}
+
+	query += ` ORDER BY prompt_embedding <=> $1::vector`
+	query += ` LIMIT $` + itoa(argPos)
+	args = append(args, req.Limit)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]SearchResult, 0)
+	for rows.Next() {
+		var d Decision
+		var similarity float64
+		err := rows.Scan(
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
+			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
+			&d.CreatedAt, &similarity,
+		)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, SearchResult{
+			Decision: d,
+			Score:    similarity,
+		})
+	}
+
+	return results, rows.Err()
+}
+
+// searchByText performs text-based search using PostgreSQL full-text search
+func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	query := `
+		SELECT
+			id, session_id, decision_type, symbol, prompt, response,
+			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
+			created_at,
+			ts_rank(
+				to_tsvector('english', COALESCE(prompt, '') || ' ' || COALESCE(response, '')),
+				plainto_tsquery('english', $1)
+			) as rank
+		FROM llm_decisions
+		WHERE to_tsvector('english', COALESCE(prompt, '') || ' ' || COALESCE(response, ''))
+			@@ plainto_tsquery('english', $1)
+	`
+	args := []interface{}{req.Query}
+	argPos := 2
+
+	// Add filters
+	if req.Symbol != "" {
+		query += ` AND symbol = $` + itoa(argPos)
+		args = append(args, req.Symbol)
+		argPos++
+	}
+	if req.FromDate != nil {
+		query += ` AND created_at >= $` + itoa(argPos)
+		args = append(args, *req.FromDate)
+		argPos++
+	}
+	if req.ToDate != nil {
+		query += ` AND created_at <= $` + itoa(argPos)
+		args = append(args, *req.ToDate)
+		argPos++
+	}
+
+	query += ` ORDER BY rank DESC`
+	query += ` LIMIT $` + itoa(argPos)
+	args = append(args, req.Limit)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		// If full-text search fails (e.g., empty query), fall back to ILIKE
+		return r.searchByILike(ctx, req)
+	}
+	defer rows.Close()
+
+	results := make([]SearchResult, 0)
+	for rows.Next() {
+		var d Decision
+		var rank float64
+		err := rows.Scan(
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
+			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
+			&d.CreatedAt, &rank,
+		)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, SearchResult{
+			Decision: d,
+			Score:    rank,
+		})
+	}
+
+	// If no results from full-text search, try ILIKE
+	if len(results) == 0 && req.Query != "" {
+		return r.searchByILike(ctx, req)
+	}
+
+	return results, rows.Err()
+}
+
+// searchByILike performs simple ILIKE pattern matching as fallback
+func (r *DecisionRepository) searchByILike(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	pattern := "%" + req.Query + "%"
+	query := `
+		SELECT
+			id, session_id, decision_type, symbol, prompt, response,
+			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
+			created_at
+		FROM llm_decisions
+		WHERE (prompt ILIKE $1 OR response ILIKE $1)
+	`
+	args := []interface{}{pattern}
+	argPos := 2
+
+	// Add filters
+	if req.Symbol != "" {
+		query += ` AND symbol = $` + itoa(argPos)
+		args = append(args, req.Symbol)
+		argPos++
+	}
+	if req.FromDate != nil {
+		query += ` AND created_at >= $` + itoa(argPos)
+		args = append(args, *req.FromDate)
+		argPos++
+	}
+	if req.ToDate != nil {
+		query += ` AND created_at <= $` + itoa(argPos)
+		args = append(args, *req.ToDate)
+		argPos++
+	}
+
+	query += ` ORDER BY created_at DESC`
+	query += ` LIMIT $` + itoa(argPos)
+	args = append(args, req.Limit)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]SearchResult, 0)
+	for rows.Next() {
+		var d Decision
+		err := rows.Scan(
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
+			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
+			&d.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, SearchResult{
+			Decision: d,
+			Score:    0.5, // Arbitrary score for ILIKE matches
+		})
+	}
+
+	return results, rows.Err()
 }
 
 // Helper function to convert int to string for query building

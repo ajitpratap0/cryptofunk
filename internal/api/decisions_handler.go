@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,9 +10,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// DecisionRepositoryInterface defines methods for decision data access
+type DecisionRepositoryInterface interface {
+	ListDecisions(ctx context.Context, filter DecisionFilter) ([]Decision, error)
+	GetDecision(ctx context.Context, id uuid.UUID) (*Decision, error)
+	GetDecisionStats(ctx context.Context, filter DecisionFilter) (*DecisionStats, error)
+	FindSimilarDecisions(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error)
+	SearchDecisions(ctx context.Context, req SearchRequest) ([]SearchResult, error)
+}
+
 // DecisionHandler handles HTTP requests for decision explainability
 type DecisionHandler struct {
-	repo *DecisionRepository
+	repo DecisionRepositoryInterface
 }
 
 // NewDecisionHandler creates a new decision handler
@@ -24,9 +34,10 @@ func (h *DecisionHandler) RegisterRoutes(router *gin.RouterGroup) {
 	decisions := router.Group("/decisions")
 	{
 		decisions.GET("", h.ListDecisions)
+		decisions.GET("/stats", h.GetStats) // Must be before :id to avoid conflict
+		decisions.POST("/search", h.SearchDecisions)
 		decisions.GET("/:id", h.GetDecision)
 		decisions.GET("/:id/similar", h.GetSimilarDecisions)
-		decisions.GET("/stats", h.GetStats)
 	}
 }
 
@@ -226,4 +237,67 @@ func (h *DecisionHandler) GetStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, stats)
+}
+
+// SearchDecisions handles POST /api/v1/decisions/search
+// @Summary Search decisions using text or semantic search
+// @Description Performs semantic search if embedding is provided (1536-dim vector),
+// @Description otherwise falls back to PostgreSQL full-text search on prompt and response fields.
+// @Tags Decisions
+// @Accept json
+// @Produce json
+// @Param request body SearchRequest true "Search parameters"
+// @Success 200 {object} map[string]interface{} "Search results with relevance scores"
+// @Failure 400 {object} map[string]string "Invalid request"
+// @Failure 500 {object} map[string]string "Server error"
+// @Router /decisions/search [post]
+func (h *DecisionHandler) SearchDecisions(c *gin.Context) {
+	var req SearchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Validate that at least query or embedding is provided
+	if req.Query == "" && len(req.Embedding) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Either 'query' (text search) or 'embedding' (vector search) must be provided",
+		})
+		return
+	}
+
+	// Validate embedding dimension if provided
+	if len(req.Embedding) > 0 && len(req.Embedding) != 1536 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid embedding dimension",
+			"details": "Embedding must be a 1536-dimensional vector (OpenAI text-embedding-ada-002 format)",
+		})
+		return
+	}
+
+	// Perform search
+	results, err := h.repo.SearchDecisions(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Search failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Determine search type for response
+	searchType := "text"
+	if len(req.Embedding) == 1536 {
+		searchType = "semantic"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"results":     results,
+		"count":       len(results),
+		"search_type": searchType,
+		"query":       req.Query,
+	})
 }

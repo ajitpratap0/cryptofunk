@@ -29,6 +29,8 @@ const (
 	MessageTypeOrderUpdate    MessageType = "order_update"
 	MessageTypeAgentStatus    MessageType = "agent_status"
 	MessageTypeSystemStatus   MessageType = "system_status"
+	MessageTypeDecision       MessageType = "decision"       // LLM decision updates
+	MessageTypeDecisionStats  MessageType = "decision_stats" // Decision statistics updates
 	MessageTypeError          MessageType = "error"
 	MessageTypePing           MessageType = "ping"
 	MessageTypePong           MessageType = "pong"
