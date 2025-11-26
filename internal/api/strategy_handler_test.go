@@ -939,7 +939,7 @@ func TestFileUploadFileTooSmall(t *testing.T) {
 
 	// Create a file that's too small (less than MinStrategyUploadSize = 50 bytes)
 	// This is clearly not a valid strategy configuration
-	tinyContent := []byte("metadata:\n  name: x")  // Only 19 bytes
+	tinyContent := []byte("metadata:\n  name: x") // Only 19 bytes
 
 	body, contentType := createMultipartForm(t, "strategy.yaml", tinyContent, nil)
 
