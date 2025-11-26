@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ValidationError contains details about validation failures
@@ -164,6 +165,30 @@ func (s *StrategyConfig) validateAgents() ValidationErrors {
 			Field:   "agents.enabled",
 			Message: "at least one trading agent must be enabled",
 		})
+	}
+
+	// Cross-validate: enabled agents should have non-zero weights
+	type agentCheck struct {
+		enabled bool
+		weight  float64
+		name    string
+	}
+	agentChecks := []agentCheck{
+		{s.Agents.Enabled.Technical, s.Agents.Weights.Technical, "technical"},
+		{s.Agents.Enabled.OrderBook, s.Agents.Weights.OrderBook, "orderbook"},
+		{s.Agents.Enabled.Sentiment, s.Agents.Weights.Sentiment, "sentiment"},
+		{s.Agents.Enabled.Trend, s.Agents.Weights.Trend, "trend"},
+		{s.Agents.Enabled.Reversion, s.Agents.Weights.Reversion, "reversion"},
+		{s.Agents.Enabled.Arbitrage, s.Agents.Weights.Arbitrage, "arbitrage"},
+	}
+
+	for _, check := range agentChecks {
+		if check.enabled && check.weight == 0 {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("agents.weights.%s", check.name),
+				Message: fmt.Sprintf("%s agent is enabled but has zero weight - it will have no influence on decisions", check.name),
+			})
+		}
 	}
 
 	// Validate agent-specific configs if enabled
@@ -485,6 +510,25 @@ func (s *StrategyConfig) validateOrchestration() ValidationErrors {
 			Field:   "orchestration.quorum",
 			Message: "quorum must be between 0 and 1",
 		})
+	}
+
+	// Validate duration strings
+	if s.Orchestration.StepInterval != "" {
+		if _, err := time.ParseDuration(s.Orchestration.StepInterval); err != nil {
+			errs = append(errs, ValidationError{
+				Field:   "orchestration.step_interval",
+				Message: fmt.Sprintf("invalid duration format: %s (use formats like '30s', '5m', '1h')", s.Orchestration.StepInterval),
+			})
+		}
+	}
+
+	if s.Orchestration.MaxSignalAge != "" {
+		if _, err := time.ParseDuration(s.Orchestration.MaxSignalAge); err != nil {
+			errs = append(errs, ValidationError{
+				Field:   "orchestration.max_signal_age",
+				Message: fmt.Sprintf("invalid duration format: %s (use formats like '30s', '5m', '1h')", s.Orchestration.MaxSignalAge),
+			})
+		}
 	}
 
 	// Consensus

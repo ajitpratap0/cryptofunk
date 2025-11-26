@@ -275,14 +275,15 @@ type ImportRequest struct {
 // @Router /api/v1/strategies/import [post]
 func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 	var data []byte
-	var err error
+	var opts strategy.ImportOptions
+	var applyNow bool
 
 	contentType := c.GetHeader("Content-Type")
 
 	if strings.Contains(contentType, "multipart/form-data") {
 		// Handle file upload
-		file, header, err := c.Request.FormFile("file")
-		if err != nil {
+		file, header, fileErr := c.Request.FormFile("file")
+		if fileErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "No file provided",
 			})
@@ -302,10 +303,12 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 
 		// Use LimitReader for additional safety
 		limitedReader := io.LimitReader(file, MaxStrategyUploadSize+1)
-		data, err = io.ReadAll(limitedReader)
-		if err != nil {
+		var readErr error
+		data, readErr = io.ReadAll(limitedReader)
+		if readErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Failed to read file",
+				"error":   "Failed to read file",
+				"details": readErr.Error(),
 			})
 			return
 		}
@@ -324,7 +327,11 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 			Str("filename", header.Filename).
 			Int("size", len(data)).
 			Msg("Importing strategy from file")
-	} else {
+
+		// File uploads use default options
+		opts = strategy.DefaultImportOptions()
+		applyNow = false
+	} else if strings.Contains(contentType, "application/json") || contentType == "" {
 		// Handle JSON request body
 		var req ImportRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -355,7 +362,7 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 		data = []byte(req.Data)
 
 		// Set up import options with overrides
-		opts := strategy.DefaultImportOptions()
+		opts = strategy.DefaultImportOptions()
 		opts.ValidateStrict = req.ValidateStrict
 
 		if req.Name != "" || req.Description != "" || len(req.Tags) > 0 {
@@ -366,39 +373,19 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 			}
 		}
 
-		imported, err := strategy.Import(data, opts)
-		if err != nil {
-			log.Err(err).Msg("Failed to import strategy")
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":   "Failed to import strategy",
-				"details": err.Error(),
-			})
-			return
-		}
-
-		// Apply if requested
-		if req.ApplyNow {
-			h.mu.Lock()
-			h.currentStrategy = imported
-			h.mu.Unlock()
-			log.Info().
-				Str("strategy_name", imported.Metadata.Name).
-				Str("strategy_id", imported.Metadata.ID).
-				Msg("Strategy imported and applied")
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"strategy": imported,
-			"applied":  req.ApplyNow,
+		applyNow = req.ApplyNow
+	} else {
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{
+			"error":   "Unsupported content type",
+			"details": fmt.Sprintf("Expected application/json or multipart/form-data, got %s", contentType),
 		})
 		return
 	}
 
-	// For file upload, use default options
-	opts := strategy.DefaultImportOptions()
+	// Import the strategy (shared path for both file upload and JSON)
 	imported, err := strategy.Import(data, opts)
 	if err != nil {
-		log.Err(err).Msg("Failed to import strategy from file")
+		log.Err(err).Msg("Failed to import strategy")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Failed to import strategy",
 			"details": err.Error(),
@@ -406,9 +393,20 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 		return
 	}
 
+	// Apply if requested
+	if applyNow {
+		h.mu.Lock()
+		h.currentStrategy = imported
+		h.mu.Unlock()
+		log.Info().
+			Str("strategy_name", imported.Metadata.Name).
+			Str("strategy_id", imported.Metadata.ID).
+			Msg("Strategy imported and applied")
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"strategy": imported,
-		"applied":  false,
+		"applied":  applyNow,
 	})
 }
 

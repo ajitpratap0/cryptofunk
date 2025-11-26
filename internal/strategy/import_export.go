@@ -307,7 +307,16 @@ func Clone(strategy *StrategyConfig) (*StrategyConfig, error) {
 	return &clone, nil
 }
 
-// Merge merges two strategies, with the second taking precedence for non-zero values
+// Merge merges two strategies, with the second taking precedence for non-zero values.
+//
+// IMPORTANT: Due to Go's zero value semantics, this function cannot distinguish between
+// "field not specified" and "field explicitly set to zero". This means:
+//   - To set a numeric value to 0, you must use the base strategy's defaults
+//   - Override values of 0 are treated as "not specified" and won't override the base
+//   - For boolean fields like VotingEnabled/LLMReasoningEnabled, the override always takes effect
+//
+// If you need to explicitly set values to zero, modify the base strategy directly or
+// use Import with a complete strategy configuration.
 func Merge(base, override *StrategyConfig) (*StrategyConfig, error) {
 	if base == nil {
 		return nil, fmt.Errorf("base strategy cannot be nil")

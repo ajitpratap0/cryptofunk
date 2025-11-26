@@ -209,31 +209,12 @@ jobs:
     name: Coverage Diff
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: timescale/timescaledb-ha:pg15-latest
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: cryptofunk_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -241,13 +222,38 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Setup database
+      - name: Start CI services
+        run: |
+          docker compose -f docker/ci/docker-compose.yml up -d --build --wait
+          echo "Services started successfully"
+
+      - name: Verify services are ready
+        run: |
+          echo "Verifying PostgreSQL..."
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "PostgreSQL is up"
+
+          echo "Verifying Redis..."
+          until nc -z localhost 6379; do
+            echo "Redis is unavailable - sleeping"
+            sleep 2
+          done
+          echo "Redis is up"
+
+      - name: Setup database extensions
         env:
           PGPASSWORD: postgres
-          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
         run: |
           psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
           psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
+        run: |
           go run cmd/migrate/main.go up
 
       - name: Run tests with coverage
@@ -292,6 +298,11 @@ jobs:
           else
             echo "⚠️  Base coverage not available, skipping comparison"
           fi
+
+      - name: Stop CI services
+        if: always()
+        run: |
+          docker compose -f docker/ci/docker-compose.yml down -v
 
   # All checks must pass
   all-checks:
