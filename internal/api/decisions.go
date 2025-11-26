@@ -26,6 +26,7 @@ type Decision struct {
 	SessionID    *uuid.UUID `json:"session_id,omitempty"`
 	DecisionType string     `json:"decision_type"`
 	Symbol       string     `json:"symbol"`
+	AgentName    *string    `json:"agent_name,omitempty"`
 	Prompt       string     `json:"prompt"`
 	Response     string     `json:"response"`
 	Model        string     `json:"model"`
@@ -67,7 +68,7 @@ type DecisionStats struct {
 func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionFilter) ([]Decision, error) {
 	query := `
 		SELECT
-			id, session_id, decision_type, symbol, prompt, response,
+			id, session_id, decision_type, symbol, agent_name, prompt, response,
 			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at
 		FROM llm_decisions
@@ -132,7 +133,7 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 	for rows.Next() {
 		var d Decision
 		err := rows.Scan(
-			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol, &d.AgentName,
 			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
 			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
 			&d.CreatedAt,
@@ -150,7 +151,7 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*Decision, error) {
 	query := `
 		SELECT
-			id, session_id, decision_type, symbol, prompt, response,
+			id, session_id, decision_type, symbol, agent_name, prompt, response,
 			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at
 		FROM llm_decisions
@@ -159,7 +160,7 @@ func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*De
 
 	var d Decision
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+		&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol, &d.AgentName,
 		&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
 		&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
 		&d.CreatedAt,
@@ -249,8 +250,20 @@ func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter Decisi
 	return &stats, nil
 }
 
+// allowedGroupByFields defines the whitelist of fields that can be used in GROUP BY
+var allowedGroupByFields = map[string]bool{
+	"decision_type": true,
+	"outcome":       true,
+	"model":         true,
+}
+
 // getCountsByField gets count breakdown by a specific field
 func (r *DecisionRepository) getCountsByField(ctx context.Context, field string, filter DecisionFilter) (map[string]int, error) {
+	// Validate field name to prevent SQL injection
+	if !allowedGroupByFields[field] {
+		return nil, fmt.Errorf("invalid field name: %s", field)
+	}
+
 	query := `
 		SELECT ` + field + `, COUNT(*)
 		FROM llm_decisions
@@ -311,7 +324,7 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 			WHERE id = $1 AND prompt_embedding IS NOT NULL
 		)
 		SELECT
-			d.id, d.session_id, d.decision_type, d.symbol, d.prompt, d.response,
+			d.id, d.session_id, d.decision_type, d.symbol, d.agent_name, d.prompt, d.response,
 			d.model, d.tokens_used, d.latency_ms, d.confidence, d.outcome, d.outcome_pnl,
 			d.created_at,
 			d.prompt_embedding <=> t.prompt_embedding as distance
@@ -333,7 +346,7 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 		var d Decision
 		var distance float64
 		err := rows.Scan(
-			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol, &d.AgentName,
 			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
 			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
 			&d.CreatedAt, &distance,
@@ -388,7 +401,7 @@ func (r *DecisionRepository) SearchDecisions(ctx context.Context, req SearchRequ
 func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
 	query := `
 		SELECT
-			id, session_id, decision_type, symbol, prompt, response,
+			id, session_id, decision_type, symbol, agent_name, prompt, response,
 			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at,
 			1 - (prompt_embedding <=> $1::vector) as similarity
@@ -430,7 +443,7 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 		var d Decision
 		var similarity float64
 		err := rows.Scan(
-			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol, &d.AgentName,
 			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
 			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
 			&d.CreatedAt, &similarity,
@@ -451,7 +464,7 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
 	query := `
 		SELECT
-			id, session_id, decision_type, symbol, prompt, response,
+			id, session_id, decision_type, symbol, agent_name, prompt, response,
 			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at,
 			ts_rank(
@@ -498,7 +511,7 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 		var d Decision
 		var rank float64
 		err := rows.Scan(
-			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol, &d.AgentName,
 			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
 			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
 			&d.CreatedAt, &rank,
@@ -525,7 +538,7 @@ func (r *DecisionRepository) searchByILike(ctx context.Context, req SearchReques
 	pattern := "%" + req.Query + "%"
 	query := `
 		SELECT
-			id, session_id, decision_type, symbol, prompt, response,
+			id, session_id, decision_type, symbol, agent_name, prompt, response,
 			model, tokens_used, latency_ms, confidence, outcome, outcome_pnl,
 			created_at
 		FROM llm_decisions
@@ -565,7 +578,7 @@ func (r *DecisionRepository) searchByILike(ctx context.Context, req SearchReques
 	for rows.Next() {
 		var d Decision
 		err := rows.Scan(
-			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol,
+			&d.ID, &d.SessionID, &d.DecisionType, &d.Symbol, &d.AgentName,
 			&d.Prompt, &d.Response, &d.Model, &d.TokensUsed,
 			&d.LatencyMs, &d.Confidence, &d.Outcome, &d.PnL,
 			&d.CreatedAt,
