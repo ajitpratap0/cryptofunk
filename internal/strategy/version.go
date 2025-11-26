@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/Masterminds/semver/v3"
 )
@@ -9,10 +10,127 @@ import (
 // MigrationFunc defines a function that migrates a strategy from one version to another
 type MigrationFunc func(*StrategyConfig) error
 
-// migrations maps source version to migration functions
+// Migration represents a single schema migration
+type Migration struct {
+	FromVersion string        // Source version
+	ToVersion   string        // Target version
+	Name        string        // Human-readable name
+	Migrate     MigrationFunc // Migration function
+}
+
+// registeredMigrations holds all registered migrations in order
+var registeredMigrations []Migration
+
+// migrations maps source version to migration functions (legacy support)
 var migrations = map[string]MigrationFunc{
 	// Example: "0.9" -> "1.0" migration
 	// "0.9": migrateFrom09To10,
+}
+
+func init() {
+	// Register all migrations in order
+	registerMigrations()
+}
+
+// registerMigrations sets up all known migrations
+func registerMigrations() {
+	// Example migration from 0.9 to 1.0 (for future use)
+	registeredMigrations = []Migration{
+		{
+			FromVersion: "0.9",
+			ToVersion:   "1.0",
+			Name:        "Add strategy metadata fields",
+			Migrate:     migrateFrom09To10,
+		},
+		// Future migrations can be added here
+		// {
+		//     FromVersion: "1.0",
+		//     ToVersion:   "1.1",
+		//     Name:        "Add new indicator configurations",
+		//     Migrate:     migrateFrom10To11,
+		// },
+	}
+
+	// Also populate legacy map for backward compatibility
+	for _, m := range registeredMigrations {
+		migrations[m.FromVersion] = m.Migrate
+	}
+}
+
+// migrateFrom09To10 migrates strategy from schema version 0.9 to 1.0
+func migrateFrom09To10(s *StrategyConfig) error {
+	// Set default values for new fields introduced in 1.0
+	if s.Metadata.Source == "" {
+		s.Metadata.Source = "migrated"
+	}
+
+	// Ensure risk parameters have valid defaults
+	if s.Risk.MinPositionUSD == 0 {
+		s.Risk.MinPositionUSD = 10.0
+	}
+	if s.Risk.MaxPositionUSD == 0 {
+		s.Risk.MaxPositionUSD = 100000.0
+	}
+
+	// Ensure orchestration has valid defaults
+	if s.Orchestration.MinConfidence == 0 {
+		s.Orchestration.MinConfidence = 0.6
+	}
+	if s.Orchestration.MinConsensus == 0 {
+		s.Orchestration.MinConsensus = 0.5
+	}
+
+	return nil
+}
+
+// GetMigrationPath returns the list of migrations needed to upgrade from one version to another
+func GetMigrationPath(fromVersion, toVersion string) ([]Migration, error) {
+	from, err := semver.NewVersion(fromVersion)
+	if err != nil {
+		from, err = semver.NewVersion(fromVersion + ".0")
+		if err != nil {
+			return nil, fmt.Errorf("invalid from version: %s", fromVersion)
+		}
+	}
+
+	to, err := semver.NewVersion(toVersion)
+	if err != nil {
+		to, err = semver.NewVersion(toVersion + ".0")
+		if err != nil {
+			return nil, fmt.Errorf("invalid to version: %s", toVersion)
+		}
+	}
+
+	if from.GreaterThan(to) || from.Equal(to) {
+		return nil, nil // No migrations needed
+	}
+
+	// Find applicable migrations
+	var path []Migration
+	for _, m := range registeredMigrations {
+		migFrom, err := semver.NewVersion(m.FromVersion)
+		if err != nil {
+			continue
+		}
+		migTo, err := semver.NewVersion(m.ToVersion)
+		if err != nil {
+			continue
+		}
+
+		// Include migration if it falls within our upgrade range
+		if !migFrom.LessThan(from) && !migTo.GreaterThan(to) {
+			path = append(path, m)
+		}
+	}
+
+	// Sort migrations by version
+	sort.Slice(path, func(i, j int) bool {
+		vi, _ := semver.NewVersion(path[i].FromVersion)
+		vj, _ := semver.NewVersion(path[j].FromVersion)
+		return vi.LessThan(vj)
+	})
+
+	return path, nil
 }
 
 // Migrate upgrades a strategy configuration to the current schema version
