@@ -16,12 +16,19 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/audit"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/strategy"
 )
 
 const (
 	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
 	MaxStrategyUploadSize = 10 * 1024 * 1024
+
+	// DefaultAuditTimeout is the default timeout for audit logging operations
+	DefaultAuditTimeout = 5 * time.Second
+
+	// DefaultValidationTimeout is the default timeout for validation operations
+	DefaultValidationTimeout = 30 * time.Second
 )
 
 // AllowedStrategyExtensions defines valid file extensions for strategy uploads
@@ -39,29 +46,73 @@ type StrategyHandler struct {
 	// mu protects concurrent access to currentStrategy
 	mu sync.RWMutex
 
-	// currentStrategy holds the active strategy
-	// TODO: In production, this should be persisted to database or config file.
-	// Current in-memory storage means strategies are lost on server restart.
-	// See: internal/db/ for database patterns to implement persistence.
+	// currentStrategy holds the active strategy (in-memory cache)
 	currentStrategy *strategy.StrategyConfig
+
+	// repo handles database persistence (optional - if nil, uses in-memory only)
+	repo *db.StrategyRepository
 
 	// auditLogger logs strategy operations for audit trail (optional)
 	auditLogger *audit.Logger
+
+	// validationTimeout is the timeout for validation operations
+	validationTimeout time.Duration
 }
 
-// NewStrategyHandler creates a new strategy handler
+// NewStrategyHandler creates a new strategy handler (in-memory only, for testing)
 func NewStrategyHandler() *StrategyHandler {
 	return &StrategyHandler{
-		currentStrategy: strategy.NewDefaultStrategy("Default Strategy"),
+		currentStrategy:   strategy.NewDefaultStrategy("Default Strategy"),
+		validationTimeout: DefaultValidationTimeout,
 	}
 }
 
 // NewStrategyHandlerWithAudit creates a new strategy handler with audit logging
 func NewStrategyHandlerWithAudit(auditLogger *audit.Logger) *StrategyHandler {
 	return &StrategyHandler{
-		currentStrategy: strategy.NewDefaultStrategy("Default Strategy"),
-		auditLogger:     auditLogger,
+		currentStrategy:   strategy.NewDefaultStrategy("Default Strategy"),
+		auditLogger:       auditLogger,
+		validationTimeout: DefaultValidationTimeout,
 	}
+}
+
+// NewStrategyHandlerWithDB creates a new strategy handler with database persistence
+func NewStrategyHandlerWithDB(repo *db.StrategyRepository, auditLogger *audit.Logger) *StrategyHandler {
+	h := &StrategyHandler{
+		repo:              repo,
+		auditLogger:       auditLogger,
+		validationTimeout: DefaultValidationTimeout,
+	}
+
+	// Try to load active strategy from database
+	if repo != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		activeStrategy, err := repo.GetActive(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to load active strategy from database, using default")
+			h.currentStrategy = strategy.NewDefaultStrategy("Default Strategy")
+		} else if activeStrategy != nil {
+			h.currentStrategy = activeStrategy
+			log.Info().
+				Str("strategy_id", activeStrategy.Metadata.ID).
+				Str("strategy_name", activeStrategy.Metadata.Name).
+				Msg("Loaded active strategy from database")
+		} else {
+			h.currentStrategy = strategy.NewDefaultStrategy("Default Strategy")
+			log.Info().Msg("No active strategy in database, using default")
+		}
+	} else {
+		h.currentStrategy = strategy.NewDefaultStrategy("Default Strategy")
+	}
+
+	return h
+}
+
+// SetValidationTimeout sets the timeout for validation operations
+func (h *StrategyHandler) SetValidationTimeout(timeout time.Duration) {
+	h.validationTimeout = timeout
 }
 
 // sanitizeFilename removes potentially dangerous characters from a filename
@@ -97,10 +148,25 @@ func (h *StrategyHandler) logAuditEvent(c *gin.Context, eventType audit.EventTyp
 
 	ipAddress := c.ClientIP()
 
-	ctx := context.Background()
+	// Use request context with timeout for audit logging
+	ctx, cancel := context.WithTimeout(c.Request.Context(), DefaultAuditTimeout)
+	defer cancel()
+
 	if err := h.auditLogger.LogStrategyChange(ctx, eventType, userID, ipAddress, strategyID, strategyName, metadata, success, errorMsg); err != nil {
 		log.Warn().Err(err).Msg("Failed to log audit event")
 	}
+}
+
+// persistStrategy saves the strategy to database if repository is configured
+func (h *StrategyHandler) persistStrategy(ctx context.Context, s *strategy.StrategyConfig, setActive bool) error {
+	if h.repo == nil {
+		return nil // No persistence configured
+	}
+
+	if setActive {
+		return h.repo.SaveAndActivate(ctx, s)
+	}
+	return h.repo.Save(ctx, s)
 }
 
 // RegisterRoutes registers all strategy-related routes
@@ -173,12 +239,29 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 		return
 	}
 
-	// Validate the strategy
-	if err := newStrategy.Validate(); err != nil {
-		h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, false, err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Strategy validation failed",
-			"details": err.Error(),
+	// Validate the strategy with timeout
+	validateCtx, validateCancel := context.WithTimeout(c.Request.Context(), h.validationTimeout)
+	defer validateCancel()
+
+	// Run validation in a goroutine to respect context cancellation
+	validationDone := make(chan error, 1)
+	go func() {
+		validationDone <- newStrategy.Validate()
+	}()
+
+	select {
+	case err := <-validationDone:
+		if err != nil {
+			h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, false, err.Error())
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Strategy validation failed",
+				"details": err.Error(),
+			})
+			return
+		}
+	case <-validateCtx.Done():
+		c.JSON(http.StatusRequestTimeout, gin.H{
+			"error": "Validation timeout exceeded",
 		})
 		return
 	}
@@ -189,6 +272,12 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	h.mu.Lock()
 	h.currentStrategy = &newStrategy
 	h.mu.Unlock()
+
+	// Persist to database if configured
+	if err := h.persistStrategy(c.Request.Context(), &newStrategy, true); err != nil {
+		log.Warn().Err(err).Msg("Failed to persist strategy to database")
+		// Continue anyway - in-memory update succeeded
+	}
 
 	// Log successful update
 	h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, true, "")
@@ -473,16 +562,41 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 		return
 	}
 
-	// Import the strategy (shared path for both file upload and JSON)
-	imported, err := strategy.Import(data, opts)
-	if err != nil {
-		h.logAuditEvent(c, audit.EventTypeStrategyImported, "", "", map[string]interface{}{
-			"source_filename": sourceFilename,
-		}, false, err.Error())
-		log.Err(err).Msg("Failed to import strategy")
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Failed to import strategy",
-			"details": err.Error(),
+	// Import the strategy with timeout (shared path for both file upload and JSON)
+	importCtx, importCancel := context.WithTimeout(c.Request.Context(), h.validationTimeout)
+	defer importCancel()
+
+	importDone := make(chan struct {
+		strategy *strategy.StrategyConfig
+		err      error
+	}, 1)
+
+	go func() {
+		imported, err := strategy.Import(data, opts)
+		importDone <- struct {
+			strategy *strategy.StrategyConfig
+			err      error
+		}{imported, err}
+	}()
+
+	var imported *strategy.StrategyConfig
+	select {
+	case result := <-importDone:
+		if result.err != nil {
+			h.logAuditEvent(c, audit.EventTypeStrategyImported, "", "", map[string]interface{}{
+				"source_filename": sourceFilename,
+			}, false, result.err.Error())
+			log.Err(result.err).Msg("Failed to import strategy")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Failed to import strategy",
+				"details": result.err.Error(),
+			})
+			return
+		}
+		imported = result.strategy
+	case <-importCtx.Done():
+		c.JSON(http.StatusRequestTimeout, gin.H{
+			"error": "Import/validation timeout exceeded",
 		})
 		return
 	}
@@ -492,10 +606,22 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 		h.mu.Lock()
 		h.currentStrategy = imported
 		h.mu.Unlock()
+
+		// Persist to database if configured
+		if err := h.persistStrategy(c.Request.Context(), imported, true); err != nil {
+			log.Warn().Err(err).Msg("Failed to persist imported strategy to database")
+			// Continue anyway - in-memory update succeeded
+		}
+
 		log.Info().
 			Str("strategy_name", imported.Metadata.Name).
 			Str("strategy_id", imported.Metadata.ID).
 			Msg("Strategy imported and applied")
+	} else if h.repo != nil {
+		// Save to database but don't set as active
+		if err := h.persistStrategy(c.Request.Context(), imported, false); err != nil {
+			log.Warn().Err(err).Msg("Failed to persist imported strategy to database")
+		}
 	}
 
 	// Log successful import
@@ -524,6 +650,7 @@ type ValidateRequest struct {
 // @Param request body ValidateRequest true "Validate request"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} map[string]string
+// @Failure 408 {object} map[string]string "Validation timeout"
 // @Router /api/v1/strategies/validate [post]
 func (h *StrategyHandler) ValidateStrategy(c *gin.Context) {
 	var req ValidateRequest
@@ -541,24 +668,48 @@ func (h *StrategyHandler) ValidateStrategy(c *gin.Context) {
 		GenerateNewID:      false,
 	}
 
-	imported, err := strategy.Import([]byte(req.Data), opts)
-	if err != nil {
+	// Validate with timeout
+	validateCtx, validateCancel := context.WithTimeout(c.Request.Context(), h.validationTimeout)
+	defer validateCancel()
+
+	validateDone := make(chan struct {
+		strategy *strategy.StrategyConfig
+		err      error
+	}, 1)
+
+	go func() {
+		imported, err := strategy.Import([]byte(req.Data), opts)
+		validateDone <- struct {
+			strategy *strategy.StrategyConfig
+			err      error
+		}{imported, err}
+	}()
+
+	select {
+	case result := <-validateDone:
+		if result.err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"valid": false,
+				"error": result.err.Error(),
+			})
+			return
+		}
+
+		// Get version info
+		versionInfo, _ := strategy.GetVersionInfo(result.strategy)
+
 		c.JSON(http.StatusOK, gin.H{
-			"valid": false,
-			"error": err.Error(),
+			"valid":          true,
+			"name":           result.strategy.Metadata.Name,
+			"schema_version": result.strategy.Metadata.SchemaVersion,
+			"version_info":   versionInfo,
 		})
-		return
+	case <-validateCtx.Done():
+		c.JSON(http.StatusRequestTimeout, gin.H{
+			"valid": false,
+			"error": "Validation timeout exceeded",
+		})
 	}
-
-	// Get version info
-	versionInfo, _ := strategy.GetVersionInfo(imported)
-
-	c.JSON(http.StatusOK, gin.H{
-		"valid":          true,
-		"name":           imported.Metadata.Name,
-		"schema_version": imported.Metadata.SchemaVersion,
-		"version_info":   versionInfo,
-	})
 }
 
 // GetVersionInfo returns version information

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -443,4 +444,220 @@ func TestGetDefaultStrategy_NoName(t *testing.T) {
 	metadata, ok := response["metadata"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "New Strategy", metadata["name"])
+}
+
+// =============================================================================
+// Concurrent Upload Tests
+// =============================================================================
+
+func TestConcurrentStrategyUpdates(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Number of concurrent requests
+	numRequests := 10
+	done := make(chan bool, numRequests)
+	errors := make(chan error, numRequests)
+
+	for i := 0; i < numRequests; i++ {
+		go func(index int) {
+			newStrategy := strategy.NewDefaultStrategy("Concurrent Strategy " + string(rune('A'+index)))
+			body, _ := json.Marshal(newStrategy)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				errors <- assert.AnError
+			}
+			done <- true
+		}(i)
+	}
+
+	// Wait for all requests to complete
+	for i := 0; i < numRequests; i++ {
+		<-done
+	}
+
+	// Check for errors
+	close(errors)
+	for err := range errors {
+		t.Errorf("Concurrent update failed: %v", err)
+	}
+
+	// Verify final state is valid
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestConcurrentFileUploads(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Number of concurrent uploads
+	numUploads := 5
+	done := make(chan bool, numUploads)
+	errors := make(chan error, numUploads)
+
+	for i := 0; i < numUploads; i++ {
+		go func(index int) {
+			// Create multipart form
+			var b bytes.Buffer
+			writer := multipart.NewWriter(&b)
+
+			fileWriter, err := writer.CreateFormFile("file", "test_concurrent.yaml")
+			if err != nil {
+				errors <- err
+				done <- true
+				return
+			}
+
+			yamlContent := `schema_version: "1.0"
+metadata:
+  name: "Concurrent Upload Strategy"
+  version: "1.0.0"
+`
+			_, err = fileWriter.Write([]byte(yamlContent))
+			if err != nil {
+				errors <- err
+				done <- true
+				return
+			}
+
+			writer.Close()
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", &b)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK && w.Code != http.StatusBadRequest {
+				errors <- assert.AnError
+			}
+			done <- true
+		}(i)
+	}
+
+	// Wait for all uploads to complete
+	for i := 0; i < numUploads; i++ {
+		<-done
+	}
+
+	// Check for errors
+	close(errors)
+	for err := range errors {
+		t.Errorf("Concurrent upload failed: %v", err)
+	}
+}
+
+func TestConcurrentReadWrite(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Mix of read and write operations
+	numReaders := 10
+	numWriters := 5
+	total := numReaders + numWriters
+	done := make(chan bool, total)
+
+	// Start readers
+	for i := 0; i < numReaders; i++ {
+		go func() {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
+			router.ServeHTTP(w, req)
+			assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusNotFound)
+			done <- true
+		}()
+	}
+
+	// Start writers
+	for i := 0; i < numWriters; i++ {
+		go func(index int) {
+			newStrategy := strategy.NewDefaultStrategy("Concurrent RW Strategy")
+			body, _ := json.Marshal(newStrategy)
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+			done <- true
+		}(i)
+	}
+
+	// Wait for all operations to complete
+	for i := 0; i < total; i++ {
+		<-done
+	}
+}
+
+func TestConcurrentExports(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Number of concurrent exports
+	numExports := 10
+	done := make(chan bool, numExports)
+
+	for i := 0; i < numExports; i++ {
+		go func(index int) {
+			format := "yaml"
+			if index%2 == 0 {
+				format = "json"
+			}
+
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/export?format="+format, nil)
+			router.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			done <- true
+		}(i)
+	}
+
+	// Wait for all exports to complete
+	for i := 0; i < numExports; i++ {
+		<-done
+	}
+}
+
+// =============================================================================
+// Validation Timeout Tests
+// =============================================================================
+
+func TestValidationTimeout(t *testing.T) {
+	handler := NewStrategyHandler()
+	handler.SetValidationTimeout(100 * time.Millisecond) // Short timeout for testing
+
+	router := gin.New()
+	router.POST("/strategies/validate", handler.ValidateStrategy)
+
+	// Create a valid strategy
+	validStrategy := strategy.NewDefaultStrategy("Valid Strategy")
+	data, _ := strategy.Export(validStrategy, strategy.ExportOptions{Format: "yaml"})
+
+	validateReq := map[string]interface{}{
+		"data":   string(data),
+		"strict": true,
+	}
+	body, _ := json.Marshal(validateReq)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/validate", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	// Should succeed with valid strategy
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// =============================================================================
+// Database Persistence Constructor Tests
+// =============================================================================
+
+func TestNewStrategyHandlerWithDB_NilRepo(t *testing.T) {
+	handler := NewStrategyHandlerWithDB(nil, nil)
+	require.NotNil(t, handler)
+	require.NotNil(t, handler.currentStrategy)
+	assert.Equal(t, "Default Strategy", handler.currentStrategy.Metadata.Name)
 }
