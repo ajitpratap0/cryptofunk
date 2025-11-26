@@ -196,10 +196,10 @@ func (s *APIServer) setupRoutes() {
 		// Note: RegisterRoutes should apply read middleware internally if needed
 		decisionHandler.RegisterRoutes(v1)
 
-		// Decision feedback routes (T309)
+		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())
 		feedbackHandler := api.NewFeedbackHandler(feedbackRepo)
-		feedbackHandler.RegisterRoutes(v1)
+		feedbackHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
 	}
 
 	// Root endpoint

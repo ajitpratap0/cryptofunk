@@ -52,23 +52,47 @@ func NewFeedbackHandler(repo *FeedbackRepository) *FeedbackHandler {
 	return &FeedbackHandler{repo: repo}
 }
 
-// RegisterRoutes registers all feedback-related routes
+// RegisterRoutes registers all feedback-related routes without rate limiting.
+// For production use, prefer RegisterRoutesWithRateLimiter.
 func (h *FeedbackHandler) RegisterRoutes(router *gin.RouterGroup) {
+	h.RegisterRoutesWithRateLimiter(router, nil, nil)
+}
+
+// RegisterRoutesWithRateLimiter registers all feedback-related routes with rate limiting.
+// readMiddleware is applied to GET endpoints, writeMiddleware to POST/PUT/DELETE endpoints.
+func (h *FeedbackHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup, readMiddleware, writeMiddleware gin.HandlerFunc) {
+	// Helper to conditionally apply middleware
+	applyRead := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		if readMiddleware != nil {
+			return append([]gin.HandlerFunc{readMiddleware}, handlers...)
+		}
+		return handlers
+	}
+	applyWrite := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		if writeMiddleware != nil {
+			return append([]gin.HandlerFunc{writeMiddleware}, handlers...)
+		}
+		return handlers
+	}
+
 	// Feedback routes nested under decisions
-	router.POST("/decisions/:id/feedback", h.CreateFeedback)
-	router.GET("/decisions/:id/feedback", h.GetDecisionFeedback)
+	router.POST("/decisions/:id/feedback", applyWrite(h.CreateFeedback)...)
+	router.GET("/decisions/:id/feedback", applyRead(h.GetDecisionFeedback)...)
 
 	// Standalone feedback routes
 	feedback := router.Group("/feedback")
 	{
-		feedback.GET("", h.ListFeedback)
-		feedback.GET("/stats", h.GetFeedbackStats)
-		feedback.GET("/review", h.GetDecisionsNeedingReview)
-		feedback.GET("/tags", h.GetCommonTags)
-		feedback.POST("/refresh-stats", h.RefreshStats)
-		feedback.GET("/:id", h.GetFeedback)
-		feedback.PUT("/:id", h.UpdateFeedback)
-		feedback.DELETE("/:id", h.DeleteFeedback)
+		// Read-only endpoints
+		feedback.GET("", applyRead(h.ListFeedback)...)
+		feedback.GET("/stats", applyRead(h.GetFeedbackStats)...)
+		feedback.GET("/review", applyRead(h.GetDecisionsNeedingReview)...)
+		feedback.GET("/tags", applyRead(h.GetCommonTags)...)
+		feedback.GET("/:id", applyRead(h.GetFeedback)...)
+
+		// Write endpoints
+		feedback.POST("/refresh-stats", applyWrite(h.RefreshStats)...)
+		feedback.PUT("/:id", applyWrite(h.UpdateFeedback)...)
+		feedback.DELETE("/:id", applyWrite(h.DeleteFeedback)...)
 	}
 }
 
@@ -154,8 +178,8 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 	// Create feedback
 	feedback, err := h.repo.CreateFeedback(c.Request.Context(), req)
 	if err != nil {
-		// Check for specific errors
-		if err.Error() == "decision not found: "+decisionID.String() {
+		// Check for decision not found error
+		if errors.Is(err, ErrDecisionNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": "Decision not found",
 			})

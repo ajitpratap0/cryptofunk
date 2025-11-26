@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -297,7 +298,7 @@ func TestHandlerCreateFeedback(t *testing.T) {
 					UpdatedAt:  time.Now(),
 				}, nil
 			}
-			return nil, errors.New("decision not found: " + req.DecisionID.String())
+			return nil, fmt.Errorf("%w: %s", ErrDecisionNotFound, req.DecisionID)
 		},
 	}
 

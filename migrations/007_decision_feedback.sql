@@ -133,8 +133,8 @@ SELECT
     COUNT(f.id) as feedback_count,
     COUNT(*) FILTER (WHERE f.rating = 'negative') as negative_count,
     COUNT(*) FILTER (WHERE f.rating = 'positive') as positive_count,
-    ARRAY_AGG(f.comment) FILTER (WHERE f.comment IS NOT NULL) as comments,
-    ARRAY_AGG(DISTINCT unnest_tags.tag) FILTER (WHERE unnest_tags.tag IS NOT NULL) as all_tags
+    COALESCE(ARRAY_AGG(f.comment) FILTER (WHERE f.comment IS NOT NULL), ARRAY[]::TEXT[]) as comments,
+    COALESCE(ARRAY_AGG(DISTINCT unnest_tags.tag) FILTER (WHERE unnest_tags.tag IS NOT NULL), ARRAY[]::TEXT[]) as all_tags
 FROM llm_decisions d
 JOIN decision_feedback f ON d.id = f.decision_id
 LEFT JOIN LATERAL unnest(f.tags) AS unnest_tags(tag) ON true

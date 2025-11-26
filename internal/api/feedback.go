@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrDecisionNotFound is returned when a decision is not found
+var ErrDecisionNotFound = errors.New("decision not found")
 
 // FeedbackRating represents the rating type for decision feedback
 type FeedbackRating string
@@ -24,6 +28,7 @@ const (
 	MaxFeedbackLimit     = 200
 	DefaultReviewLimit   = 20
 	MaxReviewLimit       = 100 // Lower limit for review queries (returns full decision data)
+	DefaultTrendDays     = 7   // Number of days for recent trend analysis
 	orderByCreatedAtDesc = " ORDER BY created_at DESC"
 )
 
@@ -150,20 +155,28 @@ type DecisionNeedingReview struct {
 	AllTags           []string  `json:"all_tags,omitempty"`
 }
 
-// CreateFeedback creates a new feedback entry for a decision
+// CreateFeedback creates a new feedback entry for a decision.
+// Uses a transaction to ensure atomicity between decision lookup and feedback creation.
 func (r *FeedbackRepository) CreateFeedback(ctx context.Context, req CreateFeedbackRequest) (*Feedback, error) {
+	// Start transaction for atomic decision lookup and feedback creation
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // Rollback is safe to ignore on commit
+
 	// First, get decision details to denormalize
 	var sessionID *uuid.UUID
 	var symbol, decisionType, agentName *string
 
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT session_id, symbol, decision_type, agent_name
 		FROM llm_decisions
 		WHERE id = $1
 	`, req.DecisionID).Scan(&sessionID, &symbol, &decisionType, &agentName)
 
 	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("decision not found: %s", req.DecisionID)
+		return nil, fmt.Errorf("%w: %s", ErrDecisionNotFound, req.DecisionID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch decision: %w", err)
@@ -189,13 +202,18 @@ func (r *FeedbackRepository) CreateFeedback(ctx context.Context, req CreateFeedb
 	feedback.DecisionType = decisionType
 	feedback.AgentName = agentName
 
-	err = r.db.QueryRow(ctx, query,
+	err = tx.QueryRow(ctx, query,
 		req.DecisionID, req.UserID, req.Rating, req.Comment, req.Tags,
 		sessionID, symbol, decisionType, agentName,
 	).Scan(&feedback.ID, &feedback.CreatedAt, &feedback.UpdatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create feedback: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return &feedback, nil
@@ -347,7 +365,8 @@ func (r *FeedbackRepository) ListFeedback(ctx context.Context, filter FeedbackFi
 	return feedbacks, rows.Err()
 }
 
-// UpdateFeedback updates an existing feedback entry
+// UpdateFeedback updates an existing feedback entry.
+// Note: updated_at is automatically set by the database trigger (decision_feedback_updated_at).
 func (r *FeedbackRepository) UpdateFeedback(ctx context.Context, id uuid.UUID, req UpdateFeedbackRequest) (*Feedback, error) {
 	query := `UPDATE decision_feedback SET `
 	args := make([]interface{}, 0)
@@ -472,8 +491,8 @@ func (r *FeedbackRepository) GetFeedbackStats(ctx context.Context, filter Feedba
 		return nil, err
 	}
 
-	// Recent trend (last 7 days)
-	stats.RecentTrend, err = r.getDailyTrend(ctx, 7)
+	// Recent trend
+	stats.RecentTrend, err = r.getDailyTrend(ctx, DefaultTrendDays)
 	if err != nil {
 		return nil, err
 	}
