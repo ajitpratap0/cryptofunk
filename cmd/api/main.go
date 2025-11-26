@@ -96,7 +96,7 @@ func main() {
 func (s *APIServer) setupMiddleware() {
 	// CORS configuration
 	config := cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8080"},
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -190,11 +190,10 @@ func (s *APIServer) setupRoutes() {
 			config.PATCH("", rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
 		}
 
-		// Decision explainability routes (read-only, apply read rate limiter)
+		// Decision explainability routes (T307) with rate limiting
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
-		// Note: RegisterRoutes should apply read middleware internally if needed
-		decisionHandler.RegisterRoutes(v1)
+		decisionHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
 
 		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())

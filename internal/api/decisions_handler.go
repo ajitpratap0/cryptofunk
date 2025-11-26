@@ -30,15 +30,39 @@ func NewDecisionHandler(repo *DecisionRepository) *DecisionHandler {
 	return &DecisionHandler{repo: repo}
 }
 
-// RegisterRoutes registers all decision-related routes
+// RegisterRoutes registers all decision-related routes without rate limiting.
+// For production use, prefer RegisterRoutesWithRateLimiter.
 func (h *DecisionHandler) RegisterRoutes(router *gin.RouterGroup) {
+	h.RegisterRoutesWithRateLimiter(router, nil, nil)
+}
+
+// RegisterRoutesWithRateLimiter registers all decision-related routes with rate limiting.
+// readMiddleware is applied to GET endpoints, writeMiddleware to POST endpoints.
+func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup, readMiddleware, writeMiddleware gin.HandlerFunc) {
+	// Helper to conditionally apply middleware
+	applyRead := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		if readMiddleware != nil {
+			return append([]gin.HandlerFunc{readMiddleware}, handlers...)
+		}
+		return handlers
+	}
+	applyWrite := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		if writeMiddleware != nil {
+			return append([]gin.HandlerFunc{writeMiddleware}, handlers...)
+		}
+		return handlers
+	}
+
 	decisions := router.Group("/decisions")
 	{
-		decisions.GET("", h.ListDecisions)
-		decisions.GET("/stats", h.GetStats) // Must be before :id to avoid conflict
-		decisions.POST("/search", h.SearchDecisions)
-		decisions.GET("/:id", h.GetDecision)
-		decisions.GET("/:id/similar", h.GetSimilarDecisions)
+		// Read-only endpoints
+		decisions.GET("", applyRead(h.ListDecisions)...)
+		decisions.GET("/stats", applyRead(h.GetStats)...) // Must be before :id to avoid conflict
+		decisions.GET("/:id", applyRead(h.GetDecision)...)
+		decisions.GET("/:id/similar", applyRead(h.GetSimilarDecisions)...)
+
+		// Search endpoint (POST but read-only, apply write middleware for rate limiting)
+		decisions.POST("/search", applyWrite(h.SearchDecisions)...)
 	}
 }
 
