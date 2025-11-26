@@ -328,9 +328,16 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 			Int("size", len(data)).
 			Msg("Importing strategy from file")
 
-		// File uploads use default options
+		// File uploads use default options, but can specify apply_now via form field
 		opts = strategy.DefaultImportOptions()
-		applyNow = false
+
+		// Check for apply_now form field (accepts "true", "1", "yes")
+		applyNowField := c.PostForm("apply_now")
+		applyNow = applyNowField == "true" || applyNowField == "1" || applyNowField == "yes"
+
+		// Check for validate_strict form field
+		validateStrictField := c.PostForm("validate_strict")
+		opts.ValidateStrict = validateStrictField == "true" || validateStrictField == "1" || validateStrictField == "yes"
 	} else if strings.Contains(contentType, "application/json") || contentType == "" {
 		// Handle JSON request body
 		var req ImportRequest
@@ -556,8 +563,20 @@ func (h *StrategyHandler) CloneStrategy(c *gin.Context) {
 	}
 
 	var req CloneRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// Use default name if not provided
+
+	// Try to parse request body if present
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid request format",
+				"details": err.Error(),
+			})
+			return
+		}
+	}
+
+	// Use default name if not provided
+	if req.Name == "" {
 		req.Name = currentStrategy.Metadata.Name + " (Copy)"
 	}
 
