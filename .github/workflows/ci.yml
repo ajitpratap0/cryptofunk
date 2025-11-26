@@ -157,6 +157,8 @@ jobs:
           fail_ci_if_error: false
 
       - name: Run concurrent tests with race detector (stress test)
+        # Only run expensive stress tests on main branch or PRs targeting main
+        if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
         env:
           DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
           REDIS_URL: "localhost:6379"

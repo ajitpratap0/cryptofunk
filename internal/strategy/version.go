@@ -74,6 +74,19 @@ func registerMigrations() {
 		}
 	}
 
+	// Validate migration path continuity - ensure no gaps in the migration chain
+	if len(registeredMigrations) > 1 {
+		for i := 1; i < len(registeredMigrations); i++ {
+			prevTo := registeredMigrations[i-1].ToVersion
+			currFrom := registeredMigrations[i].FromVersion
+			if prevTo != currFrom {
+				panic(fmt.Sprintf("migration gap detected: %q ends at %q but %q starts at %q",
+					registeredMigrations[i-1].Name, prevTo,
+					registeredMigrations[i].Name, currFrom))
+			}
+		}
+	}
+
 	// Also populate legacy map for backward compatibility
 	for _, m := range registeredMigrations {
 		migrations[m.FromVersion] = m.Migrate

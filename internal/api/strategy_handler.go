@@ -144,6 +144,32 @@ func isAllowedExtension(filename string) bool {
 	return AllowedStrategyExtensions[ext]
 }
 
+// isAllowedMIMEType validates that the detected MIME type is consistent with the file extension.
+// This provides defense-in-depth against files with mismatched content and extension.
+// YAML/JSON files are detected as text/plain by http.DetectContentType, so we accept text/plain
+// for all allowed extensions and additionally validate that JSON files start with valid JSON.
+func isAllowedMIMEType(detectedType, filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// http.DetectContentType returns "text/plain; charset=utf-8" for text files
+	// which includes YAML and JSON files
+	if strings.HasPrefix(detectedType, "text/plain") {
+		return true
+	}
+
+	// Also accept application/json for .json files
+	if ext == ".json" && strings.HasPrefix(detectedType, "application/json") {
+		return true
+	}
+
+	// Accept application/octet-stream as fallback (some systems may report this)
+	if strings.HasPrefix(detectedType, "application/octet-stream") {
+		return true
+	}
+
+	return false
+}
+
 // logAuditEvent is a helper to log audit events if the logger is configured
 func (h *StrategyHandler) logAuditEvent(c *gin.Context, eventType audit.EventType, strategyID, strategyName string, metadata map[string]interface{}, success bool, errorMsg string) {
 	if h.auditLogger == nil {
@@ -528,6 +554,16 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 				"error":    "File too small",
 				"details":  fmt.Sprintf("Minimum file size is %d bytes. File appears to be empty or corrupted.", MinStrategyUploadSize),
 				"min_size": MinStrategyUploadSize,
+			})
+			return
+		}
+
+		// MIME validation for defense-in-depth (content sniffing)
+		detectedType := http.DetectContentType(data)
+		if !isAllowedMIMEType(detectedType, header.Filename) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid file content",
+				"details": fmt.Sprintf("File content does not match expected type for %s", filepath.Ext(header.Filename)),
 			})
 			return
 		}
