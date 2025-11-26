@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +15,26 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/strategy"
 )
 
+const (
+	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
+	MaxStrategyUploadSize = 10 * 1024 * 1024
+)
+
 // StrategyHandler handles HTTP requests for strategy import/export
 type StrategyHandler struct {
-	// currentStrategy holds the active strategy (in production, this would be loaded from config/db)
+	// mu protects concurrent access to currentStrategy
+	mu sync.RWMutex
+
+	// currentStrategy holds the active strategy
+	// TODO: In production, this should be persisted to database or config file.
+	// Current in-memory storage means strategies are lost on server restart.
+	// See: internal/db/ for database patterns to implement persistence.
 	currentStrategy *strategy.StrategyConfig
+
+	// TODO: Add audit.Logger integration for full audit trail when database
+	// persistence is implemented. Use audit.LogStrategyChange() for tracking
+	// all strategy modifications (update, import, clone, merge operations).
+	// See: internal/audit/audit.go for the logging infrastructure.
 }
 
 // NewStrategyHandler creates a new strategy handler
@@ -61,11 +78,21 @@ func (h *StrategyHandler) RegisterRoutes(router *gin.RouterGroup) {
 // @Success 200 {object} strategy.StrategyConfig
 // @Router /api/v1/strategies/current [get]
 func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
-	if h.currentStrategy == nil {
-		h.currentStrategy = strategy.NewDefaultStrategy("Default Strategy")
+	h.mu.RLock()
+	currentStrategy := h.currentStrategy
+	h.mu.RUnlock()
+
+	if currentStrategy == nil {
+		h.mu.Lock()
+		// Double-check after acquiring write lock
+		if h.currentStrategy == nil {
+			h.currentStrategy = strategy.NewDefaultStrategy("Default Strategy")
+		}
+		currentStrategy = h.currentStrategy
+		h.mu.Unlock()
 	}
 
-	c.JSON(http.StatusOK, h.currentStrategy)
+	c.JSON(http.StatusOK, currentStrategy)
 }
 
 // UpdateCurrentStrategy updates the current strategy
@@ -98,14 +125,17 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 
 	// Update timestamps
 	newStrategy.Metadata.UpdatedAt = time.Now()
+
+	h.mu.Lock()
 	h.currentStrategy = &newStrategy
+	h.mu.Unlock()
 
 	log.Info().
 		Str("strategy_name", newStrategy.Metadata.Name).
 		Str("strategy_id", newStrategy.Metadata.ID).
 		Msg("Strategy updated")
 
-	c.JSON(http.StatusOK, h.currentStrategy)
+	c.JSON(http.StatusOK, &newStrategy)
 }
 
 // ExportStrategy exports the current strategy as YAML
@@ -116,7 +146,11 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 // @Success 200 {string} string "Strategy YAML/JSON"
 // @Router /api/v1/strategies/export [get]
 func (h *StrategyHandler) ExportStrategy(c *gin.Context) {
-	if h.currentStrategy == nil {
+	h.mu.RLock()
+	currentStrategy := h.currentStrategy
+	h.mu.RUnlock()
+
+	if currentStrategy == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "No strategy configured",
 		})
@@ -130,14 +164,14 @@ func (h *StrategyHandler) ExportStrategy(c *gin.Context) {
 	case "json":
 		opts.Format = strategy.FormatJSON
 		c.Header("Content-Type", "application/json")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=strategy_%s.json", h.currentStrategy.Metadata.ID))
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=strategy_%s.json", currentStrategy.Metadata.ID))
 	default:
 		opts.Format = strategy.FormatYAML
 		c.Header("Content-Type", "text/yaml")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=strategy_%s.yaml", h.currentStrategy.Metadata.ID))
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=strategy_%s.yaml", currentStrategy.Metadata.ID))
 	}
 
-	data, err := strategy.Export(h.currentStrategy, opts)
+	data, err := strategy.Export(currentStrategy, opts)
 	if err != nil {
 		log.Err(err).Msg("Failed to export strategy")
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -165,7 +199,11 @@ type ExportOptions struct {
 // @Success 200 {string} string "Strategy YAML/JSON"
 // @Router /api/v1/strategies/export [post]
 func (h *StrategyHandler) ExportStrategyWithOptions(c *gin.Context) {
-	if h.currentStrategy == nil {
+	h.mu.RLock()
+	currentStrategy := h.currentStrategy
+	h.mu.RUnlock()
+
+	if currentStrategy == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "No strategy configured",
 		})
@@ -197,7 +235,7 @@ func (h *StrategyHandler) ExportStrategyWithOptions(c *gin.Context) {
 		c.Header("Content-Type", "text/yaml")
 	}
 
-	data, err := strategy.Export(h.currentStrategy, opts)
+	data, err := strategy.Export(currentStrategy, opts)
 	if err != nil {
 		log.Err(err).Msg("Failed to export strategy")
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -233,6 +271,7 @@ type ImportRequest struct {
 // @Param file formData file false "Strategy file (YAML or JSON)"
 // @Success 200 {object} strategy.StrategyConfig
 // @Failure 400 {object} map[string]string
+// @Failure 413 {object} map[string]string "File too large"
 // @Router /api/v1/strategies/import [post]
 func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 	var data []byte
@@ -251,10 +290,32 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 		}
 		defer file.Close()
 
-		data, err = io.ReadAll(file)
+		// Check file size before reading
+		if header.Size > MaxStrategyUploadSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error":    "File too large",
+				"details":  fmt.Sprintf("Maximum file size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
+				"max_size": MaxStrategyUploadSize,
+			})
+			return
+		}
+
+		// Use LimitReader for additional safety
+		limitedReader := io.LimitReader(file, MaxStrategyUploadSize+1)
+		data, err = io.ReadAll(limitedReader)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "Failed to read file",
+			})
+			return
+		}
+
+		// Double-check size after reading
+		if len(data) > MaxStrategyUploadSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error":    "File too large",
+				"details":  fmt.Sprintf("Maximum file size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
+				"max_size": MaxStrategyUploadSize,
 			})
 			return
 		}
@@ -277,6 +338,16 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 		if req.Data == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "Strategy data is required",
+			})
+			return
+		}
+
+		// Check data size
+		if len(req.Data) > MaxStrategyUploadSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error":    "Strategy data too large",
+				"details":  fmt.Sprintf("Maximum size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
+				"max_size": MaxStrategyUploadSize,
 			})
 			return
 		}
@@ -307,7 +378,9 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 
 		// Apply if requested
 		if req.ApplyNow {
+			h.mu.Lock()
 			h.currentStrategy = imported
+			h.mu.Unlock()
 			log.Info().
 				Str("strategy_name", imported.Metadata.Name).
 				Str("strategy_id", imported.Metadata.ID).
@@ -402,8 +475,12 @@ func (h *StrategyHandler) GetVersionInfo(c *gin.Context) {
 		"supported_versions":     strategy.SupportedSchemaVersions,
 	}
 
-	if h.currentStrategy != nil {
-		strategyInfo, _ := strategy.GetVersionInfo(h.currentStrategy)
+	h.mu.RLock()
+	currentStrategy := h.currentStrategy
+	h.mu.RUnlock()
+
+	if currentStrategy != nil {
+		strategyInfo, _ := strategy.GetVersionInfo(currentStrategy)
 		info["strategy"] = strategyInfo
 	}
 
@@ -469,7 +546,11 @@ type CloneRequest struct {
 // @Failure 400 {object} map[string]string
 // @Router /api/v1/strategies/clone [post]
 func (h *StrategyHandler) CloneStrategy(c *gin.Context) {
-	if h.currentStrategy == nil {
+	h.mu.RLock()
+	currentStrategy := h.currentStrategy
+	h.mu.RUnlock()
+
+	if currentStrategy == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "No strategy to clone",
 		})
@@ -479,10 +560,10 @@ func (h *StrategyHandler) CloneStrategy(c *gin.Context) {
 	var req CloneRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// Use default name if not provided
-		req.Name = h.currentStrategy.Metadata.Name + " (Copy)"
+		req.Name = currentStrategy.Metadata.Name + " (Copy)"
 	}
 
-	cloned, err := strategy.Clone(h.currentStrategy)
+	cloned, err := strategy.Clone(currentStrategy)
 	if err != nil {
 		log.Err(err).Msg("Failed to clone strategy")
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -534,7 +615,9 @@ func (h *StrategyHandler) MergeStrategies(c *gin.Context) {
 
 	base := req.Base
 	if base == nil {
+		h.mu.RLock()
 		base = h.currentStrategy
+		h.mu.RUnlock()
 	}
 
 	if base == nil {
@@ -559,7 +642,9 @@ func (h *StrategyHandler) MergeStrategies(c *gin.Context) {
 	merged.Metadata.Name = base.Metadata.Name + " (Merged)"
 
 	if req.Apply {
+		h.mu.Lock()
 		h.currentStrategy = merged
+		h.mu.Unlock()
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -404,20 +404,30 @@ func (s *StrategyConfig) validateRisk() ValidationErrors {
 		})
 	}
 
-	// Circuit breakers
-	if s.Risk.CircuitBreakers.Enabled {
-		if s.Risk.CircuitBreakers.MaxTradesPerHour < 0 {
-			errs = append(errs, ValidationError{
-				Field:   "risk.circuit_breakers.max_trades_per_hour",
-				Message: "max trades per hour cannot be negative",
-			})
-		}
-		if s.Risk.CircuitBreakers.DrawdownHalt < 0 || s.Risk.CircuitBreakers.DrawdownHalt > 1 {
-			errs = append(errs, ValidationError{
-				Field:   "risk.circuit_breakers.drawdown_halt",
-				Message: "drawdown halt must be between 0 and 1",
-			})
-		}
+	// Circuit breakers - validate even if not enabled, as values may be enabled later
+	if s.Risk.CircuitBreakers.MaxTradesPerHour < 0 {
+		errs = append(errs, ValidationError{
+			Field:   "risk.circuit_breakers.max_trades_per_hour",
+			Message: "max trades per hour cannot be negative",
+		})
+	}
+	if s.Risk.CircuitBreakers.MaxLossesPerDay < 0 {
+		errs = append(errs, ValidationError{
+			Field:   "risk.circuit_breakers.max_losses_per_day",
+			Message: "max losses per day cannot be negative",
+		})
+	}
+	if s.Risk.CircuitBreakers.VolatilityThreshold < 0 {
+		errs = append(errs, ValidationError{
+			Field:   "risk.circuit_breakers.volatility_threshold",
+			Message: "volatility threshold cannot be negative",
+		})
+	}
+	if s.Risk.CircuitBreakers.DrawdownHalt < 0 || s.Risk.CircuitBreakers.DrawdownHalt > 1 {
+		errs = append(errs, ValidationError{
+			Field:   "risk.circuit_breakers.drawdown_halt",
+			Message: "drawdown halt must be between 0 and 1",
+		})
 	}
 
 	// Position sizing
