@@ -37,8 +37,9 @@ func (h *DecisionHandler) RegisterRoutes(router *gin.RouterGroup) {
 }
 
 // RegisterRoutesWithRateLimiter registers all decision-related routes with rate limiting.
-// readMiddleware is applied to GET endpoints, writeMiddleware to POST endpoints.
-func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup, readMiddleware, writeMiddleware gin.HandlerFunc) {
+// readMiddleware is applied to GET endpoints, searchMiddleware to search endpoints.
+// If searchMiddleware is nil, it falls back to readMiddleware.
+func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup, readMiddleware, searchMiddleware gin.HandlerFunc) {
 	// Helper to conditionally apply middleware
 	applyRead := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
 		if readMiddleware != nil {
@@ -46,9 +47,14 @@ func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup,
 		}
 		return handlers
 	}
-	applyWrite := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
-		if writeMiddleware != nil {
-			return append([]gin.HandlerFunc{writeMiddleware}, handlers...)
+	applySearch := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		// Use search middleware if provided, otherwise fall back to read middleware
+		mw := searchMiddleware
+		if mw == nil {
+			mw = readMiddleware
+		}
+		if mw != nil {
+			return append([]gin.HandlerFunc{mw}, handlers...)
 		}
 		return handlers
 	}
@@ -61,8 +67,9 @@ func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup,
 		decisions.GET("/:id", applyRead(h.GetDecision)...)
 		decisions.GET("/:id/similar", applyRead(h.GetSimilarDecisions)...)
 
-		// Search endpoint (POST but read-only, apply write middleware for rate limiting)
-		decisions.POST("/search", applyWrite(h.SearchDecisions)...)
+		// Search endpoint (POST but read-only, apply search middleware for rate limiting)
+		// Search is more expensive (vector operations) so has separate rate limits
+		decisions.POST("/search", applySearch(h.SearchDecisions)...)
 	}
 }
 

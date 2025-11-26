@@ -171,6 +171,16 @@ api:
   host: "0.0.0.0"
   port: 8081
   orchestrator_url: "http://localhost:8081"  # URL for orchestrator control endpoints
+  # CORS allowed origins for API endpoints
+  # Development defaults: localhost:3000 (CRA), localhost:5173 (Vite), localhost:8080 (API)
+  # Production: Set to your actual frontend domain(s)
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+    - "http://localhost:8080"
+    # Production example:
+    # - "https://cryptofunk.example.com"
+    # - "https://dashboard.cryptofunk.example.com"
 
 monitoring:
   prometheus_port: 9100

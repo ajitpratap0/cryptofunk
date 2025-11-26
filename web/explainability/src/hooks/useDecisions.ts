@@ -3,7 +3,41 @@
  * Provides type-safe hooks with caching and automatic refetching
  */
 
-import { useQuery, useMutation, useQueryClient, UseQueryResult } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, UseQueryResult, UseInfiniteQueryResult } from '@tanstack/react-query';
+
+/**
+ * Cache configuration constants
+ * Centralized settings for React Query caching behavior
+ */
+export const CACHE_CONFIG = {
+  /** List queries: frequent updates expected */
+  DECISIONS_LIST: {
+    staleTime: 30_000,      // 30 seconds
+    gcTime: 300_000,        // 5 minutes
+  },
+  /** Detail queries: single item, less frequent updates */
+  DECISION_DETAIL: {
+    staleTime: 60_000,      // 1 minute
+    gcTime: 600_000,        // 10 minutes
+  },
+  /** Stats queries: aggregated data */
+  DECISION_STATS: {
+    staleTime: 60_000,      // 1 minute
+    gcTime: 300_000,        // 5 minutes
+  },
+  /** Search queries: cached for repeated searches */
+  DECISION_SEARCH: {
+    staleTime: 120_000,     // 2 minutes
+    gcTime: 300_000,        // 5 minutes
+  },
+  /** Similar decisions: expensive vector operations */
+  DECISION_SIMILAR: {
+    staleTime: 300_000,     // 5 minutes
+    gcTime: 600_000,        // 10 minutes
+  },
+  /** Default page size for infinite queries */
+  DEFAULT_PAGE_SIZE: 20,
+} as const;
 import type {
   Decision,
   DecisionFilter,
@@ -56,9 +90,54 @@ export function useDecisions(
   return useQuery({
     queryKey: decisionKeys.list(filter),
     queryFn: () => listDecisions(filter),
-    staleTime: 1000 * 30, // 30 seconds
-    gcTime: 1000 * 60 * 5, // 5 minutes (formerly cacheTime)
+    staleTime: CACHE_CONFIG.DECISIONS_LIST.staleTime,
+    gcTime: CACHE_CONFIG.DECISIONS_LIST.gcTime,
     ...options,
+  });
+}
+
+/**
+ * Hook to list decisions with infinite scrolling/pagination
+ * Uses React Query's useInfiniteQuery for efficient data loading
+ *
+ * @param filter - Filtering options (excluding limit/offset which are managed internally)
+ * @param options - React Query options
+ * @returns Infinite query result with fetchNextPage and hasNextPage
+ *
+ * @example
+ * const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteDecisions({ symbol: 'BTCUSDT' });
+ */
+export function useInfiniteDecisions(
+  filter: Omit<DecisionFilter, 'limit' | 'offset'> = {},
+  options?: {
+    enabled?: boolean;
+    pageSize?: number;
+  }
+): UseInfiniteQueryResult<{ pages: ListDecisionsResponse[]; pageParams: number[] }, Error> {
+  const pageSize = options?.pageSize ?? CACHE_CONFIG.DEFAULT_PAGE_SIZE;
+
+  return useInfiniteQuery({
+    queryKey: [...decisionKeys.lists(), 'infinite', filter],
+    queryFn: async ({ pageParam = 0 }) => {
+      return listDecisions({
+        ...filter,
+        limit: pageSize,
+        offset: pageParam as number,
+      });
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      // If we got fewer results than the page size, we've reached the end
+      if (lastPage.decisions.length < pageSize) {
+        return undefined;
+      }
+      // Calculate next offset based on total items fetched
+      const totalFetched = allPages.reduce((sum, page) => sum + page.decisions.length, 0);
+      return totalFetched;
+    },
+    staleTime: CACHE_CONFIG.DECISIONS_LIST.staleTime,
+    gcTime: CACHE_CONFIG.DECISIONS_LIST.gcTime,
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -82,8 +161,8 @@ export function useDecision(
     queryKey: decisionKeys.detail(id),
     queryFn: () => getDecision(id),
     enabled: !!id && (options?.enabled ?? true),
-    staleTime: 1000 * 60, // 1 minute
-    gcTime: 1000 * 60 * 10, // 10 minutes
+    staleTime: CACHE_CONFIG.DECISION_DETAIL.staleTime,
+    gcTime: CACHE_CONFIG.DECISION_DETAIL.gcTime,
   });
 }
 
@@ -107,8 +186,8 @@ export function useDecisionStats(
   return useQuery({
     queryKey: decisionKeys.stat(filter),
     queryFn: () => getDecisionStats(filter),
-    staleTime: 1000 * 60, // 1 minute
-    gcTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: CACHE_CONFIG.DECISION_STATS.staleTime,
+    gcTime: CACHE_CONFIG.DECISION_STATS.gcTime,
     ...options,
   });
 }
@@ -159,8 +238,8 @@ export function useSearchDecisionsQuery(
     queryKey: decisionKeys.search(query, limit),
     queryFn: () => searchDecisions(query, limit),
     enabled: !!query && (options?.enabled ?? true),
-    staleTime: 1000 * 60 * 2, // 2 minutes
-    gcTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: CACHE_CONFIG.DECISION_SEARCH.staleTime,
+    gcTime: CACHE_CONFIG.DECISION_SEARCH.gcTime,
   });
 }
 
@@ -186,8 +265,8 @@ export function useSimilarDecisions(
     queryKey: decisionKeys.similar(id, limit),
     queryFn: () => getSimilarDecisions(id, limit),
     enabled: !!id && (options?.enabled ?? true),
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 10, // 10 minutes
+    staleTime: CACHE_CONFIG.DECISION_SIMILAR.staleTime,
+    gcTime: CACHE_CONFIG.DECISION_SIMILAR.gcTime,
   });
 }
 
@@ -230,6 +309,7 @@ export function useInvalidateDecisions() {
  */
 export default {
   useDecisions,
+  useInfiniteDecisions,
   useDecision,
   useDecisionStats,
   useSearchDecisions,
@@ -237,4 +317,5 @@ export default {
   useSimilarDecisions,
   useInvalidateDecisions,
   decisionKeys,
+  CACHE_CONFIG,
 };

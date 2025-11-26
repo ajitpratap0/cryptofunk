@@ -65,10 +65,23 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
     addSuffix: true,
   });
 
+  // Handle keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   return (
-    <div
+    <article
       onClick={onClick}
-      className={`bg-slate-800 rounded-lg p-4 border transition-all cursor-pointer hover:shadow-lg ${
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="button"
+      aria-pressed={selected}
+      aria-label={`${decision.agent_name || 'Unknown Agent'} decision for ${decision.symbol}: ${decision.decision_type}. Confidence ${confidencePercent}%. Outcome: ${decision.outcome || 'Pending'}`}
+      className={`bg-slate-800 rounded-lg p-4 border transition-all cursor-pointer hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
         selected
           ? 'border-blue-500 shadow-xl shadow-blue-500/20'
           : 'border-slate-700 hover:border-slate-600'
@@ -105,12 +118,21 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
       {/* Confidence Bar */}
       <div className="mt-4">
         <div className="flex items-center justify-between text-sm mb-1">
-          <span className="text-slate-400">Confidence</span>
+          <span className="text-slate-400" id={`confidence-label-${decision.id}`}>
+            Confidence
+          </span>
           <span className={`font-semibold ${getConfidenceTextColor()}`}>
             {confidencePercent}%
           </span>
         </div>
-        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+        <div
+          className="w-full h-2 bg-slate-700 rounded-full overflow-hidden"
+          role="progressbar"
+          aria-valuenow={confidencePercent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-labelledby={`confidence-label-${decision.id}`}
+        >
           <div
             className={`h-full ${getConfidenceColor()} transition-all duration-300`}
             style={{ width: `${confidencePercent}%` }}
@@ -120,10 +142,10 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
 
       {/* Footer: Timestamp */}
       <div className="flex items-center gap-2 mt-3 text-slate-500 text-xs">
-        <Clock className="w-3 h-3" />
-        <span>{relativeTime}</span>
+        <Clock className="w-3 h-3" aria-hidden="true" />
+        <time dateTime={decision.created_at}>{relativeTime}</time>
       </div>
-    </div>
+    </article>
   );
 }
 

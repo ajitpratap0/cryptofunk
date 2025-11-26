@@ -196,9 +196,10 @@ func (s *APIServer) setupRoutes() {
 		}
 
 		// Decision explainability routes (T307) with rate limiting
+		// Search uses dedicated rate limiter for expensive vector operations
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
-		decisionHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
+		decisionHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.SearchMiddleware())
 
 		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())
@@ -1286,16 +1287,40 @@ func truncateString(s string, maxLen int) string {
 
 // WebSocket handler
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for now (configure properly in production)
-		return true
-	},
+// createWebSocketUpgrader creates an upgrader with proper origin checking
+// based on the configured allowed origins
+func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
+	allowedOrigins := s.config.API.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		// Default origins for development
+		allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+	}
+
+	// Create a map for O(1) lookup
+	originMap := make(map[string]bool)
+	for _, origin := range allowedOrigins {
+		originMap[origin] = true
+	}
+
+	return websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			// Allow requests with no origin (e.g., same-origin or non-browser clients)
+			if origin == "" {
+				return true
+			}
+			// Check if origin is in allowed list
+			return originMap[origin]
+		},
+	}
 }
 
 func (s *APIServer) handleWebSocket(c *gin.Context) {
+	// Create upgrader with configured origins
+	upgrader := s.createWebSocketUpgrader()
+
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {

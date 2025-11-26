@@ -269,13 +269,15 @@ function RefreshButton() {
 
 ## Configuration
 
-The API client reads the base URL from the environment:
+The API client reads the base URL from the environment (Vite convention):
 
 ```env
-REACT_APP_API_BASE_URL=http://localhost:8080
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
-Default: `http://localhost:8080` (matches CryptoFunk API server)
+Default: Empty string (uses relative URLs, works with Vite proxy or same-origin deployment)
+
+See `.env.example` for all available configuration options.
 
 ## Error Handling
 

@@ -31,6 +31,11 @@ type RateLimiterConfig struct {
 	ReadMaxRequests int
 	ReadWindow      time.Duration
 
+	// Search endpoints (expensive vector operations)
+	// Separate limit for semantic search which is CPU/memory intensive
+	SearchMaxRequests int
+	SearchWindow      time.Duration
+
 	// Enable/disable rate limiting
 	Enabled bool
 }
@@ -53,6 +58,10 @@ func DefaultRateLimiterConfig() *RateLimiterConfig {
 		// Read endpoints: 60 requests per minute (allow monitoring)
 		ReadMaxRequests: 60,
 		ReadWindow:      time.Minute,
+
+		// Search endpoints: 20 requests per minute (vector search is expensive)
+		SearchMaxRequests: 20,
+		SearchWindow:      time.Minute,
 
 		Enabled: true,
 	}
@@ -144,6 +153,7 @@ type RateLimiterMiddleware struct {
 	control *RateLimiter
 	order   *RateLimiter
 	read    *RateLimiter
+	search  *RateLimiter
 	enabled bool
 }
 
@@ -158,6 +168,7 @@ func NewRateLimiterMiddleware(config *RateLimiterConfig) *RateLimiterMiddleware 
 		control: NewRateLimiter("control", config.ControlMaxRequests, config.ControlWindow),
 		order:   NewRateLimiter("order", config.OrderMaxRequests, config.OrderWindow),
 		read:    NewRateLimiter("read", config.ReadMaxRequests, config.ReadWindow),
+		search:  NewRateLimiter("search", config.SearchMaxRequests, config.SearchWindow),
 		enabled: config.Enabled,
 	}
 }
@@ -194,6 +205,14 @@ func (rlm *RateLimiterMiddleware) ReadMiddleware() gin.HandlerFunc {
 	return rlm.read.Middleware()
 }
 
+// SearchMiddleware returns middleware for search endpoints (expensive vector operations)
+func (rlm *RateLimiterMiddleware) SearchMiddleware() gin.HandlerFunc {
+	if !rlm.enabled {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return rlm.search.Middleware()
+}
+
 // CleanupOldEntries removes stale IP entries from all rate limiters (call periodically)
 func (rlm *RateLimiterMiddleware) CleanupOldEntries() {
 	now := time.Now()
@@ -223,6 +242,7 @@ func (rlm *RateLimiterMiddleware) CleanupOldEntries() {
 	cleanupLimiter(rlm.control)
 	cleanupLimiter(rlm.order)
 	cleanupLimiter(rlm.read)
+	cleanupLimiter(rlm.search)
 }
 
 // StartCleanupWorker starts a background goroutine that periodically cleans up old entries
