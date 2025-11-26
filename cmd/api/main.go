@@ -32,6 +32,7 @@ type APIServer struct {
 	port               string
 	orchestratorClient *http.Client
 	rateLimiter        *RateLimiterMiddleware
+	apiKeyStore        *api.APIKeyStore
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -135,6 +136,15 @@ func (s *APIServer) setupRoutes() {
 	// Start cleanup worker to remove stale IP entries (runs every 5 minutes)
 	s.rateLimiter.StartCleanupWorker(5 * time.Minute)
 
+	// Initialize API key store for authentication
+	// Auth is disabled by default - enable via config.yaml: api.auth.enabled = true
+	s.apiKeyStore = api.NewAPIKeyStore(s.db.Pool(), s.config.API.Auth.Enabled)
+	if s.config.API.Auth.Enabled {
+		log.Info().Msg("API key authentication enabled")
+	} else {
+		log.Info().Msg("API key authentication disabled (enable via api.auth.enabled in config)")
+	}
+
 	// Apply global rate limiting to all API requests
 	s.router.Use(s.rateLimiter.GlobalMiddleware())
 
@@ -197,11 +207,23 @@ func (s *APIServer) setupRoutes() {
 			config.PATCH("", s.rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
 		}
 
-		// Decision explainability routes (T307) with rate limiting
+		// Decision explainability routes (T307) with rate limiting and optional auth
 		// Search uses dedicated rate limiter for expensive vector operations
+		// Auth is optional - allows both authenticated and anonymous access
+		// When auth is enabled, authenticated users get enhanced audit logging
+		authConfig := &api.AuthConfig{
+			Enabled:      s.config.API.Auth.Enabled,
+			HeaderName:   s.config.API.Auth.HeaderName,
+			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+		}
+		if authConfig.HeaderName == "" {
+			authConfig.HeaderName = "X-API-Key" // Default header name
+		}
+		optionalAuth := api.OptionalAuth(s.apiKeyStore, authConfig)
+
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
-		decisionHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware())
+		decisionHandler.RegisterRoutesWithRateLimiterAndAuth(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware(), optionalAuth)
 
 		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())

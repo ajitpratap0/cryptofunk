@@ -33,7 +33,6 @@ package api
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -147,10 +146,14 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		return nil, nil
 	}
 
-	// Update last used timestamp asynchronously
+	// Update last used timestamp asynchronously with timeout context
+	// Using a detached context with timeout to avoid leaking the request context
+	apiKeyID := apiKey.ID // Capture value to avoid closure over pointer
 	go func() {
+		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		updateQuery := `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`
-		_, _ = s.db.Exec(context.Background(), updateQuery, apiKey.ID)
+		_, _ = s.db.Exec(updateCtx, updateQuery, apiKeyID)
 	}()
 
 	return &apiKey, nil
@@ -353,10 +356,4 @@ func OptionalAuth(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 
 		c.Next()
 	}
-}
-
-// ConstantTimeCompare performs a constant-time comparison of two strings
-// This prevents timing attacks when comparing API keys
-func ConstantTimeCompare(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

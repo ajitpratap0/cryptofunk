@@ -40,23 +40,41 @@ func (h *DecisionHandler) RegisterRoutes(router *gin.RouterGroup) {
 // readMiddleware is applied to GET endpoints, searchMiddleware to search endpoints.
 // If searchMiddleware is nil, it falls back to readMiddleware.
 func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup, readMiddleware, searchMiddleware gin.HandlerFunc) {
+	h.RegisterRoutesWithRateLimiterAndAuth(router, readMiddleware, searchMiddleware, nil)
+}
+
+// RegisterRoutesWithRateLimiterAndAuth registers all decision-related routes with rate limiting
+// and optional authentication middleware.
+// readMiddleware is applied to GET endpoints, searchMiddleware to search endpoints.
+// If searchMiddleware is nil, it falls back to readMiddleware (with a warning log).
+// authMiddleware is applied to all endpoints if provided (use OptionalAuth for non-required auth).
+func (h *DecisionHandler) RegisterRoutesWithRateLimiterAndAuth(router *gin.RouterGroup, readMiddleware, searchMiddleware, authMiddleware gin.HandlerFunc) {
 	// Helper to conditionally apply middleware
 	applyRead := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		result := handlers
 		if readMiddleware != nil {
-			return append([]gin.HandlerFunc{readMiddleware}, handlers...)
+			result = append([]gin.HandlerFunc{readMiddleware}, result...)
 		}
-		return handlers
+		if authMiddleware != nil {
+			result = append([]gin.HandlerFunc{authMiddleware}, result...)
+		}
+		return result
 	}
 	applySearch := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
 		// Use search middleware if provided, otherwise fall back to read middleware
 		mw := searchMiddleware
-		if mw == nil {
+		if mw == nil && readMiddleware != nil {
+			log.Warn().Msg("Search middleware not configured, falling back to read middleware rate limits")
 			mw = readMiddleware
 		}
+		result := handlers
 		if mw != nil {
-			return append([]gin.HandlerFunc{mw}, handlers...)
+			result = append([]gin.HandlerFunc{mw}, result...)
 		}
-		return handlers
+		if authMiddleware != nil {
+			result = append([]gin.HandlerFunc{authMiddleware}, result...)
+		}
+		return result
 	}
 
 	decisions := router.Group("/decisions")

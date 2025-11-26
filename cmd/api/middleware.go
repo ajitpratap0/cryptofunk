@@ -99,8 +99,16 @@ func NewRateLimiter(name string, maxRequests int, window time.Duration) *RateLim
 	}
 }
 
-// allow checks if a request from the given IP is allowed
-func (rl *RateLimiter) allow(ip string) bool {
+// rateLimitInfo contains information about the current rate limit state
+type rateLimitInfo struct {
+	Allowed   bool
+	Limit     int
+	Remaining int
+	ResetAt   time.Time
+}
+
+// check checks if a request from the given IP is allowed and returns rate limit info
+func (rl *RateLimiter) check(ip string) rateLimitInfo {
 	now := time.Now()
 
 	// Get or create entry for this IP
@@ -115,12 +123,22 @@ func (rl *RateLimiter) allow(ip string) bool {
 	// Remove expired requests (outside the time window)
 	cutoff := now.Add(-rl.window)
 	validRequests := make([]time.Time, 0, len(entry.requests))
+	var oldestRequest time.Time
 	for _, req := range entry.requests {
 		if req.After(cutoff) {
 			validRequests = append(validRequests, req)
+			if oldestRequest.IsZero() || req.Before(oldestRequest) {
+				oldestRequest = req
+			}
 		}
 	}
 	entry.requests = validRequests
+
+	// Calculate reset time (when the oldest request expires)
+	resetAt := now.Add(rl.window)
+	if !oldestRequest.IsZero() {
+		resetAt = oldestRequest.Add(rl.window)
+	}
 
 	// Check if we're at the limit
 	if len(entry.requests) >= rl.maxRequests {
@@ -131,23 +149,55 @@ func (rl *RateLimiter) allow(ip string) bool {
 			Int("max", rl.maxRequests).
 			Dur("window", rl.window).
 			Msg("Rate limit exceeded")
-		return false
+		return rateLimitInfo{
+			Allowed:   false,
+			Limit:     rl.maxRequests,
+			Remaining: 0,
+			ResetAt:   resetAt,
+		}
 	}
 
 	// Add this request
 	entry.requests = append(entry.requests, now)
-	return true
+	return rateLimitInfo{
+		Allowed:   true,
+		Limit:     rl.maxRequests,
+		Remaining: rl.maxRequests - len(entry.requests),
+		ResetAt:   resetAt,
+	}
+}
+
+// allow checks if a request from the given IP is allowed (backwards compatible)
+func (rl *RateLimiter) allow(ip string) bool {
+	return rl.check(ip).Allowed
 }
 
 // Middleware returns a Gin middleware that applies rate limiting
+// Adds standard rate limit headers to all responses:
+//   - X-RateLimit-Limit: Maximum requests allowed in the window
+//   - X-RateLimit-Remaining: Requests remaining in current window
+//   - X-RateLimit-Reset: Unix timestamp when the rate limit resets
+//   - Retry-After: Seconds until the rate limit resets (only on 429)
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
-		if !rl.allow(ip) {
+		info := rl.check(ip)
+
+		// Always set rate limit headers
+		c.Header("X-RateLimit-Limit", fmt.Sprintf("%d", info.Limit))
+		c.Header("X-RateLimit-Remaining", fmt.Sprintf("%d", info.Remaining))
+		c.Header("X-RateLimit-Reset", fmt.Sprintf("%d", info.ResetAt.Unix()))
+
+		if !info.Allowed {
+			retryAfter := int(time.Until(info.ResetAt).Seconds())
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error":       "rate limit exceeded",
 				"message":     fmt.Sprintf("Maximum %d requests per %v allowed", rl.maxRequests, rl.window),
-				"retry_after": rl.window.Seconds(),
+				"retry_after": retryAfter,
 			})
 			c.Abort()
 			return
