@@ -380,3 +380,65 @@ func NewDefaultStrategy(name string) *StrategyConfig {
 		},
 	}
 }
+
+// DeepCopy creates a complete independent copy of the strategy configuration.
+// All nested pointers and slices are cloned to ensure no shared references.
+func (s *StrategyConfig) DeepCopy() *StrategyConfig {
+	if s == nil {
+		return nil
+	}
+
+	// Start with a shallow copy of the main struct
+	copy := *s
+
+	// Deep copy Metadata.Tags slice
+	if s.Metadata.Tags != nil {
+		copy.Metadata.Tags = make([]string, len(s.Metadata.Tags))
+		for i, v := range s.Metadata.Tags {
+			copy.Metadata.Tags[i] = v
+		}
+	}
+
+	// Deep copy Agent configs (pointers to structs)
+	if s.Agents.Technical != nil {
+		techCopy := *s.Agents.Technical
+		copy.Agents.Technical = &techCopy
+	}
+	if s.Agents.Sentiment != nil {
+		sentCopy := *s.Agents.Sentiment
+		copy.Agents.Sentiment = &sentCopy
+	}
+	if s.Agents.OrderBook != nil {
+		obCopy := *s.Agents.OrderBook
+		copy.Agents.OrderBook = &obCopy
+	}
+	if s.Agents.Trend != nil {
+		trendCopy := *s.Agents.Trend
+		copy.Agents.Trend = &trendCopy
+	}
+	if s.Agents.Reversion != nil {
+		revCopy := *s.Agents.Reversion
+		copy.Agents.Reversion = &revCopy
+	}
+	if s.Agents.Arbitrage != nil {
+		arbCopy := *s.Agents.Arbitrage
+		// Deep copy Exchanges slice within Arbitrage
+		if s.Agents.Arbitrage.Exchanges != nil {
+			arbCopy.Exchanges = make([]string, len(s.Agents.Arbitrage.Exchanges))
+			for i, v := range s.Agents.Arbitrage.Exchanges {
+				arbCopy.Exchanges[i] = v
+			}
+		}
+		copy.Agents.Arbitrage = &arbCopy
+	}
+
+	// Deep copy Indicators.EMA.Periods slice
+	if s.Indicators.EMA.Periods != nil {
+		copy.Indicators.EMA.Periods = make([]int, len(s.Indicators.EMA.Periods))
+		for i, v := range s.Indicators.EMA.Periods {
+			copy.Indicators.EMA.Periods[i] = v
+		}
+	}
+
+	return &copy
+}

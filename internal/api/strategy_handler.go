@@ -275,15 +275,15 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// Update timestamps
 	newStrategy.Metadata.UpdatedAt = time.Now()
 
-	// Deep copy the strategy to avoid returning a reference to local variable
-	// and to ensure thread-safe access
-	strategyCopy := newStrategy
+	// Create a deep copy to ensure complete independence from the input
+	// and to prevent any shared references that could cause data races
+	strategyCopy := newStrategy.DeepCopy()
 
 	// Persist to database FIRST (without lock) to avoid lock contention
 	// during slow database operations. This allows readers to continue
 	// accessing the current state while we write to DB.
 	if h.repo != nil {
-		if err := h.repo.SaveAndActivate(c.Request.Context(), &strategyCopy); err != nil {
+		if err := h.repo.SaveAndActivate(c.Request.Context(), strategyCopy); err != nil {
 			log.Error().Err(err).Msg("Failed to persist strategy to database")
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "Failed to persist strategy",
@@ -296,7 +296,7 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// Update in-memory state AFTER successful database persistence
 	// This brief lock only covers the pointer assignment, not I/O
 	h.mu.Lock()
-	h.currentStrategy = &strategyCopy
+	h.currentStrategy = strategyCopy
 	h.mu.Unlock()
 
 	// Log successful update (outside lock to avoid holding it during I/O)
@@ -307,7 +307,8 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 		Str("strategy_id", strategyCopy.Metadata.ID).
 		Msg("Strategy updated")
 
-	// Return a fresh copy to avoid any potential data races
+	// Return the deep copy - this is completely independent from h.currentStrategy
+	// so concurrent readers cannot cause data races with this response
 	c.JSON(http.StatusOK, strategyCopy)
 }
 

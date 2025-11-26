@@ -87,19 +87,19 @@ func migrateFrom09To10(s *StrategyConfig) error {
 		s.Metadata.Source = "migrated"
 	}
 
-	// Ensure risk parameters have valid defaults
-	if s.Risk.MinPositionUSD == 0 {
+	// Ensure risk parameters have valid defaults (check for zero or negative values)
+	if s.Risk.MinPositionUSD <= 0 {
 		s.Risk.MinPositionUSD = 10.0
 	}
-	if s.Risk.MaxPositionUSD == 0 {
+	if s.Risk.MaxPositionUSD <= 0 {
 		s.Risk.MaxPositionUSD = 100000.0
 	}
 
-	// Ensure orchestration has valid defaults
-	if s.Orchestration.MinConfidence == 0 {
+	// Ensure orchestration has valid defaults (check for zero or negative values)
+	if s.Orchestration.MinConfidence <= 0 {
 		s.Orchestration.MinConfidence = 0.6
 	}
-	if s.Orchestration.MinConsensus == 0 {
+	if s.Orchestration.MinConsensus <= 0 {
 		s.Orchestration.MinConsensus = 0.5
 	}
 
@@ -130,15 +130,19 @@ func GetMigrationPath(fromVersion, toVersion string) ([]Migration, error) {
 
 	// Find applicable migrations
 	// Note: Migration versions are validated at init() time, so semver.NewVersion
-	// will not fail here. We use MustNewVersion pattern since validation already passed.
+	// will not fail here. We use MustParse since validation already passed.
 	var path []Migration
 	for _, m := range registeredMigrations {
 		// These are guaranteed valid by registerMigrations() validation
 		migFrom := semver.MustParse(m.FromVersion)
 		migTo := semver.MustParse(m.ToVersion)
 
-		// Include migration if it falls within our upgrade range
-		if !migFrom.LessThan(from) && !migTo.GreaterThan(to) {
+		// Include migration if it falls within our upgrade range:
+		// - Migration starts at or after our source version (migFrom >= from)
+		// - Migration ends at or before our target version (migTo <= to)
+		startsAtOrAfterSource := migFrom.GreaterThan(from) || migFrom.Equal(from)
+		endsAtOrBeforeTarget := migTo.LessThan(to) || migTo.Equal(to)
+		if startsAtOrAfterSource && endsAtOrBeforeTarget {
 			path = append(path, m)
 		}
 	}

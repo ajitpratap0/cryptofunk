@@ -25,6 +25,20 @@ func init() {
 }
 
 // =============================================================================
+// Test Constants
+// =============================================================================
+
+const (
+	// Concurrent test parameters
+	testConcurrentUpdates = 20
+	testConcurrentReads   = 50
+	testConcurrentClones  = 10
+
+	// Test success rate requirement (100% with proper locking)
+	testSuccessRateThreshold = 1.0
+)
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 
@@ -677,9 +691,7 @@ func TestConcurrentUpdateAndRead(t *testing.T) {
 	handler.currentStrategy = initialStrategy
 	handler.mu.Unlock()
 
-	numUpdates := 20
-	numReads := 50
-	total := numUpdates + numReads
+	total := testConcurrentUpdates + testConcurrentReads
 
 	var wg sync.WaitGroup
 	wg.Add(total)
@@ -688,12 +700,15 @@ func TestConcurrentUpdateAndRead(t *testing.T) {
 	failCount := int32(0)
 
 	// Launch concurrent updates
-	for i := 0; i < numUpdates; i++ {
+	for i := 0; i < testConcurrentUpdates; i++ {
 		go func(idx int) {
 			defer wg.Done()
 
 			newStrategy := strategy.NewDefaultStrategy("Update Strategy")
-			newStrategy.Risk.MaxDrawdown = float64(idx+1) / 100.0 // Ensure non-zero drawdown
+			// Use a field that won't cause validation conflicts
+			// MaxDrawdown has constraints with MaxDailyLoss and CircuitBreaker.DrawdownHalt
+			// Instead, vary the strategy description which has no validation constraints
+			newStrategy.Metadata.Description = "Concurrent update test - iteration " + string(rune('A'+idx))
 			body, _ := json.Marshal(newStrategy)
 
 			w := httptest.NewRecorder()
@@ -705,13 +720,14 @@ func TestConcurrentUpdateAndRead(t *testing.T) {
 				atomic.AddInt32(&successCount, 1)
 			} else {
 				atomic.AddInt32(&failCount, 1)
+				t.Logf("Update %d failed with status %d: %s", idx, w.Code, w.Body.String())
 			}
 		}(i)
 	}
 
 	// Launch concurrent reads
-	for i := 0; i < numReads; i++ {
-		go func() {
+	for i := 0; i < testConcurrentReads; i++ {
+		go func(idx int) {
 			defer wg.Done()
 
 			w := httptest.NewRecorder()
@@ -722,28 +738,28 @@ func TestConcurrentUpdateAndRead(t *testing.T) {
 				atomic.AddInt32(&successCount, 1)
 			} else {
 				atomic.AddInt32(&failCount, 1)
+				t.Logf("Read %d failed with status %d: %s", idx, w.Code, w.Body.String())
 			}
-		}()
+		}(i)
 	}
 
 	// Wait for completion
 	wg.Wait()
 
-	// Allow some failures in concurrent scenarios, but ensure majority succeed
+	// With proper locking, all operations should succeed
 	successRate := float64(successCount) / float64(total)
 	t.Logf("Concurrent test: %d/%d operations succeeded, %d failed (%.1f%% success rate)", successCount, total, failCount, successRate*100)
 
-	// Require at least 90% success rate
-	assert.GreaterOrEqual(t, successRate, 0.9, "Expected at least 90%% success rate in concurrent operations")
+	// Require 100% success rate - with proper locking, there should be no failures
+	assert.Equal(t, testSuccessRateThreshold, successRate, "Expected 100%% success rate in concurrent operations with proper locking")
 }
 
 func TestConcurrentCloneOperations(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
-	numClones := 10
-	done := make(chan struct{}, numClones)
+	done := make(chan struct{}, testConcurrentClones)
 
-	for i := 0; i < numClones; i++ {
+	for i := 0; i < testConcurrentClones; i++ {
 		go func(idx int) {
 			defer func() { done <- struct{}{} }()
 
@@ -762,7 +778,7 @@ func TestConcurrentCloneOperations(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < numClones; i++ {
+	for i := 0; i < testConcurrentClones; i++ {
 		<-done
 	}
 }
@@ -982,4 +998,92 @@ func TestRateLimiterMiddlewareIntegration(t *testing.T) {
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+}
+
+// =============================================================================
+// Deep Copy Independence Tests
+// =============================================================================
+
+func TestUpdateStrategyReturnsIndependentCopy(t *testing.T) {
+	router, handler := setupStrategyRouter()
+
+	// Create a strategy with nested data that could be shared
+	originalStrategy := strategy.NewDefaultStrategy("Test Strategy")
+	originalStrategy.Metadata.Tags = []string{"tag1", "tag2", "tag3"}
+	originalStrategy.Indicators.EMA.Periods = []int{9, 21, 50, 200}
+
+	// Update the strategy
+	body, _ := json.Marshal(originalStrategy)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Unmarshal the returned strategy
+	var returnedStrategy strategy.StrategyConfig
+	err := json.Unmarshal(w.Body.Bytes(), &returnedStrategy)
+	require.NoError(t, err)
+
+	// Modify the returned strategy's slices
+	returnedStrategy.Metadata.Tags[0] = "modified"
+	returnedStrategy.Indicators.EMA.Periods[0] = 999
+
+	// Verify the handler's internal state was NOT affected
+	handler.mu.RLock()
+	internalStrategy := handler.currentStrategy
+	handler.mu.RUnlock()
+
+	// The internal strategy should still have original values
+	assert.Equal(t, "tag1", internalStrategy.Metadata.Tags[0],
+		"Internal strategy tags should not be affected by modifying returned copy")
+	assert.Equal(t, 9, internalStrategy.Indicators.EMA.Periods[0],
+		"Internal strategy EMA periods should not be affected by modifying returned copy")
+}
+
+func TestDeepCopyIndependence(t *testing.T) {
+	// Test the DeepCopy method directly
+	original := strategy.NewDefaultStrategy("Original Strategy")
+	original.Metadata.Tags = []string{"tag1", "tag2"}
+	original.Indicators.EMA.Periods = []int{9, 21, 50}
+
+	// Create deep copy
+	copied := original.DeepCopy()
+
+	// Modify the copy's slices
+	copied.Metadata.Tags[0] = "modified_tag"
+	copied.Metadata.Tags = append(copied.Metadata.Tags, "new_tag")
+	copied.Indicators.EMA.Periods[0] = 999
+
+	// Verify original was not affected
+	assert.Equal(t, "tag1", original.Metadata.Tags[0],
+		"Original tags should not be affected by modifying copy")
+	assert.Len(t, original.Metadata.Tags, 2,
+		"Original tags length should not change when appending to copy")
+	assert.Equal(t, 9, original.Indicators.EMA.Periods[0],
+		"Original EMA periods should not be affected by modifying copy")
+}
+
+func TestDeepCopyWithNilPointers(t *testing.T) {
+	// Test DeepCopy with nil nested pointers
+	original := strategy.NewDefaultStrategy("Strategy Without Optional Fields")
+	// Explicitly set pointers to nil
+	original.Agents.Technical = nil
+	original.Agents.Sentiment = nil
+	original.Agents.Arbitrage = nil
+
+	// This should not panic
+	copied := original.DeepCopy()
+
+	assert.NotNil(t, copied)
+	assert.Nil(t, copied.Agents.Technical)
+	assert.Nil(t, copied.Agents.Sentiment)
+	assert.Nil(t, copied.Agents.Arbitrage)
+}
+
+func TestDeepCopyNil(t *testing.T) {
+	var nilStrategy *strategy.StrategyConfig
+	copied := nilStrategy.DeepCopy()
+	assert.Nil(t, copied, "DeepCopy of nil should return nil")
 }
