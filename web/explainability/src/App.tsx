@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import DecisionTimeline from './components/DecisionTimeline';
 import StatsView from './components/StatsView';
 import SearchView from './components/SearchView';
+import ErrorBoundary from './components/ErrorBoundary';
 import type { Decision } from './types';
 
 type TabType = 'timeline' | 'stats' | 'search';
@@ -68,16 +69,18 @@ function App() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-6">
-        {activeTab === 'timeline' && (
-          <DecisionTimeline
-            selectedDecision={selectedDecision}
-            onSelectDecision={setSelectedDecision}
-          />
-        )}
-        {activeTab === 'stats' && <StatsView />}
-        {activeTab === 'search' && (
-          <SearchView onSelectDecision={setSelectedDecision} />
-        )}
+        <ErrorBoundary>
+          {activeTab === 'timeline' && (
+            <DecisionTimeline
+              selectedDecision={selectedDecision}
+              onSelectDecision={setSelectedDecision}
+            />
+          )}
+          {activeTab === 'stats' && <StatsView />}
+          {activeTab === 'search' && (
+            <SearchView onSelectDecision={setSelectedDecision} />
+          )}
+        </ErrorBoundary>
       </main>
     </div>
   );

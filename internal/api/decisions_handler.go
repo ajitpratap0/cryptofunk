@@ -90,19 +90,24 @@ func (h *DecisionHandler) ListDecisions(c *gin.Context) {
 		Offset:       0,
 	}
 
-	// Parse limit
+	// Parse limit (validate non-negative)
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
-			if limit > MaxListLimit {
+			if limit < 0 {
+				limit = DefaultListLimit
+			} else if limit > MaxListLimit {
 				limit = MaxListLimit
 			}
 			filter.Limit = limit
 		}
 	}
 
-	// Parse offset
+	// Parse offset (validate non-negative)
 	if offsetStr := c.Query("offset"); offsetStr != "" {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			if offset < 0 {
+				offset = 0
+			}
 			filter.Offset = offset
 		}
 	}

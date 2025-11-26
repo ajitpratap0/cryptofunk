@@ -94,9 +94,14 @@ func main() {
 }
 
 func (s *APIServer) setupMiddleware() {
-	// CORS configuration
+	// CORS configuration - use configured origins or defaults for development
+	allowedOrigins := s.config.API.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		// Default origins for development
+		allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+	}
 	config := cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

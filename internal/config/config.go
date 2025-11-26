@@ -159,9 +159,10 @@ type FeeConfig struct {
 
 // APIConfig contains REST API settings
 type APIConfig struct {
-	Host            string `mapstructure:"host"`
-	Port            int    `mapstructure:"port"`
-	OrchestratorURL string `mapstructure:"orchestrator_url"`
+	Host            string   `mapstructure:"host"`
+	Port            int      `mapstructure:"port"`
+	OrchestratorURL string   `mapstructure:"orchestrator_url"`
+	AllowedOrigins  []string `mapstructure:"allowed_origins"` // CORS allowed origins
 }
 
 // MonitoringConfig contains monitoring settings
