@@ -32,9 +32,22 @@ func init() {
 	registerMigrations()
 }
 
-// registerMigrations sets up all known migrations
+// registerMigrations sets up all known migrations.
+//
+// Migration Infrastructure Design:
+// - Migrations are registered in chronological order (oldest to newest)
+// - Each migration transforms a strategy from one schema version to the next
+// - The Migrate function applies migrations sequentially based on version comparison
+// - GetMigrationPath can be used to preview which migrations will be applied
+//
+// To add a new migration:
+// 1. Add a new Migration struct to registeredMigrations below
+// 2. Implement the migration function (e.g., migrateFrom10To11)
+// 3. Update SchemaVersion constant to the new version
+//
+// Note: The legacy 'migrations' map is maintained for backward compatibility
+// but new code should use registeredMigrations and GetMigrationPath.
 func registerMigrations() {
-	// Example migration from 0.9 to 1.0 (for future use)
 	registeredMigrations = []Migration{
 		{
 			FromVersion: "0.9",
@@ -42,13 +55,23 @@ func registerMigrations() {
 			Name:        "Add strategy metadata fields",
 			Migrate:     migrateFrom09To10,
 		},
-		// Future migrations can be added here
+		// Future migrations can be added here:
 		// {
 		//     FromVersion: "1.0",
 		//     ToVersion:   "1.1",
 		//     Name:        "Add new indicator configurations",
 		//     Migrate:     migrateFrom10To11,
 		// },
+	}
+
+	// Validate migrations at initialization time to catch configuration errors early
+	for _, m := range registeredMigrations {
+		if _, err := semver.NewVersion(m.FromVersion); err != nil {
+			panic(fmt.Sprintf("invalid FromVersion %q in migration %q: %v", m.FromVersion, m.Name, err))
+		}
+		if _, err := semver.NewVersion(m.ToVersion); err != nil {
+			panic(fmt.Sprintf("invalid ToVersion %q in migration %q: %v", m.ToVersion, m.Name, err))
+		}
 	}
 
 	// Also populate legacy map for backward compatibility
@@ -106,16 +129,13 @@ func GetMigrationPath(fromVersion, toVersion string) ([]Migration, error) {
 	}
 
 	// Find applicable migrations
+	// Note: Migration versions are validated at init() time, so semver.NewVersion
+	// will not fail here. We use MustNewVersion pattern since validation already passed.
 	var path []Migration
 	for _, m := range registeredMigrations {
-		migFrom, err := semver.NewVersion(m.FromVersion)
-		if err != nil {
-			continue
-		}
-		migTo, err := semver.NewVersion(m.ToVersion)
-		if err != nil {
-			continue
-		}
+		// These are guaranteed valid by registerMigrations() validation
+		migFrom := semver.MustParse(m.FromVersion)
+		migTo := semver.MustParse(m.ToVersion)
 
 		// Include migration if it falls within our upgrade range
 		if !migFrom.LessThan(from) && !migTo.GreaterThan(to) {
@@ -125,8 +145,8 @@ func GetMigrationPath(fromVersion, toVersion string) ([]Migration, error) {
 
 	// Sort migrations by version
 	sort.Slice(path, func(i, j int) bool {
-		vi, _ := semver.NewVersion(path[i].FromVersion)
-		vj, _ := semver.NewVersion(path[j].FromVersion)
+		vi := semver.MustParse(path[i].FromVersion)
+		vj := semver.MustParse(path[j].FromVersion)
 		return vi.LessThan(vj)
 	})
 
@@ -166,11 +186,10 @@ func Migrate(strategy *StrategyConfig) error {
 	}
 
 	// Apply migrations in order
+	// Note: Migration versions are validated at init() time via registerMigrations()
 	for version, migrate := range migrations {
-		migrationVersion, err := semver.NewVersion(version)
-		if err != nil {
-			continue
-		}
+		// Guaranteed valid by registerMigrations() validation
+		migrationVersion := semver.MustParse(version)
 
 		// Apply migration if current version is less than migration version
 		if current.LessThan(migrationVersion) {

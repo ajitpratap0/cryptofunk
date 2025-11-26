@@ -731,7 +731,7 @@ func TestConcurrentUpdateAndRead(t *testing.T) {
 
 	// Allow some failures in concurrent scenarios, but ensure majority succeed
 	successRate := float64(successCount) / float64(total)
-	t.Logf("Concurrent test: %d/%d operations succeeded (%.1f%%)", successCount, total, successRate*100)
+	t.Logf("Concurrent test: %d/%d operations succeeded, %d failed (%.1f%% success rate)", successCount, total, failCount, successRate*100)
 
 	// Require at least 90% success rate
 	assert.GreaterOrEqual(t, successRate, 0.9, "Expected at least 90%% success rate in concurrent operations")

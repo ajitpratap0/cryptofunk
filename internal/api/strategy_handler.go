@@ -279,15 +279,11 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// and to ensure thread-safe access
 	strategyCopy := newStrategy
 
-	h.mu.Lock()
-	// Store pointer to our copy
-	h.currentStrategy = &strategyCopy
-
-	// Persist to database while still holding the lock to ensure consistency
-	// between in-memory state and database
+	// Persist to database FIRST (without lock) to avoid lock contention
+	// during slow database operations. This allows readers to continue
+	// accessing the current state while we write to DB.
 	if h.repo != nil {
 		if err := h.repo.SaveAndActivate(c.Request.Context(), &strategyCopy); err != nil {
-			h.mu.Unlock()
 			log.Error().Err(err).Msg("Failed to persist strategy to database")
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "Failed to persist strategy",
@@ -296,6 +292,11 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 			return
 		}
 	}
+
+	// Update in-memory state AFTER successful database persistence
+	// This brief lock only covers the pointer assignment, not I/O
+	h.mu.Lock()
+	h.currentStrategy = &strategyCopy
 	h.mu.Unlock()
 
 	// Log successful update (outside lock to avoid holding it during I/O)
