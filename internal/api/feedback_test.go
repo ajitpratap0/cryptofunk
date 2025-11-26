@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -381,6 +382,101 @@ func TestHandlerCreateFeedback(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("create feedback with comment too long", func(t *testing.T) {
+		// Create a comment longer than MaxCommentLength (2000)
+		longComment := make([]byte, 2001)
+		for i := range longComment {
+			longComment[i] = 'a'
+		}
+		body := map[string]interface{}{
+			"rating":  "positive",
+			"comment": string(longComment),
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/"+testDecisionID.String()+"/feedback", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Contains(t, response["error"], "Comment too long")
+	})
+
+	t.Run("create feedback with too many tags", func(t *testing.T) {
+		// Create more tags than MaxTags (20)
+		tags := make([]string, 21)
+		for i := range tags {
+			tags[i] = "tag"
+		}
+		body := map[string]interface{}{
+			"rating": "positive",
+			"tags":   tags,
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/"+testDecisionID.String()+"/feedback", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Contains(t, response["error"], "Too many tags")
+	})
+
+	t.Run("create feedback with tag too long", func(t *testing.T) {
+		// Create a tag longer than MaxTagLength (100)
+		longTag := make([]byte, 101)
+		for i := range longTag {
+			longTag[i] = 'a'
+		}
+		body := map[string]interface{}{
+			"rating": "positive",
+			"tags":   []string{string(longTag)},
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/"+testDecisionID.String()+"/feedback", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Contains(t, response["error"], "Tag too long")
+	})
+
+	t.Run("create feedback with empty tag", func(t *testing.T) {
+		body := map[string]interface{}{
+			"rating": "positive",
+			"tags":   []string{"valid_tag", ""},
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/"+testDecisionID.String()+"/feedback", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Contains(t, response["error"], "Empty tags")
 	})
 }
 
@@ -855,17 +951,28 @@ func TestHandlerRefreshStats(t *testing.T) {
 
 // TestIsDuplicateKeyError tests the duplicate key error detection
 func TestIsDuplicateKeyError(t *testing.T) {
-	assert.True(t, isDuplicateKeyError(errors.New("duplicate key value violates unique constraint")))
-	assert.True(t, isDuplicateKeyError(errors.New("unique_user_decision_feedback constraint violated")))
+	// Test with actual pgconn.PgError
+	pgErr := &pgconn.PgError{Code: "23505"} // unique_violation
+	assert.True(t, isDuplicateKeyError(pgErr))
+
+	// Test with different error code
+	pgErrOther := &pgconn.PgError{Code: "23503"} // foreign_key_violation
+	assert.False(t, isDuplicateKeyError(pgErrOther))
+
+	// Test with non-pg error
 	assert.False(t, isDuplicateKeyError(errors.New("some other error")))
 	assert.False(t, isDuplicateKeyError(nil))
 }
 
-// TestContains tests the contains helper function
-func TestContains(t *testing.T) {
-	assert.True(t, contains("hello world", "world"))
-	assert.True(t, contains("hello world", "hello"))
-	assert.False(t, contains("hello world", "foo"))
-	assert.True(t, contains("hello", "hello"))
-	assert.False(t, contains("", "hello"))
+// TestValidationConstants tests validation constants are set correctly
+func TestValidationConstants(t *testing.T) {
+	assert.Equal(t, 2000, MaxCommentLength)
+	assert.Equal(t, 20, MaxTags)
+	assert.Equal(t, 100, MaxTagLength)
+}
+
+// TestReviewLimitConstants tests review limit constants
+func TestReviewLimitConstants(t *testing.T) {
+	assert.Equal(t, 20, DefaultReviewLimit)
+	assert.Equal(t, 100, MaxReviewLimit)
 }

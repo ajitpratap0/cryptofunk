@@ -22,6 +22,8 @@ const (
 const (
 	DefaultFeedbackLimit = 50
 	MaxFeedbackLimit     = 200
+	DefaultReviewLimit   = 20
+	MaxReviewLimit       = 100 // Lower limit for review queries (returns full decision data)
 	orderByCreatedAtDesc = " ORDER BY created_at DESC"
 )
 
@@ -620,10 +622,10 @@ func (r *FeedbackRepository) getDailyTrend(ctx context.Context, days int) ([]Dai
 // GetDecisionsNeedingReview returns decisions with multiple negative ratings
 func (r *FeedbackRepository) GetDecisionsNeedingReview(ctx context.Context, limit int) ([]DecisionNeedingReview, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = DefaultReviewLimit
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > MaxReviewLimit {
+		limit = MaxReviewLimit
 	}
 
 	query := `

@@ -2,13 +2,22 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
+)
+
+// Input validation constants
+const (
+	MaxCommentLength = 2000
+	MaxTags          = 20
+	MaxTagLength     = 100
 )
 
 // FeedbackRepositoryInterface defines methods for feedback data access
@@ -101,6 +110,36 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 			"error": "Rating must be 'positive' or 'negative'",
 		})
 		return
+	}
+
+	// Validate comment length
+	if body.Comment != nil && len(*body.Comment) > MaxCommentLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Comment too long, maximum 2000 characters allowed",
+		})
+		return
+	}
+
+	// Validate tags
+	if len(body.Tags) > MaxTags {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Too many tags, maximum 20 allowed",
+		})
+		return
+	}
+	for _, tag := range body.Tags {
+		if len(tag) > MaxTagLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Tag too long, maximum 100 characters per tag",
+			})
+			return
+		}
+		if len(tag) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Empty tags are not allowed",
+			})
+			return
+		}
 	}
 
 	// Build the full request with decision ID from path
@@ -512,19 +551,9 @@ func (h *FeedbackHandler) RefreshStats(c *gin.Context) {
 
 // isDuplicateKeyError checks if an error is a PostgreSQL unique constraint violation
 func isDuplicateKeyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return contains(errStr, "duplicate key") || contains(errStr, "unique_user_decision_feedback")
-}
-
-// contains checks if a string contains a substring (simple helper to avoid importing strings)
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" // unique_violation
 	}
 	return false
 }
