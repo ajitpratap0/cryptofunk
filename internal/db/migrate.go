@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	_ "github.com/lib/pq"
+	"github.com/rs/zerolog/log"
 )
 
 // migrationsDir will be set by the caller
@@ -143,7 +144,7 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	}
 
 	if len(migrations) == 0 {
-		fmt.Println("No migrations found")
+		log.Info().Msg("No migrations found")
 		return nil
 	}
 
@@ -156,12 +157,11 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	}
 
 	if len(pendingMigrations) == 0 {
-		fmt.Printf("Database is up to date (version %d)\n", currentVersion)
+		log.Info().Int("version", currentVersion).Msg("Database is up to date")
 		return nil
 	}
 
-	fmt.Printf("Current schema version: %d\n", currentVersion)
-	fmt.Printf("Found %d pending migration(s)\n", len(pendingMigrations))
+	log.Info().Int("current_version", currentVersion).Int("pending_count", len(pendingMigrations)).Msg("Starting migrations")
 
 	// Apply each migration in a transaction
 	for _, migration := range pendingMigrations {
@@ -172,14 +172,14 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 
 	// Get final version
 	finalVersion, _ := m.getCurrentVersion(ctx)
-	fmt.Printf("Migration complete. Current version: %d\n", finalVersion)
+	log.Info().Int("version", finalVersion).Msg("Migration complete")
 
 	return nil
 }
 
 // applyMigration applies a single migration
 func (m *Migrator) applyMigration(ctx context.Context, migration Migration) error {
-	fmt.Printf("Applying migration %d: %s\n", migration.Version, migration.Description)
+	log.Info().Int("version", migration.Version).Str("description", migration.Description).Msg("Applying migration")
 
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -206,7 +206,7 @@ func (m *Migrator) applyMigration(ctx context.Context, migration Migration) erro
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	fmt.Printf("✓ Migration %d applied successfully\n", migration.Version)
+	log.Info().Int("version", migration.Version).Msg("✓ Migration applied successfully")
 
 	return nil
 }
@@ -227,18 +227,22 @@ func (m *Migrator) Status(ctx context.Context) error {
 		return err
 	}
 
-	fmt.Printf("Current schema version: %d\n", currentVersion)
-	fmt.Printf("Available migrations: %d\n", len(migrations))
-	fmt.Println("\nMigration history:")
-	fmt.Println("VERSION | STATUS  | DESCRIPTION")
-	fmt.Println("--------|---------|-----------------------------------")
+	log.Info().
+		Int("current_version", currentVersion).
+		Int("available_migrations", len(migrations)).
+		Msg("Migration status")
 
+	// Log each migration status
 	for _, migration := range migrations {
 		status := "pending"
 		if migration.Version <= currentVersion {
 			status = "applied"
 		}
-		fmt.Printf("%-7d | %-7s | %s\n", migration.Version, status, migration.Description)
+		log.Info().
+			Int("version", migration.Version).
+			Str("status", status).
+			Str("description", migration.Description).
+			Msg("Migration")
 	}
 
 	return nil

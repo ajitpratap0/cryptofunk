@@ -35,6 +35,13 @@ const (
 	EventTypeConfigUpdated EventType = "CONFIG_UPDATED"
 	EventTypeConfigViewed  EventType = "CONFIG_VIEWED"
 
+	// Strategy events
+	EventTypeStrategyUpdated  EventType = "STRATEGY_UPDATED"
+	EventTypeStrategyImported EventType = "STRATEGY_IMPORTED"
+	EventTypeStrategyExported EventType = "STRATEGY_EXPORTED"
+	EventTypeStrategyCloned   EventType = "STRATEGY_CLONED"
+	EventTypeStrategyMerged   EventType = "STRATEGY_MERGED"
+
 	// Agent events
 	EventTypeAgentStarted EventType = "AGENT_STARTED"
 	EventTypeAgentStopped EventType = "AGENT_STOPPED"
@@ -384,6 +391,46 @@ func (l *Logger) LogConfigChange(ctx context.Context, userID, ipAddress, configK
 		IPAddress: ipAddress,
 		Resource:  configKey,
 		Action:    "Configuration updated",
+		Success:   success,
+		ErrorMsg:  errorMsg,
+		Metadata:  metadata,
+	})
+}
+
+// LogStrategyChange logs a strategy modification event
+func (l *Logger) LogStrategyChange(ctx context.Context, eventType EventType, userID, ipAddress, strategyID, strategyName string, metadata map[string]interface{}, success bool, errorMsg string) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["strategy_id"] = strategyID
+	metadata["strategy_name"] = strategyName
+
+	severity := SeverityInfo
+	if !success {
+		severity = SeverityError
+	}
+
+	action := "Strategy operation"
+	switch eventType {
+	case EventTypeStrategyUpdated:
+		action = "Strategy updated"
+	case EventTypeStrategyImported:
+		action = "Strategy imported"
+	case EventTypeStrategyExported:
+		action = "Strategy exported"
+	case EventTypeStrategyCloned:
+		action = "Strategy cloned"
+	case EventTypeStrategyMerged:
+		action = "Strategies merged"
+	}
+
+	return l.Log(ctx, &Event{
+		EventType: eventType,
+		Severity:  severity,
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Resource:  strategyID,
+		Action:    action,
 		Success:   success,
 		ErrorMsg:  errorMsg,
 		Metadata:  metadata,
