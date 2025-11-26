@@ -25,8 +25,14 @@ const (
 	MaxStrategyUploadSize = 10 * 1024 * 1024
 
 	// MinStrategyUploadSize is the minimum allowed size for strategy files (50 bytes)
-	// A valid YAML/JSON strategy must contain at least metadata.name field
-	// Minimum realistic content: "metadata:\n  name: x\n" (~20 bytes) plus margin
+	// This is a sanity check to reject obviously empty/corrupted files, NOT a guarantee
+	// that the content is valid. Actual validation happens during YAML/JSON parsing.
+	//
+	// Rationale for 50 bytes:
+	// - Smallest valid YAML: "metadata:\n  name: x\n" (~20 bytes)
+	// - Smallest valid JSON: {"metadata":{"name":"x"}} (~25 bytes)
+	// - 50 bytes allows for minimal valid content plus encoding overhead/whitespace
+	// - Files smaller than this are almost certainly empty, truncated, or corrupted
 	MinStrategyUploadSize = 50
 
 	// DefaultAuditTimeout is the default timeout for audit logging operations
@@ -319,6 +325,16 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// Create a deep copy to ensure complete independence from the input
 	// and to prevent any shared references that could cause data races
 	strategyCopy := newStrategy.DeepCopy()
+	if strategyCopy == nil {
+		// DeepCopy only returns nil on JSON marshal/unmarshal errors, which
+		// indicates a serious internal error (e.g., unexportable fields).
+		// This should never happen with valid StrategyConfig structs.
+		log.Error().Str("strategy_name", newStrategy.Metadata.Name).Msg("DeepCopy returned nil - internal error")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Internal error: failed to create strategy copy",
+		})
+		return
+	}
 
 	// Persist to database FIRST (without lock) to avoid lock contention
 	// during slow database operations. This allows readers to continue
@@ -518,6 +534,16 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 	contentType := c.GetHeader("Content-Type")
 
 	if strings.Contains(contentType, "multipart/form-data") {
+		// Explicitly limit multipart form memory to prevent DoS attacks
+		// This ensures the entire multipart form (including all fields) stays within limits
+		if err := c.Request.ParseMultipartForm(MaxStrategyUploadSize); err != nil {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error":   "Form data too large or malformed",
+				"details": err.Error(),
+			})
+			return
+		}
+
 		// Handle file upload
 		file, header, fileErr := c.Request.FormFile("file")
 		if fileErr != nil {
