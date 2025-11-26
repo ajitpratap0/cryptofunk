@@ -1225,6 +1225,52 @@ func (s *APIServer) BroadcastSystemStatus(status string, message string, metadat
 	return s.hub.Broadcast(MessageTypeSystemStatus, data)
 }
 
+// BroadcastDecision broadcasts a new LLM decision to all WebSocket clients
+func (s *APIServer) BroadcastDecision(decision *db.LLMDecision) error {
+	data := map[string]interface{}{
+		"id":            decision.ID.String(),
+		"session_id":    decision.SessionID,
+		"decision_type": decision.DecisionType,
+		"symbol":        decision.Symbol,
+		"agent_name":    decision.AgentName,
+		"model":         decision.Model,
+		"confidence":    decision.Confidence,
+		"outcome":       decision.Outcome,
+		"pnl":           decision.PnL,
+		"tokens_used":   decision.TokensUsed,
+		"latency_ms":    decision.LatencyMs,
+		"created_at":    decision.CreatedAt,
+		// Truncate prompt/response for real-time updates (full details via API)
+		"prompt_preview":   truncateString(decision.Prompt, 200),
+		"response_preview": truncateString(decision.Response, 200),
+	}
+
+	return s.hub.Broadcast(MessageTypeDecision, data)
+}
+
+// BroadcastDecisionStats broadcasts aggregated decision statistics.
+// TODO: Integrate with periodic stats updates or decision outcome events.
+func (s *APIServer) BroadcastDecisionStats(stats map[string]interface{}) error {
+	data := map[string]interface{}{
+		"stats":     stats,
+		"timestamp": time.Now(),
+	}
+
+	return s.hub.Broadcast(MessageTypeDecisionStats, data)
+}
+
+// truncateString truncates a string to maxLen and adds "..." if truncated.
+// For maxLen < 4, returns the first maxLen characters without "...".
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen < 4 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
 // WebSocket handler
 
 var upgrader = websocket.Upgrader{
