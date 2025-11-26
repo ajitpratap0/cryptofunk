@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -410,15 +411,17 @@ func (s *StrategyConfig) DeepCopy() *StrategyConfig {
 	// This handles all nested structures automatically
 	data, err := json.Marshal(s)
 	if err != nil {
-		// Log error for debugging - should never happen with valid StrategyConfig
+		// Log error and record metrics for debugging - should never happen with valid StrategyConfig
 		log.Error().Err(err).Str("strategy_name", s.Metadata.Name).Msg("DeepCopy: failed to marshal strategy")
+		metrics.RecordStrategyValidationFailure("deepcopy_marshal_error")
 		return nil
 	}
 
 	var copied StrategyConfig
 	if err := json.Unmarshal(data, &copied); err != nil {
-		// Log error for debugging - should never happen if marshal succeeded
+		// Log error and record metrics for debugging - should never happen if marshal succeeded
 		log.Error().Err(err).Str("strategy_name", s.Metadata.Name).Msg("DeepCopy: failed to unmarshal strategy")
+		metrics.RecordStrategyValidationFailure("deepcopy_unmarshal_error")
 		return nil
 	}
 

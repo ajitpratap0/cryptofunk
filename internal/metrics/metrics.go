@@ -18,11 +18,11 @@ const (
 	ReasonOther          = "other"
 
 	// Strategy validation failure reasons (bounded set)
-	ValidationReasonSchemaInvalid  = "schema_invalid"
-	ValidationReasonFieldMissing   = "field_missing"
+	ValidationReasonSchemaInvalid   = "schema_invalid"
+	ValidationReasonFieldMissing    = "field_missing"
 	ValidationReasonValueOutOfRange = "value_out_of_range"
-	ValidationReasonIncompatible   = "incompatible"
-	ValidationReasonOther          = "other"
+	ValidationReasonIncompatible    = "incompatible"
+	ValidationReasonOther           = "other"
 
 	// Exchange API error categories (bounded set)
 	ExchangeErrorTimeout     = "timeout"

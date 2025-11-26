@@ -162,8 +162,9 @@ func isAllowedMIMEType(detectedType, filename string) bool {
 		return true
 	}
 
-	// Accept application/octet-stream as fallback (some systems may report this)
-	if strings.HasPrefix(detectedType, "application/octet-stream") {
+	// Accept application/octet-stream as fallback only for YAML files
+	// JSON files should be reliably detected, so we're stricter with them
+	if strings.HasPrefix(detectedType, "application/octet-stream") && (ext == ".yaml" || ext == ".yml") {
 		return true
 	}
 
