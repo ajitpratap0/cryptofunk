@@ -29,11 +29,16 @@ const (
 	// This is a sanity check to reject obviously empty/corrupted files, NOT a guarantee
 	// that the content is valid. Actual validation happens during YAML/JSON parsing.
 	//
-	// Rationale for 50 bytes:
-	// - Smallest valid YAML: "metadata:\n  name: x\n" (~20 bytes)
-	// - Smallest valid JSON: {"metadata":{"name":"x"}} (~25 bytes)
-	// - 50 bytes allows for minimal valid content plus encoding overhead/whitespace
-	// - Files smaller than this are almost certainly empty, truncated, or corrupted
+	// Rationale for 50 bytes (with ~2x safety margin):
+	// - Theoretical minimum valid YAML: "metadata:\n  name: x\n" (~20 bytes)
+	// - Theoretical minimum valid JSON: {"metadata":{"name":"x"}} (~25 bytes)
+	// - Safety margin rationale:
+	//   * Real strategies need schema_version, so add ~15-20 bytes
+	//   * BOM markers or encoding headers may add bytes
+	//   * Whitespace/formatting variations
+	// - 50 bytes = ~2x theoretical minimum provides reasonable buffer
+	// - Files smaller than 50 bytes are almost certainly empty, truncated, or corrupted
+	// - A practical minimal strategy with required fields is typically 100-200 bytes
 	MinStrategyUploadSize = 50
 
 	// DefaultAuditTimeout is the default timeout for audit logging operations
@@ -61,11 +66,17 @@ var filenameRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
 // StrategyHandler handles HTTP requests for strategy import/export
 type StrategyHandler struct {
-	// mu protects concurrent access to currentStrategy
+	// mu protects concurrent access to currentStrategy and needsDBReload
 	mu sync.RWMutex
 
 	// currentStrategy holds the active strategy (in-memory cache)
 	currentStrategy *strategy.StrategyConfig
+
+	// needsDBReload indicates that the in-memory state may be stale after a failed
+	// DB write. When true, GetCurrentStrategy will attempt to reload from the database
+	// to ensure consistency. This provides a recovery mechanism for the case where
+	// a DB persist fails but a previous update had already persisted a newer version.
+	needsDBReload bool
 
 	// repo handles database persistence (optional - if nil, uses in-memory only)
 	repo *db.StrategyRepository
@@ -366,7 +377,38 @@ func (h *StrategyHandler) RegisterRoutes(router *gin.RouterGroup) {
 func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
 	h.mu.RLock()
 	currentStrategy := h.currentStrategy
+	needsReload := h.needsDBReload
 	h.mu.RUnlock()
+
+	// If a previous DB write failed, attempt to reload from database to ensure consistency.
+	// This provides recovery from the scenario where in-memory state became stale after
+	// a failed DB persist (but a previous update had already persisted a newer version).
+	if needsReload && h.repo != nil {
+		h.mu.Lock()
+		// Double-check after acquiring write lock (another goroutine may have reloaded)
+		if h.needsDBReload {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+			defer cancel()
+
+			if reloaded, err := h.repo.GetActive(ctx); err != nil {
+				log.Warn().Err(err).Msg("Failed to reload strategy from database after previous write failure")
+				// Keep using in-memory state, but leave needsDBReload=true for retry
+			} else if reloaded != nil {
+				h.currentStrategy = reloaded
+				h.needsDBReload = false
+				currentStrategy = reloaded
+				log.Info().
+					Str("strategy_id", reloaded.Metadata.ID).
+					Msg("Successfully reloaded strategy from database after previous write failure")
+			} else {
+				// No active strategy in DB - clear the reload flag
+				h.needsDBReload = false
+			}
+		} else {
+			currentStrategy = h.currentStrategy
+		}
+		h.mu.Unlock()
+	}
 
 	if currentStrategy == nil {
 		h.mu.Lock()
@@ -474,6 +516,14 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	if h.repo != nil {
 		if err := h.repo.SaveAndActivate(c.Request.Context(), strategyCopy); err != nil {
 			log.Error().Err(err).Msg("Failed to persist strategy to database")
+
+			// Mark that in-memory state may be stale. If a previous update had already
+			// persisted a newer version to DB, our in-memory state is now inconsistent.
+			// The next GetCurrentStrategy call will attempt to reload from DB.
+			h.mu.Lock()
+			h.needsDBReload = true
+			h.mu.Unlock()
+
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "Failed to persist strategy",
 				"details": err.Error(),
@@ -486,6 +536,7 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// This brief lock only covers the pointer assignment, not I/O
 	h.mu.Lock()
 	h.currentStrategy = strategyCopy
+	h.needsDBReload = false // Clear any stale flag on successful update
 	h.mu.Unlock()
 
 	// Log successful update (outside lock to avoid holding it during I/O)

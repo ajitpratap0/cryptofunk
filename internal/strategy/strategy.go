@@ -422,15 +422,29 @@ func (s *StrategyConfig) DeepCopy() *StrategyConfig {
 	data, err := json.Marshal(s)
 	if err != nil {
 		// Log error and record metrics for debugging - should never happen with valid StrategyConfig
-		log.Error().Err(err).Str("strategy_name", s.Metadata.Name).Msg("DeepCopy: failed to marshal strategy")
+		log.Error().
+			Err(err).
+			Str("strategy_name", s.Metadata.Name).
+			Str("strategy_id", s.Metadata.ID).
+			Msg("DeepCopy: failed to marshal strategy - this indicates an unexportable field or cycle")
 		metrics.RecordStrategyValidationFailure("deepcopy_marshal_error")
 		return nil
 	}
 
 	var copied StrategyConfig
 	if err := json.Unmarshal(data, &copied); err != nil {
-		// Log error and record metrics for debugging - should never happen if marshal succeeded
-		log.Error().Err(err).Str("strategy_name", s.Metadata.Name).Msg("DeepCopy: failed to unmarshal strategy")
+		// Log error with truncated JSON data for debugging - helps identify malformed data
+		truncatedData := string(data)
+		if len(truncatedData) > 500 {
+			truncatedData = truncatedData[:500] + "...(truncated)"
+		}
+		log.Error().
+			Err(err).
+			Str("strategy_name", s.Metadata.Name).
+			Str("strategy_id", s.Metadata.ID).
+			Int("json_length", len(data)).
+			Str("json_preview", truncatedData).
+			Msg("DeepCopy: failed to unmarshal strategy - JSON data may be malformed")
 		metrics.RecordStrategyValidationFailure("deepcopy_unmarshal_error")
 		return nil
 	}
