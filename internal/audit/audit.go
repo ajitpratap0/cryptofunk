@@ -57,6 +57,13 @@ const (
 	// Data access events
 	EventTypeDataExport EventType = "DATA_EXPORT"
 	EventTypeDataDelete EventType = "DATA_DELETE"
+
+	// Decision explainability events
+	EventTypeDecisionListAccessed    EventType = "DECISION_LIST_ACCESSED"
+	EventTypeDecisionViewed          EventType = "DECISION_VIEWED"
+	EventTypeDecisionSearched        EventType = "DECISION_SEARCHED"
+	EventTypeDecisionStatsAccessed   EventType = "DECISION_STATS_ACCESSED"
+	EventTypeDecisionSimilarAccessed EventType = "DECISION_SIMILAR_ACCESSED"
 )
 
 // Severity represents the severity level of an audit event
@@ -412,6 +419,45 @@ func (l *Logger) LogConfigChange(ctx context.Context, userID, ipAddress, configK
 		Success:   success,
 		ErrorMsg:  errorMsg,
 		Metadata:  metadata,
+	})
+}
+
+// LogDecisionAccess logs decision explainability access events
+func (l *Logger) LogDecisionAccess(ctx context.Context, eventType EventType, userID, ipAddress, requestID string, metadata map[string]interface{}, success bool, errorMsg string, durationMs int64) error {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
+	severity := SeverityInfo
+	if !success {
+		severity = SeverityWarning
+	}
+
+	action := "Decision access"
+	switch eventType {
+	case EventTypeDecisionListAccessed:
+		action = "Decision list accessed"
+	case EventTypeDecisionViewed:
+		action = "Decision viewed"
+	case EventTypeDecisionSearched:
+		action = "Decision search performed"
+	case EventTypeDecisionStatsAccessed:
+		action = "Decision statistics accessed"
+	case EventTypeDecisionSimilarAccessed:
+		action = "Similar decisions accessed"
+	}
+
+	return l.Log(ctx, &Event{
+		EventType: eventType,
+		Severity:  severity,
+		UserID:    userID,
+		IPAddress: ipAddress,
+		Action:    action,
+		Success:   success,
+		ErrorMsg:  errorMsg,
+		Metadata:  metadata,
+		RequestID: requestID,
+		Duration:  durationMs,
 	})
 }
 

@@ -17,6 +17,12 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const API_PREFIX = '/api/v1';
 
+// Default timeout for API requests (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
+// Search timeout is longer due to potential vector operations (60 seconds)
+const SEARCH_TIMEOUT_MS = 60000;
+
 /**
  * Custom error class for API errors
  */
@@ -50,6 +56,25 @@ function buildQueryString(filter: DecisionFilter): string {
 }
 
 /**
+ * Creates an AbortController with a timeout
+ * Returns the controller and a cleanup function
+ */
+function createTimeoutController(timeoutMs: number): {
+  controller: AbortController;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    controller,
+    cleanup: () => clearTimeout(timeoutId),
+  };
+}
+
+/**
  * Helper function to handle fetch responses
  */
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -73,6 +98,35 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 /**
+ * Performs a fetch with timeout support
+ */
+async function fetchWithTimeout<T>(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<T> {
+  const { controller, cleanup } = createTimeoutController(timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return handleResponse<T>(response);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new DecisionApiError(
+        `Request timed out after ${timeoutMs / 1000} seconds`,
+        408 // Request Timeout
+      );
+    }
+    throw error;
+  } finally {
+    cleanup();
+  }
+}
+
+/**
  * List decisions with optional filtering
  *
  * @param filter - Filtering and pagination options
@@ -82,14 +136,16 @@ export async function listDecisions(filter: DecisionFilter = {}): Promise<ListDe
   const queryString = buildQueryString(filter);
   const url = `${API_BASE_URL}${API_PREFIX}/decisions${queryString}`;
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchWithTimeout<ListDecisionsResponse>(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     },
-  });
-
-  return handleResponse<ListDecisionsResponse>(response);
+    DEFAULT_TIMEOUT_MS
+  );
 }
 
 /**
@@ -101,14 +157,16 @@ export async function listDecisions(filter: DecisionFilter = {}): Promise<ListDe
 export async function getDecision(id: string): Promise<Decision> {
   const url = `${API_BASE_URL}${API_PREFIX}/decisions/${id}`;
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchWithTimeout<Decision>(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     },
-  });
-
-  return handleResponse<Decision>(response);
+    DEFAULT_TIMEOUT_MS
+  );
 }
 
 /**
@@ -121,14 +179,16 @@ export async function getDecisionStats(filter?: DecisionFilter): Promise<Decisio
   const queryString = filter ? buildQueryString(filter) : '';
   const url = `${API_BASE_URL}${API_PREFIX}/decisions/stats${queryString}`;
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchWithTimeout<DecisionStats>(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     },
-  });
-
-  return handleResponse<DecisionStats>(response);
+    DEFAULT_TIMEOUT_MS
+  );
 }
 
 /**
@@ -149,15 +209,18 @@ export async function searchDecisions(
     body.limit = limit;
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  // Search uses longer timeout due to potential vector operations
+  return fetchWithTimeout<SearchDecisionsResponse>(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
-
-  return handleResponse<SearchDecisionsResponse>(response);
+    SEARCH_TIMEOUT_MS
+  );
 }
 
 /**
@@ -177,14 +240,17 @@ export async function getSimilarDecisions(
   const queryString = params.toString() ? `?${params.toString()}` : '';
   const url = `${API_BASE_URL}${API_PREFIX}/decisions/${id}/similar${queryString}`;
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
+  // Similar decisions uses vector search, so use longer timeout
+  return fetchWithTimeout<SimilarDecisionsResponse>(
+    url,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     },
-  });
-
-  return handleResponse<SimilarDecisionsResponse>(response);
+    SEARCH_TIMEOUT_MS
+  );
 }
 
 /**

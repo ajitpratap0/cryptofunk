@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -155,6 +156,10 @@ type RateLimiterMiddleware struct {
 	read    *RateLimiter
 	search  *RateLimiter
 	enabled bool
+
+	// Cleanup worker management
+	stopChan chan struct{}
+	doneChan chan struct{}
 }
 
 // NewRateLimiterMiddleware creates a new rate limiter middleware with the given config
@@ -245,15 +250,47 @@ func (rlm *RateLimiterMiddleware) CleanupOldEntries() {
 	cleanupLimiter(rlm.search)
 }
 
-// StartCleanupWorker starts a background goroutine that periodically cleans up old entries
+// StartCleanupWorker starts a background goroutine that periodically cleans up old entries.
+// Call Stop() to gracefully shutdown the worker and prevent goroutine leaks.
 func (rlm *RateLimiterMiddleware) StartCleanupWorker(interval time.Duration) {
+	rlm.stopChan = make(chan struct{})
+	rlm.doneChan = make(chan struct{})
+
 	ticker := time.NewTicker(interval)
 	go func() {
-		for range ticker.C {
-			rlm.CleanupOldEntries()
-			log.Debug().Msg("Rate limiter cleanup completed")
+		defer close(rlm.doneChan)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				rlm.CleanupOldEntries()
+				log.Debug().Msg("Rate limiter cleanup completed")
+			case <-rlm.stopChan:
+				log.Debug().Msg("Rate limiter cleanup worker stopping")
+				return
+			}
 		}
 	}()
+}
+
+// Stop gracefully shuts down the cleanup worker goroutine.
+// This should be called during server shutdown to prevent goroutine leaks.
+func (rlm *RateLimiterMiddleware) Stop() {
+	if rlm.stopChan == nil {
+		return // Worker was never started
+	}
+
+	// Signal the worker to stop
+	close(rlm.stopChan)
+
+	// Wait for the worker to finish with a timeout
+	select {
+	case <-rlm.doneChan:
+		log.Info().Msg("Rate limiter cleanup worker stopped gracefully")
+	case <-time.After(5 * time.Second):
+		log.Warn().Msg("Rate limiter cleanup worker did not stop in time")
+	}
 }
 
 // AuditLoggingMiddleware creates middleware that logs all requests to the audit log
@@ -378,6 +415,30 @@ func determineEventType(method, path string) audit.EventType {
 	}
 	if path == "/api/v1/config" && method == "GET" {
 		return audit.EventTypeConfigViewed
+	}
+
+	// Decision explainability endpoints
+	if strings.HasPrefix(path, "/api/v1/decisions") {
+		// POST /decisions/search
+		if path == "/api/v1/decisions/search" && method == "POST" {
+			return audit.EventTypeDecisionSearched
+		}
+		// GET /decisions/stats
+		if path == "/api/v1/decisions/stats" && method == "GET" {
+			return audit.EventTypeDecisionStatsAccessed
+		}
+		// GET /decisions/:id/similar
+		if strings.HasSuffix(path, "/similar") && method == "GET" {
+			return audit.EventTypeDecisionSimilarAccessed
+		}
+		// GET /decisions/:id (single decision)
+		if method == "GET" && path != "/api/v1/decisions" && !strings.HasSuffix(path, "/similar") && !strings.HasSuffix(path, "/stats") {
+			return audit.EventTypeDecisionViewed
+		}
+		// GET /decisions (list)
+		if path == "/api/v1/decisions" && method == "GET" {
+			return audit.EventTypeDecisionListAccessed
+		}
 	}
 
 	// Return empty for non-critical endpoints (health checks, status, etc.)

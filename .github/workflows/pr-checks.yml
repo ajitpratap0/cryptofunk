@@ -74,12 +74,36 @@ jobs:
             console.log(`PR has ${additions} additions and ${deletions} deletions (total: ${totalChanges} changes)`);
 
             // Get list of changed files to check for lock files
-            const { data: files } = await github.rest.pulls.listFiles({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number,
-              per_page: 100
-            });
+            // Use pagination to handle PRs with more than 100 changed files
+            let allFiles = [];
+            let page = 1;
+            let hasMore = true;
+
+            while (hasMore) {
+              const { data: files } = await github.rest.pulls.listFiles({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                per_page: 100,
+                page: page
+              });
+
+              allFiles = allFiles.concat(files);
+
+              if (files.length < 100) {
+                hasMore = false;
+              } else {
+                page++;
+                // Safety limit to prevent infinite loops
+                if (page > 50) {
+                  console.log(`Warning: PR has more than 5000 files, stopping pagination`);
+                  hasMore = false;
+                }
+              }
+            }
+
+            console.log(`Fetched ${allFiles.length} files across ${page} page(s)`);
+            const files = allFiles;
 
             // Calculate changes excluding lock files and generated files
             const excludePatterns = [

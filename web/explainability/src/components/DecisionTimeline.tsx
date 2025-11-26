@@ -18,6 +18,7 @@ function DecisionTimeline({ selectedDecision, onSelectDecision }: DecisionTimeli
   const {
     data,
     isLoading,
+    isFetching,
     error,
     refetch,
     fetchNextPage,
@@ -28,6 +29,9 @@ function DecisionTimeline({ selectedDecision, onSelectDecision }: DecisionTimeli
     symbol: symbolFilter || undefined,
     outcome: outcomeFilter || undefined,
   });
+
+  // Show loading indicator when filters change (isFetching but not initial load)
+  const isFilterLoading = isFetching && !isLoading && !isFetchingNextPage;
 
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -68,7 +72,16 @@ function DecisionTimeline({ selectedDecision, onSelectDecision }: DecisionTimeli
   return (
     <div className="space-y-6" role="region" aria-label="Decision Timeline">
       {/* Filters */}
-      <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 relative">
+        {/* Loading overlay when filters are changing */}
+        {isFilterLoading && (
+          <div className="absolute inset-0 bg-slate-800/50 rounded-lg flex items-center justify-center z-10">
+            <div className="flex items-center gap-2 text-blue-400">
+              <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
+              <span className="text-sm">Updating...</span>
+            </div>
+          </div>
+        )}
         <fieldset>
           <legend className="sr-only">Filter decisions</legend>
           <div className="flex flex-wrap gap-4 items-end">
