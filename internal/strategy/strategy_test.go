@@ -750,3 +750,201 @@ func TestStrategyMetadata_UUID(t *testing.T) {
 	_, err := uuid.Parse(s.Metadata.ID)
 	assert.NoError(t, err)
 }
+
+// =============================================================================
+// DeepCopy Tests
+// =============================================================================
+
+func TestDeepCopy_Basic(t *testing.T) {
+	original := NewDefaultStrategy("Original Strategy")
+	original.Metadata.Tags = []string{"tag1", "tag2", "tag3"}
+	original.Metadata.Description = "Test description"
+
+	copied := original.DeepCopy()
+
+	assert.NotNil(t, copied)
+	assert.Equal(t, original.Metadata.Name, copied.Metadata.Name)
+	assert.Equal(t, original.Metadata.Description, copied.Metadata.Description)
+	assert.Equal(t, original.Metadata.Tags, copied.Metadata.Tags)
+}
+
+func TestDeepCopy_Independence(t *testing.T) {
+	original := NewDefaultStrategy("Original Strategy")
+	original.Metadata.Tags = []string{"tag1", "tag2"}
+	original.Indicators.EMA.Periods = []int{9, 21, 50}
+
+	copied := original.DeepCopy()
+
+	// Modify the copy
+	copied.Metadata.Tags[0] = "modified_tag"
+	copied.Metadata.Tags = append(copied.Metadata.Tags, "new_tag")
+	copied.Indicators.EMA.Periods[0] = 999
+	copied.Metadata.Name = "Modified Strategy"
+
+	// Verify original was not affected
+	assert.Equal(t, "tag1", original.Metadata.Tags[0],
+		"Original tags should not be affected by modifying copy")
+	assert.Len(t, original.Metadata.Tags, 2,
+		"Original tags length should not change when appending to copy")
+	assert.Equal(t, 9, original.Indicators.EMA.Periods[0],
+		"Original EMA periods should not be affected by modifying copy")
+	assert.Equal(t, "Original Strategy", original.Metadata.Name,
+		"Original name should not be affected by modifying copy")
+}
+
+func TestDeepCopy_WithNestedPointers(t *testing.T) {
+	original := NewDefaultStrategy("Strategy With Nested")
+	original.Agents.Technical = &TechnicalAgentConfig{
+		StepInterval:        "30s",
+		ConfidenceThreshold: 0.75,
+	}
+	original.Agents.Arbitrage = &ArbitrageAgentConfig{
+		MinSpread: 0.01,
+		Exchanges: []string{"binance", "coinbase", "kraken"},
+	}
+
+	copied := original.DeepCopy()
+
+	// Modify the copy's nested pointers
+	copied.Agents.Technical.ConfidenceThreshold = 0.99
+	copied.Agents.Arbitrage.Exchanges[0] = "modified_exchange"
+
+	// Verify original was not affected
+	assert.Equal(t, 0.75, original.Agents.Technical.ConfidenceThreshold,
+		"Original Technical config should not be affected")
+	assert.Equal(t, "binance", original.Agents.Arbitrage.Exchanges[0],
+		"Original Arbitrage exchanges should not be affected")
+}
+
+func TestDeepCopy_NilPointers(t *testing.T) {
+	original := NewDefaultStrategy("Strategy Without Optional")
+	original.Agents.Technical = nil
+	original.Agents.Sentiment = nil
+	original.Agents.Arbitrage = nil
+
+	copied := original.DeepCopy()
+
+	assert.NotNil(t, copied)
+	assert.Nil(t, copied.Agents.Technical)
+	assert.Nil(t, copied.Agents.Sentiment)
+	assert.Nil(t, copied.Agents.Arbitrage)
+}
+
+func TestDeepCopy_NilReceiver(t *testing.T) {
+	var nilStrategy *StrategyConfig
+	copied := nilStrategy.DeepCopy()
+	assert.Nil(t, copied, "DeepCopy of nil should return nil")
+}
+
+func TestDeepCopy_PreservesTime(t *testing.T) {
+	original := NewDefaultStrategy("Time Test")
+	original.Metadata.CreatedAt = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	original.Metadata.UpdatedAt = time.Date(2024, 6, 20, 14, 45, 30, 0, time.UTC)
+
+	copied := original.DeepCopy()
+
+	assert.Equal(t, original.Metadata.CreatedAt, copied.Metadata.CreatedAt,
+		"CreatedAt should be preserved exactly")
+	assert.Equal(t, original.Metadata.UpdatedAt, copied.Metadata.UpdatedAt,
+		"UpdatedAt should be preserved exactly")
+}
+
+// =============================================================================
+// Benchmark Tests
+// =============================================================================
+
+func BenchmarkDeepCopy_Simple(b *testing.B) {
+	original := NewDefaultStrategy("Benchmark Strategy")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = original.DeepCopy()
+	}
+}
+
+func BenchmarkDeepCopy_WithTags(b *testing.B) {
+	original := NewDefaultStrategy("Benchmark Strategy")
+	original.Metadata.Tags = []string{"tag1", "tag2", "tag3", "tag4", "tag5"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = original.DeepCopy()
+	}
+}
+
+func BenchmarkDeepCopy_WithNestedConfigs(b *testing.B) {
+	original := NewDefaultStrategy("Benchmark Strategy")
+	original.Agents.Technical = &TechnicalAgentConfig{
+		StepInterval:        "30s",
+		ConfidenceThreshold: 0.75,
+		LookbackPeriods:     LookbackPeriods{Short: "1h", Medium: "4h", Long: "1d"},
+	}
+	original.Agents.Sentiment = &SentimentAgentConfig{
+		StepInterval:       "5m",
+		SentimentThreshold: 0.6,
+	}
+	original.Agents.Arbitrage = &ArbitrageAgentConfig{
+		MinSpread: 0.01,
+		Exchanges: []string{"binance", "coinbase", "kraken", "ftx", "huobi"},
+	}
+	original.Metadata.Tags = []string{"crypto", "trading", "automated", "high-frequency"}
+	original.Indicators.EMA.Periods = []int{9, 21, 50, 100, 200}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = original.DeepCopy()
+	}
+}
+
+func BenchmarkDeepCopy_FullyPopulated(b *testing.B) {
+	original := NewDefaultStrategy("Full Benchmark Strategy")
+	original.Metadata.Tags = []string{"tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9", "tag10"}
+	original.Metadata.Description = "A comprehensive trading strategy for benchmark testing"
+	original.Metadata.Author = "Benchmark Author"
+	original.Metadata.Version = "2.0.0"
+
+	original.Agents.Technical = &TechnicalAgentConfig{
+		StepInterval:        "30s",
+		ConfidenceThreshold: 0.75,
+		LookbackPeriods:     LookbackPeriods{Short: "1h", Medium: "4h", Long: "1d"},
+		ConfidenceWeights:   TechnicalWeights{RSI: 0.2, MACD: 0.3, Bollinger: 0.2, Trend: 0.2, Volume: 0.1},
+	}
+	original.Agents.Sentiment = &SentimentAgentConfig{
+		StepInterval:       "5m",
+		SentimentThreshold: 0.6,
+		NewsWeight:         0.7,
+		FearGreedWeight:    0.3,
+	}
+	original.Agents.OrderBook = &OrderBookAgentConfig{
+		StepInterval:        "10s",
+		DepthLevels:         20,
+		ImbalanceThreshold:  0.3,
+		LargeOrderThreshold: 10000,
+	}
+	original.Agents.Trend = &TrendAgentConfig{
+		StepInterval:        "1m",
+		FastEMAPeriod:       12,
+		SlowEMAPeriod:       26,
+		ADXPeriod:           14,
+		ADXThreshold:        25,
+		ConfidenceThreshold: 0.7,
+	}
+	original.Agents.Reversion = &ReversionAgentConfig{
+		StepInterval:        "1m",
+		ConfidenceThreshold: 0.65,
+		EntryConditions:     ReversionEntry{RSIOversold: 30, BollingerTouch: true, VolumeSpike: 1.5},
+		ExitConditions:      ReversionExit{RSINeutral: 50, BollingerMiddle: true, TakeProfitPct: 0.02},
+	}
+	original.Agents.Arbitrage = &ArbitrageAgentConfig{
+		MinSpread:           0.005,
+		Exchanges:           []string{"binance", "coinbase", "kraken", "ftx", "huobi", "okx", "bybit", "gate"},
+		MaxLatencyMs:        100,
+		ConfidenceThreshold: 0.9,
+	}
+	original.Indicators.EMA.Periods = []int{5, 9, 12, 21, 26, 50, 100, 200}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = original.DeepCopy()
+	}
+}

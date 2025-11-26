@@ -934,6 +934,38 @@ func TestFileUploadWithStrictValidation(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestFileUploadFileTooSmall(t *testing.T) {
+	router, _ := setupStrategyRouter()
+
+	// Create a file that's too small (less than MinStrategyUploadSize)
+	tinyContent := []byte("tiny")
+
+	body, contentType := createMultipartForm(t, "strategy.yaml", tinyContent, nil)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", body)
+	req.Header.Set("Content-Type", contentType)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response["error"], "File too small")
+	assert.Contains(t, response, "min_size")
+}
+
+func TestFileUploadFileSizeConstants(t *testing.T) {
+	// Verify file size constants are sensible
+	assert.Greater(t, MaxStrategyUploadSize, MinStrategyUploadSize,
+		"Max size should be greater than min size")
+	assert.Equal(t, 10*1024*1024, MaxStrategyUploadSize,
+		"Max size should be 10MB")
+	assert.Equal(t, 10, MinStrategyUploadSize,
+		"Min size should be 10 bytes")
+}
+
 // createMultipartForm creates a multipart form request body for file uploads
 func createMultipartForm(t *testing.T, filename string, content []byte, fields map[string]string) (*bytes.Buffer, string) {
 	t.Helper()

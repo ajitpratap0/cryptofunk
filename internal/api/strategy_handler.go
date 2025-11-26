@@ -24,6 +24,10 @@ const (
 	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
 	MaxStrategyUploadSize = 10 * 1024 * 1024
 
+	// MinStrategyUploadSize is the minimum allowed size for strategy files (10 bytes)
+	// A valid strategy file must contain at least basic structure
+	MinStrategyUploadSize = 10
+
 	// DefaultAuditTimeout is the default timeout for audit logging operations
 	DefaultAuditTimeout = 5 * time.Second
 
@@ -514,6 +518,16 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 				"error":    "File too large",
 				"details":  fmt.Sprintf("Maximum file size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
 				"max_size": MaxStrategyUploadSize,
+			})
+			return
+		}
+
+		// Check minimum file size
+		if len(data) < MinStrategyUploadSize {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":    "File too small",
+				"details":  fmt.Sprintf("Minimum file size is %d bytes. File appears to be empty or corrupted.", MinStrategyUploadSize),
+				"min_size": MinStrategyUploadSize,
 			})
 			return
 		}

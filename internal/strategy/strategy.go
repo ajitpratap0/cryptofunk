@@ -4,6 +4,7 @@
 package strategy
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -382,63 +383,36 @@ func NewDefaultStrategy(name string) *StrategyConfig {
 }
 
 // DeepCopy creates a complete independent copy of the strategy configuration.
-// All nested pointers and slices are cloned to ensure no shared references.
+// Uses JSON marshal/unmarshal for robust deep copying of all nested structures.
+// This approach automatically handles all nested pointers, slices, and maps
+// without requiring manual field-by-field copying.
+//
+// Consistency Guarantees:
+// - The returned copy shares no memory references with the original
+// - Modifications to the copy will not affect the original
+// - Modifications to the original will not affect the copy
+// - All nested pointers (Agent configs) are fully cloned
+// - All slices (Tags, Exchanges, EMA.Periods) are fully cloned
+// - Time values are preserved exactly
 func (s *StrategyConfig) DeepCopy() *StrategyConfig {
 	if s == nil {
 		return nil
 	}
 
-	// Start with a shallow copy of the main struct
-	copy := *s
-
-	// Deep copy Metadata.Tags slice
-	if s.Metadata.Tags != nil {
-		copy.Metadata.Tags = make([]string, len(s.Metadata.Tags))
-		for i, v := range s.Metadata.Tags {
-			copy.Metadata.Tags[i] = v
-		}
+	// Use JSON marshal/unmarshal for robust deep copy
+	// This handles all nested structures automatically
+	data, err := json.Marshal(s)
+	if err != nil {
+		// This should never happen with valid StrategyConfig
+		// Fall back to returning nil to indicate failure
+		return nil
 	}
 
-	// Deep copy Agent configs (pointers to structs)
-	if s.Agents.Technical != nil {
-		techCopy := *s.Agents.Technical
-		copy.Agents.Technical = &techCopy
-	}
-	if s.Agents.Sentiment != nil {
-		sentCopy := *s.Agents.Sentiment
-		copy.Agents.Sentiment = &sentCopy
-	}
-	if s.Agents.OrderBook != nil {
-		obCopy := *s.Agents.OrderBook
-		copy.Agents.OrderBook = &obCopy
-	}
-	if s.Agents.Trend != nil {
-		trendCopy := *s.Agents.Trend
-		copy.Agents.Trend = &trendCopy
-	}
-	if s.Agents.Reversion != nil {
-		revCopy := *s.Agents.Reversion
-		copy.Agents.Reversion = &revCopy
-	}
-	if s.Agents.Arbitrage != nil {
-		arbCopy := *s.Agents.Arbitrage
-		// Deep copy Exchanges slice within Arbitrage
-		if s.Agents.Arbitrage.Exchanges != nil {
-			arbCopy.Exchanges = make([]string, len(s.Agents.Arbitrage.Exchanges))
-			for i, v := range s.Agents.Arbitrage.Exchanges {
-				arbCopy.Exchanges[i] = v
-			}
-		}
-		copy.Agents.Arbitrage = &arbCopy
+	var copied StrategyConfig
+	if err := json.Unmarshal(data, &copied); err != nil {
+		// This should never happen if marshal succeeded
+		return nil
 	}
 
-	// Deep copy Indicators.EMA.Periods slice
-	if s.Indicators.EMA.Periods != nil {
-		copy.Indicators.EMA.Periods = make([]int, len(s.Indicators.EMA.Periods))
-		for i, v := range s.Indicators.EMA.Periods {
-			copy.Indicators.EMA.Periods[i] = v
-		}
-	}
-
-	return &copy
+	return &copied
 }

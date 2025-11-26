@@ -156,6 +156,15 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
+      - name: Run concurrent tests with race detector (stress test)
+        env:
+          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
+          REDIS_URL: "localhost:6379"
+        run: |
+          echo "Running concurrent tests with -race -count=100 to detect race conditions..."
+          go test -v -race -count=100 -run "Concurrent" ./internal/api/... ./internal/strategy/...
+          echo "✅ No race conditions detected in concurrent tests"
+
       - name: Stop CI services
         if: always()
         run: |
