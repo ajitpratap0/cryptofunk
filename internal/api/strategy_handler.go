@@ -29,6 +29,12 @@ const (
 
 	// DefaultValidationTimeout is the default timeout for validation operations
 	DefaultValidationTimeout = 30 * time.Second
+
+	// ExportFormatJSON is the JSON export format identifier
+	ExportFormatJSON = "json"
+
+	// ExportFormatYAML is the YAML export format identifier
+	ExportFormatYAML = "yaml"
 )
 
 // AllowedStrategyExtensions defines valid file extensions for strategy uploads
@@ -309,14 +315,14 @@ func (h *StrategyHandler) ExportStrategy(c *gin.Context) {
 		return
 	}
 
-	format := c.DefaultQuery("format", "yaml")
+	format := c.DefaultQuery("format", ExportFormatYAML)
 	opts := strategy.DefaultExportOptions()
 
 	// Sanitize strategy ID for use in filename
 	safeID := sanitizeFilename(currentStrategy.Metadata.ID)
 
 	switch strings.ToLower(format) {
-	case "json":
+	case ExportFormatJSON:
 		opts.Format = strategy.FormatJSON
 		c.Header("Content-Type", "application/json")
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"strategy_%s.json\"", safeID))
@@ -375,7 +381,7 @@ func (h *StrategyHandler) ExportStrategyWithOptions(c *gin.Context) {
 	if err := c.ShouldBindJSON(&exportOpts); err != nil {
 		// Use defaults if no options provided
 		exportOpts = ExportOptions{
-			Format:          "yaml",
+			Format:          ExportFormatYAML,
 			IncludeComments: true,
 			PrettyPrint:     true,
 		}
@@ -388,7 +394,7 @@ func (h *StrategyHandler) ExportStrategyWithOptions(c *gin.Context) {
 	}
 
 	switch strings.ToLower(exportOpts.Format) {
-	case "json":
+	case ExportFormatJSON:
 		opts.Format = strategy.FormatJSON
 		c.Header("Content-Type", "application/json")
 	default:
