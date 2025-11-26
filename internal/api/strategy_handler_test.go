@@ -937,8 +937,9 @@ func TestFileUploadWithStrictValidation(t *testing.T) {
 func TestFileUploadFileTooSmall(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
-	// Create a file that's too small (less than MinStrategyUploadSize)
-	tinyContent := []byte("tiny")
+	// Create a file that's too small (less than MinStrategyUploadSize = 50 bytes)
+	// This is clearly not a valid strategy configuration
+	tinyContent := []byte("metadata:\n  name: x")  // Only 19 bytes
 
 	body, contentType := createMultipartForm(t, "strategy.yaml", tinyContent, nil)
 
@@ -962,8 +963,8 @@ func TestFileUploadFileSizeConstants(t *testing.T) {
 		"Max size should be greater than min size")
 	assert.Equal(t, 10*1024*1024, MaxStrategyUploadSize,
 		"Max size should be 10MB")
-	assert.Equal(t, 10, MinStrategyUploadSize,
-		"Min size should be 10 bytes")
+	assert.Equal(t, 50, MinStrategyUploadSize,
+		"Min size should be 50 bytes (realistic minimum for valid strategy)")
 }
 
 // createMultipartForm creates a multipart form request body for file uploads
@@ -976,8 +977,9 @@ func createMultipartForm(t *testing.T, filename string, content []byte, fields m
 	// Add file
 	part, err := writer.CreateFormFile("file", filename)
 	require.NoError(t, err)
-	_, err = part.Write(content)
-	require.NoError(t, err)
+	n, writeErr := part.Write(content)
+	require.NoError(t, writeErr)
+	require.Equal(t, len(content), n, "partial write occurred")
 
 	// Add additional fields
 	for key, value := range fields {

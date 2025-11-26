@@ -24,9 +24,10 @@ const (
 	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
 	MaxStrategyUploadSize = 10 * 1024 * 1024
 
-	// MinStrategyUploadSize is the minimum allowed size for strategy files (10 bytes)
-	// A valid strategy file must contain at least basic structure
-	MinStrategyUploadSize = 10
+	// MinStrategyUploadSize is the minimum allowed size for strategy files (50 bytes)
+	// A valid YAML/JSON strategy must contain at least metadata.name field
+	// Minimum realistic content: "metadata:\n  name: x\n" (~20 bytes) plus margin
+	MinStrategyUploadSize = 50
 
 	// DefaultAuditTimeout is the default timeout for audit logging operations
 	DefaultAuditTimeout = 5 * time.Second
@@ -145,9 +146,18 @@ func isAllowedExtension(filename string) bool {
 }
 
 // isAllowedMIMEType validates that the detected MIME type is consistent with the file extension.
-// This provides defense-in-depth against files with mismatched content and extension.
-// YAML/JSON files are detected as text/plain by http.DetectContentType, so we accept text/plain
-// for all allowed extensions and additionally validate that JSON files start with valid JSON.
+//
+// SECURITY NOTE: This is defense-in-depth only, NOT a security boundary.
+// http.DetectContentType only reads the first 512 bytes and cannot reliably
+// distinguish between text file types (YAML, JSON, scripts all return "text/plain").
+// The primary security controls are:
+// 1. File extension whitelist (.yaml, .yml, .json)
+// 2. File size limits (50 bytes - 10MB)
+// 3. Subsequent YAML/JSON parsing which validates structure
+// 4. Strategy validation which checks business rules
+//
+// This function catches obvious mismatches (e.g., binary file with .yaml extension)
+// but should not be relied upon for security against sophisticated attacks.
 func isAllowedMIMEType(detectedType, filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 
@@ -313,6 +323,18 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	// Persist to database FIRST (without lock) to avoid lock contention
 	// during slow database operations. This allows readers to continue
 	// accessing the current state while we write to DB.
+	//
+	// CONSISTENCY TRADE-OFF: There is a brief window (~1-10ms during DB write)
+	// where the database has the new strategy but in-memory state has the old one.
+	// During this window, concurrent readers will get stale (but consistent) data.
+	// This is acceptable because:
+	// 1. Strategy updates are infrequent (user-initiated)
+	// 2. Readers always get a complete, consistent strategy (just potentially stale)
+	// 3. The DB is the source of truth; on restart, the correct strategy loads
+	// 4. Lock contention would cause much worse latency spikes for all readers
+	//
+	// If stronger consistency is required, use sync.RWMutex and hold write lock
+	// during both DB persist and memory update (at cost of increased latency).
 	if h.repo != nil {
 		if err := h.repo.SaveAndActivate(c.Request.Context(), strategyCopy); err != nil {
 			log.Error().Err(err).Msg("Failed to persist strategy to database")
