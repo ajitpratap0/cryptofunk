@@ -187,6 +187,122 @@ func isAllowedMIMEType(detectedType, filename string) bool {
 	return false
 }
 
+// knownBinaryMagicNumbers contains magic number signatures for common binary file types.
+// These are used to quickly reject files that are definitely not text-based config files.
+var knownBinaryMagicNumbers = [][]byte{
+	{0x89, 0x50, 0x4E, 0x47},             // PNG
+	{0xFF, 0xD8, 0xFF},                   // JPEG
+	{0x47, 0x49, 0x46, 0x38},             // GIF
+	{0x50, 0x4B, 0x03, 0x04},             // ZIP/JAR/Office
+	{0x25, 0x50, 0x44, 0x46},             // PDF
+	{0x7F, 0x45, 0x4C, 0x46},             // ELF
+	{0x4D, 0x5A},                         // Windows EXE/DLL
+	{0x1F, 0x8B},                         // GZIP
+	{0x42, 0x5A, 0x68},                   // BZIP2
+	{0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00}, // XZ
+	{0x52, 0x61, 0x72, 0x21},             // RAR
+	{0x00, 0x00, 0x00},                   // Various binary formats (starts with nulls)
+}
+
+// isBinaryFile performs magic number checking to detect binary files.
+// This catches obvious binary files that should be rejected regardless of extension.
+func isBinaryFile(data []byte) bool {
+	if len(data) < 2 {
+		return false
+	}
+
+	for _, magic := range knownBinaryMagicNumbers {
+		if len(data) >= len(magic) {
+			match := true
+			for i, b := range magic {
+				if data[i] != b {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// FileValidationError represents a file validation failure with structured details
+type FileValidationError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
+func (e *FileValidationError) Error() string {
+	if e.Details != "" {
+		return fmt.Sprintf("%s: %s", e.Message, e.Details)
+	}
+	return e.Message
+}
+
+// ValidateUploadedFile performs comprehensive validation on an uploaded file.
+// This consolidates all file validation checks into a single reusable function.
+//
+// Validation checks performed:
+// 1. File extension whitelist
+// 2. File size bounds (min/max)
+// 3. Binary file detection via magic numbers
+// 4. MIME type consistency
+//
+// Returns nil if validation passes, or a FileValidationError with details.
+func ValidateUploadedFile(filename string, data []byte) *FileValidationError {
+	// Check extension
+	if !isAllowedExtension(filename) {
+		return &FileValidationError{
+			Code:    "invalid_extension",
+			Message: "Invalid file extension",
+			Details: fmt.Sprintf("Allowed extensions: .yaml, .yml, .json. Got: %s", filepath.Ext(filename)),
+		}
+	}
+
+	// Check minimum size
+	if len(data) < MinStrategyUploadSize {
+		return &FileValidationError{
+			Code:    "file_too_small",
+			Message: "File too small",
+			Details: fmt.Sprintf("Minimum file size is %d bytes. File appears to be empty or corrupted.", MinStrategyUploadSize),
+		}
+	}
+
+	// Check maximum size
+	if len(data) > MaxStrategyUploadSize {
+		return &FileValidationError{
+			Code:    "file_too_large",
+			Message: "File too large",
+			Details: fmt.Sprintf("Maximum file size is %d bytes (%d MB)", MaxStrategyUploadSize, MaxStrategyUploadSize/1024/1024),
+		}
+	}
+
+	// Check for binary file magic numbers
+	if isBinaryFile(data) {
+		return &FileValidationError{
+			Code:    "binary_file_detected",
+			Message: "Binary file detected",
+			Details: "Strategy files must be text-based YAML or JSON. Binary files are not allowed.",
+		}
+	}
+
+	// Check MIME type consistency
+	detectedType := http.DetectContentType(data)
+	if !isAllowedMIMEType(detectedType, filename) {
+		return &FileValidationError{
+			Code:    "invalid_content_type",
+			Message: "Invalid file content",
+			Details: fmt.Sprintf("File content does not match expected type for %s", filepath.Ext(filename)),
+		}
+	}
+
+	return nil
+}
+
 // logAuditEvent is a helper to log audit events if the logger is configured
 func (h *StrategyHandler) logAuditEvent(c *gin.Context, eventType audit.EventType, strategyID, strategyName string, metadata map[string]interface{}, success bool, errorMsg string) {
 	if h.auditLogger == nil {

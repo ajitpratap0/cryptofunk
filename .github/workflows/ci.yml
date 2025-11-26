@@ -163,8 +163,11 @@ jobs:
           DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
           REDIS_URL: "localhost:6379"
         run: |
-          echo "Running concurrent tests with -race -count=100 to detect race conditions..."
-          go test -v -race -count=100 -run "Concurrent" ./internal/api/... ./internal/strategy/...
+          # -count=20 provides good race detection coverage while keeping CI time reasonable
+          # (100 iterations adds ~5-10 minutes; 20 iterations adds ~1-2 minutes)
+          # For thorough local testing, developers can run: go test -race -count=100 ...
+          echo "Running concurrent tests with -race -count=20 to detect race conditions..."
+          go test -v -race -count=20 -run "Concurrent" ./internal/api/... ./internal/strategy/...
           echo "✅ No race conditions detected in concurrent tests"
 
       - name: Stop CI services

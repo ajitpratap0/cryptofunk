@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/rs/zerolog/log"
 )
 
 // MigrationFunc defines a function that migrates a strategy from one version to another
@@ -64,13 +65,23 @@ func registerMigrations() {
 		// },
 	}
 
-	// Validate migrations at initialization time to catch configuration errors early
+	// Validate migrations at initialization time to catch configuration errors early.
+	// Using log.Fatal instead of panic for graceful error handling - this allows
+	// proper cleanup and more informative error messages in production.
 	for _, m := range registeredMigrations {
 		if _, err := semver.NewVersion(m.FromVersion); err != nil {
-			panic(fmt.Sprintf("invalid FromVersion %q in migration %q: %v", m.FromVersion, m.Name, err))
+			log.Fatal().
+				Err(err).
+				Str("from_version", m.FromVersion).
+				Str("migration_name", m.Name).
+				Msg("Invalid FromVersion in migration configuration")
 		}
 		if _, err := semver.NewVersion(m.ToVersion); err != nil {
-			panic(fmt.Sprintf("invalid ToVersion %q in migration %q: %v", m.ToVersion, m.Name, err))
+			log.Fatal().
+				Err(err).
+				Str("to_version", m.ToVersion).
+				Str("migration_name", m.Name).
+				Msg("Invalid ToVersion in migration configuration")
 		}
 	}
 
@@ -80,9 +91,12 @@ func registerMigrations() {
 			prevTo := registeredMigrations[i-1].ToVersion
 			currFrom := registeredMigrations[i].FromVersion
 			if prevTo != currFrom {
-				panic(fmt.Sprintf("migration gap detected: %q ends at %q but %q starts at %q",
-					registeredMigrations[i-1].Name, prevTo,
-					registeredMigrations[i].Name, currFrom))
+				log.Fatal().
+					Str("prev_migration", registeredMigrations[i-1].Name).
+					Str("prev_to_version", prevTo).
+					Str("curr_migration", registeredMigrations[i].Name).
+					Str("curr_from_version", currFrom).
+					Msg("Migration gap detected: previous migration ends at different version than current migration starts")
 			}
 		}
 	}

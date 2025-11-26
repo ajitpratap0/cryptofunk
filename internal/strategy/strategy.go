@@ -398,11 +398,20 @@ func NewDefaultStrategy(name string) *StrategyConfig {
 // - All slices (Tags, Exchanges, EMA.Periods) are fully cloned
 // - Time values are preserved exactly
 //
-// Performance Trade-offs:
-// - JSON marshal/unmarshal is ~10-20µs for typical configs (see benchmarks)
-// - Manual field copying would be faster (~1-2µs) but error-prone
-// - JSON approach is chosen for correctness over micro-optimization
-// - For high-frequency cloning, consider caching or pooling strategies
+// Performance Characteristics (Production):
+// - Typical latency: 10-20µs for standard strategy configs (~2-3KB JSON)
+// - Memory allocation: ~2x strategy size (for JSON bytes + new struct)
+// - Throughput: Can handle 50,000-100,000 copies/second on modern hardware
+// - Manual field copying would be ~10x faster but is error-prone and hard to maintain
+//
+// Production Usage Guidelines:
+// - SAFE for: Strategy updates (user-initiated, infrequent)
+// - SAFE for: Clone operations (user-initiated)
+// - SAFE for: Import/export operations
+// - AVOID for: Hot paths with >1000 ops/second (consider caching instead)
+// - The ~15µs overhead is negligible compared to DB writes (~1-10ms) and network I/O
+//
+// Benchmark: Run `go test -bench=BenchmarkDeepCopy ./internal/strategy/...`
 func (s *StrategyConfig) DeepCopy() *StrategyConfig {
 	if s == nil {
 		return nil
