@@ -59,8 +59,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
     try {
       const errorData: ApiError = await response.json();
       errorMessage = errorData.message || errorData.error || errorMessage;
-    } catch {
+    } catch (e) {
       // If parsing JSON fails, use the default error message
+      if (import.meta.env.DEV) {
+        console.warn('Failed to parse error response:', e);
+      }
     }
 
     throw new DecisionApiError(errorMessage, response.status);

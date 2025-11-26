@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Loader2, ChevronDown, RefreshCw } from 'lucide-react';
 import { useInfiniteDecisions } from '../hooks/useDecisions';
 import DecisionCard from './DecisionCard';
+import { DecisionCardSkeletonList } from './DecisionCardSkeleton';
 import type { Decision } from '../types';
 
 interface DecisionTimelineProps {
@@ -155,17 +156,8 @@ function DecisionTimeline({ selectedDecision, onSelectDecision }: DecisionTimeli
         </fieldset>
       </div>
 
-      {/* Loading State */}
-      {isLoading && (
-        <div
-          className="flex items-center justify-center py-12"
-          role="status"
-          aria-live="polite"
-        >
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" aria-hidden="true" />
-          <span className="ml-3 text-slate-400">Loading decisions...</span>
-        </div>
-      )}
+      {/* Loading State - Show skeleton cards for better UX */}
+      {isLoading && <DecisionCardSkeletonList count={5} />}
 
       {/* Decision List */}
       {!isLoading && (
