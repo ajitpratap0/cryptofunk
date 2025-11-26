@@ -536,6 +536,30 @@ func TestHandlerSearchDecisions(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+
+	t.Run("search with query too long", func(t *testing.T) {
+		// Create a query longer than MaxSearchQueryLength (500)
+		longQuery := make([]byte, 501)
+		for i := range longQuery {
+			longQuery[i] = 'a'
+		}
+		body := SearchRequest{
+			Query: string(longQuery),
+		}
+		jsonBody, _ := json.Marshal(body)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "/api/v1/decisions/search", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		require.NoError(t, err)
+		assert.Contains(t, response["error"], "Query too long")
+	})
 }
 
 // TestHandlerSimilarDecisions tests the similar decisions endpoint

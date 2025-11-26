@@ -1248,7 +1248,8 @@ func (s *APIServer) BroadcastDecision(decision *db.LLMDecision) error {
 	return s.hub.Broadcast(MessageTypeDecision, data)
 }
 
-// BroadcastDecisionStats broadcasts aggregated decision statistics
+// BroadcastDecisionStats broadcasts aggregated decision statistics.
+// TODO: Integrate with periodic stats updates or decision outcome events.
 func (s *APIServer) BroadcastDecisionStats(stats map[string]interface{}) error {
 	data := map[string]interface{}{
 		"stats":     stats,
@@ -1258,12 +1259,13 @@ func (s *APIServer) BroadcastDecisionStats(stats map[string]interface{}) error {
 	return s.hub.Broadcast(MessageTypeDecisionStats, data)
 }
 
-// truncateString truncates a string to maxLen and adds "..." if truncated
+// truncateString truncates a string to maxLen and adds "..." if truncated.
+// For maxLen < 4, returns the first maxLen characters without "...".
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	if maxLen <= 3 {
+	if maxLen < 4 {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."

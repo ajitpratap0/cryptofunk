@@ -275,6 +275,14 @@ func (h *DecisionHandler) SearchDecisions(c *gin.Context) {
 		return
 	}
 
+	// Validate query length to prevent performance issues
+	if len(req.Query) > MaxSearchQueryLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Query too long, maximum 500 characters allowed",
+		})
+		return
+	}
+
 	// Perform search
 	results, err := h.repo.SearchDecisions(c.Request.Context(), req)
 	if err != nil {

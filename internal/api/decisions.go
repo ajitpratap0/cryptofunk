@@ -30,6 +30,10 @@ const (
 	DefaultSimilarLimit = 10
 	// MaxSimilarLimit is the maximum number of similar decisions to return
 	MaxSimilarLimit = 50
+
+	// MaxSearchQueryLength is the maximum length of a text search query
+	// to prevent performance issues with very long queries
+	MaxSearchQueryLength = 500
 )
 
 // DecisionRepository handles database operations for LLM decisions
