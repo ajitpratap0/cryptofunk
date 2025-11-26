@@ -40,6 +40,9 @@ jobs:
   pr-labels:
     name: Check Required Labels
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
     steps:
       - name: Check for labels
         uses: mheap/github-action-required-labels@v5
