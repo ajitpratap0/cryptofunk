@@ -14,6 +14,14 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/audit"
 )
 
+// HTTP method constants to satisfy goconst linter
+const (
+	httpMethodGET    = "GET"
+	httpMethodPOST   = "POST"
+	httpMethodPATCH  = "PATCH"
+	httpMethodDELETE = "DELETE"
+)
+
 // RateLimiterConfig defines rate limiting configuration for different endpoint types
 type RateLimiterConfig struct {
 	// Global limits (applies to all endpoints)
@@ -402,41 +410,41 @@ func determineEventType(method, path string) audit.EventType {
 	}
 
 	// Order endpoints
-	if path == "/api/v1/orders" && method == "POST" {
+	if path == "/api/v1/orders" && method == httpMethodPOST {
 		return audit.EventTypeOrderPlaced
 	}
-	if method == "DELETE" && len(path) > len("/api/v1/orders/") && path[:len("/api/v1/orders/")] == "/api/v1/orders/" {
+	if method == httpMethodDELETE && len(path) > len("/api/v1/orders/") && path[:len("/api/v1/orders/")] == "/api/v1/orders/" {
 		return audit.EventTypeOrderCanceled
 	}
 
 	// Configuration endpoints
-	if path == "/api/v1/config" && method == "PATCH" {
+	if path == "/api/v1/config" && method == httpMethodPATCH {
 		return audit.EventTypeConfigUpdated
 	}
-	if path == "/api/v1/config" && method == "GET" {
+	if path == "/api/v1/config" && method == httpMethodGET {
 		return audit.EventTypeConfigViewed
 	}
 
 	// Decision explainability endpoints
 	if strings.HasPrefix(path, "/api/v1/decisions") {
 		// POST /decisions/search
-		if path == "/api/v1/decisions/search" && method == "POST" {
+		if path == "/api/v1/decisions/search" && method == httpMethodPOST {
 			return audit.EventTypeDecisionSearched
 		}
 		// GET /decisions/stats
-		if path == "/api/v1/decisions/stats" && method == "GET" {
+		if path == "/api/v1/decisions/stats" && method == httpMethodGET {
 			return audit.EventTypeDecisionStatsAccessed
 		}
 		// GET /decisions/:id/similar
-		if strings.HasSuffix(path, "/similar") && method == "GET" {
+		if strings.HasSuffix(path, "/similar") && method == httpMethodGET {
 			return audit.EventTypeDecisionSimilarAccessed
 		}
 		// GET /decisions/:id (single decision)
-		if method == "GET" && path != "/api/v1/decisions" && !strings.HasSuffix(path, "/similar") && !strings.HasSuffix(path, "/stats") {
+		if method == httpMethodGET && path != "/api/v1/decisions" && !strings.HasSuffix(path, "/similar") && !strings.HasSuffix(path, "/stats") {
 			return audit.EventTypeDecisionViewed
 		}
 		// GET /decisions (list)
-		if path == "/api/v1/decisions" && method == "GET" {
+		if path == "/api/v1/decisions" && method == httpMethodGET {
 			return audit.EventTypeDecisionListAccessed
 		}
 	}

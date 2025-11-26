@@ -17,11 +17,11 @@ import (
 
 // APIKey represents an API key stored in the database
 type APIKey struct {
-	ID          uuid.UUID `json:"id"`
-	KeyHash     string    `json:"-"` // Never expose the hash
-	Name        string    `json:"name"`
-	UserID      string    `json:"user_id"`
-	Permissions []string  `json:"permissions"`
+	ID          uuid.UUID  `json:"id"`
+	KeyHash     string     `json:"-"` // Never expose the hash
+	Name        string     `json:"name"`
+	UserID      string     `json:"user_id"`
+	Permissions []string   `json:"permissions"`
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
