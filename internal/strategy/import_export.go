@@ -455,8 +455,13 @@ func mergeRiskSettings(base, override *RiskSettings) {
 	if override.MaxPositionUSD > 0 {
 		base.MaxPositionUSD = override.MaxPositionUSD
 	}
-	// Circuit breakers
-	if override.CircuitBreakers.Enabled {
+	// Circuit breakers - merge if any field is explicitly set
+	// Check for Enabled OR any non-zero values in the circuit breaker config
+	if override.CircuitBreakers.Enabled ||
+		override.CircuitBreakers.MaxTradesPerHour > 0 ||
+		override.CircuitBreakers.MaxLossesPerDay > 0 ||
+		override.CircuitBreakers.VolatilityThreshold > 0 ||
+		override.CircuitBreakers.DrawdownHalt > 0 {
 		base.CircuitBreakers = override.CircuitBreakers
 	}
 }

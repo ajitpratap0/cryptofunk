@@ -105,10 +105,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Check dependencies (requires Dependency Graph to be enabled in repo settings)
+  # To enable: Settings → Security & Analysis → Enable Dependency Graph
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
     if: github.event.pull_request.base.ref == 'main'
+    # Continue on error - Dependency Graph may not be enabled in repo settings
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
