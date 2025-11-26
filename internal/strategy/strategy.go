@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // SchemaVersion is the current strategy schema version
