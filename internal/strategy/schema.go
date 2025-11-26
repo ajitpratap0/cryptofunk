@@ -472,6 +472,43 @@ func (s *StrategyConfig) validateRisk() ValidationErrors {
 		}
 	}
 
+	// Cross-field validations
+	// MaxPositionSize cannot exceed MaxPortfolioExposure
+	if s.Risk.MaxPositionSize > s.Risk.MaxPortfolioExposure {
+		errs = append(errs, ValidationError{
+			Field:   "risk.max_position_size",
+			Message: fmt.Sprintf("max position size (%.2f) cannot exceed max portfolio exposure (%.2f)", s.Risk.MaxPositionSize, s.Risk.MaxPortfolioExposure),
+		})
+	}
+
+	// MaxDailyLoss should not exceed MaxDrawdown (daily limit should be stricter than total limit)
+	if s.Risk.MaxDailyLoss > s.Risk.MaxDrawdown {
+		errs = append(errs, ValidationError{
+			Field:   "risk.max_daily_loss",
+			Message: fmt.Sprintf("max daily loss (%.2f) should not exceed max drawdown (%.2f) - daily limit should be stricter than total limit", s.Risk.MaxDailyLoss, s.Risk.MaxDrawdown),
+		})
+	}
+
+	// DefaultStopLoss should be less than DefaultTakeProfit for a positive risk/reward ratio
+	if s.Risk.DefaultStopLoss > 0 && s.Risk.DefaultTakeProfit > 0 {
+		if s.Risk.DefaultStopLoss >= s.Risk.DefaultTakeProfit {
+			errs = append(errs, ValidationError{
+				Field:   "risk.default_stop_loss",
+				Message: fmt.Sprintf("default stop loss (%.2f) should be less than default take profit (%.2f) for positive risk/reward", s.Risk.DefaultStopLoss, s.Risk.DefaultTakeProfit),
+			})
+		}
+	}
+
+	// CircuitBreaker drawdown_halt should not exceed MaxDrawdown
+	if s.Risk.CircuitBreakers.Enabled && s.Risk.CircuitBreakers.DrawdownHalt > 0 {
+		if s.Risk.CircuitBreakers.DrawdownHalt > s.Risk.MaxDrawdown {
+			errs = append(errs, ValidationError{
+				Field:   "risk.circuit_breakers.drawdown_halt",
+				Message: fmt.Sprintf("circuit breaker drawdown halt (%.2f) should not exceed max drawdown (%.2f)", s.Risk.CircuitBreakers.DrawdownHalt, s.Risk.MaxDrawdown),
+			})
+		}
+	}
+
 	return errs
 }
 

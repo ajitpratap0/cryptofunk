@@ -195,19 +195,36 @@ func Import(data []byte, opts ImportOptions) (*StrategyConfig, error) {
 		return nil, fmt.Errorf("empty strategy data")
 	}
 
-	// Detect format by trying to parse as JSON first, then YAML
+	// Detect format using first non-whitespace character (more efficient than json.Valid)
 	var strategy StrategyConfig
 	var parseErr error
 
-	// Try JSON first (it's faster to detect)
-	if json.Valid(data) {
+	// Find first non-whitespace character to detect format
+	isJSON := false
+	for _, b := range data {
+		if b == ' ' || b == '\t' || b == '\n' || b == '\r' {
+			continue
+		}
+		// JSON typically starts with '{' for objects or '[' for arrays
+		isJSON = b == '{' || b == '['
+		break
+	}
+
+	if isJSON {
+		// Try parsing as JSON
 		if err := json.Unmarshal(data, &strategy); err != nil {
-			parseErr = fmt.Errorf("failed to parse JSON: %w", err)
+			// If JSON parsing fails, fall back to YAML (handles edge cases)
+			if yamlErr := yaml.Unmarshal(data, &strategy); yamlErr != nil {
+				parseErr = fmt.Errorf("failed to parse as JSON (%v) or YAML (%v)", err, yamlErr)
+			}
 		}
 	} else {
-		// Try YAML
+		// Try YAML first
 		if err := yaml.Unmarshal(data, &strategy); err != nil {
-			parseErr = fmt.Errorf("failed to parse YAML: %w", err)
+			// Try JSON as fallback (in case whitespace check was wrong)
+			if jsonErr := json.Unmarshal(data, &strategy); jsonErr != nil {
+				parseErr = fmt.Errorf("failed to parse as YAML (%v) or JSON (%v)", err, jsonErr)
+			}
 		}
 	}
 

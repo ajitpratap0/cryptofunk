@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/audit"
 	"github.com/ajitpratap0/cryptofunk/internal/strategy"
 )
 
@@ -19,6 +23,16 @@ const (
 	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
 	MaxStrategyUploadSize = 10 * 1024 * 1024
 )
+
+// AllowedStrategyExtensions defines valid file extensions for strategy uploads
+var AllowedStrategyExtensions = map[string]bool{
+	".yaml": true,
+	".yml":  true,
+	".json": true,
+}
+
+// filenameRegex matches characters that are safe for filenames
+var filenameRegex = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
 // StrategyHandler handles HTTP requests for strategy import/export
 type StrategyHandler struct {
@@ -31,16 +45,61 @@ type StrategyHandler struct {
 	// See: internal/db/ for database patterns to implement persistence.
 	currentStrategy *strategy.StrategyConfig
 
-	// TODO: Add audit.Logger integration for full audit trail when database
-	// persistence is implemented. Use audit.LogStrategyChange() for tracking
-	// all strategy modifications (update, import, clone, merge operations).
-	// See: internal/audit/audit.go for the logging infrastructure.
+	// auditLogger logs strategy operations for audit trail (optional)
+	auditLogger *audit.Logger
 }
 
 // NewStrategyHandler creates a new strategy handler
 func NewStrategyHandler() *StrategyHandler {
 	return &StrategyHandler{
 		currentStrategy: strategy.NewDefaultStrategy("Default Strategy"),
+	}
+}
+
+// NewStrategyHandlerWithAudit creates a new strategy handler with audit logging
+func NewStrategyHandlerWithAudit(auditLogger *audit.Logger) *StrategyHandler {
+	return &StrategyHandler{
+		currentStrategy: strategy.NewDefaultStrategy("Default Strategy"),
+		auditLogger:     auditLogger,
+	}
+}
+
+// sanitizeFilename removes potentially dangerous characters from a filename
+func sanitizeFilename(filename string) string {
+	// Get base name to remove any path components
+	filename = filepath.Base(filename)
+	// Replace unsafe characters with underscores
+	sanitized := filenameRegex.ReplaceAllString(filename, "_")
+	// Ensure it's not empty
+	if sanitized == "" || sanitized == "_" {
+		sanitized = "strategy"
+	}
+	return sanitized
+}
+
+// isAllowedExtension checks if the file extension is valid for strategy uploads
+func isAllowedExtension(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return AllowedStrategyExtensions[ext]
+}
+
+// logAuditEvent is a helper to log audit events if the logger is configured
+func (h *StrategyHandler) logAuditEvent(c *gin.Context, eventType audit.EventType, strategyID, strategyName string, metadata map[string]interface{}, success bool, errorMsg string) {
+	if h.auditLogger == nil {
+		return
+	}
+
+	// Extract user info from context (if authentication is implemented)
+	userID := c.GetString("user_id")
+	if userID == "" {
+		userID = "anonymous"
+	}
+
+	ipAddress := c.ClientIP()
+
+	ctx := context.Background()
+	if err := h.auditLogger.LogStrategyChange(ctx, eventType, userID, ipAddress, strategyID, strategyName, metadata, success, errorMsg); err != nil {
+		log.Warn().Err(err).Msg("Failed to log audit event")
 	}
 }
 
@@ -116,6 +175,7 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 
 	// Validate the strategy
 	if err := newStrategy.Validate(); err != nil {
+		h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, false, err.Error())
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Strategy validation failed",
 			"details": err.Error(),
@@ -129,6 +189,9 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 	h.mu.Lock()
 	h.currentStrategy = &newStrategy
 	h.mu.Unlock()
+
+	// Log successful update
+	h.logAuditEvent(c, audit.EventTypeStrategyUpdated, newStrategy.Metadata.ID, newStrategy.Metadata.Name, nil, true, "")
 
 	log.Info().
 		Str("strategy_name", newStrategy.Metadata.Name).
@@ -160,25 +223,34 @@ func (h *StrategyHandler) ExportStrategy(c *gin.Context) {
 	format := c.DefaultQuery("format", "yaml")
 	opts := strategy.DefaultExportOptions()
 
+	// Sanitize strategy ID for use in filename
+	safeID := sanitizeFilename(currentStrategy.Metadata.ID)
+
 	switch strings.ToLower(format) {
 	case "json":
 		opts.Format = strategy.FormatJSON
 		c.Header("Content-Type", "application/json")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=strategy_%s.json", currentStrategy.Metadata.ID))
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"strategy_%s.json\"", safeID))
 	default:
 		opts.Format = strategy.FormatYAML
 		c.Header("Content-Type", "text/yaml")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=strategy_%s.yaml", currentStrategy.Metadata.ID))
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"strategy_%s.yaml\"", safeID))
 	}
 
 	data, err := strategy.Export(currentStrategy, opts)
 	if err != nil {
+		h.logAuditEvent(c, audit.EventTypeStrategyExported, currentStrategy.Metadata.ID, currentStrategy.Metadata.Name, nil, false, err.Error())
 		log.Err(err).Msg("Failed to export strategy")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to export strategy",
 		})
 		return
 	}
+
+	// Log successful export
+	h.logAuditEvent(c, audit.EventTypeStrategyExported, currentStrategy.Metadata.ID, currentStrategy.Metadata.Name, map[string]interface{}{
+		"format": format,
+	}, true, "")
 
 	c.Data(http.StatusOK, c.Writer.Header().Get("Content-Type"), data)
 }
@@ -277,6 +349,7 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 	var data []byte
 	var opts strategy.ImportOptions
 	var applyNow bool
+	var sourceFilename string
 
 	contentType := c.GetHeader("Content-Type")
 
@@ -290,6 +363,17 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 			return
 		}
 		defer file.Close()
+
+		// Validate file extension
+		if !isAllowedExtension(header.Filename) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid file extension",
+				"details": fmt.Sprintf("Allowed extensions: .yaml, .yml, .json. Got: %s", filepath.Ext(header.Filename)),
+			})
+			return
+		}
+
+		sourceFilename = header.Filename
 
 		// Check file size before reading
 		if header.Size > MaxStrategyUploadSize {
@@ -392,6 +476,9 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 	// Import the strategy (shared path for both file upload and JSON)
 	imported, err := strategy.Import(data, opts)
 	if err != nil {
+		h.logAuditEvent(c, audit.EventTypeStrategyImported, "", "", map[string]interface{}{
+			"source_filename": sourceFilename,
+		}, false, err.Error())
 		log.Err(err).Msg("Failed to import strategy")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Failed to import strategy",
@@ -410,6 +497,12 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 			Str("strategy_id", imported.Metadata.ID).
 			Msg("Strategy imported and applied")
 	}
+
+	// Log successful import
+	h.logAuditEvent(c, audit.EventTypeStrategyImported, imported.Metadata.ID, imported.Metadata.Name, map[string]interface{}{
+		"source_filename": sourceFilename,
+		"applied":         applyNow,
+	}, true, "")
 
 	c.JSON(http.StatusOK, gin.H{
 		"strategy": imported,
@@ -582,6 +675,7 @@ func (h *StrategyHandler) CloneStrategy(c *gin.Context) {
 
 	cloned, err := strategy.Clone(currentStrategy)
 	if err != nil {
+		h.logAuditEvent(c, audit.EventTypeStrategyCloned, currentStrategy.Metadata.ID, currentStrategy.Metadata.Name, nil, false, err.Error())
 		log.Err(err).Msg("Failed to clone strategy")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to clone strategy",
@@ -589,12 +683,28 @@ func (h *StrategyHandler) CloneStrategy(c *gin.Context) {
 		return
 	}
 
-	if req.Name != "" {
-		cloned.Metadata.Name = req.Name
-	}
+	// Apply requested name and description
+	cloned.Metadata.Name = req.Name
 	if req.Description != "" {
 		cloned.Metadata.Description = req.Description
 	}
+
+	// Validate the cloned strategy to ensure it's valid
+	if err := cloned.Validate(); err != nil {
+		h.logAuditEvent(c, audit.EventTypeStrategyCloned, cloned.Metadata.ID, cloned.Metadata.Name, nil, false, err.Error())
+		log.Err(err).Msg("Cloned strategy validation failed")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Cloned strategy validation failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Log successful clone
+	h.logAuditEvent(c, audit.EventTypeStrategyCloned, cloned.Metadata.ID, cloned.Metadata.Name, map[string]interface{}{
+		"source_strategy_id":   currentStrategy.Metadata.ID,
+		"source_strategy_name": currentStrategy.Metadata.Name,
+	}, true, "")
 
 	c.JSON(http.StatusOK, cloned)
 }
@@ -646,6 +756,7 @@ func (h *StrategyHandler) MergeStrategies(c *gin.Context) {
 
 	merged, err := strategy.Merge(base, req.Override)
 	if err != nil {
+		h.logAuditEvent(c, audit.EventTypeStrategyMerged, base.Metadata.ID, base.Metadata.Name, nil, false, err.Error())
 		log.Err(err).Msg("Failed to merge strategies")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to merge strategies",
@@ -663,6 +774,13 @@ func (h *StrategyHandler) MergeStrategies(c *gin.Context) {
 		h.currentStrategy = merged
 		h.mu.Unlock()
 	}
+
+	// Log successful merge
+	h.logAuditEvent(c, audit.EventTypeStrategyMerged, merged.Metadata.ID, merged.Metadata.Name, map[string]interface{}{
+		"base_strategy_id":   base.Metadata.ID,
+		"base_strategy_name": base.Metadata.Name,
+		"applied":            req.Apply,
+	}, true, "")
 
 	c.JSON(http.StatusOK, gin.H{
 		"strategy": merged,
