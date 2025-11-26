@@ -8,6 +8,28 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
+)
+
+// Constants for decision queries
+const (
+	// EmbeddingDimension is the dimension of OpenAI text-embedding-ada-002 vectors
+	EmbeddingDimension = 1536
+
+	// DefaultSearchLimit is the default number of search results
+	DefaultSearchLimit = 20
+	// MaxSearchLimit is the maximum number of search results
+	MaxSearchLimit = 100
+
+	// DefaultListLimit is the default number of list results
+	DefaultListLimit = 50
+	// MaxListLimit is the maximum number of list results
+	MaxListLimit = 500
+
+	// DefaultSimilarLimit is the default number of similar decisions to return
+	DefaultSimilarLimit = 10
+	// MaxSimilarLimit is the maximum number of similar decisions to return
+	MaxSimilarLimit = 50
 )
 
 // DecisionRepository handles database operations for LLM decisions
@@ -129,7 +151,7 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 	}
 	defer rows.Close()
 
-	decisions := make([]Decision, 0)
+	decisions := make([]Decision, 0, filter.Limit)
 	for rows.Next() {
 		var d Decision
 		err := rows.Scan(
@@ -341,7 +363,7 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 	}
 	defer rows.Close()
 
-	decisions := make([]Decision, 0)
+	decisions := make([]Decision, 0, limit)
 	for rows.Next() {
 		var d Decision
 		var distance float64
@@ -382,14 +404,14 @@ type SearchResult struct {
 func (r *DecisionRepository) SearchDecisions(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
 	// Set default limit
 	if req.Limit <= 0 {
-		req.Limit = 20
+		req.Limit = DefaultSearchLimit
 	}
-	if req.Limit > 100 {
-		req.Limit = 100
+	if req.Limit > MaxSearchLimit {
+		req.Limit = MaxSearchLimit
 	}
 
 	// If embedding is provided, use vector similarity search
-	if len(req.Embedding) == 1536 {
+	if len(req.Embedding) == EmbeddingDimension {
 		return r.searchByEmbedding(ctx, req)
 	}
 
@@ -438,7 +460,7 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 	}
 	defer rows.Close()
 
-	results := make([]SearchResult, 0)
+	results := make([]SearchResult, 0, req.Limit)
 	for rows.Next() {
 		var d Decision
 		var similarity float64
@@ -501,12 +523,13 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		// If full-text search fails (e.g., empty query), fall back to ILIKE
+		// Log the error for debugging, then fall back to ILIKE search
+		log.Warn().Err(err).Str("query", req.Query).Msg("Full-text search failed, falling back to ILIKE")
 		return r.searchByILike(ctx, req)
 	}
 	defer rows.Close()
 
-	results := make([]SearchResult, 0)
+	results := make([]SearchResult, 0, req.Limit)
 	for rows.Next() {
 		var d Decision
 		var rank float64
@@ -574,7 +597,7 @@ func (r *DecisionRepository) searchByILike(ctx context.Context, req SearchReques
 	}
 	defer rows.Close()
 
-	results := make([]SearchResult, 0)
+	results := make([]SearchResult, 0, req.Limit)
 	for rows.Next() {
 		var d Decision
 		err := rows.Scan(
