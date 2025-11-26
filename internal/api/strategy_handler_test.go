@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -116,7 +117,7 @@ func TestGetCurrentStrategy(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/strategies/current", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/current", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -138,7 +139,7 @@ func TestUpdateCurrentStrategy(t *testing.T) {
 	body, _ := json.Marshal(newStrategy)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -157,7 +158,7 @@ func TestUpdateCurrentStrategy_InvalidJSON(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPut, "/strategies/current", strings.NewReader("invalid json"))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/strategies/current", strings.NewReader("invalid json"))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -168,7 +169,7 @@ func TestExportStrategy_YAML(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/strategies/export", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/export", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -180,7 +181,7 @@ func TestExportStrategy_JSON(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/strategies/export?format=json", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/export?format=json", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -202,7 +203,7 @@ func TestExportStrategyWithOptions(t *testing.T) {
 	body, _ := json.Marshal(options)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/export", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/export", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -219,7 +220,7 @@ func TestImportStrategy_JSON(t *testing.T) {
 	body, _ := json.Marshal(importReq)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/import", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -248,7 +249,7 @@ metadata:
 	writer.Close()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/import", &b)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", &b)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	router.ServeHTTP(w, req)
 
@@ -268,7 +269,7 @@ func TestImportStrategy_InvalidExtension(t *testing.T) {
 	writer.Close()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/import", &b)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/import", &b)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	router.ServeHTTP(w, req)
 
@@ -289,7 +290,7 @@ func TestValidateStrategy(t *testing.T) {
 	body, _ := json.Marshal(validateReq)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/validate", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/validate", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -311,7 +312,7 @@ func TestValidateStrategy_Invalid(t *testing.T) {
 	body, _ := json.Marshal(validateReq)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/validate", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/validate", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -332,7 +333,7 @@ func TestCloneStrategy(t *testing.T) {
 	body, _ := json.Marshal(cloneReq)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/clone", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/clone", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -360,7 +361,7 @@ func TestMergeStrategies(t *testing.T) {
 	body, _ := json.Marshal(mergeReq)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/merge", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/merge", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -371,7 +372,7 @@ func TestGetVersionInfo(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/strategies/version", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/version", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -387,7 +388,7 @@ func TestGetSchemaDocumentation(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/strategies/schema", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/strategies/schema", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -408,7 +409,7 @@ func TestGetDefaultStrategy(t *testing.T) {
 	body, _ := json.Marshal(defaultReq)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/default", bytes.NewBuffer(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/default", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -428,7 +429,7 @@ func TestGetDefaultStrategy_NoName(t *testing.T) {
 	router, _ := setupStrategyRouter()
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/strategies/default", strings.NewReader("{}"))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/strategies/default", strings.NewReader("{}"))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
