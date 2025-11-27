@@ -14,6 +14,10 @@ const (
 	StateClosed   = "closed"
 	StateOpen     = "open"
 	StateHalfOpen = "half_open"
+
+	// Metric result labels
+	ResultSuccess = "success"
+	ResultFailure = "failure"
 )
 
 // Circuit breaker thresholds - configurable per service type
@@ -230,9 +234,9 @@ func (m *CircuitBreakerManager) updateMetrics(service string, state gobreaker.St
 
 // RecordRequest records a request result for metrics
 func (m *CircuitBreakerMetrics) RecordRequest(service string, success bool) {
-	result := "success"
+	result := ResultSuccess
 	if !success {
-		result = "failure"
+		result = ResultFailure
 		m.failures.WithLabelValues(service).Inc()
 	}
 	m.requests.WithLabelValues(service, result).Inc()

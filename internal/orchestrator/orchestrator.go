@@ -774,6 +774,7 @@ func (o *Orchestrator) publishWithRetry(topic string, data []byte, maxRetries in
 				Msg("Failed to publish to NATS, will retry")
 
 			// Exponential backoff: 50ms, 100ms, 200ms, etc.
+			// #nosec G115 -- attempt is always non-negative (loop starts at 0)
 			backoff := time.Duration(50*(1<<uint(attempt))) * time.Millisecond
 			time.Sleep(backoff)
 			continue

@@ -67,7 +67,7 @@ func (db *DB) SetOrchestratorPaused(ctx context.Context, pausedBy, pauseReason s
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if commit not called
+	defer func() { _ = tx.Rollback(ctx) }() // Rollback if commit not called (error ignored as commit may have succeeded)
 
 	// Lock the current state row with SELECT FOR UPDATE to prevent concurrent modifications
 	// This ensures serialized access to state changes even across multiple orchestrator instances
@@ -118,7 +118,7 @@ func (db *DB) SetOrchestratorResumed(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if commit not called
+	defer func() { _ = tx.Rollback(ctx) }() // Rollback if commit not called (error ignored as commit may have succeeded)
 
 	// Lock the current state row with SELECT FOR UPDATE to prevent concurrent modifications
 	// This ensures serialized access to state changes even across multiple orchestrator instances

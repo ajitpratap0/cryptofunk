@@ -558,13 +558,6 @@ func (c *CoinGeckoClient) setLastError(err error) {
 	c.mu.Unlock()
 }
 
-// getLastError safely gets the last error with mutex protection
-func (c *CoinGeckoClient) getLastError() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.lastError
-}
-
 // waitForRateLimit waits until the rate limiter allows the request
 func (c *CoinGeckoClient) waitForRateLimit(ctx context.Context) error {
 	if c.rateLimiter == nil {
