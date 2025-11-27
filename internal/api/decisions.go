@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // Constants for decision queries
@@ -34,6 +36,10 @@ const (
 	// MaxSearchQueryLength is the maximum length of a text search query
 	// to prevent performance issues with very long queries
 	MaxSearchQueryLength = 500
+
+	// Query timeout constants for database operations
+	queryTimeout       = 30 * time.Second // Standard query timeout
+	vectorQueryTimeout = 60 * time.Second // Longer timeout for expensive vector operations
 )
 
 // DecisionRepository handles database operations for LLM decisions
@@ -92,6 +98,10 @@ type DecisionStats struct {
 
 // ListDecisions retrieves decisions with optional filtering
 func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionFilter) ([]Decision, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -175,6 +185,10 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 
 // GetDecision retrieves a single decision by ID
 func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*Decision, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -203,16 +217,20 @@ func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*De
 
 // GetDecisionStats retrieves aggregated statistics
 func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter DecisionFilter) (*DecisionStats, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			COUNT(*) as total,
-			AVG(COALESCE(confidence, 0)) as avg_confidence,
-			AVG(COALESCE(latency_ms, 0)) as avg_latency,
-			AVG(COALESCE(tokens_used, 0)) as avg_tokens,
-			SUM(CASE WHEN outcome = 'SUCCESS' THEN 1 ELSE 0 END)::FLOAT /
-				NULLIF(COUNT(CASE WHEN outcome IS NOT NULL THEN 1 END), 0) as success_rate,
-			SUM(COALESCE(outcome_pnl, 0)) as total_pnl,
-			AVG(COALESCE(outcome_pnl, 0)) as avg_pnl
+			COALESCE(AVG(confidence), 0) as avg_confidence,
+			COALESCE(AVG(latency_ms), 0) as avg_latency,
+			COALESCE(AVG(tokens_used), 0) as avg_tokens,
+			COALESCE(SUM(CASE WHEN outcome = 'SUCCESS' THEN 1 ELSE 0 END)::FLOAT /
+				NULLIF(COUNT(CASE WHEN outcome IS NOT NULL THEN 1 END), 0), 0) as success_rate,
+			COALESCE(SUM(outcome_pnl), 0) as total_pnl,
+			COALESCE(AVG(outcome_pnl), 0) as avg_pnl
 		FROM llm_decisions
 		WHERE 1=1
 	`
@@ -285,6 +303,10 @@ var allowedGroupByFields = map[string]bool{
 
 // getCountsByField gets count breakdown by a specific field
 func (r *DecisionRepository) getCountsByField(ctx context.Context, field string, filter DecisionFilter) (map[string]int, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	// Validate field name to prevent SQL injection
 	if !allowedGroupByFields[field] {
 		return nil, fmt.Errorf("invalid field name: %s", field)
@@ -343,6 +365,12 @@ func (r *DecisionRepository) getCountsByField(ctx context.Context, field string,
 
 // FindSimilarDecisions finds decisions with similar prompts using vector similarity
 func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error) {
+	start := time.Now()
+
+	// Use longer timeout for vector similarity operations (more expensive)
+	ctx, cancel := context.WithTimeout(ctx, vectorQueryTimeout)
+	defer cancel()
+
 	query := `
 		WITH target AS (
 			SELECT prompt_embedding
@@ -363,6 +391,8 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 
 	rows, err := r.db.Query(ctx, query, id, limit)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.RecordSimilarDecisions(duration, 0, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -378,12 +408,17 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 			&d.CreatedAt, &distance,
 		)
 		if err != nil {
+			duration := time.Since(start).Seconds()
+			metrics.RecordSimilarDecisions(duration, len(decisions), err)
 			return nil, err
 		}
 		decisions = append(decisions, d)
 	}
 
-	return decisions, rows.Err()
+	err = rows.Err()
+	duration := time.Since(start).Seconds()
+	metrics.RecordSimilarDecisions(duration, len(decisions), err)
+	return decisions, err
 }
 
 // SearchRequest contains parameters for searching decisions
@@ -425,6 +460,12 @@ func (r *DecisionRepository) SearchDecisions(ctx context.Context, req SearchRequ
 
 // searchByEmbedding performs vector similarity search using pgvector
 func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	start := time.Now()
+
+	// Use longer timeout for vector similarity operations (more expensive)
+	ctx, cancel := context.WithTimeout(ctx, vectorQueryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -460,6 +501,8 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.RecordSemanticSearch(duration, 0, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -475,6 +518,8 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 			&d.CreatedAt, &similarity,
 		)
 		if err != nil {
+			duration := time.Since(start).Seconds()
+			metrics.RecordSemanticSearch(duration, len(results), err)
 			return nil, err
 		}
 		results = append(results, SearchResult{
@@ -483,11 +528,20 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 		})
 	}
 
-	return results, rows.Err()
+	err = rows.Err()
+	duration := time.Since(start).Seconds()
+	metrics.RecordSemanticSearch(duration, len(results), err)
+	return results, err
 }
 
 // searchByText performs text-based search using PostgreSQL full-text search
 func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	start := time.Now()
+
+	// Apply query timeout for text search operations
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -529,6 +583,8 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 	if err != nil {
 		// Log the error for debugging, then fall back to ILIKE search
 		log.Warn().Err(err).Str("query", req.Query).Msg("Full-text search failed, falling back to ILIKE")
+		duration := time.Since(start).Seconds()
+		metrics.RecordVectorSearch("text_search", duration, 0, err)
 		return r.searchByILike(ctx, req)
 	}
 	defer rows.Close()
@@ -544,6 +600,8 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 			&d.CreatedAt, &rank,
 		)
 		if err != nil {
+			duration := time.Since(start).Seconds()
+			metrics.RecordVectorSearch("text_search", duration, len(results), err)
 			return nil, err
 		}
 		results = append(results, SearchResult{
@@ -554,14 +612,22 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 
 	// If no results from full-text search, try ILIKE
 	if len(results) == 0 && req.Query != "" {
+		duration := time.Since(start).Seconds()
+		metrics.RecordVectorSearch("text_search", duration, 0, nil)
 		return r.searchByILike(ctx, req)
 	}
 
+	duration := time.Since(start).Seconds()
+	metrics.RecordVectorSearch("text_search", duration, len(results), rows.Err())
 	return results, rows.Err()
 }
 
 // searchByILike performs simple ILIKE pattern matching as fallback
 func (r *DecisionRepository) searchByILike(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	// Apply query timeout for ILIKE search operations
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	pattern := "%" + req.Query + "%"
 	query := `
 		SELECT

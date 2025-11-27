@@ -159,9 +159,18 @@ type FeeConfig struct {
 
 // APIConfig contains REST API settings
 type APIConfig struct {
-	Host            string `mapstructure:"host"`
-	Port            int    `mapstructure:"port"`
-	OrchestratorURL string `mapstructure:"orchestrator_url"`
+	Host            string     `mapstructure:"host"`
+	Port            int        `mapstructure:"port"`
+	OrchestratorURL string     `mapstructure:"orchestrator_url"`
+	AllowedOrigins  []string   `mapstructure:"allowed_origins"` // CORS allowed origins
+	Auth            AuthConfig `mapstructure:"auth"`            // Authentication configuration
+}
+
+// AuthConfig contains API authentication settings
+type AuthConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`       // Enable API key authentication
+	HeaderName   string `mapstructure:"header_name"`   // Header name for API key (default: X-API-Key)
+	RequireHTTPS bool   `mapstructure:"require_https"` // Require HTTPS in production
 }
 
 // MonitoringConfig contains monitoring settings

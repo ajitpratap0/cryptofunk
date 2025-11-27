@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,10 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
+const (
+	envProduction = "production"
+)
+
 type APIServer struct {
 	router             *gin.Engine
 	db                 *db.DB
@@ -30,6 +35,8 @@ type APIServer struct {
 	hub                *Hub
 	port               string
 	orchestratorClient *http.Client
+	rateLimiter        *RateLimiterMiddleware
+	apiKeyStore        *api.APIKeyStore
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -65,7 +72,7 @@ func main() {
 	defer database.Close()
 
 	// Set Gin mode based on environment
-	if cfg.App.Environment == "production" {
+	if cfg.App.Environment == envProduction {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -94,9 +101,46 @@ func main() {
 }
 
 func (s *APIServer) setupMiddleware() {
-	// CORS configuration
+	// Security headers middleware (applies to all responses)
+	s.router.Use(securityHeadersMiddleware())
+
+	// CORS configuration - use configured origins or defaults for development
+	allowedOrigins := s.config.API.AllowedOrigins
+	isProduction := s.config.App.Environment == envProduction
+
+	if len(allowedOrigins) == 0 {
+		if isProduction {
+			// In production, require explicit configuration
+			log.Warn().Msg("No allowed_origins configured for CORS in production - rejecting all origins")
+			allowedOrigins = []string{} // Empty list = reject all
+		} else {
+			// Default origins for development
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+		}
+	}
+
+	// In production, filter out localhost origins for security
+	if isProduction {
+		filteredOrigins := make([]string, 0, len(allowedOrigins))
+		for _, origin := range allowedOrigins {
+			if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+				log.Warn().
+					Str("origin", origin).
+					Msg("SECURITY WARNING: Blocking localhost origin in production CORS configuration")
+			} else {
+				filteredOrigins = append(filteredOrigins, origin)
+			}
+		}
+		allowedOrigins = filteredOrigins
+
+		// Log startup warning if no valid origins remain
+		if len(allowedOrigins) == 0 {
+			log.Error().Msg("SECURITY ERROR: No valid CORS origins configured in production after filtering localhost - all CORS requests will be rejected")
+		}
+	}
+
 	config := cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8080"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -123,13 +167,22 @@ func (s *APIServer) setupMiddleware() {
 
 func (s *APIServer) setupRoutes() {
 	// Initialize comprehensive rate limiting middleware
-	rateLimiter := NewRateLimiterMiddleware(DefaultRateLimiterConfig())
+	s.rateLimiter = NewRateLimiterMiddleware(DefaultRateLimiterConfig())
 
 	// Start cleanup worker to remove stale IP entries (runs every 5 minutes)
-	rateLimiter.StartCleanupWorker(5 * time.Minute)
+	s.rateLimiter.StartCleanupWorker(5 * time.Minute)
+
+	// Initialize API key store for authentication
+	// Auth is disabled by default - enable via config.yaml: api.auth.enabled = true
+	s.apiKeyStore = api.NewAPIKeyStore(s.db.Pool(), s.config.API.Auth.Enabled)
+	if s.config.API.Auth.Enabled {
+		log.Info().Msg("API key authentication enabled")
+	} else {
+		log.Info().Msg("API key authentication disabled (enable via api.auth.enabled in config)")
+	}
 
 	// Apply global rate limiting to all API requests
-	s.router.Use(rateLimiter.GlobalMiddleware())
+	s.router.Use(s.rateLimiter.GlobalMiddleware())
 
 	// Prometheus metrics endpoint (no API prefix, no rate limiting)
 	s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
@@ -146,7 +199,7 @@ func (s *APIServer) setupRoutes() {
 
 		// Agent routes (read-only, apply read rate limiter)
 		agents := v1.Group("/agents")
-		agents.Use(rateLimiter.ReadMiddleware())
+		agents.Use(s.rateLimiter.ReadMiddleware())
 		{
 			agents.GET("", s.handleListAgents)
 			agents.GET("/:name", s.handleGetAgent)
@@ -155,7 +208,7 @@ func (s *APIServer) setupRoutes() {
 
 		// Position routes (read-only, apply read rate limiter)
 		positions := v1.Group("/positions")
-		positions.Use(rateLimiter.ReadMiddleware())
+		positions.Use(s.rateLimiter.ReadMiddleware())
 		{
 			positions.GET("", s.handleListPositions)
 			positions.GET("/:symbol", s.handleGetPosition)
@@ -165,17 +218,17 @@ func (s *APIServer) setupRoutes() {
 		orders := v1.Group("/orders")
 		{
 			// Read operations (higher limit)
-			orders.GET("", rateLimiter.ReadMiddleware(), s.handleListOrders)
-			orders.GET("/:id", rateLimiter.ReadMiddleware(), s.handleGetOrder)
+			orders.GET("", s.rateLimiter.ReadMiddleware(), s.handleListOrders)
+			orders.GET("/:id", s.rateLimiter.ReadMiddleware(), s.handleGetOrder)
 
 			// Write operations (lower limit to prevent order spam)
-			orders.POST("", rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
-			orders.DELETE("/:id", rateLimiter.OrderMiddleware(), s.handleCancelOrder)
+			orders.POST("", s.rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
+			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
 		}
 
 		// Trading control routes (critical ops, strictest rate limiting)
 		trade := v1.Group("/trade")
-		trade.Use(rateLimiter.ControlMiddleware())
+		trade.Use(s.rateLimiter.ControlMiddleware())
 		{
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
@@ -186,24 +239,36 @@ func (s *APIServer) setupRoutes() {
 		// Configuration routes (admin ops, apply control rate limiter)
 		config := v1.Group("/config")
 		{
-			config.GET("", rateLimiter.ReadMiddleware(), s.handleGetConfig)
-			config.PATCH("", rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
+			config.GET("", s.rateLimiter.ReadMiddleware(), s.handleGetConfig)
+			config.PATCH("", s.rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
 		}
 
-		// Decision explainability routes (read-only, apply read rate limiter)
+		// Decision explainability routes (T307) with rate limiting and optional auth
+		// Search uses dedicated rate limiter for expensive vector operations
+		// Auth is optional - allows both authenticated and anonymous access
+		// When auth is enabled, authenticated users get enhanced audit logging
+		authConfig := &api.AuthConfig{
+			Enabled:      s.config.API.Auth.Enabled,
+			HeaderName:   s.config.API.Auth.HeaderName,
+			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+		}
+		if authConfig.HeaderName == "" {
+			authConfig.HeaderName = "X-API-Key" // Default header name
+		}
+		optionalAuth := api.OptionalAuth(s.apiKeyStore, authConfig)
+
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
-		// Note: RegisterRoutes should apply read middleware internally if needed
-		decisionHandler.RegisterRoutes(v1)
+		decisionHandler.RegisterRoutesWithRateLimiterAndAuth(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware(), optionalAuth)
 
 		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())
 		feedbackHandler := api.NewFeedbackHandler(feedbackRepo)
-		feedbackHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
+		feedbackHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 
 		// Strategy import/export routes (T310) with rate limiting
 		strategyHandler := api.NewStrategyHandler()
-		strategyHandler.RegisterRoutesWithRateLimiter(v1, rateLimiter.ReadMiddleware(), rateLimiter.OrderMiddleware())
+		strategyHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 	}
 
 	// Root endpoint
@@ -244,6 +309,11 @@ func (s *APIServer) start() {
 	<-quit
 
 	log.Info().Msg("Shutting down API server...")
+
+	// Stop rate limiter cleanup worker to prevent goroutine leak
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
+	}
 
 	// Graceful shutdown with 5 second timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1282,16 +1352,82 @@ func truncateString(s string, maxLen int) string {
 
 // WebSocket handler
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins for now (configure properly in production)
-		return true
-	},
+// createWebSocketUpgrader creates an upgrader with proper origin checking
+// based on the configured allowed origins and environment
+func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
+	allowedOrigins := s.config.API.AllowedOrigins
+	isProduction := s.config.App.Environment == envProduction
+
+	if len(allowedOrigins) == 0 {
+		if isProduction {
+			// In production, require explicit configuration
+			log.Warn().Msg("No allowed_origins configured for WebSocket in production - all origins will be rejected")
+			allowedOrigins = []string{} // Empty list = reject all
+		} else {
+			// Default origins for development
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+		}
+	}
+
+	// Validate production configuration
+	if isProduction {
+		for _, origin := range allowedOrigins {
+			if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+				log.Warn().Str("origin", origin).Msg("WARNING: localhost origin configured in production WebSocket")
+			}
+			if !strings.HasPrefix(origin, "https://") {
+				log.Warn().Str("origin", origin).Msg("WARNING: non-HTTPS origin configured in production WebSocket")
+			}
+		}
+	}
+
+	// Create a map for O(1) lookup
+	originMap := make(map[string]bool)
+	for _, origin := range allowedOrigins {
+		originMap[origin] = true
+	}
+
+	return websocket.Upgrader{
+		ReadBufferSize:  4096, // Increased for real-time trading data
+		WriteBufferSize: 4096,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+
+			// In production, reject requests with no origin header
+			// This prevents non-browser clients from bypassing origin validation
+			if origin == "" {
+				if isProduction {
+					log.Warn().
+						Str("remote_addr", r.RemoteAddr).
+						Str("path", r.URL.Path).
+						Msg("WebSocket connection rejected - missing origin header in production")
+					return false
+				}
+				// In development mode, allow connections without Origin header.
+				// This enables testing with non-browser tools like wscat, Postman,
+				// curl, or other CLI clients that don't send Origin headers.
+				// In production, this check is more strict and requires a valid Origin
+				// from the allowed domains list to prevent CSRF attacks.
+				return true
+			}
+
+			// Check if origin is in allowed list
+			allowed := originMap[origin]
+			if !allowed {
+				log.Warn().
+					Str("origin", origin).
+					Str("remote_addr", r.RemoteAddr).
+					Msg("WebSocket connection rejected - origin not in allowed list")
+			}
+			return allowed
+		},
+	}
 }
 
 func (s *APIServer) handleWebSocket(c *gin.Context) {
+	// Create upgrader with configured origins
+	upgrader := s.createWebSocketUpgrader()
+
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -1419,5 +1555,21 @@ func requestLogger() gin.HandlerFunc {
 			Dur("latency", latency).
 			Str("ip", c.ClientIP()).
 			Msg("HTTP request")
+	}
+}
+
+// securityHeadersMiddleware adds security headers to all responses
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Prevent MIME type sniffing
+		c.Header("X-Content-Type-Options", "nosniff")
+
+		// Prevent clickjacking attacks
+		c.Header("X-Frame-Options", "DENY")
+
+		// Enable XSS protection in older browsers (most modern browsers ignore this)
+		c.Header("X-XSS-Protection", "1; mode=block")
+
+		c.Next()
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,14 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/audit"
+)
+
+// HTTP method constants to satisfy goconst linter
+const (
+	httpMethodGET    = "GET"
+	httpMethodPOST   = "POST"
+	httpMethodPATCH  = "PATCH"
+	httpMethodDELETE = "DELETE"
 )
 
 // RateLimiterConfig defines rate limiting configuration for different endpoint types
@@ -30,6 +39,11 @@ type RateLimiterConfig struct {
 	// Read-only endpoints (list positions, orders, agents)
 	ReadMaxRequests int
 	ReadWindow      time.Duration
+
+	// Search endpoints (expensive vector operations)
+	// Separate limit for semantic search which is CPU/memory intensive
+	SearchMaxRequests int
+	SearchWindow      time.Duration
 
 	// Enable/disable rate limiting
 	Enabled bool
@@ -53,6 +67,10 @@ func DefaultRateLimiterConfig() *RateLimiterConfig {
 		// Read endpoints: 60 requests per minute (allow monitoring)
 		ReadMaxRequests: 60,
 		ReadWindow:      time.Minute,
+
+		// Search endpoints: 20 requests per minute (vector search is expensive)
+		SearchMaxRequests: 20,
+		SearchWindow:      time.Minute,
 
 		Enabled: true,
 	}
@@ -81,8 +99,16 @@ func NewRateLimiter(name string, maxRequests int, window time.Duration) *RateLim
 	}
 }
 
-// allow checks if a request from the given IP is allowed
-func (rl *RateLimiter) allow(ip string) bool {
+// rateLimitInfo contains information about the current rate limit state
+type rateLimitInfo struct {
+	Allowed   bool
+	Limit     int
+	Remaining int
+	ResetAt   time.Time
+}
+
+// check checks if a request from the given IP is allowed and returns rate limit info
+func (rl *RateLimiter) check(ip string) rateLimitInfo {
 	now := time.Now()
 
 	// Get or create entry for this IP
@@ -97,12 +123,22 @@ func (rl *RateLimiter) allow(ip string) bool {
 	// Remove expired requests (outside the time window)
 	cutoff := now.Add(-rl.window)
 	validRequests := make([]time.Time, 0, len(entry.requests))
+	var oldestRequest time.Time
 	for _, req := range entry.requests {
 		if req.After(cutoff) {
 			validRequests = append(validRequests, req)
+			if oldestRequest.IsZero() || req.Before(oldestRequest) {
+				oldestRequest = req
+			}
 		}
 	}
 	entry.requests = validRequests
+
+	// Calculate reset time (when the oldest request expires)
+	resetAt := now.Add(rl.window)
+	if !oldestRequest.IsZero() {
+		resetAt = oldestRequest.Add(rl.window)
+	}
 
 	// Check if we're at the limit
 	if len(entry.requests) >= rl.maxRequests {
@@ -113,23 +149,55 @@ func (rl *RateLimiter) allow(ip string) bool {
 			Int("max", rl.maxRequests).
 			Dur("window", rl.window).
 			Msg("Rate limit exceeded")
-		return false
+		return rateLimitInfo{
+			Allowed:   false,
+			Limit:     rl.maxRequests,
+			Remaining: 0,
+			ResetAt:   resetAt,
+		}
 	}
 
 	// Add this request
 	entry.requests = append(entry.requests, now)
-	return true
+	return rateLimitInfo{
+		Allowed:   true,
+		Limit:     rl.maxRequests,
+		Remaining: rl.maxRequests - len(entry.requests),
+		ResetAt:   resetAt,
+	}
+}
+
+// allow checks if a request from the given IP is allowed (backwards compatible)
+func (rl *RateLimiter) allow(ip string) bool {
+	return rl.check(ip).Allowed
 }
 
 // Middleware returns a Gin middleware that applies rate limiting
+// Adds standard rate limit headers to all responses:
+//   - X-RateLimit-Limit: Maximum requests allowed in the window
+//   - X-RateLimit-Remaining: Requests remaining in current window
+//   - X-RateLimit-Reset: Unix timestamp when the rate limit resets
+//   - Retry-After: Seconds until the rate limit resets (only on 429)
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
-		if !rl.allow(ip) {
+		info := rl.check(ip)
+
+		// Always set rate limit headers
+		c.Header("X-RateLimit-Limit", fmt.Sprintf("%d", info.Limit))
+		c.Header("X-RateLimit-Remaining", fmt.Sprintf("%d", info.Remaining))
+		c.Header("X-RateLimit-Reset", fmt.Sprintf("%d", info.ResetAt.Unix()))
+
+		if !info.Allowed {
+			retryAfter := int(time.Until(info.ResetAt).Seconds())
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error":       "rate limit exceeded",
 				"message":     fmt.Sprintf("Maximum %d requests per %v allowed", rl.maxRequests, rl.window),
-				"retry_after": rl.window.Seconds(),
+				"retry_after": retryAfter,
 			})
 			c.Abort()
 			return
@@ -144,7 +212,12 @@ type RateLimiterMiddleware struct {
 	control *RateLimiter
 	order   *RateLimiter
 	read    *RateLimiter
+	search  *RateLimiter
 	enabled bool
+
+	// Cleanup worker management
+	stopChan chan struct{}
+	doneChan chan struct{}
 }
 
 // NewRateLimiterMiddleware creates a new rate limiter middleware with the given config
@@ -158,6 +231,7 @@ func NewRateLimiterMiddleware(config *RateLimiterConfig) *RateLimiterMiddleware 
 		control: NewRateLimiter("control", config.ControlMaxRequests, config.ControlWindow),
 		order:   NewRateLimiter("order", config.OrderMaxRequests, config.OrderWindow),
 		read:    NewRateLimiter("read", config.ReadMaxRequests, config.ReadWindow),
+		search:  NewRateLimiter("search", config.SearchMaxRequests, config.SearchWindow),
 		enabled: config.Enabled,
 	}
 }
@@ -194,6 +268,14 @@ func (rlm *RateLimiterMiddleware) ReadMiddleware() gin.HandlerFunc {
 	return rlm.read.Middleware()
 }
 
+// SearchMiddleware returns middleware for search endpoints (expensive vector operations)
+func (rlm *RateLimiterMiddleware) SearchMiddleware() gin.HandlerFunc {
+	if !rlm.enabled {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return rlm.search.Middleware()
+}
+
 // CleanupOldEntries removes stale IP entries from all rate limiters (call periodically)
 func (rlm *RateLimiterMiddleware) CleanupOldEntries() {
 	now := time.Now()
@@ -223,17 +305,50 @@ func (rlm *RateLimiterMiddleware) CleanupOldEntries() {
 	cleanupLimiter(rlm.control)
 	cleanupLimiter(rlm.order)
 	cleanupLimiter(rlm.read)
+	cleanupLimiter(rlm.search)
 }
 
-// StartCleanupWorker starts a background goroutine that periodically cleans up old entries
+// StartCleanupWorker starts a background goroutine that periodically cleans up old entries.
+// Call Stop() to gracefully shutdown the worker and prevent goroutine leaks.
 func (rlm *RateLimiterMiddleware) StartCleanupWorker(interval time.Duration) {
+	rlm.stopChan = make(chan struct{})
+	rlm.doneChan = make(chan struct{})
+
 	ticker := time.NewTicker(interval)
 	go func() {
-		for range ticker.C {
-			rlm.CleanupOldEntries()
-			log.Debug().Msg("Rate limiter cleanup completed")
+		defer close(rlm.doneChan)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				rlm.CleanupOldEntries()
+				log.Debug().Msg("Rate limiter cleanup completed")
+			case <-rlm.stopChan:
+				log.Debug().Msg("Rate limiter cleanup worker stopping")
+				return
+			}
 		}
 	}()
+}
+
+// Stop gracefully shuts down the cleanup worker goroutine.
+// This should be called during server shutdown to prevent goroutine leaks.
+func (rlm *RateLimiterMiddleware) Stop() {
+	if rlm.stopChan == nil {
+		return // Worker was never started
+	}
+
+	// Signal the worker to stop
+	close(rlm.stopChan)
+
+	// Wait for the worker to finish with a timeout
+	select {
+	case <-rlm.doneChan:
+		log.Info().Msg("Rate limiter cleanup worker stopped gracefully")
+	case <-time.After(5 * time.Second):
+		log.Warn().Msg("Rate limiter cleanup worker did not stop in time")
+	}
 }
 
 // AuditLoggingMiddleware creates middleware that logs all requests to the audit log
@@ -345,19 +460,43 @@ func determineEventType(method, path string) audit.EventType {
 	}
 
 	// Order endpoints
-	if path == "/api/v1/orders" && method == "POST" {
+	if path == "/api/v1/orders" && method == httpMethodPOST {
 		return audit.EventTypeOrderPlaced
 	}
-	if method == "DELETE" && len(path) > len("/api/v1/orders/") && path[:len("/api/v1/orders/")] == "/api/v1/orders/" {
+	if method == httpMethodDELETE && len(path) > len("/api/v1/orders/") && path[:len("/api/v1/orders/")] == "/api/v1/orders/" {
 		return audit.EventTypeOrderCanceled
 	}
 
 	// Configuration endpoints
-	if path == "/api/v1/config" && method == "PATCH" {
+	if path == "/api/v1/config" && method == httpMethodPATCH {
 		return audit.EventTypeConfigUpdated
 	}
-	if path == "/api/v1/config" && method == "GET" {
+	if path == "/api/v1/config" && method == httpMethodGET {
 		return audit.EventTypeConfigViewed
+	}
+
+	// Decision explainability endpoints
+	if strings.HasPrefix(path, "/api/v1/decisions") {
+		// POST /decisions/search
+		if path == "/api/v1/decisions/search" && method == httpMethodPOST {
+			return audit.EventTypeDecisionSearched
+		}
+		// GET /decisions/stats
+		if path == "/api/v1/decisions/stats" && method == httpMethodGET {
+			return audit.EventTypeDecisionStatsAccessed
+		}
+		// GET /decisions/:id/similar
+		if strings.HasSuffix(path, "/similar") && method == httpMethodGET {
+			return audit.EventTypeDecisionSimilarAccessed
+		}
+		// GET /decisions/:id (single decision)
+		if method == httpMethodGET && path != "/api/v1/decisions" && !strings.HasSuffix(path, "/similar") && !strings.HasSuffix(path, "/stats") {
+			return audit.EventTypeDecisionViewed
+		}
+		// GET /decisions (list)
+		if path == "/api/v1/decisions" && method == httpMethodGET {
+			return audit.EventTypeDecisionListAccessed
+		}
 	}
 
 	// Return empty for non-critical endpoints (health checks, status, etc.)

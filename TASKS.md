@@ -3302,7 +3302,7 @@ This document consolidates all implementation tasks from the architecture and de
 
 ### 14.1 Explainability Dashboard (Week 19)
 
-- [ ] **T307** [P0] Build Explainability API Endpoints
+- [x] **T307** [P0] Build Explainability API Endpoints ✅ COMPLETED
   - `GET /api/v1/decisions` - List recent LLM decisions with pagination (limit, offset)
   - `GET /api/v1/decisions/:id` - Detailed decision (full prompt, LLM response, reasoning, context)
   - `POST /api/v1/decisions/search` - Semantic search by query using pgvector (cosine similarity)
@@ -3311,20 +3311,18 @@ This document consolidates all implementation tasks from the architecture and de
   - Add indexes on `llm_decisions` table for performance (timestamp, agent_id, session_id)
   - **Acceptance**: API endpoints return LLM decision data, search works with pgvector
   - **Estimate**: 12 hours
-  - **Files Impacted**: `cmd/api/handlers/decisions.go` (new), `internal/db/decisions.go`, `migrations/006_decisions_indexes.sql`
+  - **Files Impacted**: `internal/api/decisions.go`, `internal/api/decisions_handler.go`, `cmd/api/main.go`
 
-- [ ] **T308** [P0] Build Explainability Web UI
-  - Choose: React or Vue.js frontend (recommend React with TypeScript)
-  - OR extend Grafana with custom panels (simpler but less flexible)
-  - Decision timeline view (chronological feed, infinite scroll)
-  - Decision detail modal (reasoning, confidence, context, prompt/response)
-  - Semantic search interface ("Why did you buy BTC at 3pm?")
-  - Agent comparison view (technical vs trend vs risk decisions side-by-side)
-  - Filter by agent, symbol, timeframe, confidence (>0.7, etc.)
-  - Export decisions as CSV or JSON
+- [x] **T308** [P0] Build Explainability Web UI ✅ COMPLETED
+  - React 18 with TypeScript, TanStack Query, Tailwind CSS, Vite
+  - Decision timeline view (chronological feed with filtering)
+  - Decision detail modal (full prompt/response, metrics, "Find Similar")
+  - Semantic search interface ("Why did you buy BTC?")
+  - Statistics dashboard (success rates, confidence, P&L metrics)
+  - Filter by symbol, decision type, outcome, date range
   - **Acceptance**: Users can browse and search all LLM decisions with full reasoning
   - **Estimate**: 32 hours
-  - **Files Impacted**: `web/explainability/` (new React app) or Grafana plugin, `web/explainability/package.json`
+  - **Files Impacted**: `web/explainability/` (new React app with 16 source files)
 
 - [ ] **T309** [P1] Decision Voting & Feedback
   - Add "Was this decision helpful?" thumbs up/down to each decision

@@ -16,6 +16,7 @@ This document outlines procedures for rotating secrets in the CryptoFunk trading
 - [Emergency Rotation](#emergency-rotation)
 - [Vault Setup](#vault-setup)
 - [Verification](#verification)
+- [CryptoFunk API Key Management](#cryptofunk-api-key-management)
 
 ## Overview
 
@@ -52,6 +53,12 @@ CryptoFunk manages the following secret types:
    - Provider-specific API keys
    - Rotated monthly
    - Path: `secret/data/cryptofunk/production/llm`
+
+5. **CryptoFunk API Keys** (User Authentication)
+   - SHA-256 hashed keys stored in PostgreSQL
+   - Used for REST API authentication
+   - Managed via database functions
+   - See [CryptoFunk API Key Management](#cryptofunk-api-key-management)
 
 ## Rotation Schedules
 
@@ -502,6 +509,231 @@ kubectl get serviceaccount cryptofunk-vault -n cryptofunk
 - [Kubernetes Auth Method](https://www.vaultproject.io/docs/auth/kubernetes)
 - [KV Secrets Engine](https://www.vaultproject.io/docs/secrets/kv/kv-v2)
 - [Vault Best Practices](https://learn.hashicorp.com/tutorials/vault/production-hardening)
+
+## CryptoFunk API Key Management
+
+CryptoFunk uses API key authentication for the REST API. This section covers how to create, rotate, and revoke API keys for user authentication.
+
+### Overview
+
+API keys are used to authenticate requests to the CryptoFunk REST API. They provide:
+- SHA-256 hashed storage (raw keys are never stored)
+- Permission-based authorization
+- Expiration support
+- Usage tracking (last_used_at)
+- Revocation capability
+
+### Prerequisites
+
+1. Run migration `009_api_keys.sql` to create the `api_keys` table:
+   ```bash
+   task db-migrate
+   ```
+
+2. Enable authentication in `config.yaml`:
+   ```yaml
+   api:
+     auth:
+       enabled: true
+       header_name: "X-API-Key"
+       require_https: true
+   ```
+
+### Creating API Keys
+
+Use the `create_api_key()` PostgreSQL function to create new keys:
+
+```bash
+# Connect to PostgreSQL
+task db-shell
+
+# Create a new API key with specific permissions
+SELECT create_api_key(
+  'My Service Key',           -- name
+  'system',                   -- user_id
+  ARRAY['read', 'write'],     -- permissions
+  NULL                        -- expires_at (NULL = never expires)
+);
+
+# Create an API key that expires in 90 days
+SELECT create_api_key(
+  'Temporary Key',
+  'admin',
+  ARRAY['read'],
+  NOW() + INTERVAL '90 days'
+);
+
+# Create an admin key with full permissions
+SELECT create_api_key(
+  'Admin Key',
+  'admin',
+  ARRAY['admin'],  -- 'admin' or '*' grants all permissions
+  NULL
+);
+```
+
+The function returns the raw API key (e.g., `cfk_abc123...`). **Store this securely - it cannot be recovered!**
+
+### Using API Keys
+
+Include the API key in requests using either method:
+
+```bash
+# Method 1: X-API-Key header (preferred)
+curl -H "X-API-Key: cfk_abc123..." \
+  http://localhost:8080/api/v1/decisions
+
+# Method 2: Authorization Bearer header
+curl -H "Authorization: Bearer cfk_abc123..." \
+  http://localhost:8080/api/v1/decisions
+```
+
+### API Key Rotation Workflow
+
+**Recommended rotation frequency**: Every 90 days, or immediately if compromised.
+
+**Zero-downtime rotation steps**:
+
+1. **Create new API key** (before expiring old one):
+   ```sql
+   SELECT create_api_key(
+     'My Service Key v2',
+     'system',
+     ARRAY['read', 'write'],
+     NULL
+   );
+   ```
+
+2. **Update applications** to use the new key.
+
+3. **Verify new key works**:
+   ```bash
+   curl -H "X-API-Key: <new-key>" \
+     http://localhost:8080/api/v1/health
+   ```
+
+4. **Revoke old key**:
+   ```sql
+   -- Find old key by name
+   SELECT id, name, created_at FROM api_keys
+   WHERE name LIKE 'My Service Key%'
+   ORDER BY created_at DESC;
+
+   -- Revoke the old key
+   UPDATE api_keys SET revoked = true WHERE id = '<old-key-id>';
+   ```
+
+### Revoking API Keys
+
+Revoke keys immediately if compromised:
+
+```sql
+-- Revoke by key ID
+UPDATE api_keys SET revoked = true WHERE id = '<key-id>';
+
+-- Revoke all keys for a user
+UPDATE api_keys SET revoked = true WHERE user_id = '<user-id>';
+
+-- Verify revocation
+SELECT id, name, revoked FROM api_keys WHERE id = '<key-id>';
+```
+
+Revoked keys are immediately rejected by the auth middleware.
+
+### Viewing API Keys
+
+List and monitor API keys (the hash is never displayed):
+
+```sql
+-- List all active keys
+SELECT
+  id,
+  name,
+  user_id,
+  permissions,
+  last_used_at,
+  created_at,
+  expires_at,
+  revoked
+FROM api_keys
+WHERE revoked = false
+ORDER BY created_at DESC;
+
+-- Find unused keys (potential security risk)
+SELECT id, name, user_id, created_at
+FROM api_keys
+WHERE last_used_at IS NULL
+  AND created_at < NOW() - INTERVAL '30 days';
+
+-- Find expired keys (cleanup candidates)
+SELECT id, name, user_id, expires_at
+FROM api_keys
+WHERE expires_at < NOW();
+```
+
+### Permission System
+
+Available permissions:
+- `read` - Read-only access to all GET endpoints
+- `write` - Create/update/delete operations
+- `admin` - Full access (equivalent to `*`)
+- `*` - Wildcard, grants all permissions
+- Custom permissions can be checked with `RequirePermission("custom")` middleware
+
+Permission examples:
+```sql
+-- Read-only dashboard access
+SELECT create_api_key('Dashboard Reader', 'user1', ARRAY['read'], NULL);
+
+-- Trading bot with write access
+SELECT create_api_key('Trading Bot', 'bot1', ARRAY['read', 'write'], NULL);
+
+-- Admin access
+SELECT create_api_key('Admin Console', 'admin', ARRAY['admin'], NULL);
+```
+
+### Security Best Practices
+
+1. **Never log or expose raw API keys** - Only the SHA-256 hash is stored
+2. **Use HTTPS in production** - Set `api.auth.require_https: true`
+3. **Set expiration dates** for temporary access
+4. **Audit key usage** - Monitor `last_used_at` for anomalies
+5. **Revoke unused keys** - Remove keys that haven't been used in 90+ days
+6. **Use minimal permissions** - Grant only necessary permissions
+7. **Rotate regularly** - At least every 90 days for long-lived keys
+
+### Cleanup Old Keys
+
+Run periodically to clean up expired and revoked keys:
+
+```sql
+-- Delete keys that have been revoked for more than 30 days
+DELETE FROM api_keys
+WHERE revoked = true
+  AND updated_at < NOW() - INTERVAL '30 days';
+
+-- Delete expired keys older than 30 days
+DELETE FROM api_keys
+WHERE expires_at < NOW() - INTERVAL '30 days';
+```
+
+### Emergency Key Revocation
+
+If a key is compromised:
+
+```bash
+# 1. Immediately revoke the key
+psql -d cryptofunk -c "UPDATE api_keys SET revoked = true WHERE key_hash = '$(echo -n '<raw-key>' | sha256sum | cut -d' ' -f1)';"
+
+# 2. Check audit logs for unauthorized access
+grep '<key-id>' /var/log/cryptofunk/audit.log
+
+# 3. Review recent API activity
+psql -d cryptofunk -c "SELECT * FROM audit_logs WHERE api_key_id = '<key-id>' ORDER BY created_at DESC LIMIT 100;"
+
+# 4. Create new key if needed
+psql -d cryptofunk -c "SELECT create_api_key('Replacement Key', 'user', ARRAY['read', 'write'], NULL);"
+```
 
 ## Support
 

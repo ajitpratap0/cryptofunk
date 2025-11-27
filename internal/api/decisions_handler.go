@@ -30,15 +30,65 @@ func NewDecisionHandler(repo *DecisionRepository) *DecisionHandler {
 	return &DecisionHandler{repo: repo}
 }
 
-// RegisterRoutes registers all decision-related routes
+// RegisterRoutes registers all decision-related routes without rate limiting.
+// For production use, prefer RegisterRoutesWithRateLimiter.
 func (h *DecisionHandler) RegisterRoutes(router *gin.RouterGroup) {
+	h.RegisterRoutesWithRateLimiter(router, nil, nil)
+}
+
+// RegisterRoutesWithRateLimiter registers all decision-related routes with rate limiting.
+// readMiddleware is applied to GET endpoints, searchMiddleware to search endpoints.
+// If searchMiddleware is nil, it falls back to readMiddleware.
+func (h *DecisionHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup, readMiddleware, searchMiddleware gin.HandlerFunc) {
+	h.RegisterRoutesWithRateLimiterAndAuth(router, readMiddleware, searchMiddleware, nil)
+}
+
+// RegisterRoutesWithRateLimiterAndAuth registers all decision-related routes with rate limiting
+// and optional authentication middleware.
+// readMiddleware is applied to GET endpoints, searchMiddleware to search endpoints.
+// If searchMiddleware is nil, it falls back to readMiddleware (with a warning log).
+// authMiddleware is applied to all endpoints if provided (use OptionalAuth for non-required auth).
+func (h *DecisionHandler) RegisterRoutesWithRateLimiterAndAuth(router *gin.RouterGroup, readMiddleware, searchMiddleware, authMiddleware gin.HandlerFunc) {
+	// Helper to conditionally apply middleware
+	applyRead := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		result := handlers
+		if readMiddleware != nil {
+			result = append([]gin.HandlerFunc{readMiddleware}, result...)
+		}
+		if authMiddleware != nil {
+			result = append([]gin.HandlerFunc{authMiddleware}, result...)
+		}
+		return result
+	}
+	applySearch := func(handlers ...gin.HandlerFunc) []gin.HandlerFunc {
+		// Use search middleware if provided, otherwise fall back to read middleware
+		mw := searchMiddleware
+		if mw == nil && readMiddleware != nil {
+			log.Warn().Msg("Search middleware not configured, falling back to read middleware rate limits")
+			mw = readMiddleware
+		}
+		result := handlers
+		if mw != nil {
+			result = append([]gin.HandlerFunc{mw}, result...)
+		}
+		if authMiddleware != nil {
+			result = append([]gin.HandlerFunc{authMiddleware}, result...)
+		}
+		return result
+	}
+
 	decisions := router.Group("/decisions")
 	{
-		decisions.GET("", h.ListDecisions)
-		decisions.GET("/stats", h.GetStats) // Must be before :id to avoid conflict
-		decisions.POST("/search", h.SearchDecisions)
-		decisions.GET("/:id", h.GetDecision)
-		decisions.GET("/:id/similar", h.GetSimilarDecisions)
+		// Read-only endpoints
+		decisions.GET("", applyRead(h.ListDecisions)...)
+		decisions.GET("/stats", applyRead(h.GetStats)...) // Must be before :id to avoid conflict
+		decisions.GET("/:id", applyRead(h.GetDecision)...)
+		// Similar endpoint uses vector search (expensive), apply search middleware
+		decisions.GET("/:id/similar", applySearch(h.GetSimilarDecisions)...)
+
+		// Search endpoint (POST but read-only, apply search middleware for rate limiting)
+		// Search is more expensive (vector operations) so has separate rate limits
+		decisions.POST("/search", applySearch(h.SearchDecisions)...)
 	}
 }
 
@@ -66,33 +116,48 @@ func (h *DecisionHandler) ListDecisions(c *gin.Context) {
 		Offset:       0,
 	}
 
-	// Parse limit
+	// Parse limit (validate non-negative)
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
-			if limit > MaxListLimit {
+			if limit < 0 {
+				limit = DefaultListLimit
+			} else if limit > MaxListLimit {
 				limit = MaxListLimit
 			}
 			filter.Limit = limit
 		}
 	}
 
-	// Parse offset
+	// Parse offset (validate non-negative)
 	if offsetStr := c.Query("offset"); offsetStr != "" {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			if offset < 0 {
+				offset = 0
+			}
 			filter.Offset = offset
 		}
 	}
 
 	// Parse dates
 	if fromDateStr := c.Query("from_date"); fromDateStr != "" {
-		if fromDate, err := time.Parse(time.RFC3339, fromDateStr); err == nil {
-			filter.FromDate = &fromDate
+		fromDate, err := time.Parse(time.RFC3339, fromDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid from_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.FromDate = &fromDate
 	}
 	if toDateStr := c.Query("to_date"); toDateStr != "" {
-		if toDate, err := time.Parse(time.RFC3339, toDateStr); err == nil {
-			filter.ToDate = &toDate
+		toDate, err := time.Parse(time.RFC3339, toDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid to_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.ToDate = &toDate
 	}
 
 	// Fetch decisions
@@ -172,12 +237,23 @@ func (h *DecisionHandler) GetSimilarDecisions(c *gin.Context) {
 	// Parse limit
 	limit := DefaultSimilarLimit
 	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
-			if parsedLimit > MaxSimilarLimit {
-				parsedLimit = MaxSimilarLimit
-			}
-			limit = parsedLimit
+		parsedLimit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid limit parameter, must be an integer",
+			})
+			return
 		}
+		if parsedLimit < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Limit must be at least 1",
+			})
+			return
+		}
+		if parsedLimit > MaxSimilarLimit {
+			parsedLimit = MaxSimilarLimit
+		}
+		limit = parsedLimit
 	}
 
 	// Find similar decisions
@@ -215,14 +291,24 @@ func (h *DecisionHandler) GetStats(c *gin.Context) {
 
 	// Parse dates
 	if fromDateStr := c.Query("from_date"); fromDateStr != "" {
-		if fromDate, err := time.Parse(time.RFC3339, fromDateStr); err == nil {
-			filter.FromDate = &fromDate
+		fromDate, err := time.Parse(time.RFC3339, fromDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid from_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.FromDate = &fromDate
 	}
 	if toDateStr := c.Query("to_date"); toDateStr != "" {
-		if toDate, err := time.Parse(time.RFC3339, toDateStr); err == nil {
-			filter.ToDate = &toDate
+		toDate, err := time.Parse(time.RFC3339, toDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid to_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.ToDate = &toDate
 	}
 
 	// Fetch stats
