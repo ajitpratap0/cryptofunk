@@ -33,22 +33,25 @@ type CoinGeckoClient struct {
 	retryDelay  time.Duration
 	mu          sync.RWMutex
 	connected   bool
-	lastError   error           // Last error encountered (protected by mu)
+	lastError   error              // Last error encountered (protected by mu)
 	sfGroup     singleflight.Group // Prevents cache stampede
 }
 
 // CoinGeckoClientOptions configures the CoinGecko client
 type CoinGeckoClientOptions struct {
-	MCPURL             string        // MCP server URL
-	APIKey             string        // Optional API key for pro tier
-	Timeout            time.Duration // Request timeout
-	RateLimit          int           // Requests per minute
-	MaxRetries         int           // Maximum retry attempts
-	RetryDelay         time.Duration // Initial retry delay
-	EnableRateLimiting bool          // Enable rate limiting
+	MCPURL             string        // MCP server URL (default: https://mcp.api.coingecko.com/mcp)
+	APIKey             string        // Optional API key for CoinGecko Pro tier (currently unused - SDK doesn't support headers yet)
+	Timeout            time.Duration // Request timeout (default: 30s)
+	RateLimit          int           // Requests per minute (default: 50 for free tier, increase for Pro)
+	MaxRetries         int           // Maximum retry attempts (default: 3)
+	RetryDelay         time.Duration // Initial retry delay with exponential backoff (default: 1s)
+	EnableRateLimiting bool          // Enable rate limiting (recommended: true)
 }
 
-// NewCoinGeckoClient creates a new CoinGecko MCP client with rate limiting and retry logic
+// NewCoinGeckoClient creates a new CoinGecko MCP client with rate limiting and retry logic.
+// The apiKey parameter is reserved for future CoinGecko Pro tier support but is currently
+// not used as the MCP SDK doesn't support custom headers yet. Pass an empty string for
+// free tier usage.
 func NewCoinGeckoClient(apiKey string) (*CoinGeckoClient, error) {
 	return NewCoinGeckoClientWithOptions(CoinGeckoClientOptions{
 		MCPURL:             "https://mcp.api.coingecko.com/mcp",
@@ -243,7 +246,7 @@ func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrenc
 }
 
 // MarketChart represents historical market data
-type MarketChart struct{
+type MarketChart struct {
 	Prices       []PricePoint
 	MarketCaps   []PricePoint
 	TotalVolumes []PricePoint

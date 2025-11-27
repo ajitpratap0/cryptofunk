@@ -8,8 +8,8 @@ import (
 )
 
 func TestNewCoinGeckoClient(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	tests := []struct {
@@ -70,8 +70,8 @@ func TestNewCoinGeckoClient(t *testing.T) {
 }
 
 func TestNewCoinGeckoClientWithOptions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	tests := []struct {
@@ -514,8 +514,8 @@ func TestToCandlesticksEmptyChart(t *testing.T) {
 }
 
 func TestRateLimiting(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	// Create client with very low rate limit for testing
@@ -559,8 +559,8 @@ func TestRateLimiting(t *testing.T) {
 }
 
 func TestRetryLogic(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	// This test verifies the retry mechanism structure
@@ -619,8 +619,8 @@ func TestHealth(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	client, err := NewCoinGeckoClient("")
@@ -641,8 +641,8 @@ func TestClose(t *testing.T) {
 }
 
 func TestContextCancellation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	client, err := NewCoinGeckoClient("")

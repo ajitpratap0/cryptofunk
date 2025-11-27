@@ -16,6 +16,30 @@ const (
 	StateHalfOpen = "half_open"
 )
 
+// Circuit breaker thresholds - configurable per service type
+const (
+	// Exchange circuit breaker settings
+	ExchangeMinRequests     = 5                // Minimum requests before tripping
+	ExchangeFailureRatio    = 0.6              // Failure ratio threshold (60%)
+	ExchangeOpenTimeout     = 30 * time.Second // How long circuit stays open
+	ExchangeHalfOpenMaxReqs = 3                // Max requests in half-open state
+	ExchangeCountInterval   = 10 * time.Second // Window for counting failures
+
+	// LLM circuit breaker settings (longer timeouts for AI calls)
+	LLMMinRequests     = 3                // Minimum requests before tripping
+	LLMFailureRatio    = 0.6              // Failure ratio threshold (60%)
+	LLMOpenTimeout     = 60 * time.Second // How long circuit stays open (longer for LLM recovery)
+	LLMHalfOpenMaxReqs = 2                // Max requests in half-open state
+	LLMCountInterval   = 10 * time.Second // Window for counting failures
+
+	// Database circuit breaker settings (faster recovery)
+	DBMinRequests     = 10               // Minimum requests before tripping
+	DBFailureRatio    = 0.6              // Failure ratio threshold (60%)
+	DBOpenTimeout     = 15 * time.Second // How long circuit stays open (quick recovery)
+	DBHalfOpenMaxReqs = 5                // Max requests in half-open state
+	DBCountInterval   = 10 * time.Second // Window for counting failures
+)
+
 // CircuitBreakerManager manages circuit breakers for different service types
 type CircuitBreakerManager struct {
 	exchange *gobreaker.CircuitBreaker
@@ -77,45 +101,45 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 		metrics: metrics,
 	}
 
-	// Exchange circuit breaker: 5 failures → open for 30 seconds
+	// Exchange circuit breaker: configurable thresholds
 	manager.exchange = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "exchange",
-		MaxRequests: 3,                // Max requests in half-open state
-		Interval:    10 * time.Second, // Window for counting failures
-		Timeout:     30 * time.Second, // How long to stay open before half-open
+		MaxRequests: ExchangeHalfOpenMaxReqs,
+		Interval:    ExchangeCountInterval,
+		Timeout:     ExchangeOpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= 5 && failureRatio >= 0.6
+			return counts.Requests >= ExchangeMinRequests && failureRatio >= ExchangeFailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			manager.updateMetrics("exchange", to)
 		},
 	})
 
-	// LLM circuit breaker: 3 failures → open for 60 seconds
+	// LLM circuit breaker: longer timeouts for AI model calls
 	manager.llm = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "llm",
-		MaxRequests: 2,
-		Interval:    10 * time.Second,
-		Timeout:     60 * time.Second, // Longer timeout for LLM
+		MaxRequests: LLMHalfOpenMaxReqs,
+		Interval:    LLMCountInterval,
+		Timeout:     LLMOpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= 3 && failureRatio >= 0.6
+			return counts.Requests >= LLMMinRequests && failureRatio >= LLMFailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			manager.updateMetrics("llm", to)
 		},
 	})
 
-	// Database circuit breaker: 10 failures → open for 15 seconds
+	// Database circuit breaker: quick recovery for DB connections
 	manager.database = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "database",
-		MaxRequests: 5,
-		Interval:    10 * time.Second,
-		Timeout:     15 * time.Second,
+		MaxRequests: DBHalfOpenMaxReqs,
+		Interval:    DBCountInterval,
+		Timeout:     DBOpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= 10 && failureRatio >= 0.6
+			return counts.Requests >= DBMinRequests && failureRatio >= DBFailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			manager.updateMetrics("database", to)

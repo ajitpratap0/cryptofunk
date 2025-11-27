@@ -54,20 +54,20 @@ type PerformanceData struct {
 
 // WinRateData holds win rate statistics
 type WinRateData struct {
-	WinRate      float64
+	WinRate       float64
 	WinningTrades int64
-	LosingTrades int64
-	TotalTrades  int64
-	AvgWin       float64
-	AvgLoss      float64
+	LosingTrades  int64
+	TotalTrades   int64
+	AvgWin        float64
+	AvgLoss       float64
 }
 
 // MarketRegimeData holds market regime information
 type MarketRegimeData struct {
-	Regime      string  // "bullish", "bearish", "sideways"
-	Volatility  float64
-	ShortMA     float64
-	LongMA      float64
+	Regime        string // "bullish", "bearish", "sideways"
+	Volatility    float64
+	ShortMA       float64
+	LongMA        float64
 	TrendStrength float64
 }
 
@@ -161,6 +161,9 @@ func (c *Calculator) GetCurrentPrice(ctx context.Context, symbol string, interva
 	var price float64
 	err := c.pool.QueryRow(ctx, query, symbol, interval).Scan(&price)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 0, fmt.Errorf("no price data found for symbol %s with interval %s", symbol, interval)
+		}
 		return 0, fmt.Errorf("failed to get current price: %w", err)
 	}
 
@@ -178,12 +181,12 @@ func (c *Calculator) CalculateWinRate(ctx context.Context, symbol string) (*WinR
 	if c.pool == nil {
 		log.Warn().Str("symbol", symbol).Msg("No database pool available, using default win rate")
 		return &WinRateData{
-			WinRate:      0.55,
+			WinRate:       0.55,
 			WinningTrades: 0,
-			LosingTrades: 0,
-			TotalTrades:  0,
-			AvgWin:       200.0,
-			AvgLoss:      100.0,
+			LosingTrades:  0,
+			TotalTrades:   0,
+			AvgWin:        200.0,
+			AvgLoss:       100.0,
 		}, nil
 	}
 
@@ -228,12 +231,12 @@ func (c *Calculator) CalculateWinRate(ctx context.Context, symbol string) (*WinR
 	if totalTrades == 0 {
 		log.Warn().Str("symbol", symbol).Msg("No historical trades found, using default win rate")
 		return &WinRateData{
-			WinRate:      0.55, // Default 55% win rate
+			WinRate:       0.55, // Default 55% win rate
 			WinningTrades: 0,
-			LosingTrades: 0,
-			TotalTrades:  0,
-			AvgWin:       200.0, // Default $200 average win
-			AvgLoss:      100.0, // Default $100 average loss
+			LosingTrades:  0,
+			TotalTrades:   0,
+			AvgWin:        200.0, // Default $200 average win
+			AvgLoss:       100.0, // Default $100 average loss
 		}, nil
 	}
 
@@ -247,12 +250,12 @@ func (c *Calculator) CalculateWinRate(ctx context.Context, symbol string) (*WinR
 		Msg("Win rate calculated from database")
 
 	return &WinRateData{
-		WinRate:      winRate,
+		WinRate:       winRate,
 		WinningTrades: winningTrades,
-		LosingTrades: losingTrades,
-		TotalTrades:  totalTrades,
-		AvgWin:       avgWin,
-		AvgLoss:      avgLoss,
+		LosingTrades:  losingTrades,
+		TotalTrades:   totalTrades,
+		AvgWin:        avgWin,
+		AvgLoss:       avgLoss,
 	}, nil
 }
 
@@ -439,8 +442,8 @@ func (c *Calculator) DetectMarketRegime(ctx context.Context, symbol string, days
 	volatility := calculateStdDev(histData.Returns)
 
 	// Calculate moving averages
-	shortMA := calculateMovingAverage(histData.Prices, 10)  // 10-day MA
-	longMA := calculateMovingAverage(histData.Prices, 20)   // 20-day MA
+	shortMA := calculateMovingAverage(histData.Prices, 10) // 10-day MA
+	longMA := calculateMovingAverage(histData.Prices, 20)  // 20-day MA
 
 	// Determine trend and regime
 	prices := histData.Prices
@@ -488,10 +491,10 @@ func (c *Calculator) DetectMarketRegime(ctx context.Context, symbol string, days
 		Msg("Market regime detected from database")
 
 	return &MarketRegimeData{
-		Regime:      regime,
-		Volatility:  volatility,
-		ShortMA:     shortMA,
-		LongMA:      longMA,
+		Regime:        regime,
+		Volatility:    volatility,
+		ShortMA:       shortMA,
+		LongMA:        longMA,
 		TrendStrength: trendStrength,
 	}, nil
 }

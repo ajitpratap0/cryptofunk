@@ -271,6 +271,18 @@ func main() {
 
 // NewRiskAgent creates a new risk management agent
 func NewRiskAgent(config *RiskAgentConfig, database *db.DB, riskService *risk.Service, calculator *risk.Calculator) (*RiskAgent, error) {
+	// Validate required parameters
+	if config == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	// database can be nil for testing - calculator will use defaults
+	if riskService == nil {
+		return nil, fmt.Errorf("riskService is required")
+	}
+	if calculator == nil {
+		return nil, fmt.Errorf("calculator is required for risk calculations")
+	}
+
 	// Initialize LLM client if enabled
 	var llmClient llm.LLMClient
 	var promptBuilder *llm.PromptBuilder
@@ -816,8 +828,8 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 	// Calculate drawdown using calculator
 	if len(perfData.EquityCurve) > 0 {
 		currentDD, maxDD, peak := a.calculator.CalculateDrawdown(perfData.EquityCurve)
-		a.beliefs.currentDrawdown = currentDD * 100  // Convert to percentage
-		a.beliefs.maxDrawdown = maxDD * 100          // Convert to percentage
+		a.beliefs.currentDrawdown = currentDD * 100 // Convert to percentage
+		a.beliefs.maxDrawdown = maxDD * 100         // Convert to percentage
 		a.beliefs.peakEquity = peak
 
 		log.Debug().
@@ -827,7 +839,6 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 			Msg("Drawdown calculated from database")
 	}
 }
-
 
 // assessMarketConditions determines current market regime
 func (a *RiskAgent) assessMarketConditions() {
@@ -859,7 +870,6 @@ func (a *RiskAgent) assessMarketConditions() {
 		Float64("trend_strength", regimeData.TrendStrength).
 		Msg("Market conditions assessed from database")
 }
-
 
 // getCurrentPrice gets the current market price for a symbol from the database
 func (a *RiskAgent) getCurrentPrice(symbol string) float64 {

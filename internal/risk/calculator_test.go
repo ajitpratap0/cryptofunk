@@ -314,7 +314,7 @@ func TestCalculateVaRFromReturns(t *testing.T) {
 	varValue, cvarValue, err := calculator.CalculateVaR(returns, confidenceLevel)
 
 	require.NoError(t, err)
-	assert.Greater(t, varValue, 0.0) // VaR should be positive for losses
+	assert.Greater(t, varValue, 0.0)              // VaR should be positive for losses
 	assert.GreaterOrEqual(t, cvarValue, varValue) // CVaR should be >= VaR
 
 	t.Logf("VaR (95%%): %.4f, CVaR: %.4f", varValue, cvarValue)

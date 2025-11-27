@@ -184,15 +184,17 @@ func (s *APIServer) setupRoutes() {
 			Str("header_name", s.config.API.Auth.HeaderName).
 			Msg("API key authentication enabled")
 	} else {
-		// Warning level in production, info level otherwise
-		logEvent := log.Info()
+		// Always warn when authentication is disabled - security risk regardless of environment
+		// Production warning is more severe, but all environments should be aware
 		if isProduction {
-			logEvent = log.Warn()
+			log.Error().
+				Str("environment", s.config.App.Environment).
+				Msg("CRITICAL: API authentication is DISABLED in production - all endpoints including trading control (pause/resume/start/stop) are unprotected. This is a security vulnerability. Enable via api.auth.enabled=true in config.yaml")
+		} else {
+			log.Warn().
+				Str("environment", s.config.App.Environment).
+				Msg("API authentication is disabled - all endpoints including trading control are unprotected. This is acceptable for development. Enable via api.auth.enabled=true for production.")
 		}
-
-		logEvent.
-			Str("environment", s.config.App.Environment).
-			Msg("SECURITY WARNING: API authentication is DISABLED - all endpoints including trading control (pause/resume/start/stop) are unprotected. Enable via api.auth.enabled=true in config.yaml")
 	}
 
 	// Apply global rate limiting to all API requests

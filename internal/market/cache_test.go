@@ -30,8 +30,8 @@ func setupMiniRedis(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
 }
 
 func TestNewCachedCoinGeckoClient(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
@@ -112,8 +112,8 @@ func TestCachedGetPrice_CacheMiss(t *testing.T) {
 }
 
 func TestCachedGetPrice_CacheHit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
@@ -300,8 +300,8 @@ func TestHealth_Success(t *testing.T) {
 }
 
 func TestHealth_RedisDown(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	mr, err := miniredis.Run()
@@ -330,8 +330,8 @@ func TestHealth_RedisDown(t *testing.T) {
 }
 
 func TestInvalidateCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
@@ -378,8 +378,8 @@ func TestInvalidateCache(t *testing.T) {
 }
 
 func TestClearCache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test that requires MCP server connection")
+	if testing.Short() || os.Getenv("COINGECKO_API_TEST") == "" {
+		t.Skip("Skipping integration test that requires MCP server - set COINGECKO_API_TEST=1 to run")
 	}
 
 	redisClient, mr := setupMiniRedis(t)
