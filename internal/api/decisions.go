@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // Constants for decision queries
@@ -363,6 +365,8 @@ func (r *DecisionRepository) getCountsByField(ctx context.Context, field string,
 
 // FindSimilarDecisions finds decisions with similar prompts using vector similarity
 func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error) {
+	start := time.Now()
+
 	// Use longer timeout for vector similarity operations (more expensive)
 	ctx, cancel := context.WithTimeout(ctx, vectorQueryTimeout)
 	defer cancel()
@@ -387,6 +391,8 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 
 	rows, err := r.db.Query(ctx, query, id, limit)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.RecordSimilarDecisions(duration, 0, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -402,12 +408,17 @@ func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.U
 			&d.CreatedAt, &distance,
 		)
 		if err != nil {
+			duration := time.Since(start).Seconds()
+			metrics.RecordSimilarDecisions(duration, len(decisions), err)
 			return nil, err
 		}
 		decisions = append(decisions, d)
 	}
 
-	return decisions, rows.Err()
+	err = rows.Err()
+	duration := time.Since(start).Seconds()
+	metrics.RecordSimilarDecisions(duration, len(decisions), err)
+	return decisions, err
 }
 
 // SearchRequest contains parameters for searching decisions
@@ -449,6 +460,8 @@ func (r *DecisionRepository) SearchDecisions(ctx context.Context, req SearchRequ
 
 // searchByEmbedding performs vector similarity search using pgvector
 func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	start := time.Now()
+
 	// Use longer timeout for vector similarity operations (more expensive)
 	ctx, cancel := context.WithTimeout(ctx, vectorQueryTimeout)
 	defer cancel()
@@ -488,6 +501,8 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
+		duration := time.Since(start).Seconds()
+		metrics.RecordSemanticSearch(duration, 0, err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -503,6 +518,8 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 			&d.CreatedAt, &similarity,
 		)
 		if err != nil {
+			duration := time.Since(start).Seconds()
+			metrics.RecordSemanticSearch(duration, len(results), err)
 			return nil, err
 		}
 		results = append(results, SearchResult{
@@ -511,11 +528,16 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 		})
 	}
 
-	return results, rows.Err()
+	err = rows.Err()
+	duration := time.Since(start).Seconds()
+	metrics.RecordSemanticSearch(duration, len(results), err)
+	return results, err
 }
 
 // searchByText performs text-based search using PostgreSQL full-text search
 func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	start := time.Now()
+
 	// Apply query timeout for text search operations
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
@@ -561,6 +583,8 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 	if err != nil {
 		// Log the error for debugging, then fall back to ILIKE search
 		log.Warn().Err(err).Str("query", req.Query).Msg("Full-text search failed, falling back to ILIKE")
+		duration := time.Since(start).Seconds()
+		metrics.RecordVectorSearch("text_search", duration, 0, err)
 		return r.searchByILike(ctx, req)
 	}
 	defer rows.Close()
@@ -576,6 +600,8 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 			&d.CreatedAt, &rank,
 		)
 		if err != nil {
+			duration := time.Since(start).Seconds()
+			metrics.RecordVectorSearch("text_search", duration, len(results), err)
 			return nil, err
 		}
 		results = append(results, SearchResult{
@@ -586,9 +612,13 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 
 	// If no results from full-text search, try ILIKE
 	if len(results) == 0 && req.Query != "" {
+		duration := time.Since(start).Seconds()
+		metrics.RecordVectorSearch("text_search", duration, 0, nil)
 		return r.searchByILike(ctx, req)
 	}
 
+	duration := time.Since(start).Seconds()
+	metrics.RecordVectorSearch("text_search", duration, len(results), rows.Err())
 	return results, rows.Err()
 }
 

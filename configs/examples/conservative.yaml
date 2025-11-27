@@ -120,6 +120,20 @@ api:
   port: 8081
   orchestrator_url: "http://localhost:8081"
 
+  # Authentication strongly recommended for live trading
+  auth:
+    enabled: true  # Enable for production
+    header_name: "X-API-Key"
+    require_https: true
+
+  # Production CORS - add your actual domains
+  allowed_origins:
+    - "https://cryptofunk.example.com"
+    - "https://dashboard.cryptofunk.example.com"
+    # Development (remove in production)
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+
 monitoring:
   prometheus_port: 9100
   enable_metrics: true

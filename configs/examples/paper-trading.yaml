@@ -125,6 +125,19 @@ api:
   port: 8081
   orchestrator_url: "http://localhost:8081"
 
+  # Authentication (disabled for paper trading/testing)
+  # For production, see main config.yaml for authentication setup
+  auth:
+    enabled: false  # Disabled for easy testing
+    header_name: "X-API-Key"
+    require_https: false  # Disabled for local development
+
+  # CORS for local development
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+    - "http://localhost:8080"
+
 monitoring:
   prometheus_port: 9100
   enable_metrics: true

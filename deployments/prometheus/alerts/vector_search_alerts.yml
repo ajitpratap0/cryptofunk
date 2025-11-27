@@ -1,0 +1,139 @@
+groups:
+  - name: vector_search_performance
+    interval: 15s
+    rules:
+      # High latency alert (P95)
+      - alert: VectorSearchHighLatency
+        expr: histogram_quantile(0.95, rate(cryptofunk_vector_search_latency_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Vector search p95 latency exceeds 2 seconds"
+          description: "The 95th percentile latency for {{ $labels.operation }} vector search is {{ $value | printf \"%.2f\" }}s (threshold: 2s). This may indicate index issues or resource constraints."
+
+      # Critical latency alert (P99)
+      - alert: VectorSearchCriticalLatency
+        expr: histogram_quantile(0.99, rate(cryptofunk_vector_search_latency_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Vector search p99 latency critically high"
+          description: "The 99th percentile latency for {{ $labels.operation }} is {{ $value | printf \"%.2f\" }}s (threshold: 5s). Immediate investigation required."
+
+      # High error rate alert
+      - alert: VectorSearchHighErrorRate
+        expr: |
+          (
+            sum(rate(cryptofunk_vector_search_operations_total{status="error"}[5m])) by (operation)
+            /
+            sum(rate(cryptofunk_vector_search_operations_total[5m])) by (operation)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Vector search error rate exceeds 5%"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.operation }} operations are failing (threshold: 5%). Check database logs and pgvector extension."
+
+      # Critical error rate alert
+      - alert: VectorSearchCriticalErrorRate
+        expr: |
+          (
+            sum(rate(cryptofunk_vector_search_operations_total{status="error"}[5m])) by (operation)
+            /
+            sum(rate(cryptofunk_vector_search_operations_total[5m])) by (operation)
+          ) > 0.2
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Vector search error rate critically high"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.operation }} operations are failing (threshold: 20%). Vector search may be completely broken."
+
+      # No operations alert (possible dead endpoint)
+      - alert: VectorSearchNoOperations
+        expr: sum(rate(cryptofunk_vector_search_operations_total[15m])) == 0
+        for: 30m
+        labels:
+          severity: info
+          component: database
+        annotations:
+          summary: "No vector search operations in last 30 minutes"
+          description: "The vector search endpoints haven't received any traffic. This may be normal during low activity periods, but verify explainability features are working."
+
+      # High query volume (potential abuse or runaway queries)
+      - alert: VectorSearchHighQueryVolume
+        expr: sum(rate(cryptofunk_vector_search_operations_total[5m])) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Vector search query volume is high"
+          description: "{{ $value | printf \"%.1f\" }} vector search operations/sec (threshold: 10/sec). Monitor for potential abuse or inefficient query patterns."
+
+      # Few or zero results consistently (may indicate index issues)
+      - alert: VectorSearchLowResultCount
+        expr: |
+          (
+            sum(rate(cryptofunk_vector_search_results_sum{operation=~"semantic_search|similar_decisions"}[10m]))
+            /
+            sum(rate(cryptofunk_vector_search_results_count{operation=~"semantic_search|similar_decisions"}[10m]))
+          ) < 1
+        for: 15m
+        labels:
+          severity: info
+          component: database
+        annotations:
+          summary: "Vector search returning few results"
+          description: "Average result count for {{ $labels.operation }} is {{ $value | printf \"%.1f\" }} (expected: >1). May indicate sparse data or index issues."
+
+  - name: vector_search_infrastructure
+    interval: 15s
+    rules:
+      # Database connection pool exhaustion (affects all queries including vector search)
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          (
+            cryptofunk_database_connections_active
+            /
+            10
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "{{ $value | humanizePercentage }} of database connections are in use ({{ $value | multiply 10 | printf \"%.0f\" }}/10). Vector search and other queries may be queued."
+
+      # Critical connection pool exhaustion
+      - alert: DatabaseConnectionPoolCritical
+        expr: cryptofunk_database_connections_idle == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "No idle database connections available"
+          description: "All database connections are in use. New queries (including vector search) will be blocked until connections are released."
+
+      # Slow vector search with high active connections (potential lock contention)
+      - alert: VectorSearchSlowWithHighConnections
+        expr: |
+          histogram_quantile(0.95, rate(cryptofunk_vector_search_latency_seconds_bucket[5m])) > 1
+          and
+          cryptofunk_database_connections_active > 8
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow vector search with high connection usage"
+          description: "P95 vector search latency is {{ $value | printf \"%.2f\" }}s with high connection usage. May indicate database contention or resource constraints."

@@ -171,16 +171,38 @@ api:
   host: "0.0.0.0"
   port: 8081
   orchestrator_url: "http://localhost:8081"  # URL for orchestrator control endpoints
-  # CORS allowed origins for API endpoints
-  # Development defaults: localhost:3000 (CRA), localhost:5173 (Vite), localhost:8080 (API)
-  # Production: Set to your actual frontend domain(s)
+
+  # Authentication Configuration
+  # API key authentication protects dashboard and decision endpoints
+  # To enable:
+  #   1. Run migration 009_api_keys.sql (creates api_keys table)
+  #   2. Generate API keys: SELECT * FROM create_api_key('My Key', 'admin', '["read:decisions", "write:feedback"]'::jsonb);
+  #   3. Set auth.enabled = true
+  #   4. Provide API key via X-API-Key header or Authorization: Bearer <key>
+  # Note: If auth is enabled but no valid keys exist, all authenticated endpoints will be inaccessible.
+  #       Create at least one admin key before enabling authentication.
+  auth:
+    enabled: true                # Enable API key authentication (default: false for development)
+    header_name: "X-API-Key"     # Header name for API key (also supports Authorization: Bearer <key>)
+    require_https: true          # Require HTTPS in production (localhost/127.0.0.1 are exempt)
+
+  # CORS Configuration
+  # Controls which origins can access the API from browsers
+  # Development: localhost origins are automatically allowed for testing
+  # Production: When app.environment=production, only HTTPS origins are allowed (HTTP origins are blocked)
+  # How it works:
+  #   - In development mode: All origins below are allowed (including HTTP localhost)
+  #   - In production mode: Only HTTPS origins are allowed; HTTP origins are filtered out
+  #   - Add your production frontend domains here before deploying
   allowed_origins:
-    - "http://localhost:3000"
-    - "http://localhost:5173"
-    - "http://localhost:8080"
-    # Production example:
-    # - "https://cryptofunk.example.com"
-    # - "https://dashboard.cryptofunk.example.com"
+    # Production domains (add your actual domains here)
+    - "https://cryptofunk.example.com"
+    - "https://dashboard.cryptofunk.example.com"
+
+    # Development/Testing (automatically blocked in production)
+    - "http://localhost:3000"    # Create React App default
+    - "http://localhost:5173"    # Vite default
+    - "http://localhost:8080"    # API docs/testing
 
 monitoring:
   prometheus_port: 9100
