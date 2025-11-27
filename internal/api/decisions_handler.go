@@ -83,7 +83,8 @@ func (h *DecisionHandler) RegisterRoutesWithRateLimiterAndAuth(router *gin.Route
 		decisions.GET("", applyRead(h.ListDecisions)...)
 		decisions.GET("/stats", applyRead(h.GetStats)...) // Must be before :id to avoid conflict
 		decisions.GET("/:id", applyRead(h.GetDecision)...)
-		decisions.GET("/:id/similar", applyRead(h.GetSimilarDecisions)...)
+		// Similar endpoint uses vector search (expensive), apply search middleware
+		decisions.GET("/:id/similar", applySearch(h.GetSimilarDecisions)...)
 
 		// Search endpoint (POST but read-only, apply search middleware for rate limiting)
 		// Search is more expensive (vector operations) so has separate rate limits
@@ -139,14 +140,24 @@ func (h *DecisionHandler) ListDecisions(c *gin.Context) {
 
 	// Parse dates
 	if fromDateStr := c.Query("from_date"); fromDateStr != "" {
-		if fromDate, err := time.Parse(time.RFC3339, fromDateStr); err == nil {
-			filter.FromDate = &fromDate
+		fromDate, err := time.Parse(time.RFC3339, fromDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid from_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.FromDate = &fromDate
 	}
 	if toDateStr := c.Query("to_date"); toDateStr != "" {
-		if toDate, err := time.Parse(time.RFC3339, toDateStr); err == nil {
-			filter.ToDate = &toDate
+		toDate, err := time.Parse(time.RFC3339, toDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid to_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.ToDate = &toDate
 	}
 
 	// Fetch decisions
@@ -226,12 +237,23 @@ func (h *DecisionHandler) GetSimilarDecisions(c *gin.Context) {
 	// Parse limit
 	limit := DefaultSimilarLimit
 	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
-			if parsedLimit > MaxSimilarLimit {
-				parsedLimit = MaxSimilarLimit
-			}
-			limit = parsedLimit
+		parsedLimit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid limit parameter, must be an integer",
+			})
+			return
 		}
+		if parsedLimit < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Limit must be at least 1",
+			})
+			return
+		}
+		if parsedLimit > MaxSimilarLimit {
+			parsedLimit = MaxSimilarLimit
+		}
+		limit = parsedLimit
 	}
 
 	// Find similar decisions
@@ -269,14 +291,24 @@ func (h *DecisionHandler) GetStats(c *gin.Context) {
 
 	// Parse dates
 	if fromDateStr := c.Query("from_date"); fromDateStr != "" {
-		if fromDate, err := time.Parse(time.RFC3339, fromDateStr); err == nil {
-			filter.FromDate = &fromDate
+		fromDate, err := time.Parse(time.RFC3339, fromDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid from_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.FromDate = &fromDate
 	}
 	if toDateStr := c.Query("to_date"); toDateStr != "" {
-		if toDate, err := time.Parse(time.RFC3339, toDateStr); err == nil {
-			filter.ToDate = &toDate
+		toDate, err := time.Parse(time.RFC3339, toDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid to_date format, must be RFC3339",
+			})
+			return
 		}
+		filter.ToDate = &toDate
 	}
 
 	// Fetch stats

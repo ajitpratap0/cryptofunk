@@ -1,17 +1,23 @@
 import React from 'react';
 import { RefreshCw, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { useDecisionStats } from '../hooks/useDecisions';
-import LoadingSpinner from './LoadingSpinner';
+import { SkeletonStatsView } from './Skeleton';
+
+// Helper functions moved outside component to prevent re-creation on every render
+const getPnLColor = (pnl: number): string => {
+  return pnl >= 0 ? 'text-green-400' : 'text-red-400';
+};
+
+const formatPnL = (pnl: number): string => {
+  const sign = pnl >= 0 ? '+' : '';
+  return `${sign}$${pnl.toFixed(2)}`;
+};
 
 const StatsView: React.FC = () => {
   const { data: stats, isLoading, error, refetch } = useDecisionStats();
 
   if (isLoading) {
-    return (
-      <div className="bg-slate-800 p-8 rounded-lg">
-        <LoadingSpinner />
-      </div>
-    );
+    return <SkeletonStatsView />;
   }
 
   if (error || !stats) {
@@ -30,15 +36,6 @@ const StatsView: React.FC = () => {
   const pendingCount = stats.by_outcome?.['PENDING'] || 0;
 
   const successRate = stats.success_rate ? (stats.success_rate * 100).toFixed(1) : '0.0';
-
-  const getPnLColor = (pnl: number) => {
-    return pnl >= 0 ? 'text-green-400' : 'text-red-400';
-  };
-
-  const formatPnL = (pnl: number) => {
-    const sign = pnl >= 0 ? '+' : '';
-    return `${sign}$${pnl.toFixed(2)}`;
-  };
 
   // Calculate chart heights for outcome distribution
   const total = stats.total_decisions || 1;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { useDecision } from '../hooks/useDecisions';
 import LoadingSpinner from './LoadingSpinner';
@@ -17,6 +17,60 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
   const { data: decision, isLoading, error } = useDecision(decisionId || '');
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [responseExpanded, setResponseExpanded] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Handle escape key to close modal
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
+  // Focus trap implementation
+  useEffect(() => {
+    if (!modalRef.current || isLoading) return;
+
+    const modal = modalRef.current;
+    const focusableElements = modal.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstFocusable = focusableElements[0];
+    const lastFocusable = focusableElements[focusableElements.length - 1];
+
+    // Focus the close button when modal opens
+    closeButtonRef.current?.focus();
+
+    const handleTabKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+
+      if (event.shiftKey) {
+        // Shift + Tab
+        if (document.activeElement === firstFocusable) {
+          event.preventDefault();
+          lastFocusable?.focus();
+        }
+      } else {
+        // Tab
+        if (document.activeElement === lastFocusable) {
+          event.preventDefault();
+          firstFocusable?.focus();
+        }
+      }
+    };
+
+    modal.addEventListener('keydown', handleTabKey);
+    return () => {
+      modal.removeEventListener('keydown', handleTabKey);
+    };
+  }, [isLoading]);
 
   if (!decisionId) {
     return null;
@@ -24,7 +78,12 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
 
   if (isLoading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Loading decision details"
+      >
         <div className="bg-slate-800 rounded-lg p-8 max-w-4xl w-full mx-4">
           <LoadingSpinner />
         </div>
@@ -34,14 +93,20 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
 
   if (error || !decision) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Error loading decision"
+      >
         <div className="bg-slate-800 rounded-lg p-8 max-w-4xl w-full mx-4">
-          <div className="text-red-400">
+          <div className="text-red-400" role="alert">
             Error loading decision: {error?.message || 'Not found'}
           </div>
           <button
             onClick={onClose}
-            className="mt-4 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded"
+            className="mt-4 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close modal"
           >
             Close
           </button>
@@ -79,16 +144,25 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-slate-800 rounded-lg shadow-xl max-w-4xl w-full my-8">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="decision-detail-title"
+    >
+      <div ref={modalRef} className="bg-slate-800 rounded-lg shadow-xl max-w-4xl w-full my-8">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-700">
-          <h2 className="text-2xl font-bold text-white">Decision Details</h2>
+          <h2 id="decision-detail-title" className="text-2xl font-bold text-white">
+            Decision Details
+          </h2>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
-            className="p-2 hover:bg-slate-700 rounded-full transition-colors"
+            className="p-2 hover:bg-slate-700 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close modal"
           >
-            <X className="w-5 h-5 text-slate-400" />
+            <X className="w-5 h-5 text-slate-400" aria-hidden="true" />
           </button>
         </div>
 
@@ -172,17 +246,20 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
           <div className="border border-slate-700 rounded-lg overflow-hidden">
             <button
               onClick={() => setPromptExpanded(!promptExpanded)}
-              className="w-full flex items-center justify-between p-4 bg-slate-900 hover:bg-slate-800 transition-colors"
+              className="w-full flex items-center justify-between p-4 bg-slate-900 hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+              aria-expanded={promptExpanded}
+              aria-controls="prompt-content"
+              aria-label={promptExpanded ? 'Collapse prompt' : 'Expand prompt'}
             >
               <span className="font-semibold text-white">Prompt</span>
               {promptExpanded ? (
-                <ChevronUp className="w-5 h-5 text-slate-400" />
+                <ChevronUp className="w-5 h-5 text-slate-400" aria-hidden="true" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-slate-400" />
+                <ChevronDown className="w-5 h-5 text-slate-400" aria-hidden="true" />
               )}
             </button>
             {promptExpanded && (
-              <div className="p-4 bg-slate-900/50">
+              <div id="prompt-content" className="p-4 bg-slate-900/50">
                 <pre className="text-sm text-slate-300 whitespace-pre-wrap font-mono bg-slate-900 p-4 rounded max-h-96 overflow-y-auto">
                   {decision.prompt}
                 </pre>
@@ -194,17 +271,20 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
           <div className="border border-slate-700 rounded-lg overflow-hidden">
             <button
               onClick={() => setResponseExpanded(!responseExpanded)}
-              className="w-full flex items-center justify-between p-4 bg-slate-900 hover:bg-slate-800 transition-colors"
+              className="w-full flex items-center justify-between p-4 bg-slate-900 hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset"
+              aria-expanded={responseExpanded}
+              aria-controls="response-content"
+              aria-label={responseExpanded ? 'Collapse response' : 'Expand response'}
             >
               <span className="font-semibold text-white">Response</span>
               {responseExpanded ? (
-                <ChevronUp className="w-5 h-5 text-slate-400" />
+                <ChevronUp className="w-5 h-5 text-slate-400" aria-hidden="true" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-slate-400" />
+                <ChevronDown className="w-5 h-5 text-slate-400" aria-hidden="true" />
               )}
             </button>
             {responseExpanded && (
-              <div className="p-4 bg-slate-900/50">
+              <div id="response-content" className="p-4 bg-slate-900/50">
                 <pre className="text-sm text-slate-300 whitespace-pre-wrap font-mono bg-slate-900 p-4 rounded max-h-96 overflow-y-auto">
                   {decision.response}
                 </pre>
@@ -217,14 +297,16 @@ const DecisionDetail: React.FC<DecisionDetailProps> = ({
         <div className="flex items-center justify-between p-6 border-t border-slate-700 bg-slate-900">
           <button
             onClick={() => onFindSimilar && onFindSimilar(decision.id)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Find decisions similar to this one"
           >
-            <Search className="w-4 h-4" />
+            <Search className="w-4 h-4" aria-hidden="true" />
             Find Similar
           </button>
           <button
             onClick={onClose}
-            className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+            className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500"
+            aria-label="Close modal"
           >
             Close
           </button>

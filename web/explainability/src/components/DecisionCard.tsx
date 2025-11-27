@@ -8,58 +8,56 @@ export interface DecisionCardProps {
   onClick: () => void;
 }
 
+// Helper functions moved outside component to prevent re-creation on every render
+const getConfidenceColor = (confidence: number): string => {
+  if (confidence > 0.7) return 'bg-green-500';
+  if (confidence > 0.5) return 'bg-yellow-500';
+  return 'bg-red-500';
+};
+
+const getConfidenceTextColor = (confidence: number): string => {
+  if (confidence > 0.7) return 'text-green-400';
+  if (confidence > 0.5) return 'text-yellow-400';
+  return 'text-red-400';
+};
+
+const getOutcomeBadge = (outcome?: string) => {
+  switch (outcome) {
+    case 'SUCCESS':
+      return (
+        <span className="px-2 py-1 bg-green-900/30 text-green-400 text-xs font-medium rounded border border-green-700">
+          Success
+        </span>
+      );
+    case 'FAILURE':
+      return (
+        <span className="px-2 py-1 bg-red-900/30 text-red-400 text-xs font-medium rounded border border-red-700">
+          Failure
+        </span>
+      );
+    default:
+      return (
+        <span className="px-2 py-1 bg-slate-700 text-slate-400 text-xs font-medium rounded border border-slate-600">
+          Pending
+        </span>
+      );
+  }
+};
+
+const getDecisionIcon = (decisionType?: string) => {
+  const type = decisionType?.toUpperCase() || '';
+  if (type.includes('BUY')) {
+    return <TrendingUp className="w-5 h-5 text-green-400" />;
+  }
+  if (type.includes('SELL')) {
+    return <TrendingDown className="w-5 h-5 text-red-400" />;
+  }
+  return <Activity className="w-5 h-5 text-blue-400" />;
+};
+
 function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
   const confidence = decision.confidence ?? 0;
   const confidencePercent = Math.round(confidence * 100);
-
-  // Determine confidence color
-  const getConfidenceColor = () => {
-    if (confidence > 0.7) return 'bg-green-500';
-    if (confidence > 0.5) return 'bg-yellow-500';
-    return 'bg-red-500';
-  };
-
-  const getConfidenceTextColor = () => {
-    if (confidence > 0.7) return 'text-green-400';
-    if (confidence > 0.5) return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
-  // Determine outcome badge
-  const getOutcomeBadge = () => {
-    switch (decision.outcome) {
-      case 'SUCCESS':
-        return (
-          <span className="px-2 py-1 bg-green-900/30 text-green-400 text-xs font-medium rounded border border-green-700">
-            Success
-          </span>
-        );
-      case 'FAILURE':
-        return (
-          <span className="px-2 py-1 bg-red-900/30 text-red-400 text-xs font-medium rounded border border-red-700">
-            Failure
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2 py-1 bg-slate-700 text-slate-400 text-xs font-medium rounded border border-slate-600">
-            Pending
-          </span>
-        );
-    }
-  };
-
-  // Determine decision type icon
-  const getDecisionIcon = () => {
-    const type = decision.decision_type?.toUpperCase() || '';
-    if (type.includes('BUY')) {
-      return <TrendingUp className="w-5 h-5 text-green-400" />;
-    }
-    if (type.includes('SELL')) {
-      return <TrendingDown className="w-5 h-5 text-red-400" />;
-    }
-    return <Activity className="w-5 h-5 text-blue-400" />;
-  };
 
   const relativeTime = formatDistanceToNow(new Date(decision.created_at), {
     addSuffix: true,
@@ -90,7 +88,7 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
       <div className="flex items-start justify-between gap-4">
         {/* Left: Icon and Main Info */}
         <div className="flex items-start gap-3 flex-1">
-          <div className="mt-1">{getDecisionIcon()}</div>
+          <div className="mt-1">{getDecisionIcon(decision.decision_type)}</div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-slate-100">
@@ -112,7 +110,7 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
         </div>
 
         {/* Right: Outcome Badge */}
-        <div className="flex-shrink-0">{getOutcomeBadge()}</div>
+        <div className="flex-shrink-0">{getOutcomeBadge(decision.outcome)}</div>
       </div>
 
       {/* Confidence Bar */}
@@ -121,7 +119,7 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
           <span className="text-slate-400" id={`confidence-label-${decision.id}`}>
             Confidence
           </span>
-          <span className={`font-semibold ${getConfidenceTextColor()}`}>
+          <span className={`font-semibold ${getConfidenceTextColor(confidence)}`}>
             {confidencePercent}%
           </span>
         </div>
@@ -134,7 +132,7 @@ function DecisionCard({ decision, selected, onClick }: DecisionCardProps) {
           aria-labelledby={`confidence-label-${decision.id}`}
         >
           <div
-            className={`h-full ${getConfidenceColor()} transition-all duration-300`}
+            className={`h-full ${getConfidenceColor(confidence)} transition-all duration-300`}
             style={{ width: `${confidencePercent}%` }}
           />
         </div>

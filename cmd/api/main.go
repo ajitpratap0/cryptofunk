@@ -97,6 +97,9 @@ func main() {
 }
 
 func (s *APIServer) setupMiddleware() {
+	// Security headers middleware (applies to all responses)
+	s.router.Use(securityHeadersMiddleware())
+
 	// CORS configuration - use configured origins or defaults for development
 	allowedOrigins := s.config.API.AllowedOrigins
 	if len(allowedOrigins) == 0 {
@@ -1367,7 +1370,11 @@ func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
 						Msg("WebSocket connection rejected - missing origin header in production")
 					return false
 				}
-				// Allow in development for testing tools like curl, wscat
+				// In development mode, allow connections without Origin header.
+				// This enables testing with non-browser tools like wscat, Postman,
+				// curl, or other CLI clients that don't send Origin headers.
+				// In production, this check is more strict and requires a valid Origin
+				// from the allowed domains list to prevent CSRF attacks.
 				return true
 			}
 
@@ -1515,5 +1522,21 @@ func requestLogger() gin.HandlerFunc {
 			Dur("latency", latency).
 			Str("ip", c.ClientIP()).
 			Msg("HTTP request")
+	}
+}
+
+// securityHeadersMiddleware adds security headers to all responses
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Prevent MIME type sniffing
+		c.Header("X-Content-Type-Options", "nosniff")
+
+		// Prevent clickjacking attacks
+		c.Header("X-Frame-Options", "DENY")
+
+		// Enable XSS protection in older browsers (most modern browsers ignore this)
+		c.Header("X-XSS-Protection", "1; mode=block")
+
+		c.Next()
 	}
 }

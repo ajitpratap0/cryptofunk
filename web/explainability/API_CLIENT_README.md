@@ -269,7 +269,7 @@ function RefreshButton() {
 
 ## Configuration
 
-The API client reads the base URL from the environment (Vite convention):
+The API client reads the base URL from the environment variable (Vite convention):
 
 ```env
 VITE_API_BASE_URL=http://localhost:8080
