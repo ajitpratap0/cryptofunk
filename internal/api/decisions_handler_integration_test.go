@@ -31,7 +31,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create test repository and handler
-	repo := NewDecisionRepository(tc.Pool)
+	repo := NewDecisionRepository(tc.DB.Pool())
 	handler := NewDecisionHandler(repo)
 
 	// Setup Gin router
@@ -41,7 +41,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 
 	// Insert test data
 	ctx := context.Background()
-	testDecisions := insertTestDecisions(t, tc.Pool, ctx)
+	testDecisions := insertTestDecisions(t, tc.DB.Pool(), ctx)
 
 	t.Run("ListDecisions", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions", nil)
