@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -417,4 +418,40 @@ func (tc *PostgresContainer) ExecuteSQL(sql string) error {
 
 	_, err := pool.Exec(ctx, sql)
 	return err
+}
+
+// StartNATSServer starts an embedded NATS server for testing
+// Returns a NATS server instance that should be shut down with Shutdown()
+func StartNATSServer(t *testing.T) *server.Server {
+	t.Helper()
+
+	// Create NATS server options
+	opts := &server.Options{
+		Host: "127.0.0.1",
+		Port: -1, // Random port
+	}
+
+	// Create and start NATS server
+	ns, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("Failed to create NATS server: %v", err)
+	}
+
+	// Start server in background
+	go ns.Start()
+
+	// Wait for server to be ready
+	if !ns.ReadyForConnections(5 * time.Second) {
+		t.Fatal("NATS server failed to start within timeout")
+	}
+
+	t.Logf("NATS server started on %s", ns.ClientURL())
+
+	// Register cleanup
+	t.Cleanup(func() {
+		ns.Shutdown()
+		ns.WaitForShutdown()
+	})
+
+	return ns
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -75,8 +76,9 @@ func TestTechnicalIndicatorsServer_ListTools(t *testing.T) {
 }
 
 func TestCalculateRSI_ValidInput(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil, // Will be set in test
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -107,8 +109,9 @@ func TestCalculateRSI_ValidInput(t *testing.T) {
 }
 
 func TestCalculateRSI_EmptyPrices(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -134,8 +137,9 @@ func TestCalculateRSI_EmptyPrices(t *testing.T) {
 }
 
 func TestCalculateRSI_InsufficientData(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -161,8 +165,9 @@ func TestCalculateRSI_InsufficientData(t *testing.T) {
 }
 
 func TestCalculateRSI_MissingPrices(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -188,8 +193,9 @@ func TestCalculateRSI_MissingPrices(t *testing.T) {
 }
 
 func TestCalculateMACD_ValidInput(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	// Generate 50 prices for MACD calculation
@@ -223,8 +229,9 @@ func TestCalculateMACD_ValidInput(t *testing.T) {
 }
 
 func TestCalculateMACD_InsufficientData(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -252,8 +259,9 @@ func TestCalculateMACD_InsufficientData(t *testing.T) {
 }
 
 func TestCalculateBollingerBands_ValidInput(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	// Generate 30 prices
@@ -286,8 +294,9 @@ func TestCalculateBollingerBands_ValidInput(t *testing.T) {
 }
 
 func TestCalculateBollingerBands_DefaultParams(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	prices := make([]interface{}, 30)
@@ -318,8 +327,9 @@ func TestCalculateBollingerBands_DefaultParams(t *testing.T) {
 }
 
 func TestCalculateEMA_ValidInput(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	prices := make([]interface{}, 20)
@@ -350,8 +360,9 @@ func TestCalculateEMA_ValidInput(t *testing.T) {
 }
 
 func TestCalculateEMA_MissingPeriod(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	prices := make([]interface{}, 20)
@@ -382,8 +393,9 @@ func TestCalculateEMA_MissingPeriod(t *testing.T) {
 }
 
 func TestCalculateADX_ValidInput(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	// Generate 30 OHLC data points
@@ -422,8 +434,9 @@ func TestCalculateADX_ValidInput(t *testing.T) {
 }
 
 func TestCalculateADX_MismatchedArrayLengths(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -451,8 +464,9 @@ func TestCalculateADX_MismatchedArrayLengths(t *testing.T) {
 }
 
 func TestCalculateADX_MissingClose(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -497,8 +511,9 @@ func TestInvalidMethod(t *testing.T) {
 }
 
 func TestInvalidToolName(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -584,8 +599,9 @@ func TestStdioIntegration(t *testing.T) {
 }
 
 func TestInvalidPriceType(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	params := map[string]interface{}{
@@ -611,8 +627,9 @@ func TestInvalidPriceType(t *testing.T) {
 }
 
 func TestNegativePeriod(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	prices := make([]interface{}, 20)
@@ -643,8 +660,9 @@ func TestNegativePeriod(t *testing.T) {
 }
 
 func TestZeroPeriod(t *testing.T) {
+	service := indicators.NewService()
 	server := &MCPServer{
-		service: nil,
+		service: service,
 	}
 
 	prices := make([]interface{}, 20)

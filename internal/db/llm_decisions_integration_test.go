@@ -23,6 +23,10 @@ const (
 
 // TestLLMDecisionBasicCRUDWithTestcontainers tests core CRUD operations for LLM decisions
 func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -227,6 +231,10 @@ func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 
 // TestLLMDecisionQueryMethodsWithTestcontainers tests query and filter operations
 func TestLLMDecisionQueryMethodsWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -468,6 +476,10 @@ func TestLLMDecisionQueryMethodsWithTestcontainers(t *testing.T) {
 
 // TestLLMDecisionConcurrencyWithTestcontainers tests concurrent operations
 func TestLLMDecisionConcurrencyWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -713,6 +725,10 @@ func TestLLMDecisionConcurrencyWithTestcontainers(t *testing.T) {
 
 // TestLLMDecisionEdgeCases tests edge cases and special scenarios
 func TestLLMDecisionEdgeCases(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)

@@ -35,6 +35,7 @@ func createTestRiskAgent() *RiskAgent {
 	agent := &RiskAgent{
 		config:      config,
 		riskService: risk.NewService(),
+		calculator:  risk.NewCalculator(nil), // No DB needed for tests
 		beliefs: &RiskBeliefs{
 			currentPositions:  make([]Position, 0),
 			equityCurve:       make([]float64, 0),
@@ -81,7 +82,8 @@ func TestNewRiskAgent(t *testing.T) {
 		MaxTotalExposure: 50000.0,
 	}
 
-	agent, err := NewRiskAgent(config, nil, risk.NewService())
+	calculator := risk.NewCalculator(nil) // No DB needed for basic initialization test
+	agent, err := NewRiskAgent(config, nil, risk.NewService(), calculator)
 	require.NoError(t, err)
 	assert.NotNil(t, agent)
 	assert.Equal(t, "test-agent", agent.config.AgentName)
@@ -89,6 +91,7 @@ func TestNewRiskAgent(t *testing.T) {
 	assert.NotNil(t, agent.beliefs)
 	assert.NotNil(t, agent.desires)
 	assert.NotNil(t, agent.intentions)
+	assert.NotNil(t, agent.calculator)
 }
 
 func TestRiskAgentInitialization(t *testing.T) {

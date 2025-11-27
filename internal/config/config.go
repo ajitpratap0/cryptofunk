@@ -1,9 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 )
 
@@ -180,6 +182,7 @@ type MonitoringConfig struct {
 }
 
 // Load loads configuration from file and environment variables
+// If Vault is enabled, secrets are loaded from Vault; otherwise falls back to environment variables
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
@@ -212,6 +215,19 @@ func Load(configPath string) (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Load secrets from Vault if enabled (with fallback to env vars)
+	ctx := context.Background()
+	vaultCfg := GetVaultConfigFromEnv()
+	if vaultCfg.Enabled {
+		log.Info().Msg("Vault integration enabled - loading secrets from Vault")
+		if err := LoadSecretsFromVault(ctx, &cfg, vaultCfg); err != nil {
+			log.Warn().Err(err).Msg("Failed to load secrets from Vault - falling back to environment variables")
+			// Continue with env vars as fallback
+		}
+	} else {
+		log.Info().Msg("Vault integration disabled - using environment variables for secrets")
 	}
 
 	// Validate configuration using comprehensive validation

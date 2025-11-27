@@ -294,6 +294,7 @@ kubectl apply -f base/deployment-redis.yaml
 kubectl apply -f base/deployment-nats.yaml
 kubectl apply -f base/deployment-bifrost.yaml
 kubectl apply -f base/deployment-prometheus.yaml
+kubectl apply -f base/deployment-alertmanager.yaml
 kubectl apply -f base/deployment-grafana.yaml
 
 # Wait for infrastructure pods

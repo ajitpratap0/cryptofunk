@@ -8,11 +8,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+	"github.com/sony/gobreaker"
+
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
 
 // DB wraps the PostgreSQL connection pool
 type DB struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	circuitBreaker *risk.CircuitBreakerManager
 }
 
 // New creates a new database connection pool
@@ -50,7 +54,10 @@ func New(ctx context.Context) (*DB, error) {
 
 	log.Info().Msg("Database connection pool created successfully")
 
-	return &DB{pool: pool}, nil
+	return &DB{
+		pool:           pool,
+		circuitBreaker: risk.NewCircuitBreakerManager(),
+	}, nil
 }
 
 // Close closes the database connection pool
@@ -82,4 +89,39 @@ func (db *DB) Health(ctx context.Context) error {
 // SetPool sets the connection pool (used by tests)
 func (db *DB) SetPool(pool *pgxpool.Pool) {
 	db.pool = pool
+}
+
+// ExecuteWithCircuitBreaker executes a database operation with circuit breaker protection
+// This wraps database calls to prevent cascading failures during database outages
+func (db *DB) ExecuteWithCircuitBreaker(operation func() (interface{}, error)) (interface{}, error) {
+	if db.circuitBreaker == nil {
+		// Fallback if circuit breaker is not initialized
+		return operation()
+	}
+
+	result, err := db.circuitBreaker.Database().Execute(operation)
+	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			db.circuitBreaker.Metrics().RecordRequest("database", false)
+			return nil, fmt.Errorf("database circuit breaker is open, service unavailable")
+		}
+		db.circuitBreaker.Metrics().RecordRequest("database", false)
+		return nil, err
+	}
+
+	db.circuitBreaker.Metrics().RecordRequest("database", true)
+	return result, nil
+}
+
+// GetCircuitBreaker returns the circuit breaker manager for this database
+// This allows external code to use the same circuit breaker instance
+func (db *DB) GetCircuitBreaker() *risk.CircuitBreakerManager {
+	return db.circuitBreaker
+}
+
+// SetCircuitBreaker sets a custom circuit breaker manager
+// This is useful for sharing circuit breakers across components
+func (db *DB) SetCircuitBreaker(cb *risk.CircuitBreakerManager) {
+	db.circuitBreaker = cb
 }

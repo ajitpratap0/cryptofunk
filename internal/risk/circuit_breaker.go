@@ -125,6 +125,76 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 	return manager
 }
 
+// NewPassthroughCircuitBreakerManager creates a circuit breaker manager that never trips.
+// This is useful for testing scenarios where you want to test other components without
+// the circuit breaker interfering.
+func NewPassthroughCircuitBreakerManager() *CircuitBreakerManager {
+	// Register metrics only once
+	if !metricsRegistered {
+		globalMetrics = &CircuitBreakerMetrics{
+			state: promauto.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Name: "circuit_breaker_state",
+					Help: "Circuit breaker state (0=closed, 1=open, 2=half_open)",
+				},
+				[]string{"service"},
+			),
+			requests: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "circuit_breaker_requests_total",
+					Help: "Total number of requests through circuit breaker",
+				},
+				[]string{"service", "result"},
+			),
+			failures: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "circuit_breaker_failures_total",
+					Help: "Total number of failures tracked by circuit breaker",
+				},
+				[]string{"service"},
+			),
+		}
+		metricsRegistered = true
+	}
+
+	metrics := globalMetrics
+
+	manager := &CircuitBreakerManager{
+		metrics: metrics,
+	}
+
+	// Passthrough circuit breaker - never trips
+	neverTrip := func(counts gobreaker.Counts) bool {
+		return false // Never trip
+	}
+
+	manager.exchange = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "exchange_passthrough",
+		MaxRequests: 1000,
+		Interval:    0,
+		Timeout:     1 * time.Millisecond,
+		ReadyToTrip: neverTrip,
+	})
+
+	manager.llm = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "llm_passthrough",
+		MaxRequests: 1000,
+		Interval:    0,
+		Timeout:     1 * time.Millisecond,
+		ReadyToTrip: neverTrip,
+	})
+
+	manager.database = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "database_passthrough",
+		MaxRequests: 1000,
+		Interval:    0,
+		Timeout:     1 * time.Millisecond,
+		ReadyToTrip: neverTrip,
+	})
+
+	return manager
+}
+
 // Exchange returns the exchange circuit breaker
 func (m *CircuitBreakerManager) Exchange() *gobreaker.CircuitBreaker {
 	return m.exchange

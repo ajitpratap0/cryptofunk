@@ -15,6 +15,10 @@ import (
 
 // TestOrderHelperMethodsWithTestcontainers tests uncovered order helper methods
 func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -246,6 +250,10 @@ func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 
 // TestPositionHelperMethodsWithTestcontainers tests uncovered position helper methods
 func TestPositionHelperMethodsWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)

@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing symbol", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"side":     "buy",
 			"quantity": 1.0,
 		})
@@ -52,7 +53,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Empty symbol", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "",
 			"side":     "buy",
 			"quantity": 1.0,
@@ -63,7 +64,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Missing side", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"quantity": 1.0,
 		})
@@ -73,7 +74,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Invalid side", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "invalid",
 			"quantity": 1.0,
@@ -84,7 +85,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Missing quantity", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol": "BTCUSDT",
 			"side":   "buy",
 		})
@@ -94,7 +95,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Zero quantity", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 0.0,
@@ -105,7 +106,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Negative quantity", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": -1.0,
@@ -116,7 +117,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Invalid quantity type (string)", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": "not_a_number",
@@ -127,7 +128,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Quantity as integer", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 1,
@@ -137,7 +138,7 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Quantity as int64", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": int64(1),
@@ -152,7 +153,7 @@ func TestPlaceLimitOrder_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing symbol", func(t *testing.T) {
-		result, err := service.PlaceLimitOrder(map[string]interface{}{
+		result, err := service.PlaceLimitOrder(context.Background(), map[string]interface{}{
 			"side":     "buy",
 			"quantity": 1.0,
 			"price":    50000.0,
@@ -163,7 +164,7 @@ func TestPlaceLimitOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Missing price", func(t *testing.T) {
-		result, err := service.PlaceLimitOrder(map[string]interface{}{
+		result, err := service.PlaceLimitOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 1.0,
@@ -174,7 +175,7 @@ func TestPlaceLimitOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Zero price", func(t *testing.T) {
-		result, err := service.PlaceLimitOrder(map[string]interface{}{
+		result, err := service.PlaceLimitOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 1.0,
@@ -186,7 +187,7 @@ func TestPlaceLimitOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Negative price", func(t *testing.T) {
-		result, err := service.PlaceLimitOrder(map[string]interface{}{
+		result, err := service.PlaceLimitOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 1.0,
@@ -198,7 +199,7 @@ func TestPlaceLimitOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Price as integer", func(t *testing.T) {
-		result, err := service.PlaceLimitOrder(map[string]interface{}{
+		result, err := service.PlaceLimitOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 1.0,
@@ -214,14 +215,14 @@ func TestCancelOrder_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing order_id", func(t *testing.T) {
-		result, err := service.CancelOrder(map[string]interface{}{})
+		result, err := service.CancelOrder(context.Background(), map[string]interface{}{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "order_id")
 		assert.Nil(t, result)
 	})
 
 	t.Run("Empty order_id", func(t *testing.T) {
-		result, err := service.CancelOrder(map[string]interface{}{
+		result, err := service.CancelOrder(context.Background(), map[string]interface{}{
 			"order_id": "",
 		})
 		assert.Error(t, err)
@@ -230,7 +231,7 @@ func TestCancelOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Non-existent order_id", func(t *testing.T) {
-		result, err := service.CancelOrder(map[string]interface{}{
+		result, err := service.CancelOrder(context.Background(), map[string]interface{}{
 			"order_id": "non_existent_order",
 		})
 		assert.Error(t, err)
@@ -244,14 +245,14 @@ func TestGetOrderStatus_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing order_id", func(t *testing.T) {
-		result, err := service.GetOrderStatus(map[string]interface{}{})
+		result, err := service.GetOrderStatus(context.Background(), map[string]interface{}{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "order_id")
 		assert.Nil(t, result)
 	})
 
 	t.Run("Non-existent order_id", func(t *testing.T) {
-		result, err := service.GetOrderStatus(map[string]interface{}{
+		result, err := service.GetOrderStatus(context.Background(), map[string]interface{}{
 			"order_id": "non_existent_order",
 		})
 		assert.Error(t, err)
@@ -265,14 +266,14 @@ func TestGetPositionBySymbol(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing symbol", func(t *testing.T) {
-		result, err := service.GetPositionBySymbol(map[string]interface{}{})
+		result, err := service.GetPositionBySymbol(context.Background(), map[string]interface{}{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "symbol")
 		assert.Nil(t, result)
 	})
 
 	t.Run("Non-existent symbol", func(t *testing.T) {
-		result, err := service.GetPositionBySymbol(map[string]interface{}{
+		result, err := service.GetPositionBySymbol(context.Background(), map[string]interface{}{
 			"symbol": "NONEXISTENT",
 		})
 		assert.NoError(t, err)
@@ -290,7 +291,7 @@ func TestGetPositions(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Get positions (empty)", func(t *testing.T) {
-		result, err := service.GetPositions(map[string]interface{}{})
+		result, err := service.GetPositions(context.Background(), map[string]interface{}{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -305,14 +306,14 @@ func TestUpdatePositionPnL_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing prices", func(t *testing.T) {
-		result, err := service.UpdatePositionPnL(map[string]interface{}{})
+		result, err := service.UpdatePositionPnL(context.Background(), map[string]interface{}{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "prices")
 		assert.Nil(t, result)
 	})
 
 	t.Run("Invalid prices type", func(t *testing.T) {
-		result, err := service.UpdatePositionPnL(map[string]interface{}{
+		result, err := service.UpdatePositionPnL(context.Background(), map[string]interface{}{
 			"prices": "not_a_map",
 		})
 		assert.Error(t, err)
@@ -321,7 +322,7 @@ func TestUpdatePositionPnL_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Invalid price value", func(t *testing.T) {
-		result, err := service.UpdatePositionPnL(map[string]interface{}{
+		result, err := service.UpdatePositionPnL(context.Background(), map[string]interface{}{
 			"prices": map[string]interface{}{
 				"BTCUSDT": "not_a_number",
 			},
@@ -332,7 +333,7 @@ func TestUpdatePositionPnL_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Valid prices with float64", func(t *testing.T) {
-		result, err := service.UpdatePositionPnL(map[string]interface{}{
+		result, err := service.UpdatePositionPnL(context.Background(), map[string]interface{}{
 			"prices": map[string]interface{}{
 				"BTCUSDT": 50000.0,
 				"ETHUSDT": 3000.0,
@@ -343,7 +344,7 @@ func TestUpdatePositionPnL_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Valid prices with int", func(t *testing.T) {
-		result, err := service.UpdatePositionPnL(map[string]interface{}{
+		result, err := service.UpdatePositionPnL(context.Background(), map[string]interface{}{
 			"prices": map[string]interface{}{
 				"BTCUSDT": 50000,
 			},
@@ -353,7 +354,7 @@ func TestUpdatePositionPnL_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Valid prices with int64", func(t *testing.T) {
-		result, err := service.UpdatePositionPnL(map[string]interface{}{
+		result, err := service.UpdatePositionPnL(context.Background(), map[string]interface{}{
 			"prices": map[string]interface{}{
 				"BTCUSDT": int64(50000),
 			},
@@ -368,7 +369,7 @@ func TestClosePositionBySymbol_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing symbol", func(t *testing.T) {
-		result, err := service.ClosePositionBySymbol(map[string]interface{}{
+		result, err := service.ClosePositionBySymbol(context.Background(), map[string]interface{}{
 			"exit_price": 50000.0,
 		})
 		assert.Error(t, err)
@@ -377,7 +378,7 @@ func TestClosePositionBySymbol_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Missing exit_price", func(t *testing.T) {
-		result, err := service.ClosePositionBySymbol(map[string]interface{}{
+		result, err := service.ClosePositionBySymbol(context.Background(), map[string]interface{}{
 			"symbol": "BTCUSDT",
 		})
 		assert.Error(t, err)
@@ -386,7 +387,7 @@ func TestClosePositionBySymbol_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Non-existent position", func(t *testing.T) {
-		result, err := service.ClosePositionBySymbol(map[string]interface{}{
+		result, err := service.ClosePositionBySymbol(context.Background(), map[string]interface{}{
 			"symbol":     "NONEXISTENT",
 			"exit_price": 50000.0,
 		})
@@ -397,7 +398,7 @@ func TestClosePositionBySymbol_ErrorPaths(t *testing.T) {
 
 	t.Run("Optional exit_reason", func(t *testing.T) {
 		// Create a position first
-		_, err := service.PlaceMarketOrder(map[string]interface{}{
+		_, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 1.0,
@@ -405,7 +406,7 @@ func TestClosePositionBySymbol_ErrorPaths(t *testing.T) {
 		require.NoError(t, err)
 
 		// Close without exit_reason (should use default)
-		result, err := service.ClosePositionBySymbol(map[string]interface{}{
+		result, err := service.ClosePositionBySymbol(context.Background(), map[string]interface{}{
 			"symbol":     "BTCUSDT",
 			"exit_price": 51000.0,
 		})
@@ -424,7 +425,7 @@ func TestStopSession_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("No active session", func(t *testing.T) {
-		result, err := service.StopSession(map[string]interface{}{
+		result, err := service.StopSession(context.Background(), map[string]interface{}{
 			"final_capital": 10000.0,
 		})
 		assert.Error(t, err)
@@ -433,7 +434,7 @@ func TestStopSession_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Missing final_capital (fails on session check first)", func(t *testing.T) {
-		result, err := service.StopSession(map[string]interface{}{})
+		result, err := service.StopSession(context.Background(), map[string]interface{}{})
 		assert.Error(t, err)
 		// Will fail on "no active session" before checking final_capital
 		assert.Contains(t, err.Error(), "no active")
@@ -441,7 +442,7 @@ func TestStopSession_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Negative final_capital (fails on session check first)", func(t *testing.T) {
-		result, err := service.StopSession(map[string]interface{}{
+		result, err := service.StopSession(context.Background(), map[string]interface{}{
 			"final_capital": -1000.0,
 		})
 		assert.Error(t, err)
@@ -456,7 +457,7 @@ func TestGetSessionStats_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("No active session", func(t *testing.T) {
-		result, err := service.GetSessionStats(map[string]interface{}{})
+		result, err := service.GetSessionStats(context.Background(), map[string]interface{}{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no active trading session")
 		assert.Nil(t, result)
@@ -468,7 +469,7 @@ func TestStartSession_ErrorPaths(t *testing.T) {
 	service := NewServicePaper(nil)
 
 	t.Run("Missing symbol", func(t *testing.T) {
-		result, err := service.StartSession(map[string]interface{}{
+		result, err := service.StartSession(context.Background(), map[string]interface{}{
 			"initial_capital": 10000.0,
 		})
 		assert.Error(t, err)
@@ -477,7 +478,7 @@ func TestStartSession_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Missing initial_capital", func(t *testing.T) {
-		result, err := service.StartSession(map[string]interface{}{
+		result, err := service.StartSession(context.Background(), map[string]interface{}{
 			"symbol": "BTCUSDT",
 		})
 		assert.Error(t, err)
@@ -486,7 +487,7 @@ func TestStartSession_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Zero initial_capital", func(t *testing.T) {
-		result, err := service.StartSession(map[string]interface{}{
+		result, err := service.StartSession(context.Background(), map[string]interface{}{
 			"symbol":          "BTCUSDT",
 			"initial_capital": 0.0,
 		})
@@ -496,7 +497,7 @@ func TestStartSession_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Negative initial_capital", func(t *testing.T) {
-		result, err := service.StartSession(map[string]interface{}{
+		result, err := service.StartSession(context.Background(), map[string]interface{}{
 			"symbol":          "BTCUSDT",
 			"initial_capital": -1000.0,
 		})

@@ -15,6 +15,10 @@ import (
 
 // TestDatabaseConnectionWithTestcontainers tests basic database connectivity using testcontainers
 func TestDatabaseConnectionWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -36,6 +40,10 @@ func TestDatabaseConnectionWithTestcontainers(t *testing.T) {
 
 // TestTradingSessionCRUDWithTestcontainers tests complete CRUD operations for trading sessions
 func TestTradingSessionCRUDWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -158,6 +166,10 @@ func TestTradingSessionCRUDWithTestcontainers(t *testing.T) {
 
 // TestOrdersCRUDWithTestcontainers tests complete CRUD operations for orders
 func TestOrdersCRUDWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -293,6 +305,10 @@ func TestOrdersCRUDWithTestcontainers(t *testing.T) {
 
 // TestTradesCRUDWithTestcontainers tests complete CRUD operations for trades
 func TestTradesCRUDWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -382,6 +398,10 @@ func TestTradesCRUDWithTestcontainers(t *testing.T) {
 
 // TestPositionsCRUDWithTestcontainers tests complete CRUD operations for positions
 func TestPositionsCRUDWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -504,6 +524,10 @@ func TestPositionsCRUDWithTestcontainers(t *testing.T) {
 
 // TestConcurrentOperationsWithTestcontainers tests thread-safety of database operations
 func TestConcurrentOperationsWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -567,6 +591,10 @@ func TestConcurrentOperationsWithTestcontainers(t *testing.T) {
 }
 
 func TestListActiveSessionsWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -666,6 +694,10 @@ func TestListActiveSessionsWithTestcontainers(t *testing.T) {
 }
 
 func TestGetSessionsBySymbolWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)

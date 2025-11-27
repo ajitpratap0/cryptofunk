@@ -18,6 +18,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
 
 const (
@@ -195,6 +196,9 @@ type Orchestrator struct {
 	// Metrics
 	metrics       *OrchestratorMetrics
 	metricsServer *metrics.Server
+
+	// Circuit breaker for external dependencies
+	circuitBreaker *risk.CircuitBreakerManager
 }
 
 // NewOrchestrator creates a new orchestrator instance
@@ -208,19 +212,23 @@ func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, database *d
 	// Create metrics server
 	metricsServer := metrics.NewServer(metricsPort, orchestratorLog)
 
+	// Create circuit breaker manager
+	circuitBreaker := risk.NewCircuitBreakerManager()
+
 	// Note: NATS connection is deferred to Initialize() to allow unit tests
 	// to create orchestrator without requiring NATS server
 
 	return &Orchestrator{
-		config:        config,
-		log:           orchestratorLog,
-		db:            database,
-		agents:        make(map[string]*AgentSession),
-		natsConn:      nil, // Will be set in Initialize()
-		signalBuffer:  make([]*AgentSignal, 0),
-		metrics:       orchestratorMetrics,
-		metricsServer: metricsServer,
-		startTime:     time.Now(),
+		config:         config,
+		log:            orchestratorLog,
+		db:             database,
+		agents:         make(map[string]*AgentSession),
+		natsConn:       nil, // Will be set in Initialize()
+		signalBuffer:   make([]*AgentSignal, 0),
+		metrics:        orchestratorMetrics,
+		metricsServer:  metricsServer,
+		circuitBreaker: circuitBreaker,
+		startTime:      time.Now(),
 	}, nil
 }
 
@@ -230,6 +238,28 @@ func (o *Orchestrator) Initialize(ctx context.Context) error {
 
 	// Create cancellable context
 	o.ctx, o.cancel = context.WithCancel(ctx)
+
+	// Load persisted pause state from database
+	if o.db != nil {
+		state, err := o.db.GetOrchestratorState(ctx)
+		if err != nil {
+			o.log.Warn().Err(err).Msg("Failed to load orchestrator state from database, starting unpaused")
+		} else {
+			o.pausedMutex.Lock()
+			o.paused = state.Paused
+			o.pausedMutex.Unlock()
+
+			if state.Paused {
+				o.log.Info().
+					Time("paused_at", *state.PausedAt).
+					Str("paused_by", *state.PausedBy).
+					Str("reason", *state.PauseReason).
+					Msg("Loaded paused state from database - trading will remain paused")
+			} else {
+				o.log.Info().Msg("Loaded unpaused state from database - trading is active")
+			}
+		}
+	}
 
 	// Connect to NATS (if not already connected)
 	if o.natsConn == nil {
@@ -725,6 +755,19 @@ func (o *Orchestrator) Pause() error {
 	o.paused = true
 	o.log.Info().Msg("Trading paused")
 
+	// Persist pause state to database
+	if o.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := o.db.SetOrchestratorPaused(ctx, "api", "manual_pause"); err != nil {
+			o.log.Error().Err(err).Msg("Failed to persist pause state to database")
+			// Don't fail the pause operation if DB write fails
+		} else {
+			o.log.Debug().Msg("Pause state persisted to database")
+		}
+	}
+
 	// Broadcast pause event to all agents via NATS
 	if o.natsConn != nil {
 		pauseEvent := map[string]interface{}{
@@ -763,6 +806,19 @@ func (o *Orchestrator) Resume() error {
 
 	o.paused = false
 	o.log.Info().Msg("Trading resumed")
+
+	// Persist resume state to database
+	if o.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := o.db.SetOrchestratorResumed(ctx); err != nil {
+			o.log.Error().Err(err).Msg("Failed to persist resume state to database")
+			// Don't fail the resume operation if DB write fails
+		} else {
+			o.log.Debug().Msg("Resume state persisted to database")
+		}
+	}
 
 	// Broadcast resume event to all agents via NATS
 	if o.natsConn != nil {
@@ -1039,4 +1095,10 @@ func (o *Orchestrator) GetActiveAgentCount() int {
 	}
 
 	return activeCount
+}
+
+// GetCircuitBreaker returns the circuit breaker manager
+// This allows external components to use the same circuit breaker instance
+func (o *Orchestrator) GetCircuitBreaker() *risk.CircuitBreakerManager {
+	return o.circuitBreaker
 }

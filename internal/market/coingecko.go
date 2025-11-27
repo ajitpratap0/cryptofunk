@@ -4,40 +4,159 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"math"
 	"net/http"
-	"net/url"
-	"strconv"
+	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/time/rate"
 )
 
 const (
-	coinGeckoAPIBase = "https://api.coingecko.com/api/v3"
-	defaultTimeout   = 30 * time.Second
+	defaultTimeout       = 30 * time.Second
+	defaultRateLimit     = 50 // requests per minute for free tier
+	defaultMaxRetries    = 3
+	defaultRetryDelay    = time.Second
+	defaultMaxRetryDelay = 30 * time.Second
 )
 
-// CoinGeckoClient wraps the CoinGecko REST API
+// CoinGeckoClient wraps the CoinGecko MCP server client with rate limiting and retry logic
 type CoinGeckoClient struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
-	timeout    time.Duration
+	mcpClient   *mcp.Client
+	session     *mcp.ClientSession
+	rateLimiter *rate.Limiter
+	timeout     time.Duration
+	maxRetries  int
+	retryDelay  time.Duration
+	mu          sync.RWMutex
+	connected   bool
 }
 
-// NewCoinGeckoClient creates a new CoinGecko REST API client
-func NewCoinGeckoClient(apiKey string) (*CoinGeckoClient, error) {
-	log.Info().Msg("Initializing CoinGecko REST API client")
+// CoinGeckoClientOptions configures the CoinGecko client
+type CoinGeckoClientOptions struct {
+	MCPURL             string        // MCP server URL
+	APIKey             string        // Optional API key for pro tier
+	Timeout            time.Duration // Request timeout
+	RateLimit          int           // Requests per minute
+	MaxRetries         int           // Maximum retry attempts
+	RetryDelay         time.Duration // Initial retry delay
+	EnableRateLimiting bool          // Enable rate limiting
+}
 
-	return &CoinGeckoClient{
-		baseURL: coinGeckoAPIBase,
-		apiKey:  apiKey,
-		httpClient: &http.Client{
-			Timeout: defaultTimeout,
-		},
-		timeout: defaultTimeout,
-	}, nil
+// NewCoinGeckoClient creates a new CoinGecko MCP client with rate limiting and retry logic
+func NewCoinGeckoClient(apiKey string) (*CoinGeckoClient, error) {
+	return NewCoinGeckoClientWithOptions(CoinGeckoClientOptions{
+		MCPURL:             "https://mcp.api.coingecko.com/mcp",
+		APIKey:             apiKey,
+		Timeout:            defaultTimeout,
+		RateLimit:          defaultRateLimit,
+		MaxRetries:         defaultMaxRetries,
+		RetryDelay:         defaultRetryDelay,
+		EnableRateLimiting: true,
+	})
+}
+
+// NewCoinGeckoClientWithOptions creates a new CoinGecko client with custom options
+func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClient, error) {
+	log.Info().
+		Str("mcp_url", opts.MCPURL).
+		Int("rate_limit", opts.RateLimit).
+		Bool("has_api_key", opts.APIKey != "").
+		Msg("Initializing CoinGecko MCP client")
+
+	// Set defaults
+	if opts.Timeout == 0 {
+		opts.Timeout = defaultTimeout
+	}
+	if opts.RateLimit == 0 {
+		opts.RateLimit = defaultRateLimit
+	}
+	if opts.MaxRetries == 0 {
+		opts.MaxRetries = defaultMaxRetries
+	}
+	if opts.RetryDelay == 0 {
+		opts.RetryDelay = defaultRetryDelay
+	}
+
+	// Create MCP client
+	impl := &mcp.Implementation{
+		Name:    "cryptofunk-coingecko-client",
+		Version: "1.0.0",
+	}
+
+	mcpClient := mcp.NewClient(impl, nil)
+
+	// Create rate limiter (token bucket algorithm)
+	// Convert requests per minute to requests per second
+	rps := float64(opts.RateLimit) / 60.0
+	var rateLimiter *rate.Limiter
+	if opts.EnableRateLimiting {
+		rateLimiter = rate.NewLimiter(rate.Limit(rps), opts.RateLimit)
+		log.Debug().
+			Float64("rate_per_second", rps).
+			Int("burst", opts.RateLimit).
+			Msg("Rate limiter configured")
+	}
+
+	client := &CoinGeckoClient{
+		mcpClient:   mcpClient,
+		rateLimiter: rateLimiter,
+		timeout:     opts.Timeout,
+		maxRetries:  opts.MaxRetries,
+		retryDelay:  opts.RetryDelay,
+		connected:   false,
+	}
+
+	// Connect to CoinGecko MCP server using SSE transport
+	if err := client.connect(context.Background(), opts.MCPURL, opts.APIKey); err != nil {
+		return nil, fmt.Errorf("failed to connect to MCP server: %w", err)
+	}
+
+	return client, nil
+}
+
+// connect establishes connection to the MCP server
+func (c *CoinGeckoClient) connect(ctx context.Context, mcpURL, apiKey string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.connected {
+		return nil
+	}
+
+	// Create HTTP client with API key header if provided
+	httpClient := &http.Client{
+		Timeout: c.timeout,
+	}
+
+	// Create SSE transport for CoinGecko MCP
+	transport := &mcp.SSEClientTransport{
+		Endpoint:   mcpURL,
+		HTTPClient: httpClient,
+	}
+
+	// TODO: Add support for API key headers when SDK supports it
+	// For now, CoinGecko MCP free tier should work without API key
+	if apiKey != "" {
+		log.Debug().Msg("API key support via headers not yet implemented in SDK")
+	}
+
+	// Connect to server
+	session, err := c.mcpClient.Connect(ctx, transport, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to MCP server: %w", err)
+	}
+
+	c.session = session
+	c.connected = true
+
+	log.Info().
+		Str("mcp_url", mcpURL).
+		Msg("Connected to CoinGecko MCP server")
+
+	return nil
 }
 
 // PriceResult represents the response from get_price tool
@@ -47,52 +166,32 @@ type PriceResult struct {
 	Currency string
 }
 
-// GetPrice fetches the current price for a cryptocurrency
+// GetPrice fetches the current price for a cryptocurrency using MCP
 func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrency string) (*PriceResult, error) {
 	log.Debug().
 		Str("symbol", symbol).
 		Str("vs_currency", vsCurrency).
-		Msg("Fetching price from CoinGecko API")
+		Msg("Fetching price from CoinGecko MCP")
 
-	// Build request URL: /simple/price?ids=bitcoin&vs_currencies=usd
-	params := url.Values{}
-	params.Add("ids", symbol)
-	params.Add("vs_currencies", vsCurrency)
-	if c.apiKey != "" {
-		params.Add("x_cg_pro_api_key", c.apiKey)
+	// Apply rate limiting
+	if err := c.waitForRateLimit(ctx); err != nil {
+		return nil, err
 	}
 
-	reqURL := fmt.Sprintf("%s/simple/price?%s", c.baseURL, params.Encode())
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// Prepare MCP tool call arguments
+	args := map[string]interface{}{
+		"ids":           symbol,
+		"vs_currencies": vsCurrency,
 	}
 
-	// Execute request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close() // Best effort close
-	}()
-
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response: {symbol: {currency: price}}
-	// Example: {"bitcoin": {"usd": 45000.50}}
+	// Call MCP tool with retry logic
 	var result map[string]map[string]float64
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	err := c.callToolWithRetry(ctx, "get_price", args, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get price: %w", err)
 	}
 
-	// Extract price
+	// Extract price from nested map structure
 	symbolData, ok := result[symbol]
 	if !ok {
 		return nil, fmt.Errorf("symbol %s not found in response", symbol)
@@ -117,7 +216,7 @@ func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrenc
 }
 
 // MarketChart represents historical market data
-type MarketChart struct {
+type MarketChart struct{
 	Prices       []PricePoint
 	MarketCaps   []PricePoint
 	TotalVolumes []PricePoint
@@ -129,54 +228,35 @@ type PricePoint struct {
 	Value     float64
 }
 
-// GetMarketChart fetches historical market data
+// GetMarketChart fetches historical market data using MCP
 func (c *CoinGeckoClient) GetMarketChart(ctx context.Context, symbol string, days int) (*MarketChart, error) {
 	log.Debug().
 		Str("symbol", symbol).
 		Int("days", days).
-		Msg("Fetching market chart from CoinGecko API")
+		Msg("Fetching market chart from CoinGecko MCP")
 
-	// Build request URL: /coins/{id}/market_chart?vs_currency=usd&days=7
-	params := url.Values{}
-	params.Add("vs_currency", "usd")
-	params.Add("days", strconv.Itoa(days))
-	if c.apiKey != "" {
-		params.Add("x_cg_pro_api_key", c.apiKey)
+	// Apply rate limiting
+	if err := c.waitForRateLimit(ctx); err != nil {
+		return nil, err
 	}
 
-	reqURL := fmt.Sprintf("%s/coins/%s/market_chart?%s", c.baseURL, symbol, params.Encode())
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// Prepare MCP tool call arguments
+	args := map[string]interface{}{
+		"coin_id":     symbol,
+		"vs_currency": "usd",
+		"days":        days,
 	}
 
-	// Execute request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close() // Best effort close
-	}()
-
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	// CoinGecko returns {prices: [[timestamp_ms, price], ...], market_caps: [[timestamp_ms, cap], ...], total_volumes: [[timestamp_ms, volume], ...]}
+	// Call MCP tool with retry logic
 	var result struct {
 		Prices       [][]float64 `json:"prices"`
 		MarketCaps   [][]float64 `json:"market_caps"`
 		TotalVolumes [][]float64 `json:"total_volumes"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	err := c.callToolWithRetry(ctx, "get_market_chart", args, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get market chart: %w", err)
 	}
 
 	chart := &MarketChart{
@@ -236,46 +316,27 @@ type CoinInfo struct {
 	MarketData  map[string]interface{}
 }
 
-// GetCoinInfo fetches detailed information about a cryptocurrency
+// GetCoinInfo fetches detailed information about a cryptocurrency using MCP
 func (c *CoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*CoinInfo, error) {
 	log.Debug().
 		Str("coin_id", coinID).
-		Msg("Fetching coin info from CoinGecko API")
+		Msg("Fetching coin info from CoinGecko MCP")
 
-	// Build request URL: /coins/{id}?localization=false&tickers=false&community_data=false&developer_data=false
-	params := url.Values{}
-	params.Add("localization", "false")
-	params.Add("tickers", "false")
-	params.Add("community_data", "false")
-	params.Add("developer_data", "false")
-	if c.apiKey != "" {
-		params.Add("x_cg_pro_api_key", c.apiKey)
+	// Apply rate limiting
+	if err := c.waitForRateLimit(ctx); err != nil {
+		return nil, err
 	}
 
-	reqURL := fmt.Sprintf("%s/coins/%s?%s", c.baseURL, coinID, params.Encode())
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// Prepare MCP tool call arguments
+	args := map[string]interface{}{
+		"coin_id":        coinID,
+		"localization":   false,
+		"tickers":        false,
+		"community_data": false,
+		"developer_data": false,
 	}
 
-	// Execute request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close() // Best effort close
-	}()
-
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
+	// Call MCP tool with retry logic
 	var result struct {
 		ID          string `json:"id"`
 		Symbol      string `json:"symbol"`
@@ -289,8 +350,9 @@ func (c *CoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*Coin
 		MarketData map[string]interface{} `json:"market_data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	err := c.callToolWithRetry(ctx, "get_coin_info", args, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get coin info: %w", err)
 	}
 
 	// Extract homepage link
@@ -313,6 +375,113 @@ func (c *CoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*Coin
 		Links:       map[string]string{"homepage": homepage},
 		MarketData:  result.MarketData,
 	}, nil
+}
+
+// callToolWithRetry calls an MCP tool with exponential backoff retry logic
+func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string, args map[string]interface{}, result interface{}) error {
+	c.mu.RLock()
+	session := c.session
+	c.mu.RUnlock()
+
+	if session == nil {
+		return fmt.Errorf("not connected to MCP server")
+	}
+
+	var lastErr error
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			// Calculate exponential backoff delay
+			backoffDelay := time.Duration(math.Pow(2, float64(attempt-1))) * c.retryDelay
+			if backoffDelay > defaultMaxRetryDelay {
+				backoffDelay = defaultMaxRetryDelay
+			}
+
+			log.Debug().
+				Str("tool", toolName).
+				Int("attempt", attempt).
+				Dur("backoff", backoffDelay).
+				Msg("Retrying MCP tool call after backoff")
+
+			select {
+			case <-time.After(backoffDelay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		// Create request context with timeout
+		reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+
+		// Call MCP tool
+		params := &mcp.CallToolParams{
+			Name:      toolName,
+			Arguments: args,
+		}
+
+		response, err := session.CallTool(reqCtx, params)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d failed: %w", attempt+1, err)
+			log.Warn().
+				Err(err).
+				Str("tool", toolName).
+				Int("attempt", attempt+1).
+				Msg("MCP tool call failed")
+			continue
+		}
+
+		// Parse response content
+		if len(response.Content) == 0 {
+			lastErr = fmt.Errorf("attempt %d: empty response content", attempt+1)
+			log.Warn().
+				Str("tool", toolName).
+				Int("attempt", attempt+1).
+				Msg("Empty MCP response")
+			continue
+		}
+
+		// Extract text content
+		content := response.Content[0]
+		textContent, ok := content.(*mcp.TextContent)
+		if !ok {
+			lastErr = fmt.Errorf("attempt %d: unexpected content type", attempt+1)
+			continue
+		}
+
+		// Unmarshal JSON response
+		if err := json.Unmarshal([]byte(textContent.Text), result); err != nil {
+			lastErr = fmt.Errorf("attempt %d: failed to unmarshal response: %w", attempt+1, err)
+			log.Warn().
+				Err(err).
+				Str("tool", toolName).
+				Int("attempt", attempt+1).
+				Msg("Failed to unmarshal MCP response")
+			continue
+		}
+
+		// Success
+		log.Debug().
+			Str("tool", toolName).
+			Int("attempt", attempt+1).
+			Msg("MCP tool call succeeded")
+		return nil
+	}
+
+	return fmt.Errorf("max retries (%d) exceeded: %w", c.maxRetries, lastErr)
+}
+
+// waitForRateLimit waits until the rate limiter allows the request
+func (c *CoinGeckoClient) waitForRateLimit(ctx context.Context) error {
+	if c.rateLimiter == nil {
+		return nil // Rate limiting disabled
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
+	return nil
 }
 
 // ToCandlesticks converts MarketChart data to OHLCV candlesticks
@@ -402,12 +571,16 @@ func (c *Candlestick) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// Health checks if the CoinGecko API connection is healthy
+// Health checks if the CoinGecko MCP connection is healthy
 func (c *CoinGeckoClient) Health(ctx context.Context) error {
-	log.Debug().Msg("Checking CoinGecko API health")
+	log.Debug().Msg("Checking CoinGecko MCP health")
 
-	if c.httpClient == nil {
-		return fmt.Errorf("HTTP client not initialized")
+	c.mu.RLock()
+	connected := c.connected
+	c.mu.RUnlock()
+
+	if !connected {
+		return fmt.Errorf("not connected to MCP server")
 	}
 
 	// Try a simple API call to verify connection
@@ -420,16 +593,24 @@ func (c *CoinGeckoClient) Health(ctx context.Context) error {
 		return fmt.Errorf("health check failed: %w", err)
 	}
 
-	log.Debug().Msg("CoinGecko API health check passed")
+	log.Debug().Msg("CoinGecko MCP health check passed")
 	return nil
 }
 
-// Close closes the HTTP client and releases resources
+// Close closes the MCP client and releases resources
 func (c *CoinGeckoClient) Close() error {
-	if c.httpClient != nil {
-		// Close idle connections
-		c.httpClient.CloseIdleConnections()
-		log.Info().Msg("Closed CoinGecko API client")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.session != nil {
+		if err := c.session.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing MCP session")
+		}
+		c.session = nil
 	}
+
+	c.connected = false
+	log.Info().Msg("Closed CoinGecko MCP client")
+
 	return nil
 }

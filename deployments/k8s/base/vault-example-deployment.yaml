@@ -1,0 +1,224 @@
+# Example: How to configure deployments for Vault integration
+#
+# This file demonstrates how to update your deployments to use HashiCorp Vault
+# for secrets management. Apply these patterns to all deployments that need secrets.
+#
+# Key changes:
+# 1. Add serviceAccountName: cryptofunk-vault
+# 2. Add Vault environment variables from vault-config ConfigMap
+# 3. Keep existing K8s secrets as fallback (when VAULT_ENABLED=false)
+#
+# Apply to: orchestrator, api, mcp-servers, agents, bifrost
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-service
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: example-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: example-service
+    spec:
+      # IMPORTANT: Use the Vault service account for Kubernetes authentication
+      serviceAccountName: cryptofunk-vault
+
+      containers:
+      - name: example-service
+        image: cryptofunk/example-service:latest
+        imagePullPolicy: IfNotPresent
+
+        env:
+        # =================================================================
+        # VAULT CONFIGURATION (from vault-config ConfigMap)
+        # =================================================================
+        - name: VAULT_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_ENABLED
+        - name: VAULT_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_ADDR
+        - name: VAULT_AUTH_METHOD
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_AUTH_METHOD
+        - name: VAULT_MOUNT_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_MOUNT_PATH
+        - name: VAULT_SECRET_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_SECRET_PATH
+        - name: VAULT_K8S_ROLE
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_K8S_ROLE
+        - name: VAULT_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_NAMESPACE
+              optional: true
+
+        # =================================================================
+        # FALLBACK SECRETS (from K8s secrets)
+        # These are used when VAULT_ENABLED=false
+        # When Vault is enabled, these are ignored and secrets come from Vault
+        # =================================================================
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: POSTGRES_PASSWORD
+        - name: BINANCE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: BINANCE_API_KEY
+              optional: true
+        - name: BINANCE_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: BINANCE_API_SECRET
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: OPENAI_API_KEY
+              optional: true
+
+        # =================================================================
+        # APPLICATION CONFIGURATION (non-secret)
+        # =================================================================
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: LOG_LEVEL
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+
+---
+# USAGE INSTRUCTIONS
+# ===================
+#
+# Step 1: Set up Vault (see docs/SECRET_ROTATION.md)
+# ----------------------------------------------------
+# 1. Deploy Vault (or use existing Vault installation)
+# 2. Enable KV v2 secrets engine: vault secrets enable -path=secret kv-v2
+# 3. Configure Kubernetes authentication:
+#      vault auth enable kubernetes
+#      vault write auth/kubernetes/config \
+#        kubernetes_host="https://kubernetes.default.svc:443"
+# 4. Create Vault policy (see deployments/k8s/base/vault-integration.yaml comments)
+# 5. Create Vault role:
+#      vault write auth/kubernetes/role/cryptofunk \
+#        bound_service_account_names=cryptofunk-vault \
+#        bound_service_account_namespaces=cryptofunk \
+#        policies=cryptofunk \
+#        ttl=24h
+#
+# Step 2: Store secrets in Vault
+# --------------------------------
+# vault kv put secret/cryptofunk/production/database \
+#   password="<strong-db-password>" \
+#   user="postgres"
+#
+# vault kv put secret/cryptofunk/production/redis \
+#   password="<strong-redis-password>"
+#
+# vault kv put secret/cryptofunk/production/exchanges/binance \
+#   api_key="<binance-api-key>" \
+#   secret_key="<binance-secret-key>"
+#
+# vault kv put secret/cryptofunk/production/llm \
+#   anthropic_api_key="<anthropic-key>" \
+#   openai_api_key="<openai-key>" \
+#   gemini_api_key="<gemini-key>"
+#
+# Step 3: Enable Vault in K8s
+# ----------------------------
+# kubectl edit configmap vault-config -n cryptofunk
+# Change: VAULT_ENABLED: "true"
+# Update: VAULT_ADDR to your Vault server URL
+#
+# Step 4: Update your deployments
+# --------------------------------
+# Add the patterns from this file to your deployments:
+# - orchestrator (deployment-orchestrator.yaml)
+# - api (deployment-api.yaml)
+# - mcp-servers (deployment-mcp-servers.yaml)
+# - agents (deployment-agents.yaml)
+# - bifrost (deployment-bifrost.yaml)
+#
+# Step 5: Apply and restart
+# --------------------------
+# kubectl apply -f deployments/k8s/base/
+# kubectl rollout restart deployment/orchestrator -n cryptofunk
+# kubectl rollout restart deployment/api -n cryptofunk
+# # ... repeat for all services
+#
+# Step 6: Verify
+# ---------------
+# kubectl logs deployment/orchestrator -n cryptofunk | grep -i vault
+# Should see: "Vault client initialized successfully"
+#           "✓ Loaded database password from Vault"
+#
+# FALLBACK BEHAVIOR
+# =================
+# When VAULT_ENABLED=false (default):
+# - Secrets are loaded from K8s secrets (cryptofunk-secrets)
+# - No connection to Vault is attempted
+# - Existing behavior is preserved
+#
+# When VAULT_ENABLED=true:
+# - Secrets are loaded from Vault
+# - K8s secrets are ignored (but kept as fallback if Vault fails)
+# - Service logs will show Vault connection status
+#
+# DEVELOPMENT MODE
+# ================
+# For local development (no Vault):
+# - Set VAULT_ENABLED=false (default)
+# - Use environment variables or .env files
+# - The config package will use os.Getenv() as fallback
+#
+# SECURITY NOTES
+# ==============
+# 1. Never commit Vault tokens to version control
+# 2. Use Kubernetes auth method (not token) in production
+# 3. Rotate secrets regularly (see docs/SECRET_ROTATION.md)
+# 4. Use minimal IAM policies for Vault access
+# 5. Enable Vault audit logging
+# 6. Monitor Vault access in your security SIEM

@@ -50,26 +50,44 @@ metadata:
     app.kubernetes.io/component: vault-config
 data:
   # Vault server address (update for your environment)
+  # For development/testing: "http://vault.cryptofunk.svc.cluster.local:8200"
+  # For production: "https://vault.example.com:8200"
   VAULT_ADDR: "https://vault.example.com:8200"
 
   # Vault authentication method: token, kubernetes, or approle
+  # Recommended: "kubernetes" for K8s deployments
   VAULT_AUTH_METHOD: "kubernetes"
 
   # Vault KV mount path (usually "secret" for KV v2)
   VAULT_MOUNT_PATH: "secret"
 
   # Base path for CryptoFunk secrets in Vault
-  # Example: secret/data/cryptofunk/production/database
+  # Full path will be: {VAULT_MOUNT_PATH}/data/{VAULT_SECRET_PATH}/{secret_type}
+  # Example paths:
+  #   - secret/data/cryptofunk/production/database
+  #   - secret/data/cryptofunk/production/exchanges/binance
+  #   - secret/data/cryptofunk/production/llm
   VAULT_SECRET_PATH: "cryptofunk/production"
 
   # Kubernetes role for Vault authentication
+  # This role must be configured in Vault with appropriate policies
   VAULT_K8S_ROLE: "cryptofunk"
 
-  # Enable Vault integration (set to "false" to disable)
+  # Enable Vault integration (set to "true" to enable)
+  # When enabled: secrets are loaded from Vault
+  # When disabled: secrets are loaded from environment variables (K8s secrets)
   VAULT_ENABLED: "false"  # Change to "true" when Vault is configured
 
   # Vault namespace (for Vault Enterprise, leave empty for OSS)
   VAULT_NAMESPACE: ""
+
+  # Connection timeout for Vault API calls (in seconds)
+  VAULT_TIMEOUT: "10"
+
+  # Retry configuration
+  VAULT_MAX_RETRIES: "3"
+  VAULT_RETRY_WAIT_MIN: "1"  # seconds
+  VAULT_RETRY_WAIT_MAX: "5"  # seconds
 ---
 # Secret for Vault token (alternative to Kubernetes auth)
 # IMPORTANT: Only use this for development! Use Kubernetes auth in production

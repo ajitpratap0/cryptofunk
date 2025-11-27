@@ -29,6 +29,10 @@ func setupMiniRedis(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
 }
 
 func TestNewCachedCoinGeckoClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test that requires MCP server connection")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
@@ -107,6 +111,10 @@ func TestCachedGetPrice_CacheMiss(t *testing.T) {
 }
 
 func TestCachedGetPrice_CacheHit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test that requires MCP server connection")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
@@ -291,6 +299,10 @@ func TestHealth_Success(t *testing.T) {
 }
 
 func TestHealth_RedisDown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test that requires MCP server connection")
+	}
+
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("Failed to create miniredis: %v", err)
@@ -317,6 +329,10 @@ func TestHealth_RedisDown(t *testing.T) {
 }
 
 func TestInvalidateCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test that requires MCP server connection")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
@@ -361,6 +377,10 @@ func TestInvalidateCache(t *testing.T) {
 }
 
 func TestClearCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test that requires MCP server connection")
+	}
+
 	redisClient, mr := setupMiniRedis(t)
 	defer mr.Close()
 
