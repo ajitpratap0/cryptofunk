@@ -224,13 +224,13 @@ func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter Decisi
 	query := `
 		SELECT
 			COUNT(*) as total,
-			AVG(COALESCE(confidence, 0)) as avg_confidence,
-			AVG(COALESCE(latency_ms, 0)) as avg_latency,
-			AVG(COALESCE(tokens_used, 0)) as avg_tokens,
-			SUM(CASE WHEN outcome = 'SUCCESS' THEN 1 ELSE 0 END)::FLOAT /
-				NULLIF(COUNT(CASE WHEN outcome IS NOT NULL THEN 1 END), 0) as success_rate,
-			SUM(COALESCE(outcome_pnl, 0)) as total_pnl,
-			AVG(COALESCE(outcome_pnl, 0)) as avg_pnl
+			COALESCE(AVG(confidence), 0) as avg_confidence,
+			COALESCE(AVG(latency_ms), 0) as avg_latency,
+			COALESCE(AVG(tokens_used), 0) as avg_tokens,
+			COALESCE(SUM(CASE WHEN outcome = 'SUCCESS' THEN 1 ELSE 0 END)::FLOAT /
+				NULLIF(COUNT(CASE WHEN outcome IS NOT NULL THEN 1 END), 0), 0) as success_rate,
+			COALESCE(SUM(outcome_pnl), 0) as total_pnl,
+			COALESCE(AVG(outcome_pnl), 0) as avg_pnl
 		FROM llm_decisions
 		WHERE 1=1
 	`
