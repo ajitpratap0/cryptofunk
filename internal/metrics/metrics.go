@@ -10,6 +10,11 @@ import (
 // Bounded cardinality constants for metric labels.
 // These ensure metrics don't have unbounded label values which can cause memory issues.
 const (
+	// Status labels (bounded set)
+	StatusSuccess = "success"
+	StatusFailure = "failure"
+	StatusError   = "error"
+
 	// Circuit breaker reasons (bounded set)
 	ReasonMaxDrawdown    = "max_drawdown"
 	ReasonHighVolatility = "high_volatility"
@@ -393,6 +398,29 @@ var (
 	})
 )
 
+// Vector Search Metrics
+var (
+	// Vector search latency by operation type
+	VectorSearchLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "cryptofunk_vector_search_latency_seconds",
+		Help:    "Latency of vector search operations in seconds",
+		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+	}, []string{"operation", "status"})
+
+	// Vector search operations count
+	VectorSearchOps = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_vector_search_operations_total",
+		Help: "Total number of vector search operations",
+	}, []string{"operation", "status"})
+
+	// Vector search result count
+	VectorSearchResults = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "cryptofunk_vector_search_results",
+		Help:    "Number of results returned by vector search operations",
+		Buckets: []float64{0, 1, 5, 10, 20, 50, 100},
+	}, []string{"operation"})
+)
+
 // Helper functions to update metrics
 
 // UpdateDatabaseConnections updates database connection metrics
@@ -514,9 +542,9 @@ func RecordOrchestratorLatency(durationMs float64) {
 
 // RecordAuditLog records an audit log operation
 func RecordAuditLog(eventType string, success bool, durationMs float64) {
-	status := "success"
+	status := StatusSuccess
 	if !success {
-		status = "failure"
+		status = StatusFailure
 	}
 	AuditLogOperations.WithLabelValues(eventType, status).Inc()
 	AuditLogLatency.Observe(durationMs)
@@ -529,9 +557,9 @@ func RecordAuditLogFailure(errorType, eventType string) {
 
 // RecordStrategyOperation records a strategy operation
 func RecordStrategyOperation(operation string, success bool) {
-	status := "success"
+	status := StatusSuccess
 	if !success {
-		status = "failure"
+		status = StatusFailure
 	}
 	StrategyOperations.WithLabelValues(operation, status).Inc()
 }
@@ -540,4 +568,29 @@ func RecordStrategyOperation(operation string, success bool) {
 func RecordStrategyValidationFailure(reason string) {
 	normalizedReason := NormalizeValidationReason(reason)
 	StrategyValidationFailures.WithLabelValues(normalizedReason).Inc()
+}
+
+// RecordVectorSearch records a vector search operation with latency and result count
+func RecordVectorSearch(operation string, durationSec float64, resultCount int, err error) {
+	status := StatusSuccess
+	if err != nil {
+		status = "error"
+	}
+
+	VectorSearchLatency.WithLabelValues(operation, status).Observe(durationSec)
+	VectorSearchOps.WithLabelValues(operation, status).Inc()
+
+	if err == nil {
+		VectorSearchResults.WithLabelValues(operation).Observe(float64(resultCount))
+	}
+}
+
+// RecordSemanticSearch records a semantic search operation
+func RecordSemanticSearch(durationSec float64, resultCount int, err error) {
+	RecordVectorSearch("semantic_search", durationSec, resultCount, err)
+}
+
+// RecordSimilarDecisions records a similar decisions search operation
+func RecordSimilarDecisions(durationSec float64, resultCount int, err error) {
+	RecordVectorSearch("similar_decisions", durationSec, resultCount, err)
 }

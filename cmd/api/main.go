@@ -24,6 +24,10 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
+const (
+	envProduction = "production"
+)
+
 type APIServer struct {
 	router             *gin.Engine
 	db                 *db.DB
@@ -68,7 +72,7 @@ func main() {
 	defer database.Close()
 
 	// Set Gin mode based on environment
-	if cfg.App.Environment == "production" {
+	if cfg.App.Environment == envProduction {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -102,10 +106,39 @@ func (s *APIServer) setupMiddleware() {
 
 	// CORS configuration - use configured origins or defaults for development
 	allowedOrigins := s.config.API.AllowedOrigins
+	isProduction := s.config.App.Environment == envProduction
+
 	if len(allowedOrigins) == 0 {
-		// Default origins for development
-		allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+		if isProduction {
+			// In production, require explicit configuration
+			log.Warn().Msg("No allowed_origins configured for CORS in production - rejecting all origins")
+			allowedOrigins = []string{} // Empty list = reject all
+		} else {
+			// Default origins for development
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+		}
 	}
+
+	// In production, filter out localhost origins for security
+	if isProduction {
+		filteredOrigins := make([]string, 0, len(allowedOrigins))
+		for _, origin := range allowedOrigins {
+			if strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+				log.Warn().
+					Str("origin", origin).
+					Msg("SECURITY WARNING: Blocking localhost origin in production CORS configuration")
+			} else {
+				filteredOrigins = append(filteredOrigins, origin)
+			}
+		}
+		allowedOrigins = filteredOrigins
+
+		// Log startup warning if no valid origins remain
+		if len(allowedOrigins) == 0 {
+			log.Error().Msg("SECURITY ERROR: No valid CORS origins configured in production after filtering localhost - all CORS requests will be rejected")
+		}
+	}
+
 	config := cors.Config{
 		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -1323,7 +1356,7 @@ func truncateString(s string, maxLen int) string {
 // based on the configured allowed origins and environment
 func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
 	allowedOrigins := s.config.API.AllowedOrigins
-	isProduction := s.config.App.Environment == "production"
+	isProduction := s.config.App.Environment == envProduction
 
 	if len(allowedOrigins) == 0 {
 		if isProduction {

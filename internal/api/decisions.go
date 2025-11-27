@@ -34,6 +34,10 @@ const (
 	// MaxSearchQueryLength is the maximum length of a text search query
 	// to prevent performance issues with very long queries
 	MaxSearchQueryLength = 500
+
+	// Query timeout constants for database operations
+	queryTimeout       = 30 * time.Second // Standard query timeout
+	vectorQueryTimeout = 60 * time.Second // Longer timeout for expensive vector operations
 )
 
 // DecisionRepository handles database operations for LLM decisions
@@ -92,6 +96,10 @@ type DecisionStats struct {
 
 // ListDecisions retrieves decisions with optional filtering
 func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionFilter) ([]Decision, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -175,6 +183,10 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 
 // GetDecision retrieves a single decision by ID
 func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*Decision, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -203,6 +215,10 @@ func (r *DecisionRepository) GetDecision(ctx context.Context, id uuid.UUID) (*De
 
 // GetDecisionStats retrieves aggregated statistics
 func (r *DecisionRepository) GetDecisionStats(ctx context.Context, filter DecisionFilter) (*DecisionStats, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			COUNT(*) as total,
@@ -285,6 +301,10 @@ var allowedGroupByFields = map[string]bool{
 
 // getCountsByField gets count breakdown by a specific field
 func (r *DecisionRepository) getCountsByField(ctx context.Context, field string, filter DecisionFilter) (map[string]int, error) {
+	// Apply query timeout to prevent long-running queries
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	// Validate field name to prevent SQL injection
 	if !allowedGroupByFields[field] {
 		return nil, fmt.Errorf("invalid field name: %s", field)
@@ -343,6 +363,10 @@ func (r *DecisionRepository) getCountsByField(ctx context.Context, field string,
 
 // FindSimilarDecisions finds decisions with similar prompts using vector similarity
 func (r *DecisionRepository) FindSimilarDecisions(ctx context.Context, id uuid.UUID, limit int) ([]Decision, error) {
+	// Use longer timeout for vector similarity operations (more expensive)
+	ctx, cancel := context.WithTimeout(ctx, vectorQueryTimeout)
+	defer cancel()
+
 	query := `
 		WITH target AS (
 			SELECT prompt_embedding
@@ -425,6 +449,10 @@ func (r *DecisionRepository) SearchDecisions(ctx context.Context, req SearchRequ
 
 // searchByEmbedding performs vector similarity search using pgvector
 func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	// Use longer timeout for vector similarity operations (more expensive)
+	ctx, cancel := context.WithTimeout(ctx, vectorQueryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -488,6 +516,10 @@ func (r *DecisionRepository) searchByEmbedding(ctx context.Context, req SearchRe
 
 // searchByText performs text-based search using PostgreSQL full-text search
 func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	// Apply query timeout for text search operations
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	query := `
 		SELECT
 			id, session_id, decision_type, symbol, agent_name, prompt, response,
@@ -562,6 +594,10 @@ func (r *DecisionRepository) searchByText(ctx context.Context, req SearchRequest
 
 // searchByILike performs simple ILIKE pattern matching as fallback
 func (r *DecisionRepository) searchByILike(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+	// Apply query timeout for ILIKE search operations
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
 	pattern := "%" + req.Query + "%"
 	query := `
 		SELECT

@@ -4,7 +4,36 @@ Comprehensive Grafana dashboards for monitoring CryptoFunk trading system perfor
 
 ## Dashboards Overview
 
-### 1. System Overview (`system-overview.json`)
+### 1. Explainability & Vector Search (`explainability-dashboard.json`)
+
+**Purpose**: Monitor LLM decision explainability and vector search performance.
+
+**Key Metrics**:
+- Vector search latency (p50, p95, p99) for semantic search and similar decisions
+- Search request rate by endpoint
+- Search error rate percentage
+- Database connection pool metrics
+- Database query latency for decision operations
+- Decision API request volume
+- Response time distribution for all decision endpoints
+- Error breakdown by HTTP status code
+- Vector search summary statistics
+
+**Use Cases**:
+- Monitoring vector search performance and reliability
+- Identifying slow pgvector queries
+- Tracking decision API usage patterns
+- Debugging search errors and failures
+- Optimizing database connection pool sizing
+- Performance tuning for semantic search operations
+
+**Recommended Alerts**:
+- Vector search p95 latency > 2 seconds
+- Search error rate > 5%
+- Database connection pool near max capacity
+- Decision API error rate > 3%
+
+### 2. System Overview (`system-overview.json`)
 
 **Purpose**: Monitor overall system health and infrastructure components.
 

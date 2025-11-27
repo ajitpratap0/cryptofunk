@@ -401,6 +401,144 @@ describe('DecisionTimeline', () => {
       fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
       expect(mockRefetch).toHaveBeenCalledTimes(1);
     });
+
+    it('shows loading overlay when filters are changing', () => {
+      (useInfiniteDecisions as Mock).mockReturnValue({
+        data: { pages: [{ decisions: mockDecisions }] },
+        isLoading: false,
+        isFetching: true,
+        error: null,
+        refetch: mockRefetch,
+        fetchNextPage: mockFetchNextPage,
+        hasNextPage: false,
+        isFetchingNextPage: false,
+      });
+
+      render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      expect(screen.getByText('Updating...')).toBeInTheDocument();
+    });
+
+    it('outcome filter has all expected options', () => {
+      render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      const outcomeSelect = screen.getByLabelText('Outcome') as HTMLSelectElement;
+      const options = Array.from(outcomeSelect.options).map(opt => opt.value);
+
+      expect(options).toContain('');
+      expect(options).toContain('SUCCESS');
+      expect(options).toContain('FAILURE');
+      expect(options).toContain('PENDING');
+    });
+
+    it('filters are applied to useInfiniteDecisions hook', () => {
+      const mockHook = vi.fn().mockReturnValue({
+        data: { pages: [{ decisions: mockDecisions }] },
+        isLoading: false,
+        isFetching: false,
+        error: null,
+        refetch: mockRefetch,
+        fetchNextPage: mockFetchNextPage,
+        hasNextPage: false,
+        isFetchingNextPage: false,
+      });
+
+      (useInfiniteDecisions as Mock).mockImplementation(mockHook);
+
+      render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      // Verify the hook was called with empty filters initially
+      expect(mockHook).toHaveBeenCalledWith({
+        agent_name: undefined,
+        symbol: undefined,
+        outcome: undefined,
+      });
+    });
+
+    it('filters persist across renders', async () => {
+      const { rerender } = render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      const agentInput = screen.getByLabelText('Agent');
+      fireEvent.change(agentInput, { target: { value: 'Technical' } });
+
+      await waitFor(() => {
+        expect(agentInput).toHaveValue('Technical');
+      });
+
+      // Rerender with different props
+      rerender(
+        <DecisionTimeline
+          selectedDecision={mockDecisions[0]}
+          onSelectDecision={mockOnSelectDecision}
+        />
+      );
+
+      // Filter value should still be there
+      expect(agentInput).toHaveValue('Technical');
+    });
+
+    it('filter inputs have correct placeholders', () => {
+      render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      expect(screen.getByPlaceholderText(/filter by agent name/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/filter by symbol/i)).toBeInTheDocument();
+    });
+
+    it('clear filters button is always enabled', () => {
+      render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      const clearButton = screen.getByRole('button', { name: /clear all filters/i });
+      expect(clearButton).not.toBeDisabled();
+    });
+
+    it('refresh button is always enabled', () => {
+      render(
+        <DecisionTimeline
+          selectedDecision={null}
+          onSelectDecision={mockOnSelectDecision}
+        />,
+        { wrapper: createWrapper() }
+      );
+
+      const refreshButton = screen.getByRole('button', { name: /refresh decisions/i });
+      expect(refreshButton).not.toBeDisabled();
+    });
   });
 
   describe('Selection', () => {
