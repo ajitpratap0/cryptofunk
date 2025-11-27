@@ -242,22 +242,60 @@ When a circuit breaker opens:
 
 ### Tuning Parameters
 
-To adjust circuit breaker parameters, modify `internal/risk/circuit_breaker.go`:
+**Recommended Method: Configuration File**
+
+Circuit breaker thresholds are now fully configurable via `configs/config.yaml`:
+
+```yaml
+risk:
+  circuit_breaker:
+    # Exchange Circuit Breaker
+    exchange:
+      min_requests: 5           # Minimum requests before circuit can trip
+      failure_ratio: 0.6        # Trip after 60% failure rate
+      open_timeout: "30s"       # Wait 30s before attempting recovery
+      half_open_max_reqs: 3     # Test with 3 requests in half-open state
+      count_interval: "10s"     # Count failures over 10s window
+
+    # LLM Circuit Breaker
+    llm:
+      min_requests: 3
+      failure_ratio: 0.6
+      open_timeout: "60s"       # Longer for AI services
+      half_open_max_reqs: 2
+      count_interval: "10s"
+
+    # Database Circuit Breaker
+    database:
+      min_requests: 10
+      failure_ratio: 0.6
+      open_timeout: "15s"       # Quick recovery for DB
+      half_open_max_reqs: 5
+      count_interval: "10s"
+```
+
+**Programmatic Usage:**
 
 ```go
-// Example: More lenient exchange circuit breaker
-manager.exchange = gobreaker.NewCircuitBreaker(gobreaker.Settings{
-    Name:        "exchange",
-    MaxRequests: 5,                // Increase half-open requests
-    Interval:    20 * time.Second, // Longer failure window
-    Timeout:     60 * time.Second, // Longer recovery time
-    ReadyToTrip: func(counts gobreaker.Counts) bool {
-        failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-        return counts.Requests >= 10 && failureRatio >= 0.7 // Higher thresholds
-    },
-    // ... callbacks
-})
+// Create with custom settings
+exchangeSettings := &risk.ServiceSettings{
+    MinRequests:     10,
+    FailureRatio:    0.7,
+    OpenTimeout:     60 * time.Second,
+    HalfOpenMaxReqs: 5,
+    CountInterval:   20 * time.Second,
+}
+
+manager := risk.NewCircuitBreakerManagerWithSettings(
+    exchangeSettings, // Exchange settings
+    nil,              // LLM settings (use defaults)
+    nil,              // DB settings (use defaults)
+)
 ```
+
+**Default Behavior:**
+
+If no configuration is provided, the system uses the default constants defined in `internal/risk/circuit_breaker.go`. This maintains backward compatibility with existing code.
 
 ### Monitoring Queries
 

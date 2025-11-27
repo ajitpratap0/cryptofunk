@@ -94,8 +94,96 @@ func initMetrics() {
 	})
 }
 
-// NewCircuitBreakerManager creates a new circuit breaker manager with Prometheus metrics
+// ServiceSettings holds circuit breaker configuration for a single service
+type ServiceSettings struct {
+	MinRequests     uint32
+	FailureRatio    float64
+	OpenTimeout     time.Duration
+	HalfOpenMaxReqs uint32
+	CountInterval   time.Duration
+}
+
+// ParseDuration parses a duration string and returns the duration or a default value
+func ParseDuration(durationStr string, defaultValue time.Duration) time.Duration {
+	if durationStr == "" {
+		return defaultValue
+	}
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return defaultValue
+	}
+	return duration
+}
+
+// NewCircuitBreakerManager creates a new circuit breaker manager with default settings
+// This function maintains backward compatibility for existing code
 func NewCircuitBreakerManager() *CircuitBreakerManager {
+	return NewCircuitBreakerManagerWithSettings(nil, nil, nil)
+}
+
+// NewCircuitBreakerManagerFromConfig creates a circuit breaker manager from config settings
+// This is a convenience function that converts config.CircuitBreakerSettings to ServiceSettings
+func NewCircuitBreakerManagerFromConfig(exchangeCfg, llmCfg, dbCfg interface{}) *CircuitBreakerManager {
+	// Type assertion and conversion for exchange settings
+	var exchangeSettings *ServiceSettings
+	if cfg, ok := exchangeCfg.(struct {
+		MinRequests     uint32
+		FailureRatio    float64
+		OpenTimeout     string
+		HalfOpenMaxReqs uint32
+		CountInterval   string
+	}); ok {
+		exchangeSettings = &ServiceSettings{
+			MinRequests:     cfg.MinRequests,
+			FailureRatio:    cfg.FailureRatio,
+			OpenTimeout:     ParseDuration(cfg.OpenTimeout, ExchangeOpenTimeout),
+			HalfOpenMaxReqs: cfg.HalfOpenMaxReqs,
+			CountInterval:   ParseDuration(cfg.CountInterval, ExchangeCountInterval),
+		}
+	}
+
+	// Type assertion and conversion for LLM settings
+	var llmSettings *ServiceSettings
+	if cfg, ok := llmCfg.(struct {
+		MinRequests     uint32
+		FailureRatio    float64
+		OpenTimeout     string
+		HalfOpenMaxReqs uint32
+		CountInterval   string
+	}); ok {
+		llmSettings = &ServiceSettings{
+			MinRequests:     cfg.MinRequests,
+			FailureRatio:    cfg.FailureRatio,
+			OpenTimeout:     ParseDuration(cfg.OpenTimeout, LLMOpenTimeout),
+			HalfOpenMaxReqs: cfg.HalfOpenMaxReqs,
+			CountInterval:   ParseDuration(cfg.CountInterval, LLMCountInterval),
+		}
+	}
+
+	// Type assertion and conversion for database settings
+	var dbSettings *ServiceSettings
+	if cfg, ok := dbCfg.(struct {
+		MinRequests     uint32
+		FailureRatio    float64
+		OpenTimeout     string
+		HalfOpenMaxReqs uint32
+		CountInterval   string
+	}); ok {
+		dbSettings = &ServiceSettings{
+			MinRequests:     cfg.MinRequests,
+			FailureRatio:    cfg.FailureRatio,
+			OpenTimeout:     ParseDuration(cfg.OpenTimeout, DBOpenTimeout),
+			HalfOpenMaxReqs: cfg.HalfOpenMaxReqs,
+			CountInterval:   ParseDuration(cfg.CountInterval, DBCountInterval),
+		}
+	}
+
+	return NewCircuitBreakerManagerWithSettings(exchangeSettings, llmSettings, dbSettings)
+}
+
+// NewCircuitBreakerManagerWithSettings creates a new circuit breaker manager with Prometheus metrics
+// If settings are nil, defaults to the constants defined above
+func NewCircuitBreakerManagerWithSettings(exchangeSettings, llmSettings, dbSettings *ServiceSettings) *CircuitBreakerManager {
 	// Register metrics only once using sync.Once for thread safety
 	initMetrics()
 
@@ -105,15 +193,44 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 		metrics: metrics,
 	}
 
+	// Use defaults if settings not provided
+	if exchangeSettings == nil {
+		exchangeSettings = &ServiceSettings{
+			MinRequests:     ExchangeMinRequests,
+			FailureRatio:    ExchangeFailureRatio,
+			OpenTimeout:     ExchangeOpenTimeout,
+			HalfOpenMaxReqs: ExchangeHalfOpenMaxReqs,
+			CountInterval:   ExchangeCountInterval,
+		}
+	}
+	if llmSettings == nil {
+		llmSettings = &ServiceSettings{
+			MinRequests:     LLMMinRequests,
+			FailureRatio:    LLMFailureRatio,
+			OpenTimeout:     LLMOpenTimeout,
+			HalfOpenMaxReqs: LLMHalfOpenMaxReqs,
+			CountInterval:   LLMCountInterval,
+		}
+	}
+	if dbSettings == nil {
+		dbSettings = &ServiceSettings{
+			MinRequests:     DBMinRequests,
+			FailureRatio:    DBFailureRatio,
+			OpenTimeout:     DBOpenTimeout,
+			HalfOpenMaxReqs: DBHalfOpenMaxReqs,
+			CountInterval:   DBCountInterval,
+		}
+	}
+
 	// Exchange circuit breaker: configurable thresholds
 	manager.exchange = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "exchange",
-		MaxRequests: ExchangeHalfOpenMaxReqs,
-		Interval:    ExchangeCountInterval,
-		Timeout:     ExchangeOpenTimeout,
+		MaxRequests: exchangeSettings.HalfOpenMaxReqs,
+		Interval:    exchangeSettings.CountInterval,
+		Timeout:     exchangeSettings.OpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= ExchangeMinRequests && failureRatio >= ExchangeFailureRatio
+			return counts.Requests >= exchangeSettings.MinRequests && failureRatio >= exchangeSettings.FailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			manager.updateMetrics("exchange", to)
@@ -123,12 +240,12 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 	// LLM circuit breaker: longer timeouts for AI model calls
 	manager.llm = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "llm",
-		MaxRequests: LLMHalfOpenMaxReqs,
-		Interval:    LLMCountInterval,
-		Timeout:     LLMOpenTimeout,
+		MaxRequests: llmSettings.HalfOpenMaxReqs,
+		Interval:    llmSettings.CountInterval,
+		Timeout:     llmSettings.OpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= LLMMinRequests && failureRatio >= LLMFailureRatio
+			return counts.Requests >= llmSettings.MinRequests && failureRatio >= llmSettings.FailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			manager.updateMetrics("llm", to)
@@ -138,12 +255,12 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 	// Database circuit breaker: quick recovery for DB connections
 	manager.database = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "database",
-		MaxRequests: DBHalfOpenMaxReqs,
-		Interval:    DBCountInterval,
-		Timeout:     DBOpenTimeout,
+		MaxRequests: dbSettings.HalfOpenMaxReqs,
+		Interval:    dbSettings.CountInterval,
+		Timeout:     dbSettings.OpenTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= DBMinRequests && failureRatio >= DBFailureRatio
+			return counts.Requests >= dbSettings.MinRequests && failureRatio >= dbSettings.FailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			manager.updateMetrics("database", to)

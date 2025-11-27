@@ -63,6 +63,19 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to load or validate configuration")
 	}
 
+	// CRITICAL SECURITY CHECK: Prevent production deployment with API auth disabled
+	// This validation MUST happen before any server initialization
+	isProduction := cfg.App.Environment == envProduction || cfg.App.Environment == "prod"
+	if isProduction && !cfg.API.Auth.Enabled {
+		log.Fatal().
+			Str("environment", cfg.App.Environment).
+			Bool("auth_enabled", cfg.API.Auth.Enabled).
+			Msg("CRITICAL SECURITY ERROR: Cannot start API server in production with authentication disabled. " +
+				"This would expose all trading control endpoints (start/stop/pause/resume) without protection. " +
+				"Set api.auth.enabled=true in config.yaml or change environment to non-production.")
+		os.Exit(1)
+	}
+
 	// Initialize database
 	ctx := context.Background()
 	database, err := db.New(ctx)

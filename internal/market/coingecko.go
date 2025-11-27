@@ -21,6 +21,8 @@ const (
 	defaultMaxRetries    = 3
 	defaultRetryDelay    = time.Second
 	defaultMaxRetryDelay = 30 * time.Second
+	healthCheckTimeout   = 5 * time.Second
+	defaultCacheTTL      = 60 * time.Second // Default cache TTL for prices
 )
 
 // CoinGeckoClient wraps the CoinGecko MCP server client with rate limiting and retry logic
@@ -35,17 +37,19 @@ type CoinGeckoClient struct {
 	connected   bool
 	lastError   error              // Last error encountered (protected by mu)
 	sfGroup     singleflight.Group // Prevents cache stampede
+	cache       *RedisPriceCache   // Optional Redis cache for price data
 }
 
 // CoinGeckoClientOptions configures the CoinGecko client
 type CoinGeckoClientOptions struct {
-	MCPURL             string        // MCP server URL (default: https://mcp.api.coingecko.com/mcp)
-	APIKey             string        // Optional API key for CoinGecko Pro tier (currently unused - SDK doesn't support headers yet)
-	Timeout            time.Duration // Request timeout (default: 30s)
-	RateLimit          int           // Requests per minute (default: 50 for free tier, increase for Pro)
-	MaxRetries         int           // Maximum retry attempts (default: 3)
-	RetryDelay         time.Duration // Initial retry delay with exponential backoff (default: 1s)
-	EnableRateLimiting bool          // Enable rate limiting (recommended: true)
+	MCPURL             string           // MCP server URL (default: https://mcp.api.coingecko.com/mcp)
+	APIKey             string           // Optional API key for CoinGecko Pro tier (currently unused - SDK doesn't support headers yet)
+	Timeout            time.Duration    // Request timeout (default: 30s)
+	RateLimit          int              // Requests per minute (default: 50 for free tier, increase for Pro)
+	MaxRetries         int              // Maximum retry attempts (default: 3)
+	RetryDelay         time.Duration    // Initial retry delay with exponential backoff (default: 1s)
+	EnableRateLimiting bool             // Enable rate limiting (recommended: true)
+	Cache              *RedisPriceCache // Optional Redis cache for price data (default: nil)
 }
 
 // NewCoinGeckoClient creates a new CoinGecko MCP client with rate limiting and retry logic.
@@ -119,6 +123,14 @@ func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClien
 		maxRetries:  opts.MaxRetries,
 		retryDelay:  opts.RetryDelay,
 		connected:   false,
+		cache:       opts.Cache, // Optional Redis cache
+	}
+
+	// Log cache status
+	if client.cache != nil {
+		log.Info().Msg("Redis cache enabled for CoinGecko price data")
+	} else {
+		log.Debug().Msg("Redis cache not configured - using in-memory singleflight only")
 	}
 
 	// Connect to CoinGecko MCP server using SSE transport
@@ -179,12 +191,32 @@ type PriceResult struct {
 }
 
 // GetPrice fetches the current price for a cryptocurrency using MCP
-// Uses singleflight to prevent cache stampede from concurrent requests
+// Uses Redis cache (if available) and singleflight to prevent cache stampede from concurrent requests
 func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrency string) (*PriceResult, error) {
 	log.Debug().
 		Str("symbol", symbol).
 		Str("vs_currency", vsCurrency).
 		Msg("Fetching price from CoinGecko MCP")
+
+	// Check Redis cache first (if available)
+	if c.cache != nil {
+		if price, found := c.cache.Get(ctx, symbol, vsCurrency); found {
+			log.Debug().
+				Str("symbol", symbol).
+				Str("vs_currency", vsCurrency).
+				Float64("price", price).
+				Msg("Redis cache hit for price")
+			return &PriceResult{
+				Symbol:   symbol,
+				Price:    price,
+				Currency: vsCurrency,
+			}, nil
+		}
+		log.Debug().
+			Str("symbol", symbol).
+			Str("vs_currency", vsCurrency).
+			Msg("Redis cache miss - fetching from MCP")
+	}
 
 	// Use singleflight to deduplicate concurrent requests for same symbol+currency
 	key := fmt.Sprintf("price:%s:%s", symbol, vsCurrency)
@@ -218,11 +250,24 @@ func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrenc
 			return nil, fmt.Errorf("currency %s not found for symbol %s", vsCurrency, symbol)
 		}
 
-		return &PriceResult{
+		priceResult := &PriceResult{
 			Symbol:   symbol,
 			Price:    price,
 			Currency: vsCurrency,
-		}, nil
+		}
+
+		// Store in Redis cache if available (fire-and-forget, don't fail on cache errors)
+		if c.cache != nil {
+			if cacheErr := c.cache.Set(ctx, symbol, vsCurrency, price); cacheErr != nil {
+				log.Warn().
+					Err(cacheErr).
+					Str("symbol", symbol).
+					Str("vs_currency", vsCurrency).
+					Msg("Failed to cache price in Redis - continuing anyway")
+			}
+		}
+
+		return priceResult, nil
 	})
 
 	if err != nil {
@@ -483,9 +528,10 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 			}
 		}
 
-		// Fix: Create context with timeout and ensure proper cleanup
-		// Move cancel outside loop to prevent context leak
+		// Fix: Create context with timeout and ensure proper cleanup with defer
+		// This prevents context leak even if panic occurs before cancel() is called
 		reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
+		defer cancel()
 
 		// Call MCP tool
 		params := &mcp.CallToolParams{
@@ -494,9 +540,6 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 		}
 
 		response, err := session.CallTool(reqCtx, params)
-
-		// Explicitly cancel context after use to prevent leak
-		cancel()
 
 		if err != nil {
 			lastErr = fmt.Errorf("attempt %d failed: %w", attempt+1, err)
@@ -654,6 +697,27 @@ func (c *Candlestick) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// SetCache sets or updates the Redis cache for the client
+// This allows cache to be configured after client initialization
+func (c *CoinGeckoClient) SetCache(cache *RedisPriceCache) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cache = cache
+	if cache != nil {
+		log.Info().Msg("Redis cache configured for CoinGecko client")
+	} else {
+		log.Info().Msg("Redis cache removed from CoinGecko client")
+	}
+}
+
+// GetCache returns the current Redis cache (if any)
+func (c *CoinGeckoClient) GetCache() *RedisPriceCache {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cache
+}
+
 // Health checks if the CoinGecko MCP connection is healthy
 func (c *CoinGeckoClient) Health(ctx context.Context) error {
 	log.Debug().Msg("Checking CoinGecko MCP health")
@@ -661,6 +725,7 @@ func (c *CoinGeckoClient) Health(ctx context.Context) error {
 	c.mu.RLock()
 	connected := c.connected
 	lastErr := c.lastError
+	cache := c.cache
 	c.mu.RUnlock()
 
 	if !connected {
@@ -672,9 +737,19 @@ func (c *CoinGeckoClient) Health(ctx context.Context) error {
 		return fmt.Errorf("recent error detected: %w", lastErr)
 	}
 
+	// Check Redis cache health if available (non-blocking)
+	if cache != nil {
+		if err := cache.Health(ctx); err != nil {
+			log.Warn().
+				Err(err).
+				Msg("Redis cache health check failed - cache may be unavailable")
+			// Don't fail the overall health check, just warn
+		}
+	}
+
 	// Try a simple API call to verify connection
 	// Use lightweight ping endpoint if available, or get_price for health check
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
 
 	_, err := c.GetPrice(ctx, "bitcoin", "usd")
