@@ -163,7 +163,7 @@ type APIConfig struct {
 	Port            int        `mapstructure:"port"`
 	OrchestratorURL string     `mapstructure:"orchestrator_url"`
 	AllowedOrigins  []string   `mapstructure:"allowed_origins"` // CORS allowed origins
-	Auth            AuthConfig `mapstructure:"auth"`             // Authentication configuration
+	Auth            AuthConfig `mapstructure:"auth"`            // Authentication configuration
 }
 
 // AuthConfig contains API authentication settings
