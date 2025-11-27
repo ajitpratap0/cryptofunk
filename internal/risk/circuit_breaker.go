@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -32,14 +33,13 @@ type CircuitBreakerMetrics struct {
 
 var (
 	// Global metrics instance (singleton)
-	globalMetrics     *CircuitBreakerMetrics
-	metricsRegistered bool
+	globalMetrics *CircuitBreakerMetrics
+	metricsOnce   sync.Once
 )
 
-// NewCircuitBreakerManager creates a new circuit breaker manager with Prometheus metrics
-func NewCircuitBreakerManager() *CircuitBreakerManager {
-	// Register metrics only once
-	if !metricsRegistered {
+// initMetrics initializes the global metrics instance exactly once in a thread-safe manner
+func initMetrics() {
+	metricsOnce.Do(func() {
 		globalMetrics = &CircuitBreakerMetrics{
 			state: promauto.NewGaugeVec(
 				prometheus.GaugeOpts{
@@ -63,8 +63,13 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 				[]string{"service"},
 			),
 		}
-		metricsRegistered = true
-	}
+	})
+}
+
+// NewCircuitBreakerManager creates a new circuit breaker manager with Prometheus metrics
+func NewCircuitBreakerManager() *CircuitBreakerManager {
+	// Register metrics only once using sync.Once for thread safety
+	initMetrics()
 
 	metrics := globalMetrics
 
@@ -129,33 +134,8 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 // This is useful for testing scenarios where you want to test other components without
 // the circuit breaker interfering.
 func NewPassthroughCircuitBreakerManager() *CircuitBreakerManager {
-	// Register metrics only once
-	if !metricsRegistered {
-		globalMetrics = &CircuitBreakerMetrics{
-			state: promauto.NewGaugeVec(
-				prometheus.GaugeOpts{
-					Name: "circuit_breaker_state",
-					Help: "Circuit breaker state (0=closed, 1=open, 2=half_open)",
-				},
-				[]string{"service"},
-			),
-			requests: promauto.NewCounterVec(
-				prometheus.CounterOpts{
-					Name: "circuit_breaker_requests_total",
-					Help: "Total number of requests through circuit breaker",
-				},
-				[]string{"service", "result"},
-			),
-			failures: promauto.NewCounterVec(
-				prometheus.CounterOpts{
-					Name: "circuit_breaker_failures_total",
-					Help: "Total number of failures tracked by circuit breaker",
-				},
-				[]string{"service"},
-			),
-		}
-		metricsRegistered = true
-	}
+	// Register metrics only once using sync.Once for thread safety
+	initMetrics()
 
 	metrics := globalMetrics
 

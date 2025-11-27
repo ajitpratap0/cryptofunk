@@ -2,6 +2,7 @@ package risk
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -368,5 +369,240 @@ func TestCircuitBreakerManager_RealWorldScenario(t *testing.T) {
 		// Circuit would transition to half-open and allow test requests
 		// For this test, we just verify the circuit is open
 		assert.Equal(t, gobreaker.StateOpen, manager.Exchange().State())
+	})
+}
+
+func TestNewPassthroughCircuitBreakerManager(t *testing.T) {
+	t.Run("creates manager with all circuit breakers", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		require.NotNil(t, manager)
+		require.NotNil(t, manager.exchange)
+		require.NotNil(t, manager.llm)
+		require.NotNil(t, manager.database)
+		require.NotNil(t, manager.metrics)
+	})
+
+	t.Run("never trips on exchange failures", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		// Execute many failures - way more than would normally trip the circuit
+		for i := 0; i < 100; i++ {
+			manager.Exchange().Execute(func() (interface{}, error) {
+				return nil, errors.New("exchange error")
+			})
+		}
+
+		// Circuit should still be closed
+		assert.Equal(t, gobreaker.StateClosed, manager.Exchange().State())
+
+		// Verify next request still executes
+		executed := false
+		_, err := manager.Exchange().Execute(func() (interface{}, error) {
+			executed = true
+			return "success", nil
+		})
+		assert.NoError(t, err)
+		assert.True(t, executed, "function should have been executed")
+	})
+
+	t.Run("never trips on LLM failures", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		// Execute many failures
+		for i := 0; i < 100; i++ {
+			manager.LLM().Execute(func() (interface{}, error) {
+				return nil, errors.New("llm timeout")
+			})
+		}
+
+		// Circuit should still be closed
+		assert.Equal(t, gobreaker.StateClosed, manager.LLM().State())
+
+		// Verify next request still executes
+		executed := false
+		_, err := manager.LLM().Execute(func() (interface{}, error) {
+			executed = true
+			return "success", nil
+		})
+		assert.NoError(t, err)
+		assert.True(t, executed, "function should have been executed")
+	})
+
+	t.Run("never trips on database failures", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		// Execute many failures
+		for i := 0; i < 100; i++ {
+			manager.Database().Execute(func() (interface{}, error) {
+				return nil, errors.New("database connection failed")
+			})
+		}
+
+		// Circuit should still be closed
+		assert.Equal(t, gobreaker.StateClosed, manager.Database().State())
+
+		// Verify next request still executes
+		executed := false
+		_, err := manager.Database().Execute(func() (interface{}, error) {
+			executed = true
+			return "success", nil
+		})
+		assert.NoError(t, err)
+		assert.True(t, executed, "function should have been executed")
+	})
+
+	t.Run("propagates errors correctly", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		expectedErr := errors.New("specific error")
+		_, err := manager.Exchange().Execute(func() (interface{}, error) {
+			return nil, expectedErr
+		})
+
+		// Error should be propagated, not wrapped with ErrOpenState
+		assert.Equal(t, expectedErr, err)
+		assert.NotErrorIs(t, err, gobreaker.ErrOpenState)
+	})
+
+	t.Run("propagates return values correctly", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		expectedValue := map[string]interface{}{
+			"status": "ok",
+			"data":   123,
+		}
+
+		result, err := manager.Exchange().Execute(func() (interface{}, error) {
+			return expectedValue, nil
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, expectedValue, result)
+	})
+
+	t.Run("concurrent access works correctly", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		done := make(chan bool, 20)
+		successCount := 0
+		var mu sync.Mutex
+
+		// Execute many concurrent requests with failures
+		for i := 0; i < 20; i++ {
+			go func(idx int) {
+				defer func() { done <- true }()
+
+				_, err := manager.Exchange().Execute(func() (interface{}, error) {
+					time.Sleep(5 * time.Millisecond)
+					if idx%2 == 0 {
+						return nil, errors.New("failure")
+					}
+					return "success", nil
+				})
+
+				// Even with failures, no request should fail with ErrOpenState
+				if err == nil || !errors.Is(err, gobreaker.ErrOpenState) {
+					mu.Lock()
+					successCount++
+					mu.Unlock()
+				}
+			}(i)
+		}
+
+		// Wait for all goroutines
+		for i := 0; i < 20; i++ {
+			<-done
+		}
+
+		// All requests should have been executed (not rejected by circuit breaker)
+		mu.Lock()
+		assert.Equal(t, 20, successCount, "all requests should be executed, none rejected by circuit breaker")
+		mu.Unlock()
+	})
+
+	t.Run("metrics are still recorded", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+		metrics := manager.Metrics()
+
+		// Verify metrics object exists
+		require.NotNil(t, metrics)
+
+		// Record some metrics (should not panic)
+		metrics.RecordRequest("exchange", true)
+		metrics.RecordRequest("exchange", false)
+		metrics.RecordRequest("llm", true)
+		metrics.RecordRequest("database", false)
+
+		// No panics means success
+	})
+
+	t.Run("passthrough manager shares global metrics", func(t *testing.T) {
+		manager1 := NewPassthroughCircuitBreakerManager()
+		manager2 := NewCircuitBreakerManager()
+
+		// Both should share the same global metrics instance
+		assert.Same(t, manager1.metrics, manager2.metrics)
+	})
+
+	t.Run("allows high request volume without tripping", func(t *testing.T) {
+		manager := NewPassthroughCircuitBreakerManager()
+
+		// Execute 1000 requests with 90% failure rate
+		for i := 0; i < 1000; i++ {
+			manager.Exchange().Execute(func() (interface{}, error) {
+				if i%10 == 0 {
+					return "success", nil
+				}
+				return nil, errors.New("failure")
+			})
+		}
+
+		// Circuit should still be closed
+		assert.Equal(t, gobreaker.StateClosed, manager.Exchange().State())
+
+		// Verify a request still executes
+		executed := false
+		manager.Exchange().Execute(func() (interface{}, error) {
+			executed = true
+			return nil, nil
+		})
+		assert.True(t, executed)
+	})
+}
+
+func TestPassthroughVsNormalCircuitBreaker(t *testing.T) {
+	t.Run("normal manager trips, passthrough does not", func(t *testing.T) {
+		normalManager := NewCircuitBreakerManager()
+		passthroughManager := NewPassthroughCircuitBreakerManager()
+
+		// Trigger failures on both
+		for i := 0; i < 10; i++ {
+			normalManager.Exchange().Execute(func() (interface{}, error) {
+				return nil, errors.New("error")
+			})
+			passthroughManager.Exchange().Execute(func() (interface{}, error) {
+				return nil, errors.New("error")
+			})
+		}
+
+		// Normal manager should be open
+		assert.Equal(t, gobreaker.StateOpen, normalManager.Exchange().State())
+
+		// Passthrough manager should still be closed
+		assert.Equal(t, gobreaker.StateClosed, passthroughManager.Exchange().State())
+
+		// Normal manager rejects new requests
+		_, err := normalManager.Exchange().Execute(func() (interface{}, error) {
+			return "test", nil
+		})
+		assert.ErrorIs(t, err, gobreaker.ErrOpenState)
+
+		// Passthrough manager accepts new requests
+		result, err := passthroughManager.Exchange().Execute(func() (interface{}, error) {
+			return "test", nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "test", result)
 	})
 }

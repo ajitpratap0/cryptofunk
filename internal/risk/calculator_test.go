@@ -405,9 +405,10 @@ func TestCalculateStdDev(t *testing.T) {
 	values := []float64{2, 4, 4, 4, 5, 5, 7, 9}
 	stdDev := calculateStdDev(values)
 
-	// Known standard deviation for this dataset
-	expectedStdDev := 2.0
-	assert.InDelta(t, expectedStdDev, stdDev, 0.1)
+	// Known sample standard deviation for this dataset (using N-1, Bessel's correction)
+	// Mean = 5, Variance = 32/7 ≈ 4.571, StdDev = √4.571 ≈ 2.138
+	expectedStdDev := 2.138
+	assert.InDelta(t, expectedStdDev, stdDev, 0.01)
 }
 
 // TestCalculateStdDevEmpty tests standard deviation with empty slice

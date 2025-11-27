@@ -562,7 +562,7 @@ func TestClient_DefaultConfig(t *testing.T) {
 		t.Errorf("Expected maxTokens 2000, got %d", client.maxTokens)
 	}
 
-	if client.timeout != 30*time.Second {
-		t.Errorf("Expected timeout 30s, got %v", client.timeout)
+	if client.timeout != 60*time.Second {
+		t.Errorf("Expected timeout 60s, got %v", client.timeout)
 	}
 }

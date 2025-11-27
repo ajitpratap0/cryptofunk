@@ -325,6 +325,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("api.port", 8081)
 	v.SetDefault("api.orchestrator_url", "http://localhost:8081")
 
+	// API Authentication defaults
+	// Authentication is disabled by default for development/testing
+	// For production deployments, set api.auth.enabled = true in config.yaml
+	v.SetDefault("api.auth.enabled", false)
+	v.SetDefault("api.auth.header_name", "X-API-Key")
+	v.SetDefault("api.auth.require_https", true)
+
 	// Monitoring defaults
 	v.SetDefault("monitoring.prometheus_port", 9100)
 	v.SetDefault("monitoring.enable_metrics", true)

@@ -480,7 +480,7 @@ func (o *Orchestrator) makeDecision(ctx context.Context) error {
 		o.metrics.DecisionDuration.Observe(duration.Seconds())
 	}()
 
-	// Check if trading is paused
+	// Check if trading is paused (early fast-path check)
 	o.pausedMutex.RLock()
 	isPaused := o.paused
 	o.pausedMutex.RUnlock()
@@ -506,6 +506,21 @@ func (o *Orchestrator) makeDecision(ctx context.Context) error {
 			MinConsensus:  o.config.MinConsensus,
 			MinConfidence: o.config.MinConfidence,
 		})
+
+		// CRITICAL: Re-check pause state immediately before publishing
+		// This prevents TOCTOU race where pause could occur after initial check
+		// but before decision publication
+		o.pausedMutex.RLock()
+		currentlyPaused := o.paused
+		o.pausedMutex.RUnlock()
+
+		if currentlyPaused {
+			o.log.Debug().
+				Str("symbol", symbol).
+				Msg("Trading paused during decision making, discarding decision")
+			// Stop processing remaining symbols
+			break
+		}
 
 		// Publish all decisions including HOLD (needed for monitoring and testing)
 		if err := o.publishDecision(decision); err != nil {
@@ -743,32 +758,72 @@ func (o *Orchestrator) updateActiveAgentsMetricLocked() {
 	o.metrics.ActiveAgents.Set(float64(activeCount))
 }
 
+// publishWithRetry attempts to publish a message to NATS with exponential backoff retry logic
+// Returns error only if all retry attempts fail
+func (o *Orchestrator) publishWithRetry(topic string, data []byte, maxRetries int) error {
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := o.natsConn.Publish(topic, data); err != nil {
+			lastErr = err
+			o.log.Warn().
+				Err(err).
+				Str("topic", topic).
+				Int("attempt", attempt+1).
+				Int("max_retries", maxRetries).
+				Msg("Failed to publish to NATS, will retry")
+
+			// Exponential backoff: 50ms, 100ms, 200ms, etc.
+			backoff := time.Duration(50*(1<<uint(attempt))) * time.Millisecond
+			time.Sleep(backoff)
+			continue
+		}
+
+		// Success
+		if attempt > 0 {
+			o.log.Info().
+				Str("topic", topic).
+				Int("attempts", attempt+1).
+				Msg("Successfully published to NATS after retries")
+		}
+		return nil
+	}
+
+	// All retries failed
+	return fmt.Errorf("failed to publish after %d attempts: %w", maxRetries, lastErr)
+}
+
 // Pause pauses all trading decision-making
+// Uses database-level locking to prevent race conditions and ensures atomic state updates
 func (o *Orchestrator) Pause() error {
 	o.pausedMutex.Lock()
 	defer o.pausedMutex.Unlock()
 
+	// Check in-memory state first (fast path for already-paused case)
 	if o.paused {
 		return fmt.Errorf("trading is already paused")
 	}
 
-	o.paused = true
-	o.log.Info().Msg("Trading paused")
-
-	// Persist pause state to database
+	// Persist pause state to database BEFORE updating in-memory state
+	// This ensures database is source of truth and failures don't leave inconsistent state
 	if o.db != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		if err := o.db.SetOrchestratorPaused(ctx, "api", "manual_pause"); err != nil {
 			o.log.Error().Err(err).Msg("Failed to persist pause state to database")
-			// Don't fail the pause operation if DB write fails
-		} else {
-			o.log.Debug().Msg("Pause state persisted to database")
+			// CRITICAL: If database write fails, do NOT update in-memory state
+			// This prevents divergence between DB and memory state
+			return fmt.Errorf("failed to pause trading (database error): %w", err)
 		}
+		o.log.Debug().Msg("Pause state persisted to database")
 	}
 
-	// Broadcast pause event to all agents via NATS
+	// Update in-memory state only after successful DB write
+	o.paused = true
+	o.log.Info().Msg("Trading paused")
+
+	// Broadcast pause event to all agents via NATS with retry logic
 	if o.natsConn != nil {
 		pauseEvent := map[string]interface{}{
 			"event":     "trading_paused",
@@ -779,48 +834,56 @@ func (o *Orchestrator) Pause() error {
 		data, err := json.Marshal(pauseEvent)
 		if err != nil {
 			o.log.Error().Err(err).Msg("Failed to marshal pause event")
-			return fmt.Errorf("failed to marshal pause event: %w", err)
+			// Don't fail the operation if we can't marshal (should never happen with map[string]interface{})
+			// But log it as this indicates a serious problem
+			o.log.Error().Msg("CRITICAL: Failed to marshal pause event - agents may not be notified")
+		} else {
+			// Attempt to publish with retries
+			topic := "cryptofunk.orchestrator.control"
+			if err := o.publishWithRetry(topic, data, 3); err != nil {
+				// Log error but don't fail the pause operation
+				// The pause has already been committed to DB and memory
+				o.log.Error().Err(err).Str("topic", topic).Msg("Failed to broadcast pause event after retries - agents may not be immediately notified")
+			} else {
+				o.log.Info().Str("topic", topic).Msg("Pause event broadcast to agents")
+			}
 		}
-
-		// Publish to control topic
-		topic := "cryptofunk.orchestrator.control"
-		if err := o.natsConn.Publish(topic, data); err != nil {
-			o.log.Error().Err(err).Str("topic", topic).Msg("Failed to publish pause event")
-			return fmt.Errorf("failed to publish pause event: %w", err)
-		}
-
-		o.log.Info().Str("topic", topic).Msg("Pause event broadcast to agents")
 	}
 
 	return nil
 }
 
 // Resume resumes trading decision-making
+// Uses database-level locking to prevent race conditions and ensures atomic state updates
 func (o *Orchestrator) Resume() error {
 	o.pausedMutex.Lock()
 	defer o.pausedMutex.Unlock()
 
+	// Check in-memory state first (fast path for not-paused case)
 	if !o.paused {
 		return fmt.Errorf("trading is not paused")
 	}
 
-	o.paused = false
-	o.log.Info().Msg("Trading resumed")
-
-	// Persist resume state to database
+	// Persist resume state to database BEFORE updating in-memory state
+	// This ensures database is source of truth and failures don't leave inconsistent state
 	if o.db != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		if err := o.db.SetOrchestratorResumed(ctx); err != nil {
 			o.log.Error().Err(err).Msg("Failed to persist resume state to database")
-			// Don't fail the resume operation if DB write fails
-		} else {
-			o.log.Debug().Msg("Resume state persisted to database")
+			// CRITICAL: If database write fails, do NOT update in-memory state
+			// This prevents divergence between DB and memory state
+			return fmt.Errorf("failed to resume trading (database error): %w", err)
 		}
+		o.log.Debug().Msg("Resume state persisted to database")
 	}
 
-	// Broadcast resume event to all agents via NATS
+	// Update in-memory state only after successful DB write
+	o.paused = false
+	o.log.Info().Msg("Trading resumed")
+
+	// Broadcast resume event to all agents via NATS with retry logic
 	if o.natsConn != nil {
 		resumeEvent := map[string]interface{}{
 			"event":     "trading_resumed",
@@ -830,17 +893,20 @@ func (o *Orchestrator) Resume() error {
 		data, err := json.Marshal(resumeEvent)
 		if err != nil {
 			o.log.Error().Err(err).Msg("Failed to marshal resume event")
-			return fmt.Errorf("failed to marshal resume event: %w", err)
+			// Don't fail the operation if we can't marshal (should never happen with map[string]interface{})
+			// But log it as this indicates a serious problem
+			o.log.Error().Msg("CRITICAL: Failed to marshal resume event - agents may not be notified")
+		} else {
+			// Attempt to publish with retries
+			topic := "cryptofunk.orchestrator.control"
+			if err := o.publishWithRetry(topic, data, 3); err != nil {
+				// Log error but don't fail the resume operation
+				// The resume has already been committed to DB and memory
+				o.log.Error().Err(err).Str("topic", topic).Msg("Failed to broadcast resume event after retries - agents may not be immediately notified")
+			} else {
+				o.log.Info().Str("topic", topic).Msg("Resume event broadcast to agents")
+			}
 		}
-
-		// Publish to control topic
-		topic := "cryptofunk.orchestrator.control"
-		if err := o.natsConn.Publish(topic, data); err != nil {
-			o.log.Error().Err(err).Str("topic", topic).Msg("Failed to publish resume event")
-			return fmt.Errorf("failed to publish resume event: %w", err)
-		}
-
-		o.log.Info().Str("topic", topic).Msg("Resume event broadcast to agents")
 	}
 
 	return nil

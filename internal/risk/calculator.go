@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -110,6 +111,11 @@ func (c *Calculator) LoadHistoricalPrices(ctx context.Context, symbol string, in
 		times = append(times, openTime)
 	}
 
+	// Check for errors from iterating over rows
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating price rows: %w", err)
+	}
+
 	if len(prices) == 0 {
 		return nil, fmt.Errorf("no historical prices found for %s", symbol)
 	}
@@ -184,10 +190,10 @@ func (c *Calculator) CalculateWinRate(ctx context.Context, symbol string) (*WinR
 	query := `
 		SELECT
 			COUNT(*) FILTER (WHERE realized_pnl > 0) AS winning_trades,
-			COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losing_trades,
+			COUNT(*) FILTER (WHERE realized_pnl < 0) AS losing_trades,
 			COUNT(*) AS total_trades,
 			COALESCE(AVG(realized_pnl) FILTER (WHERE realized_pnl > 0), 0) AS avg_win,
-			COALESCE(ABS(AVG(realized_pnl)) FILTER (WHERE realized_pnl < 0), 0) AS avg_loss
+			COALESCE(ABS(AVG(realized_pnl) FILTER (WHERE realized_pnl < 0)), 0) AS avg_loss
 		FROM positions
 		WHERE exit_time IS NOT NULL
 			AND realized_pnl IS NOT NULL
@@ -305,6 +311,11 @@ func (c *Calculator) LoadEquityCurve(ctx context.Context, sessionID *string, day
 		}
 	}
 
+	// Check for errors from iterating over rows
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating equity rows: %w", err)
+	}
+
 	if len(equityCurve) == 0 {
 		log.Warn().Msg("No equity curve data found, returning empty")
 		return &PerformanceData{
@@ -356,13 +367,18 @@ func (c *Calculator) CalculateSharpeRatio(returns []float64, riskFreeRate float6
 	}
 	meanReturn := sum / float64(len(returns))
 
-	// Calculate standard deviation
+	// Calculate standard deviation using sample variance (Bessel's correction)
 	variance := 0.0
 	for _, r := range returns {
 		diff := r - meanReturn
 		variance += diff * diff
 	}
-	variance /= float64(len(returns))
+	// Use N-1 for sample variance (Bessel's correction)
+	if len(returns) > 1 {
+		variance /= float64(len(returns) - 1)
+	} else {
+		variance /= float64(len(returns))
+	}
 	stdDev := math.Sqrt(variance)
 
 	if stdDev == 0 {
@@ -431,7 +447,12 @@ func (c *Calculator) DetectMarketRegime(ctx context.Context, symbol string, days
 	currentPrice := prices[len(prices)-1]
 	startPrice := prices[0]
 
-	priceTrend := (currentPrice - startPrice) / startPrice
+	// Calculate price trend with zero-check to avoid division by zero
+	priceTrend := 0.0
+	if startPrice > 0 {
+		priceTrend = (currentPrice - startPrice) / startPrice
+	}
+
 	maTrend := 0.0
 	if longMA > 0 {
 		maTrend = (shortMA - longMA) / longMA
@@ -624,13 +645,18 @@ func calculateStdDev(values []float64) float64 {
 	}
 	mean := sum / float64(len(values))
 
-	// Calculate variance
+	// Calculate variance using sample variance (Bessel's correction)
 	variance := 0.0
 	for _, v := range values {
 		diff := v - mean
 		variance += diff * diff
 	}
-	variance /= float64(len(values))
+	// Use N-1 for sample variance (Bessel's correction)
+	if len(values) > 1 {
+		variance /= float64(len(values) - 1)
+	} else {
+		variance /= float64(len(values))
+	}
 
 	return math.Sqrt(variance)
 }
@@ -651,32 +677,7 @@ func calculateMovingAverage(values []float64, period int) float64 {
 	return sum / float64(period)
 }
 
-// sortReturns sorts returns in ascending order (simple quicksort)
+// sortReturns sorts returns in ascending order using stdlib slices.Sort
 func sortReturns(returns []float64) {
-	if len(returns) <= 1 {
-		return
-	}
-	quickSort(returns, 0, len(returns)-1)
-}
-
-func quickSort(arr []float64, low, high int) {
-	if low < high {
-		pi := partition(arr, low, high)
-		quickSort(arr, low, pi-1)
-		quickSort(arr, pi+1, high)
-	}
-}
-
-func partition(arr []float64, low, high int) int {
-	pivot := arr[high]
-	i := low - 1
-
-	for j := low; j < high; j++ {
-		if arr[j] < pivot {
-			i++
-			arr[i], arr[j] = arr[j], arr[i]
-		}
-	}
-	arr[i+1], arr[high] = arr[high], arr[i+1]
-	return i + 1
+	slices.Sort(returns)
 }

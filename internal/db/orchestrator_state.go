@@ -60,30 +60,102 @@ func (db *DB) GetOrchestratorState(ctx context.Context) (*OrchestratorState, err
 }
 
 // SetOrchestratorPaused updates the orchestrator state to paused
+// Uses database-level locking to prevent race conditions on concurrent pause operations
 func (db *DB) SetOrchestratorPaused(ctx context.Context, pausedBy, pauseReason string) error {
-	query := `
+	// Begin transaction for atomic state update with locking
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback if commit not called
+
+	// Lock the current state row with SELECT FOR UPDATE to prevent concurrent modifications
+	// This ensures serialized access to state changes even across multiple orchestrator instances
+	lockQuery := `
+		SELECT id, paused
+		FROM orchestrator_state
+		ORDER BY id DESC
+		LIMIT 1
+		FOR UPDATE
+	`
+
+	var currentID int
+	var currentPaused bool
+	err = tx.QueryRow(ctx, lockQuery).Scan(&currentID, &currentPaused)
+	if err != nil {
+		return fmt.Errorf("failed to lock current state: %w", err)
+	}
+
+	// Validate state transition: can only pause if currently not paused
+	if currentPaused {
+		return fmt.Errorf("trading is already paused (current state locked)")
+	}
+
+	// Insert new state record with paused=true
+	insertQuery := `
 		INSERT INTO orchestrator_state (paused, paused_at, paused_by, pause_reason, updated_at, created_at)
 		VALUES (TRUE, NOW(), $1, $2, NOW(), NOW())
 	`
 
-	_, err := db.pool.Exec(ctx, query, pausedBy, pauseReason)
+	_, err = tx.Exec(ctx, insertQuery, pausedBy, pauseReason)
 	if err != nil {
-		return fmt.Errorf("failed to set orchestrator paused: %w", err)
+		return fmt.Errorf("failed to insert paused state: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit pause state: %w", err)
 	}
 
 	return nil
 }
 
 // SetOrchestratorResumed updates the orchestrator state to resumed (not paused)
+// Uses database-level locking to prevent race conditions on concurrent resume operations
 func (db *DB) SetOrchestratorResumed(ctx context.Context) error {
-	query := `
+	// Begin transaction for atomic state update with locking
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Rollback if commit not called
+
+	// Lock the current state row with SELECT FOR UPDATE to prevent concurrent modifications
+	// This ensures serialized access to state changes even across multiple orchestrator instances
+	lockQuery := `
+		SELECT id, paused
+		FROM orchestrator_state
+		ORDER BY id DESC
+		LIMIT 1
+		FOR UPDATE
+	`
+
+	var currentID int
+	var currentPaused bool
+	err = tx.QueryRow(ctx, lockQuery).Scan(&currentID, &currentPaused)
+	if err != nil {
+		return fmt.Errorf("failed to lock current state: %w", err)
+	}
+
+	// Validate state transition: can only resume if currently paused
+	if !currentPaused {
+		return fmt.Errorf("trading is not paused (current state locked)")
+	}
+
+	// Insert new state record with paused=false
+	insertQuery := `
 		INSERT INTO orchestrator_state (paused, resumed_at, updated_at, created_at)
 		VALUES (FALSE, NOW(), NOW(), NOW())
 	`
 
-	_, err := db.pool.Exec(ctx, query)
+	_, err = tx.Exec(ctx, insertQuery)
 	if err != nil {
-		return fmt.Errorf("failed to set orchestrator resumed: %w", err)
+		return fmt.Errorf("failed to insert resumed state: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit resume state: %w", err)
 	}
 
 	return nil

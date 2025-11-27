@@ -527,7 +527,7 @@ func loadDatabaseSecrets(ctx context.Context, vc *VaultClient, cfg *Config) erro
 
 	if password, ok := secrets["password"].(string); ok && password != "" {
 		cfg.Database.Password = password
-		log.Info().Msg("✓ Loaded database password from Vault")
+		log.Debug().Msg("✓ Loaded database password from Vault")
 	}
 
 	if user, ok := secrets["user"].(string); ok && user != "" {
@@ -546,7 +546,7 @@ func loadRedisSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 
 	if password, ok := secrets["password"].(string); ok && password != "" {
 		cfg.Redis.Password = password
-		log.Info().Msg("✓ Loaded Redis password from Vault")
+		log.Debug().Msg("✓ Loaded Redis password from Vault")
 	}
 
 	return nil
@@ -573,7 +573,7 @@ func loadExchangeSecrets(ctx context.Context, vc *VaultClient, cfg *Config) erro
 		}
 
 		cfg.Exchanges[exchangeName] = exchangeConfig
-		log.Info().Str("exchange", exchangeName).Msg("✓ Loaded exchange API keys from Vault")
+		log.Debug().Str("exchange", exchangeName).Msg("✓ Loaded exchange API keys from Vault")
 	}
 
 	return nil
@@ -591,7 +591,7 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 		if err := os.Setenv("ANTHROPIC_API_KEY", anthropicKey); err != nil {
 			log.Warn().Err(err).Msg("Failed to set ANTHROPIC_API_KEY environment variable")
 		} else {
-			log.Info().Msg("✓ Loaded Anthropic API key from Vault")
+			log.Debug().Msg("✓ Loaded Anthropic API key from Vault")
 		}
 	}
 
@@ -599,7 +599,7 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 		if err := os.Setenv("OPENAI_API_KEY", openaiKey); err != nil {
 			log.Warn().Err(err).Msg("Failed to set OPENAI_API_KEY environment variable")
 		} else {
-			log.Info().Msg("✓ Loaded OpenAI API key from Vault")
+			log.Debug().Msg("✓ Loaded OpenAI API key from Vault")
 		}
 	}
 
@@ -607,7 +607,7 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 		if err := os.Setenv("GEMINI_API_KEY", geminiKey); err != nil {
 			log.Warn().Err(err).Msg("Failed to set GEMINI_API_KEY environment variable")
 		} else {
-			log.Info().Msg("✓ Loaded Gemini API key from Vault")
+			log.Debug().Msg("✓ Loaded Gemini API key from Vault")
 		}
 	}
 

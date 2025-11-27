@@ -173,12 +173,26 @@ func (s *APIServer) setupRoutes() {
 	s.rateLimiter.StartCleanupWorker(5 * time.Minute)
 
 	// Initialize API key store for authentication
-	// Auth is disabled by default - enable via config.yaml: api.auth.enabled = true
+	// Auth is disabled by default for development - enable via config.yaml: api.auth.enabled = true
 	s.apiKeyStore = api.NewAPIKeyStore(s.db.Pool(), s.config.API.Auth.Enabled)
+
+	isProduction := s.config.App.Environment == envProduction
+
 	if s.config.API.Auth.Enabled {
-		log.Info().Msg("API key authentication enabled")
+		log.Info().
+			Bool("require_https", s.config.API.Auth.RequireHTTPS).
+			Str("header_name", s.config.API.Auth.HeaderName).
+			Msg("API key authentication enabled")
 	} else {
-		log.Info().Msg("API key authentication disabled (enable via api.auth.enabled in config)")
+		// Warning level in production, info level otherwise
+		logEvent := log.Info()
+		if isProduction {
+			logEvent = log.Warn()
+		}
+
+		logEvent.
+			Str("environment", s.config.App.Environment).
+			Msg("SECURITY WARNING: API authentication is DISABLED - all endpoints including trading control (pause/resume/start/stop) are unprotected. Enable via api.auth.enabled=true in config.yaml")
 	}
 
 	// Apply global rate limiting to all API requests
@@ -226,9 +240,28 @@ func (s *APIServer) setupRoutes() {
 			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
 		}
 
-		// Trading control routes (critical ops, strictest rate limiting)
+		// Create authentication config for protected endpoints
+		authConfig := &api.AuthConfig{
+			Enabled:      s.config.API.Auth.Enabled,
+			HeaderName:   s.config.API.Auth.HeaderName,
+			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+		}
+		if authConfig.HeaderName == "" {
+			authConfig.HeaderName = "X-API-Key" // Default header name
+		}
+
+		// Trading control routes (critical ops, strictest rate limiting + authentication)
+		// These endpoints control trading operations and require authentication when enabled
 		trade := v1.Group("/trade")
 		trade.Use(s.rateLimiter.ControlMiddleware())
+
+		// Add authentication middleware for critical trading operations
+		// When auth is enabled, these endpoints require a valid API key
+		// This protects against unauthorized trading control
+		if s.config.API.Auth.Enabled {
+			trade.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
+
 		{
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
@@ -247,14 +280,6 @@ func (s *APIServer) setupRoutes() {
 		// Search uses dedicated rate limiter for expensive vector operations
 		// Auth is optional - allows both authenticated and anonymous access
 		// When auth is enabled, authenticated users get enhanced audit logging
-		authConfig := &api.AuthConfig{
-			Enabled:      s.config.API.Auth.Enabled,
-			HeaderName:   s.config.API.Auth.HeaderName,
-			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
-		}
-		if authConfig.HeaderName == "" {
-			authConfig.HeaderName = "X-API-Key" // Default header name
-		}
 		optionalAuth := api.OptionalAuth(s.apiKeyStore, authConfig)
 
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())

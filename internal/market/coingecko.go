@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
 
@@ -32,6 +33,8 @@ type CoinGeckoClient struct {
 	retryDelay  time.Duration
 	mu          sync.RWMutex
 	connected   bool
+	lastError   error           // Last error encountered (protected by mu)
+	sfGroup     singleflight.Group // Prevents cache stampede
 }
 
 // CoinGeckoClientOptions configures the CoinGecko client
@@ -93,10 +96,16 @@ func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClien
 	rps := float64(opts.RateLimit) / 60.0
 	var rateLimiter *rate.Limiter
 	if opts.EnableRateLimiting {
-		rateLimiter = rate.NewLimiter(rate.Limit(rps), opts.RateLimit)
+		// Burst size should be ~10% of rate limit to prevent stampede
+		// For 50 req/min, burst of 5 allows short bursts while maintaining overall rate
+		burstSize := opts.RateLimit / 10
+		if burstSize < 1 {
+			burstSize = 1
+		}
+		rateLimiter = rate.NewLimiter(rate.Limit(rps), burstSize)
 		log.Debug().
 			Float64("rate_per_second", rps).
-			Int("burst", opts.RateLimit).
+			Int("burst", burstSize).
 			Msg("Rate limiter configured")
 	}
 
@@ -167,52 +176,70 @@ type PriceResult struct {
 }
 
 // GetPrice fetches the current price for a cryptocurrency using MCP
+// Uses singleflight to prevent cache stampede from concurrent requests
 func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrency string) (*PriceResult, error) {
 	log.Debug().
 		Str("symbol", symbol).
 		Str("vs_currency", vsCurrency).
 		Msg("Fetching price from CoinGecko MCP")
 
-	// Apply rate limiting
-	if err := c.waitForRateLimit(ctx); err != nil {
+	// Use singleflight to deduplicate concurrent requests for same symbol+currency
+	key := fmt.Sprintf("price:%s:%s", symbol, vsCurrency)
+	result, err, shared := c.sfGroup.Do(key, func() (interface{}, error) {
+		// Apply rate limiting
+		if err := c.waitForRateLimit(ctx); err != nil {
+			return nil, err
+		}
+
+		// Prepare MCP tool call arguments
+		args := map[string]interface{}{
+			"ids":           symbol,
+			"vs_currencies": vsCurrency,
+		}
+
+		// Call MCP tool with retry logic
+		var apiResult map[string]map[string]float64
+		err := c.callToolWithRetry(ctx, "get_price", args, &apiResult)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get price: %w", err)
+		}
+
+		// Extract price from nested map structure
+		symbolData, ok := apiResult[symbol]
+		if !ok {
+			return nil, fmt.Errorf("symbol %s not found in response", symbol)
+		}
+
+		price, ok := symbolData[vsCurrency]
+		if !ok {
+			return nil, fmt.Errorf("currency %s not found for symbol %s", vsCurrency, symbol)
+		}
+
+		return &PriceResult{
+			Symbol:   symbol,
+			Price:    price,
+			Currency: vsCurrency,
+		}, nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 
-	// Prepare MCP tool call arguments
-	args := map[string]interface{}{
-		"ids":           symbol,
-		"vs_currencies": vsCurrency,
+	if shared {
+		log.Debug().
+			Str("symbol", symbol).
+			Str("vs_currency", vsCurrency).
+			Msg("Price request deduped via singleflight")
+	} else {
+		log.Info().
+			Str("symbol", symbol).
+			Str("vs_currency", vsCurrency).
+			Float64("price", result.(*PriceResult).Price).
+			Msg("Price fetched successfully")
 	}
 
-	// Call MCP tool with retry logic
-	var result map[string]map[string]float64
-	err := c.callToolWithRetry(ctx, "get_price", args, &result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get price: %w", err)
-	}
-
-	// Extract price from nested map structure
-	symbolData, ok := result[symbol]
-	if !ok {
-		return nil, fmt.Errorf("symbol %s not found in response", symbol)
-	}
-
-	price, ok := symbolData[vsCurrency]
-	if !ok {
-		return nil, fmt.Errorf("currency %s not found for symbol %s", vsCurrency, symbol)
-	}
-
-	log.Info().
-		Str("symbol", symbol).
-		Str("vs_currency", vsCurrency).
-		Float64("price", price).
-		Msg("Price fetched successfully")
-
-	return &PriceResult{
-		Symbol:   symbol,
-		Price:    price,
-		Currency: vsCurrency,
-	}, nil
+	return result.(*PriceResult), nil
 }
 
 // MarketChart represents historical market data
@@ -229,79 +256,98 @@ type PricePoint struct {
 }
 
 // GetMarketChart fetches historical market data using MCP
+// Uses singleflight to prevent cache stampede from concurrent requests
 func (c *CoinGeckoClient) GetMarketChart(ctx context.Context, symbol string, days int) (*MarketChart, error) {
 	log.Debug().
 		Str("symbol", symbol).
 		Int("days", days).
 		Msg("Fetching market chart from CoinGecko MCP")
 
-	// Apply rate limiting
-	if err := c.waitForRateLimit(ctx); err != nil {
+	// Use singleflight to deduplicate concurrent requests for same symbol+days
+	key := fmt.Sprintf("chart:%s:%d", symbol, days)
+	result, err, shared := c.sfGroup.Do(key, func() (interface{}, error) {
+		// Apply rate limiting
+		if err := c.waitForRateLimit(ctx); err != nil {
+			return nil, err
+		}
+
+		// Prepare MCP tool call arguments
+		args := map[string]interface{}{
+			"coin_id":     symbol,
+			"vs_currency": "usd",
+			"days":        days,
+		}
+
+		// Call MCP tool with retry logic
+		var apiResult struct {
+			Prices       [][]float64 `json:"prices"`
+			MarketCaps   [][]float64 `json:"market_caps"`
+			TotalVolumes [][]float64 `json:"total_volumes"`
+		}
+
+		err := c.callToolWithRetry(ctx, "get_market_chart", args, &apiResult)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get market chart: %w", err)
+		}
+
+		chart := &MarketChart{
+			Prices:       make([]PricePoint, 0, len(apiResult.Prices)),
+			MarketCaps:   make([]PricePoint, 0, len(apiResult.MarketCaps)),
+			TotalVolumes: make([]PricePoint, 0, len(apiResult.TotalVolumes)),
+		}
+
+		// Parse prices array
+		for _, point := range apiResult.Prices {
+			if len(point) >= 2 {
+				chart.Prices = append(chart.Prices, PricePoint{
+					Timestamp: time.Unix(0, int64(point[0])*int64(time.Millisecond)),
+					Value:     point[1],
+				})
+			}
+		}
+
+		// Parse market caps array
+		for _, point := range apiResult.MarketCaps {
+			if len(point) >= 2 {
+				chart.MarketCaps = append(chart.MarketCaps, PricePoint{
+					Timestamp: time.Unix(0, int64(point[0])*int64(time.Millisecond)),
+					Value:     point[1],
+				})
+			}
+		}
+
+		// Parse volumes array
+		for _, point := range apiResult.TotalVolumes {
+			if len(point) >= 2 {
+				chart.TotalVolumes = append(chart.TotalVolumes, PricePoint{
+					Timestamp: time.Unix(0, int64(point[0])*int64(time.Millisecond)),
+					Value:     point[1],
+				})
+			}
+		}
+
+		return chart, nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 
-	// Prepare MCP tool call arguments
-	args := map[string]interface{}{
-		"coin_id":     symbol,
-		"vs_currency": "usd",
-		"days":        days,
+	chart := result.(*MarketChart)
+	if shared {
+		log.Debug().
+			Str("symbol", symbol).
+			Int("days", days).
+			Msg("Market chart request deduped via singleflight")
+	} else {
+		log.Info().
+			Str("symbol", symbol).
+			Int("days", days).
+			Int("price_points", len(chart.Prices)).
+			Int("market_cap_points", len(chart.MarketCaps)).
+			Int("volume_points", len(chart.TotalVolumes)).
+			Msg("Market chart fetched successfully")
 	}
-
-	// Call MCP tool with retry logic
-	var result struct {
-		Prices       [][]float64 `json:"prices"`
-		MarketCaps   [][]float64 `json:"market_caps"`
-		TotalVolumes [][]float64 `json:"total_volumes"`
-	}
-
-	err := c.callToolWithRetry(ctx, "get_market_chart", args, &result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get market chart: %w", err)
-	}
-
-	chart := &MarketChart{
-		Prices:       make([]PricePoint, 0, len(result.Prices)),
-		MarketCaps:   make([]PricePoint, 0, len(result.MarketCaps)),
-		TotalVolumes: make([]PricePoint, 0, len(result.TotalVolumes)),
-	}
-
-	// Parse prices array
-	for _, point := range result.Prices {
-		if len(point) >= 2 {
-			chart.Prices = append(chart.Prices, PricePoint{
-				Timestamp: time.Unix(0, int64(point[0])*int64(time.Millisecond)),
-				Value:     point[1],
-			})
-		}
-	}
-
-	// Parse market caps array
-	for _, point := range result.MarketCaps {
-		if len(point) >= 2 {
-			chart.MarketCaps = append(chart.MarketCaps, PricePoint{
-				Timestamp: time.Unix(0, int64(point[0])*int64(time.Millisecond)),
-				Value:     point[1],
-			})
-		}
-	}
-
-	// Parse volumes array
-	for _, point := range result.TotalVolumes {
-		if len(point) >= 2 {
-			chart.TotalVolumes = append(chart.TotalVolumes, PricePoint{
-				Timestamp: time.Unix(0, int64(point[0])*int64(time.Millisecond)),
-				Value:     point[1],
-			})
-		}
-	}
-
-	log.Info().
-		Str("symbol", symbol).
-		Int("days", days).
-		Int("price_points", len(chart.Prices)).
-		Int("market_cap_points", len(chart.MarketCaps)).
-		Int("volume_points", len(chart.TotalVolumes)).
-		Msg("Market chart fetched successfully")
 
 	return chart, nil
 }
@@ -317,64 +363,82 @@ type CoinInfo struct {
 }
 
 // GetCoinInfo fetches detailed information about a cryptocurrency using MCP
+// Uses singleflight to prevent cache stampede from concurrent requests
 func (c *CoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*CoinInfo, error) {
 	log.Debug().
 		Str("coin_id", coinID).
 		Msg("Fetching coin info from CoinGecko MCP")
 
-	// Apply rate limiting
-	if err := c.waitForRateLimit(ctx); err != nil {
+	// Use singleflight to deduplicate concurrent requests for same coin
+	key := fmt.Sprintf("info:%s", coinID)
+	result, err, shared := c.sfGroup.Do(key, func() (interface{}, error) {
+		// Apply rate limiting
+		if err := c.waitForRateLimit(ctx); err != nil {
+			return nil, err
+		}
+
+		// Prepare MCP tool call arguments
+		args := map[string]interface{}{
+			"coin_id":        coinID,
+			"localization":   false,
+			"tickers":        false,
+			"community_data": false,
+			"developer_data": false,
+		}
+
+		// Call MCP tool with retry logic
+		var apiResult struct {
+			ID          string `json:"id"`
+			Symbol      string `json:"symbol"`
+			Name        string `json:"name"`
+			Description struct {
+				En string `json:"en"`
+			} `json:"description"`
+			Links struct {
+				Homepage []string `json:"homepage"`
+			} `json:"links"`
+			MarketData map[string]interface{} `json:"market_data"`
+		}
+
+		err := c.callToolWithRetry(ctx, "get_coin_info", args, &apiResult)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get coin info: %w", err)
+		}
+
+		// Extract homepage link
+		homepage := ""
+		if len(apiResult.Links.Homepage) > 0 {
+			homepage = apiResult.Links.Homepage[0]
+		}
+
+		return &CoinInfo{
+			ID:          apiResult.ID,
+			Symbol:      apiResult.Symbol,
+			Name:        apiResult.Name,
+			Description: apiResult.Description.En,
+			Links:       map[string]string{"homepage": homepage},
+			MarketData:  apiResult.MarketData,
+		}, nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 
-	// Prepare MCP tool call arguments
-	args := map[string]interface{}{
-		"coin_id":        coinID,
-		"localization":   false,
-		"tickers":        false,
-		"community_data": false,
-		"developer_data": false,
+	coinInfo := result.(*CoinInfo)
+	if shared {
+		log.Debug().
+			Str("coin_id", coinID).
+			Msg("Coin info request deduped via singleflight")
+	} else {
+		log.Info().
+			Str("coin_id", coinID).
+			Str("name", coinInfo.Name).
+			Str("symbol", coinInfo.Symbol).
+			Msg("Coin info fetched successfully")
 	}
 
-	// Call MCP tool with retry logic
-	var result struct {
-		ID          string `json:"id"`
-		Symbol      string `json:"symbol"`
-		Name        string `json:"name"`
-		Description struct {
-			En string `json:"en"`
-		} `json:"description"`
-		Links struct {
-			Homepage []string `json:"homepage"`
-		} `json:"links"`
-		MarketData map[string]interface{} `json:"market_data"`
-	}
-
-	err := c.callToolWithRetry(ctx, "get_coin_info", args, &result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get coin info: %w", err)
-	}
-
-	// Extract homepage link
-	homepage := ""
-	if len(result.Links.Homepage) > 0 {
-		homepage = result.Links.Homepage[0]
-	}
-
-	log.Info().
-		Str("coin_id", coinID).
-		Str("name", result.Name).
-		Str("symbol", result.Symbol).
-		Msg("Coin info fetched successfully")
-
-	return &CoinInfo{
-		ID:          result.ID,
-		Symbol:      result.Symbol,
-		Name:        result.Name,
-		Description: result.Description.En,
-		Links:       map[string]string{"homepage": homepage},
-		MarketData:  result.MarketData,
-	}, nil
+	return coinInfo, nil
 }
 
 // callToolWithRetry calls an MCP tool with exponential backoff retry logic
@@ -384,12 +448,16 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 	c.mu.RUnlock()
 
 	if session == nil {
-		return fmt.Errorf("not connected to MCP server")
+		err := fmt.Errorf("not connected to MCP server")
+		c.setLastError(err)
+		return err
 	}
 
 	var lastErr error
 
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+	// Fix: Use < instead of <= to get exactly maxRetries attempts
+	// With maxRetries=3, this gives attempts 0, 1, 2 (3 total attempts)
+	for attempt := 0; attempt < c.maxRetries; attempt++ {
 		if attempt > 0 {
 			// Calculate exponential backoff delay
 			backoffDelay := time.Duration(math.Pow(2, float64(attempt-1))) * c.retryDelay
@@ -406,13 +474,15 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 			select {
 			case <-time.After(backoffDelay):
 			case <-ctx.Done():
-				return ctx.Err()
+				err := ctx.Err()
+				c.setLastError(err)
+				return err
 			}
 		}
 
-		// Create request context with timeout
+		// Fix: Create context with timeout and ensure proper cleanup
+		// Move cancel outside loop to prevent context leak
 		reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
-		defer cancel()
 
 		// Call MCP tool
 		params := &mcp.CallToolParams{
@@ -421,6 +491,10 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 		}
 
 		response, err := session.CallTool(reqCtx, params)
+
+		// Explicitly cancel context after use to prevent leak
+		cancel()
+
 		if err != nil {
 			lastErr = fmt.Errorf("attempt %d failed: %w", attempt+1, err)
 			log.Warn().
@@ -460,7 +534,8 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 			continue
 		}
 
-		// Success
+		// Success - clear last error
+		c.setLastError(nil)
 		log.Debug().
 			Str("tool", toolName).
 			Int("attempt", attempt+1).
@@ -468,7 +543,23 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 		return nil
 	}
 
-	return fmt.Errorf("max retries (%d) exceeded: %w", c.maxRetries, lastErr)
+	finalErr := fmt.Errorf("max retries (%d) exceeded: %w", c.maxRetries, lastErr)
+	c.setLastError(finalErr)
+	return finalErr
+}
+
+// setLastError safely sets the last error with mutex protection
+func (c *CoinGeckoClient) setLastError(err error) {
+	c.mu.Lock()
+	c.lastError = err
+	c.mu.Unlock()
+}
+
+// getLastError safely gets the last error with mutex protection
+func (c *CoinGeckoClient) getLastError() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastError
 }
 
 // waitForRateLimit waits until the rate limiter allows the request
@@ -509,7 +600,7 @@ func (m *MarketChart) ToCandlesticks(intervalMinutes int) []Candlestick {
 				candlesticks = append(candlesticks, *currentCandle)
 			}
 
-			// Start new candle
+			// Start new candle with volume initialized to 0
 			intervalStart = pointIntervalStart
 			currentCandle = &Candlestick{
 				Timestamp: intervalStart,
@@ -517,12 +608,7 @@ func (m *MarketChart) ToCandlesticks(intervalMinutes int) []Candlestick {
 				High:      pricePoint.Value,
 				Low:       pricePoint.Value,
 				Close:     pricePoint.Value,
-				Volume:    0.0,
-			}
-
-			// Add volume if available
-			if i < len(m.TotalVolumes) {
-				currentCandle.Volume = m.TotalVolumes[i].Value
+				Volume:    0.0, // Always start at 0, then aggregate below
 			}
 		} else {
 			// Update current candle
@@ -533,11 +619,12 @@ func (m *MarketChart) ToCandlesticks(intervalMinutes int) []Candlestick {
 				currentCandle.Low = pricePoint.Value
 			}
 			currentCandle.Close = pricePoint.Value
+		}
 
-			// Add volume
-			if i < len(m.TotalVolumes) {
-				currentCandle.Volume += m.TotalVolumes[i].Value
-			}
+		// Fix: Always aggregate volume for ALL price points (including first)
+		// This ensures consistent behavior regardless of whether it's a new or existing candle
+		if i < len(m.TotalVolumes) {
+			currentCandle.Volume += m.TotalVolumes[i].Value
 		}
 	}
 
@@ -577,10 +664,16 @@ func (c *CoinGeckoClient) Health(ctx context.Context) error {
 
 	c.mu.RLock()
 	connected := c.connected
+	lastErr := c.lastError
 	c.mu.RUnlock()
 
 	if !connected {
 		return fmt.Errorf("not connected to MCP server")
+	}
+
+	// If there was a recent error, report it
+	if lastErr != nil {
+		return fmt.Errorf("recent error detected: %w", lastErr)
 	}
 
 	// Try a simple API call to verify connection

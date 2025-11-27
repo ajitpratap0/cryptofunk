@@ -536,6 +536,23 @@ func (c *Config) validateEnvironmentRequirements() ValidationErrors {
 				Message: "SSL must be enabled for database in production",
 			})
 		}
+
+		// Require API authentication in production for security
+		// Trading control endpoints (pause, resume, start, stop) are critical operations
+		if !c.API.Auth.Enabled {
+			errors = append(errors, ValidationError{
+				Field:   "api.auth.enabled",
+				Message: "API authentication must be enabled in production. Set api.auth.enabled = true in config.yaml and create API keys using migration 009_api_keys.sql",
+			})
+		}
+
+		// Require HTTPS for API authentication in production
+		if c.API.Auth.Enabled && !c.API.Auth.RequireHTTPS {
+			errors = append(errors, ValidationError{
+				Field:   "api.auth.require_https",
+				Message: "HTTPS must be required for API authentication in production (api.auth.require_https = true)",
+			})
+		}
 	}
 
 	// Check critical environment variables

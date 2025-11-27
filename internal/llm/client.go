@@ -54,7 +54,7 @@ func NewClient(config ClientConfig) *Client {
 		config.MaxTokens = 2000
 	}
 	if config.Timeout == 0 {
-		config.Timeout = 30 * time.Second
+		config.Timeout = 60 * time.Second // LLM calls can take longer for complex reasoning
 	}
 
 	// Create circuit breaker if not provided

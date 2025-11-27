@@ -159,12 +159,26 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
 	resp = cbResult.(*PlaceOrderResponse)
 
-	// Get order details
-	order, err := s.exchange.GetOrder(exchangeCtx, resp.OrderID)
+	// Get order details through circuit breaker
+	var order *Order
+	orderResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrder(exchangeCtx, resp.OrderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Str("order_id", resp.OrderID).Msg("Circuit breaker open: failed to retrieve order after placement")
+			return resp, nil // Still return the response even if we can't get details
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil // Still return the response even if we can't get details
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = orderResult.(*Order)
 
 	// Update positions if order was filled
 	if order.Status == OrderStatusFilled {
@@ -230,18 +244,45 @@ func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface
 		Price:    price,
 	}
 
-	// Place order
-	resp, err := s.exchange.PlaceOrder(exchangeCtx, req)
+	// Place order through circuit breaker
+	var resp *PlaceOrderResponse
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.PlaceOrder(exchangeCtx, req)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
 
-	// Get order details
-	order, err := s.exchange.GetOrder(exchangeCtx, resp.OrderID)
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	resp = cbResult.(*PlaceOrderResponse)
+
+	// Get order details through circuit breaker
+	var order *Order
+	orderResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrder(exchangeCtx, resp.OrderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Str("order_id", resp.OrderID).Msg("Circuit breaker open: failed to retrieve order after placement")
+			return resp, nil // Still return the response even if we can't get details
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
-		return resp, nil
+		return resp, nil // Still return the response even if we can't get details
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = orderResult.(*Order)
 
 	// Update positions if order was filled (limit orders may fill immediately in some cases)
 	if order.Status == OrderStatusFilled {
@@ -269,11 +310,24 @@ func (s *Service) CancelOrder(ctx context.Context, args map[string]interface{}) 
 		return nil, fmt.Errorf("order_id is required and must be a string")
 	}
 
-	// Cancel order
-	order, err := s.exchange.CancelOrder(exchangeCtx, orderID)
+	// Cancel order through circuit breaker
+	var order *Order
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.CancelOrder(exchangeCtx, orderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = cbResult.(*Order)
 
 	return order, nil
 }
@@ -291,17 +345,44 @@ func (s *Service) GetOrderStatus(ctx context.Context, args map[string]interface{
 		return nil, fmt.Errorf("order_id is required and must be a string")
 	}
 
-	// Get order
-	order, err := s.exchange.GetOrder(exchangeCtx, orderID)
+	// Get order through circuit breaker
+	var order *Order
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrder(exchangeCtx, orderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
 
-	// Get fills
-	fills, err := s.exchange.GetOrderFills(exchangeCtx, orderID)
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = cbResult.(*Order)
+
+	// Get fills through circuit breaker
+	var fills []Fill
+	fillsResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrderFills(exchangeCtx, orderID)
+	})
+
 	if err != nil {
-		log.Error().Err(err).Str("order_id", orderID).Msg("Failed to get order fills")
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Str("order_id", orderID).Msg("Circuit breaker open: failed to get order fills")
+		} else {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Err(err).Str("order_id", orderID).Msg("Failed to get order fills")
+		}
 		// Continue even if we can't get fills
+	} else {
+		s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+		fills = fillsResult.([]Fill)
 	}
 
 	return map[string]interface{}{
