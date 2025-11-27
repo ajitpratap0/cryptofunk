@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +37,43 @@ func NewCalculatorWithPool(pool *pgxpool.Pool) *Calculator {
 	return &Calculator{
 		pool: pool,
 	}
+}
+
+// symbolRegex validates symbol format: 2-10 uppercase alphanumeric characters,
+// optionally followed by "/" and another 2-10 uppercase alphanumeric characters
+// Valid examples: "BTC", "ETH", "BTC/USDT", "ETH/USD"
+var symbolRegex = regexp.MustCompile(`^[A-Z0-9]{2,10}(/[A-Z0-9]{2,10})?$`)
+
+// sqlKeywords contains common SQL keywords to reject in symbols
+var sqlKeywords = []string{
+	"SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
+	"UNION", "WHERE", "FROM", "JOIN", "ORDER", "GROUP", "HAVING",
+	"AND", "OR", "NOT", "NULL", "TRUE", "FALSE", "EXEC", "EXECUTE",
+}
+
+// isValidSymbol validates that a symbol follows the expected format and
+// doesn't contain SQL injection attempts
+func isValidSymbol(symbol string) bool {
+	// Empty symbols are invalid
+	if symbol == "" {
+		return false
+	}
+
+	// Check for special characters that could be used for SQL injection
+	if strings.ContainsAny(symbol, ";'\"\\-()[]{}*%") {
+		return false
+	}
+
+	// Check against SQL keywords
+	upperSymbol := strings.ToUpper(symbol)
+	for _, keyword := range sqlKeywords {
+		if strings.Contains(upperSymbol, keyword) {
+			return false
+		}
+	}
+
+	// Validate format with regex
+	return symbolRegex.MatchString(symbol)
 }
 
 // HistoricalData holds historical market data for risk calculations
@@ -78,6 +117,11 @@ type MarketRegimeData struct {
 // LoadHistoricalPrices loads historical prices from candlesticks table
 // Uses TimescaleDB hypertable for efficient time-series queries
 func (c *Calculator) LoadHistoricalPrices(ctx context.Context, symbol string, interval string, days int) (*HistoricalData, error) {
+	// Validate symbol to prevent SQL injection
+	if !isValidSymbol(symbol) {
+		return nil, fmt.Errorf("invalid symbol format: %s", symbol)
+	}
+
 	// Return error if no pool available
 	if c.pool == nil {
 		return nil, fmt.Errorf("no database pool available")
@@ -144,6 +188,11 @@ func (c *Calculator) LoadHistoricalPrices(ctx context.Context, symbol string, in
 
 // GetCurrentPrice gets the most recent price for a symbol
 func (c *Calculator) GetCurrentPrice(ctx context.Context, symbol string, interval string) (float64, error) {
+	// Validate symbol to prevent SQL injection
+	if !isValidSymbol(symbol) {
+		return 0, fmt.Errorf("invalid symbol format: %s", symbol)
+	}
+
 	// Return error if no pool available
 	if c.pool == nil {
 		return 0, fmt.Errorf("no database pool available")
@@ -177,6 +226,11 @@ func (c *Calculator) GetCurrentPrice(ctx context.Context, symbol string, interva
 // CalculateWinRate calculates historical win rate from positions table
 // Analyzes closed positions to determine win/loss statistics
 func (c *Calculator) CalculateWinRate(ctx context.Context, symbol string) (*WinRateData, error) {
+	// Validate symbol if provided (empty symbol is allowed for all positions)
+	if symbol != "" && !isValidSymbol(symbol) {
+		return nil, fmt.Errorf("invalid symbol format: %s", symbol)
+	}
+
 	// Return defaults if no pool available (for testing)
 	if c.pool == nil {
 		log.Warn().Str("symbol", symbol).Msg("No database pool available, using default win rate")
@@ -428,6 +482,11 @@ func (c *Calculator) CalculateSharpeFromEquity(ctx context.Context, sessionID *s
 // DetectMarketRegime detects market regime using 30-day rolling volatility
 // Uses moving averages and volatility to determine bullish/bearish/sideways
 func (c *Calculator) DetectMarketRegime(ctx context.Context, symbol string, days int) (*MarketRegimeData, error) {
+	// Validate symbol to prevent SQL injection
+	if !isValidSymbol(symbol) {
+		return nil, fmt.Errorf("invalid symbol format: %s", symbol)
+	}
+
 	// Load historical prices for the symbol
 	histData, err := c.LoadHistoricalPrices(ctx, symbol, "1d", days)
 	if err != nil {
@@ -570,6 +629,11 @@ func (c *Calculator) CalculateVaRFromEquity(ctx context.Context, sessionID *stri
 
 // CalculateVaRFromPrices calculates VaR from historical price returns
 func (c *Calculator) CalculateVaRFromPrices(ctx context.Context, symbol string, interval string, days int, confidenceLevel float64) (float64, float64, error) {
+	// Validate symbol to prevent SQL injection
+	if !isValidSymbol(symbol) {
+		return 0, 0, fmt.Errorf("invalid symbol format: %s", symbol)
+	}
+
 	histData, err := c.LoadHistoricalPrices(ctx, symbol, interval, days)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to load historical prices: %w", err)

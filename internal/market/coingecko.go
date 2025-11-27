@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultTimeout       = 30 * time.Second
-	defaultRateLimit     = 50 // requests per minute for free tier
+	defaultRateLimit     = 50 // requests per minute for free tier (CoinGecko allows 10-50 calls/min, we use 50 conservatively)
 	defaultMaxRetries    = 3
 	defaultRetryDelay    = time.Second
 	defaultMaxRetryDelay = 30 * time.Second
@@ -607,7 +607,24 @@ func (c *CoinGeckoClient) waitForRateLimit(ctx context.Context) error {
 		return nil // Rate limiting disabled
 	}
 
+	// Check if we would need to wait (for logging purposes)
+	reservation := c.rateLimiter.Reserve()
+	delay := reservation.Delay()
+
+	if delay > 0 {
+		log.Debug().
+			Dur("wait_duration", delay).
+			Msg("Rate limit reached, waiting before API call")
+	}
+
+	// Cancel the reservation since we'll use Wait() instead
+	reservation.Cancel()
+
+	// Wait for rate limiter to allow the request
 	if err := c.rateLimiter.Wait(ctx); err != nil {
+		log.Warn().
+			Err(err).
+			Msg("Rate limit wait interrupted")
 		return fmt.Errorf("rate limit wait failed: %w", err)
 	}
 

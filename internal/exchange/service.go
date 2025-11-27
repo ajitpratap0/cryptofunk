@@ -182,10 +182,27 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 
 	// Update positions if order was filled
 	if order.Status == OrderStatusFilled {
-		fills, err := s.exchange.GetOrderFills(exchangeCtx, order.ID)
-		if err == nil && len(fills) > 0 {
-			if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
-				log.Error().Err(err).Msg("Failed to update positions after order fill")
+		// Get order fills through circuit breaker
+		fillsResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+			return s.exchange.GetOrderFills(exchangeCtx, order.ID)
+		})
+
+		if err != nil {
+			// Check if circuit breaker is open
+			if err == gobreaker.ErrOpenState {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Str("order_id", order.ID).Msg("Circuit breaker open: failed to get order fills for position update")
+			} else {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Err(err).Str("order_id", order.ID).Msg("Failed to get order fills for position update")
+			}
+		} else {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+			fills := fillsResult.([]Fill)
+			if len(fills) > 0 {
+				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
+					log.Error().Err(err).Msg("Failed to update positions after order fill")
+				}
 			}
 		}
 	}
@@ -286,10 +303,27 @@ func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface
 
 	// Update positions if order was filled (limit orders may fill immediately in some cases)
 	if order.Status == OrderStatusFilled {
-		fills, err := s.exchange.GetOrderFills(exchangeCtx, order.ID)
-		if err == nil && len(fills) > 0 {
-			if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
-				log.Error().Err(err).Msg("Failed to update positions after order fill")
+		// Get order fills through circuit breaker
+		fillsResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+			return s.exchange.GetOrderFills(exchangeCtx, order.ID)
+		})
+
+		if err != nil {
+			// Check if circuit breaker is open
+			if err == gobreaker.ErrOpenState {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Str("order_id", order.ID).Msg("Circuit breaker open: failed to get order fills for position update")
+			} else {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Err(err).Str("order_id", order.ID).Msg("Failed to get order fills for position update")
+			}
+		} else {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+			fills := fillsResult.([]Fill)
+			if len(fills) > 0 {
+				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
+					log.Error().Err(err).Msg("Failed to update positions after order fill")
+				}
 			}
 		}
 	}

@@ -193,9 +193,10 @@ func TestCheckPortfolioLimits_DrawdownExceeded(t *testing.T) {
 
 func TestCalculateOptimalSize_BasicCalculation(t *testing.T) {
 	agent := createTestRiskAgent()
+	ctx := context.Background()
 
 	// Test with default win rate
-	optimalSize := agent.calculateOptimalSize("BTC/USDT", 0.8)
+	optimalSize := agent.calculateOptimalSize(ctx, "BTC/USDT", 0.8)
 
 	// Should return a positive size
 	assert.Greater(t, optimalSize, 0.0)
@@ -210,9 +211,10 @@ func TestCalculateOptimalSize_BasicCalculation(t *testing.T) {
 
 func TestCalculateOptimalSize_HighConfidence(t *testing.T) {
 	agent := createTestRiskAgent()
+	ctx := context.Background()
 
-	lowConfSize := agent.calculateOptimalSize("BTC/USDT", 0.5)
-	highConfSize := agent.calculateOptimalSize("BTC/USDT", 0.9)
+	lowConfSize := agent.calculateOptimalSize(ctx, "BTC/USDT", 0.5)
+	highConfSize := agent.calculateOptimalSize(ctx, "BTC/USDT", 0.9)
 
 	// Higher confidence should result in larger position
 	assert.Greater(t, highConfSize, lowConfSize)
@@ -220,9 +222,10 @@ func TestCalculateOptimalSize_HighConfidence(t *testing.T) {
 
 func TestCalculateOptimalSize_CappedAtMaxPositionSize(t *testing.T) {
 	agent := createTestRiskAgent()
+	ctx := context.Background()
 
 	// Even with high confidence, should cap at max position size
-	optimalSize := agent.calculateOptimalSize("BTC/USDT", 1.0)
+	optimalSize := agent.calculateOptimalSize(ctx, "BTC/USDT", 1.0)
 	assert.LessOrEqual(t, optimalSize, agent.config.MaxPositionSize)
 }
 
@@ -486,8 +489,9 @@ func TestGetSymbolExposure(t *testing.T) {
 
 func TestAssessMarketConditions(t *testing.T) {
 	agent := createTestRiskAgent()
+	ctx := context.Background()
 
-	agent.assessMarketConditions()
+	agent.assessMarketConditions(ctx)
 
 	assert.NotEmpty(t, agent.beliefs.marketRegime)
 	assert.Greater(t, agent.beliefs.volatility, 0.0)

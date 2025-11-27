@@ -581,11 +581,11 @@ func (a *RiskAgent) getSymbolExposure(symbol string) float64 {
 // ============================================================================
 
 // calculateOptimalSize calculates optimal position size using Kelly Criterion
-func (a *RiskAgent) calculateOptimalSize(symbol string, confidence float64) float64 {
+func (a *RiskAgent) calculateOptimalSize(ctx context.Context, symbol string, confidence float64) float64 {
 	// Get historical performance for this symbol or overall portfolio
-	winRate := a.getHistoricalWinRate(symbol)
-	avgWin := a.getHistoricalAvgWin(symbol)
-	avgLoss := a.getHistoricalAvgLoss(symbol)
+	winRate := a.getHistoricalWinRate(ctx, symbol)
+	avgWin := a.getHistoricalAvgWin(ctx, symbol)
+	avgLoss := a.getHistoricalAvgLoss(ctx, symbol)
 
 	// Adjust win rate based on signal confidence
 	adjustedWinRate := winRate * confidence
@@ -624,8 +624,8 @@ func (a *RiskAgent) calculateOptimalSize(symbol string, confidence float64) floa
 }
 
 // getHistoricalWinRate returns historical win rate for symbol (or overall)
-func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (a *RiskAgent) getHistoricalWinRate(ctx context.Context, symbol string) float64 {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// Use calculator to get win rate from database
@@ -639,8 +639,8 @@ func (a *RiskAgent) getHistoricalWinRate(symbol string) float64 {
 }
 
 // getHistoricalAvgWin returns average win size
-func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (a *RiskAgent) getHistoricalAvgWin(ctx context.Context, symbol string) float64 {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// Use calculator to get win rate data from database
@@ -658,8 +658,8 @@ func (a *RiskAgent) getHistoricalAvgWin(symbol string) float64 {
 }
 
 // getHistoricalAvgLoss returns average loss size
-func (a *RiskAgent) getHistoricalAvgLoss(symbol string) float64 {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (a *RiskAgent) getHistoricalAvgLoss(ctx context.Context, symbol string) float64 {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// Use calculator to get win rate data from database
@@ -716,10 +716,10 @@ func (a *RiskAgent) updateBeliefs(ctx context.Context) error {
 	}
 
 	// Calculate performance metrics
-	a.calculatePerformanceMetrics()
+	a.calculatePerformanceMetrics(ctx)
 
 	// Assess market conditions
-	a.assessMarketConditions()
+	a.assessMarketConditions(ctx)
 
 	// Update limits utilization
 	a.beliefs.mu.Lock()
@@ -795,8 +795,8 @@ func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
 }
 
 // calculatePerformanceMetrics calculates Sharpe, drawdown, etc.
-func (a *RiskAgent) calculatePerformanceMetrics() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (a *RiskAgent) calculatePerformanceMetrics(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// Load equity curve from performance_metrics table using calculator
@@ -841,8 +841,8 @@ func (a *RiskAgent) calculatePerformanceMetrics() {
 }
 
 // assessMarketConditions determines current market regime
-func (a *RiskAgent) assessMarketConditions() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (a *RiskAgent) assessMarketConditions(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// Use calculator to detect market regime from database
@@ -872,8 +872,8 @@ func (a *RiskAgent) assessMarketConditions() {
 }
 
 // getCurrentPrice gets the current market price for a symbol from the database
-func (a *RiskAgent) getCurrentPrice(symbol string) float64 {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (a *RiskAgent) getCurrentPrice(ctx context.Context, symbol string) float64 {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// Use calculator to get current price from database
@@ -897,11 +897,11 @@ func (a *RiskAgent) evaluateProposal(ctx context.Context, symbol string, action 
 		intentions, err := a.evaluateProposalWithLLM(ctx, symbol, action, size, confidence)
 		if err != nil {
 			log.Warn().Err(err).Msg("LLM risk assessment failed, falling back to rule-based analysis")
-			return a.evaluateProposalRuleBased(symbol, action, size, confidence)
+			return a.evaluateProposalRuleBased(ctx, symbol, action, size, confidence)
 		}
 		return intentions
 	}
-	return a.evaluateProposalRuleBased(symbol, action, size, confidence)
+	return a.evaluateProposalRuleBased(ctx, symbol, action, size, confidence)
 }
 
 // evaluateProposalWithLLM performs LLM-powered risk assessment
@@ -909,7 +909,7 @@ func (a *RiskAgent) evaluateProposalWithLLM(ctx context.Context, symbol string, 
 	log.Debug().Str("symbol", symbol).Str("action", action).Msg("Evaluating proposal with LLM")
 
 	// Get current price from database
-	currentPrice := a.getCurrentPrice(symbol)
+	currentPrice := a.getCurrentPrice(ctx, symbol)
 
 	a.beliefs.mu.RLock()
 	portfolioValue := a.config.MaxPositionSize * 10.0 // Estimate portfolio as 10x max position
@@ -1005,7 +1005,7 @@ func (a *RiskAgent) evaluateProposalWithLLM(ctx context.Context, symbol string, 
 }
 
 // evaluateProposalRuleBased performs rule-based risk assessment
-func (a *RiskAgent) evaluateProposalRuleBased(symbol string, action string, size float64, confidence float64) *RiskIntentions {
+func (a *RiskAgent) evaluateProposalRuleBased(ctx context.Context, symbol string, action string, size float64, confidence float64) *RiskIntentions {
 	a.beliefs.mu.RLock()
 	defer a.beliefs.mu.RUnlock()
 
@@ -1064,7 +1064,7 @@ func (a *RiskAgent) evaluateProposalRuleBased(symbol string, action string, size
 	}
 
 	// Check 5: Position sizing recommendation
-	optimalSize := a.calculateOptimalSize(symbol, confidence)
+	optimalSize := a.calculateOptimalSize(ctx, symbol, confidence)
 	if size > optimalSize*1.5 { // Allow 50% over optimal
 		intentions.shouldVeto = false // Don't veto, but recommend smaller size
 		intentions.recommendedSize = optimalSize
@@ -1095,7 +1095,7 @@ func (a *RiskAgent) evaluateProposalRuleBased(symbol string, action string, size
 	intentions.confidenceScore = 0.90
 
 	// Calculate stop loss using current market price
-	currentPrice := a.getCurrentPrice(symbol)
+	currentPrice := a.getCurrentPrice(ctx, symbol)
 	intentions.stopLossLevel = a.calculateStopLoss(currentPrice, action)
 
 	return intentions
