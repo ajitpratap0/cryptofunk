@@ -1,3 +1,8 @@
+//go:build load
+
+// Package load contains load tests for vector search operations.
+// These tests require a running API server and are not run by default.
+// Run with: go test -tags=load ./tests/load/...
 package load
 
 import (
@@ -478,7 +483,10 @@ func performSearch(client *http.Client, apiURL string, searchReq SearchRequest) 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, apiURL+"/decisions/search", bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/decisions/search", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -489,7 +497,11 @@ func performSearch(client *http.Client, apiURL string, searchReq SearchRequest) 
 
 func performSimilarQuery(client *http.Client, apiURL string, decisionID uuid.UUID, limit int) (*http.Response, error) {
 	url := fmt.Sprintf("%s/decisions/%s/similar?limit=%d", apiURL, decisionID.String(), limit)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -499,15 +511,13 @@ func performSimilarQuery(client *http.Client, apiURL string, decisionID uuid.UUI
 
 func getValidDecisionID(client *http.Client, apiURL string) (uuid.UUID, error) {
 	// Try to get the first decision from the list endpoint
-	req, err := http.NewRequest(http.MethodGet, apiURL+"/decisions?limit=1", nil)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req = req.WithContext(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL+"/decisions?limit=1", nil)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to list decisions: %w", err)
