@@ -18,6 +18,15 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
+const (
+	// agentShutdownTimeout is the timeout for graceful agent shutdown operations
+	agentShutdownTimeout = 5 * time.Second
+
+	// mcpToolCallTimeout is the default timeout for MCP tool calls
+	// This is set to 60 seconds to accommodate LLM calls and external API requests
+	mcpToolCallTimeout = 60 * time.Second
+)
+
 // MCPServerConfig holds configuration for a single MCP server
 type MCPServerConfig struct {
 	Name    string            `json:"name" yaml:"name"`       // Server identifier (e.g., "coingecko", "technical_indicators")
@@ -356,7 +365,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 
 	// Shutdown metrics server
 	if a.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), agentShutdownTimeout)
 		defer cancel()
 		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
 			a.log.Error().Err(err).Msg("Error shutting down metrics server")
@@ -400,8 +409,8 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 		return nil, fmt.Errorf("MCP server %s not found", serverName)
 	}
 
-	// Create context with timeout for MCP tool calls (60 seconds for LLM/external API calls)
-	toolCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Create context with timeout for MCP tool calls
+	toolCtx, cancel := context.WithTimeout(ctx, mcpToolCallTimeout)
 	defer cancel()
 
 	// Call tool on session

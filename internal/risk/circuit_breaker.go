@@ -115,6 +115,16 @@ func ParseDuration(durationStr string, defaultValue time.Duration) time.Duration
 	return duration
 }
 
+// CircuitBreakerConfigSettings represents circuit breaker configuration from config files
+// This matches the structure of config.CircuitBreakerSettings
+type CircuitBreakerConfigSettings struct {
+	MinRequests     uint32
+	FailureRatio    float64
+	OpenTimeout     string
+	HalfOpenMaxReqs uint32
+	CountInterval   string
+}
+
 // NewCircuitBreakerManager creates a new circuit breaker manager with default settings
 // This function maintains backward compatibility for existing code
 func NewCircuitBreakerManager() *CircuitBreakerManager {
@@ -122,59 +132,41 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 }
 
 // NewCircuitBreakerManagerFromConfig creates a circuit breaker manager from config settings
-// This is a convenience function that converts config.CircuitBreakerSettings to ServiceSettings
-func NewCircuitBreakerManagerFromConfig(exchangeCfg, llmCfg, dbCfg interface{}) *CircuitBreakerManager {
-	// Type assertion and conversion for exchange settings
+// This is a convenience function that converts CircuitBreakerConfigSettings to ServiceSettings
+func NewCircuitBreakerManagerFromConfig(exchangeCfg, llmCfg, dbCfg *CircuitBreakerConfigSettings) *CircuitBreakerManager {
+	// Convert exchange settings
 	var exchangeSettings *ServiceSettings
-	if cfg, ok := exchangeCfg.(struct {
-		MinRequests     uint32
-		FailureRatio    float64
-		OpenTimeout     string
-		HalfOpenMaxReqs uint32
-		CountInterval   string
-	}); ok {
+	if exchangeCfg != nil {
 		exchangeSettings = &ServiceSettings{
-			MinRequests:     cfg.MinRequests,
-			FailureRatio:    cfg.FailureRatio,
-			OpenTimeout:     ParseDuration(cfg.OpenTimeout, ExchangeOpenTimeout),
-			HalfOpenMaxReqs: cfg.HalfOpenMaxReqs,
-			CountInterval:   ParseDuration(cfg.CountInterval, ExchangeCountInterval),
+			MinRequests:     exchangeCfg.MinRequests,
+			FailureRatio:    exchangeCfg.FailureRatio,
+			OpenTimeout:     ParseDuration(exchangeCfg.OpenTimeout, ExchangeOpenTimeout),
+			HalfOpenMaxReqs: exchangeCfg.HalfOpenMaxReqs,
+			CountInterval:   ParseDuration(exchangeCfg.CountInterval, ExchangeCountInterval),
 		}
 	}
 
-	// Type assertion and conversion for LLM settings
+	// Convert LLM settings
 	var llmSettings *ServiceSettings
-	if cfg, ok := llmCfg.(struct {
-		MinRequests     uint32
-		FailureRatio    float64
-		OpenTimeout     string
-		HalfOpenMaxReqs uint32
-		CountInterval   string
-	}); ok {
+	if llmCfg != nil {
 		llmSettings = &ServiceSettings{
-			MinRequests:     cfg.MinRequests,
-			FailureRatio:    cfg.FailureRatio,
-			OpenTimeout:     ParseDuration(cfg.OpenTimeout, LLMOpenTimeout),
-			HalfOpenMaxReqs: cfg.HalfOpenMaxReqs,
-			CountInterval:   ParseDuration(cfg.CountInterval, LLMCountInterval),
+			MinRequests:     llmCfg.MinRequests,
+			FailureRatio:    llmCfg.FailureRatio,
+			OpenTimeout:     ParseDuration(llmCfg.OpenTimeout, LLMOpenTimeout),
+			HalfOpenMaxReqs: llmCfg.HalfOpenMaxReqs,
+			CountInterval:   ParseDuration(llmCfg.CountInterval, LLMCountInterval),
 		}
 	}
 
-	// Type assertion and conversion for database settings
+	// Convert database settings
 	var dbSettings *ServiceSettings
-	if cfg, ok := dbCfg.(struct {
-		MinRequests     uint32
-		FailureRatio    float64
-		OpenTimeout     string
-		HalfOpenMaxReqs uint32
-		CountInterval   string
-	}); ok {
+	if dbCfg != nil {
 		dbSettings = &ServiceSettings{
-			MinRequests:     cfg.MinRequests,
-			FailureRatio:    cfg.FailureRatio,
-			OpenTimeout:     ParseDuration(cfg.OpenTimeout, DBOpenTimeout),
-			HalfOpenMaxReqs: cfg.HalfOpenMaxReqs,
-			CountInterval:   ParseDuration(cfg.CountInterval, DBCountInterval),
+			MinRequests:     dbCfg.MinRequests,
+			FailureRatio:    dbCfg.FailureRatio,
+			OpenTimeout:     ParseDuration(dbCfg.OpenTimeout, DBOpenTimeout),
+			HalfOpenMaxReqs: dbCfg.HalfOpenMaxReqs,
+			CountInterval:   ParseDuration(dbCfg.CountInterval, DBCountInterval),
 		}
 	}
 

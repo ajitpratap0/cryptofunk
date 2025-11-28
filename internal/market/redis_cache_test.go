@@ -41,14 +41,14 @@ func TestNewRedisPriceCache(t *testing.T) {
 			cache := NewRedisPriceCache(tt.client, tt.ttl)
 			if tt.shouldBeNil {
 				if cache != nil {
-					t.Error("Expected nil cache")
+					t.Errorf("Expected nil cache for nil client, but got non-nil cache")
 				}
 			} else {
 				if cache == nil {
-					t.Fatal("Expected non-nil cache")
+					t.Fatal("Expected non-nil cache for valid client, but got nil")
 				}
 				if cache.ttl == 0 {
-					t.Error("Expected non-zero TTL")
+					t.Errorf("Expected non-zero TTL, but got zero (input TTL: %v)", tt.ttl)
 				}
 			}
 		})
@@ -72,25 +72,24 @@ func TestRedisPriceCache_GetSet(t *testing.T) {
 	// Test cache miss
 	price, found := cache.Get(ctx, "bitcoin", "usd")
 	if found {
-		t.Error("Expected cache miss")
+		t.Error("Expected cache miss for uncached key 'bitcoin:usd', but found=true")
 	}
+	const tolerance = 1e-9
 	if price != 0 {
-		t.Errorf("Expected price 0, got %f", price)
+		t.Errorf("Expected price 0.0 for cache miss, got %.10f", price)
 	}
 
-	// Set price
-	err = cache.Set(ctx, "bitcoin", "usd", 50000.0)
-	if err != nil {
-		t.Fatalf("Failed to set cache: %v", err)
-	}
+	// Set price (fire-and-forget, no error returned)
+	cache.Set(ctx, "bitcoin", "usd", 50000.0)
 
 	// Test cache hit
 	price, found = cache.Get(ctx, "bitcoin", "usd")
 	if !found {
-		t.Error("Expected cache hit")
+		t.Error("Expected cache hit for key 'bitcoin:usd' after Set, but found=false")
 	}
-	if price != 50000.0 {
-		t.Errorf("Expected price 50000.0, got %f", price)
+	expectedPrice := 50000.0
+	if price < expectedPrice-tolerance || price > expectedPrice+tolerance {
+		t.Errorf("Expected price %.2f (±%.2e), got %.10f", expectedPrice, tolerance, price)
 	}
 }
 
@@ -108,19 +107,18 @@ func TestRedisPriceCache_SetWithTTL(t *testing.T) {
 	cache := NewRedisPriceCache(client, 60*time.Second)
 	ctx := context.Background()
 
-	// Set with custom TTL
-	err = cache.SetWithTTL(ctx, "ethereum", "usd", 3000.0, 1*time.Second)
-	if err != nil {
-		t.Fatalf("Failed to set cache with TTL: %v", err)
-	}
+	// Set with custom TTL (fire-and-forget, no error returned)
+	cache.SetWithTTL(ctx, "ethereum", "usd", 3000.0, 1*time.Second)
 
 	// Should be cached
 	price, found := cache.Get(ctx, "ethereum", "usd")
 	if !found {
-		t.Error("Expected cache hit")
+		t.Error("Expected cache hit for 'ethereum:usd' immediately after SetWithTTL, but found=false")
 	}
-	if price != 3000.0 {
-		t.Errorf("Expected price 3000.0, got %f", price)
+	const tolerance = 1e-9
+	expectedPrice := 3000.0
+	if price < expectedPrice-tolerance || price > expectedPrice+tolerance {
+		t.Errorf("Expected price %.2f (±%.2e), got %.10f", expectedPrice, tolerance, price)
 	}
 
 	// Advance time in miniredis
@@ -129,7 +127,7 @@ func TestRedisPriceCache_SetWithTTL(t *testing.T) {
 	// Should be expired
 	_, found = cache.Get(ctx, "ethereum", "usd")
 	if found {
-		t.Error("Expected cache miss after expiration")
+		t.Error("Expected cache miss for 'ethereum:usd' after 2 seconds (TTL=1s), but found=true")
 	}
 }
 
@@ -147,28 +145,25 @@ func TestRedisPriceCache_Delete(t *testing.T) {
 	cache := NewRedisPriceCache(client, 60*time.Second)
 	ctx := context.Background()
 
-	// Set price
-	err = cache.Set(ctx, "bitcoin", "usd", 50000.0)
-	if err != nil {
-		t.Fatalf("Failed to set cache: %v", err)
-	}
+	// Set price (fire-and-forget, no error returned)
+	cache.Set(ctx, "bitcoin", "usd", 50000.0)
 
 	// Verify it's cached
 	_, found := cache.Get(ctx, "bitcoin", "usd")
 	if !found {
-		t.Error("Expected cache hit")
+		t.Error("Expected cache hit for 'bitcoin:usd' after Set, but found=false")
 	}
 
 	// Delete
 	err = cache.Delete(ctx, "bitcoin", "usd")
 	if err != nil {
-		t.Fatalf("Failed to delete cache: %v", err)
+		t.Fatalf("Failed to delete cache for 'bitcoin:usd': %v", err)
 	}
 
 	// Should be gone
 	_, found = cache.Get(ctx, "bitcoin", "usd")
 	if found {
-		t.Error("Expected cache miss after delete")
+		t.Error("Expected cache miss for 'bitcoin:usd' after Delete, but found=true")
 	}
 }
 
@@ -198,17 +193,15 @@ func TestRedisPriceCache_Clear(t *testing.T) {
 	}
 
 	for _, s := range symbols {
-		err = cache.Set(ctx, s.symbol, s.currency, s.price)
-		if err != nil {
-			t.Fatalf("Failed to set cache: %v", err)
-		}
+		// Set prices (fire-and-forget, no error returned)
+		cache.Set(ctx, s.symbol, s.currency, s.price)
 	}
 
 	// Verify all are cached
 	for _, s := range symbols {
 		_, found := cache.Get(ctx, s.symbol, s.currency)
 		if !found {
-			t.Errorf("Expected cache hit for %s", s.symbol)
+			t.Errorf("Expected cache hit for '%s:%s' after Set, but found=false", s.symbol, s.currency)
 		}
 	}
 
@@ -222,7 +215,7 @@ func TestRedisPriceCache_Clear(t *testing.T) {
 	for _, s := range symbols {
 		_, found := cache.Get(ctx, s.symbol, s.currency)
 		if found {
-			t.Errorf("Expected cache miss for %s after clear", s.symbol)
+			t.Errorf("Expected cache miss for '%s:%s' after Clear, but found=true", s.symbol, s.currency)
 		}
 	}
 }
@@ -244,7 +237,7 @@ func TestRedisPriceCache_Health(t *testing.T) {
 	// Health check should pass
 	err = cache.Health(ctx)
 	if err != nil {
-		t.Errorf("Expected health check to pass: %v", err)
+		t.Errorf("Expected health check to pass for running Redis, but got error: %v", err)
 	}
 
 	// Close Redis
@@ -253,7 +246,7 @@ func TestRedisPriceCache_Health(t *testing.T) {
 	// Health check should fail
 	err = cache.Health(ctx)
 	if err == nil {
-		t.Error("Expected health check to fail after Redis close")
+		t.Error("Expected health check to fail after Redis close, but got no error")
 	}
 }
 
@@ -264,30 +257,34 @@ func TestRedisPriceCache_NilSafety(t *testing.T) {
 	// All methods should handle nil cache gracefully
 	price, found := cache.Get(ctx, "bitcoin", "usd")
 	if found {
-		t.Error("Expected false for nil cache")
+		t.Error("Expected found=false for nil cache Get, but got found=true")
 	}
 	if price != 0 {
-		t.Errorf("Expected price 0, got %f", price)
+		t.Errorf("Expected price 0.0 for nil cache Get, got %.10f", price)
 	}
 
-	err := cache.Set(ctx, "bitcoin", "usd", 50000.0)
-	if err == nil {
-		t.Error("Expected error for nil cache Set")
-	}
+	// Set should not panic for nil cache (fire-and-forget, no error returned)
+	cache.Set(ctx, "bitcoin", "usd", 50000.0)
 
-	err = cache.Delete(ctx, "bitcoin", "usd")
+	err := cache.Delete(ctx, "bitcoin", "usd")
 	if err == nil {
-		t.Error("Expected error for nil cache Delete")
+		t.Error("Expected error for nil cache Delete, but got no error")
+	} else if err.Error() == "" {
+		t.Error("Expected descriptive error message for nil cache Delete, but got empty string")
 	}
 
 	err = cache.Clear(ctx)
 	if err == nil {
-		t.Error("Expected error for nil cache Clear")
+		t.Error("Expected error for nil cache Clear, but got no error")
+	} else if err.Error() == "" {
+		t.Error("Expected descriptive error message for nil cache Clear, but got empty string")
 	}
 
 	err = cache.Health(ctx)
 	if err == nil {
-		t.Error("Expected error for nil cache Health")
+		t.Error("Expected error for nil cache Health, but got no error")
+	} else if err.Error() == "" {
+		t.Error("Expected descriptive error message for nil cache Health, but got empty string")
 	}
 }
 
@@ -303,17 +300,16 @@ func TestRedisPriceCache_RedisFailureGraceful(t *testing.T) {
 	// Get should return cache miss (not panic)
 	price, found := cache.Get(ctx, "bitcoin", "usd")
 	if found {
-		t.Error("Expected cache miss on Redis failure")
+		t.Error("Expected found=false (cache miss) when Redis is unavailable, but got found=true")
 	}
 	if price != 0 {
-		t.Errorf("Expected price 0, got %f", price)
+		t.Errorf("Expected price 0.0 when Redis is unavailable, got %.10f", price)
 	}
 
-	// Set should return error but not panic
-	err := cache.Set(ctx, "bitcoin", "usd", 50000.0)
-	if err == nil {
-		t.Error("Expected error when Redis is unavailable")
-	}
+	// Set should not panic even when Redis is unavailable (fire-and-forget)
+	// It logs the error internally but doesn't return it
+	cache.Set(ctx, "bitcoin", "usd", 50000.0)
+	// Test passes if no panic occurs
 }
 
 func TestRedisPriceCache_KeyFormat(t *testing.T) {
@@ -330,19 +326,16 @@ func TestRedisPriceCache_KeyFormat(t *testing.T) {
 	cache := NewRedisPriceCache(client, 60*time.Second)
 	ctx := context.Background()
 
-	// Set price
-	err = cache.Set(ctx, "bitcoin", "usd", 50000.0)
-	if err != nil {
-		t.Fatalf("Failed to set cache: %v", err)
-	}
+	// Set price (fire-and-forget, no error returned)
+	cache.Set(ctx, "bitcoin", "usd", 50000.0)
 
 	// Check key format in Redis
 	expectedKey := "cryptofunk:price:bitcoin:usd"
 	exists, err := client.Exists(ctx, expectedKey).Result()
 	if err != nil {
-		t.Fatalf("Failed to check key existence: %v", err)
+		t.Fatalf("Failed to check existence of key %q: %v", expectedKey, err)
 	}
 	if exists != 1 {
-		t.Errorf("Expected key %s to exist", expectedKey)
+		t.Errorf("Expected key %q to exist in Redis (exists=1), but got exists=%d", expectedKey, exists)
 	}
 }

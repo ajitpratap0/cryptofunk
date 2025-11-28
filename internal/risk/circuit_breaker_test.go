@@ -606,3 +606,94 @@ func TestPassthroughVsNormalCircuitBreaker(t *testing.T) {
 		assert.Equal(t, "test", result)
 	})
 }
+
+func TestNewCircuitBreakerManagerFromConfig(t *testing.T) {
+	t.Run("creates manager with custom config settings", func(t *testing.T) {
+		exchangeCfg := &CircuitBreakerConfigSettings{
+			MinRequests:     10,
+			FailureRatio:    0.5,
+			OpenTimeout:     "45s",
+			HalfOpenMaxReqs: 5,
+			CountInterval:   "15s",
+		}
+		llmCfg := &CircuitBreakerConfigSettings{
+			MinRequests:     5,
+			FailureRatio:    0.7,
+			OpenTimeout:     "90s",
+			HalfOpenMaxReqs: 3,
+			CountInterval:   "20s",
+		}
+		dbCfg := &CircuitBreakerConfigSettings{
+			MinRequests:     15,
+			FailureRatio:    0.5,
+			OpenTimeout:     "20s",
+			HalfOpenMaxReqs: 8,
+			CountInterval:   "12s",
+		}
+
+		manager := NewCircuitBreakerManagerFromConfig(exchangeCfg, llmCfg, dbCfg)
+
+		require.NotNil(t, manager)
+		require.NotNil(t, manager.Exchange())
+		require.NotNil(t, manager.LLM())
+		require.NotNil(t, manager.Database())
+
+		// Verify initial state is closed
+		assert.Equal(t, gobreaker.StateClosed, manager.Exchange().State())
+		assert.Equal(t, gobreaker.StateClosed, manager.LLM().State())
+		assert.Equal(t, gobreaker.StateClosed, manager.Database().State())
+	})
+
+	t.Run("creates manager with nil config (uses defaults)", func(t *testing.T) {
+		manager := NewCircuitBreakerManagerFromConfig(nil, nil, nil)
+
+		require.NotNil(t, manager)
+		require.NotNil(t, manager.Exchange())
+		require.NotNil(t, manager.LLM())
+		require.NotNil(t, manager.Database())
+
+		// Verify initial state is closed
+		assert.Equal(t, gobreaker.StateClosed, manager.Exchange().State())
+		assert.Equal(t, gobreaker.StateClosed, manager.LLM().State())
+		assert.Equal(t, gobreaker.StateClosed, manager.Database().State())
+	})
+
+	t.Run("handles partial config (only exchange)", func(t *testing.T) {
+		exchangeCfg := &CircuitBreakerConfigSettings{
+			MinRequests:     8,
+			FailureRatio:    0.55,
+			OpenTimeout:     "25s",
+			HalfOpenMaxReqs: 4,
+			CountInterval:   "8s",
+		}
+
+		manager := NewCircuitBreakerManagerFromConfig(exchangeCfg, nil, nil)
+
+		require.NotNil(t, manager)
+		require.NotNil(t, manager.Exchange())
+		require.NotNil(t, manager.LLM())
+		require.NotNil(t, manager.Database())
+
+		// All should be in closed state
+		assert.Equal(t, gobreaker.StateClosed, manager.Exchange().State())
+		assert.Equal(t, gobreaker.StateClosed, manager.LLM().State())
+		assert.Equal(t, gobreaker.StateClosed, manager.Database().State())
+	})
+
+	t.Run("config with invalid duration falls back to defaults", func(t *testing.T) {
+		exchangeCfg := &CircuitBreakerConfigSettings{
+			MinRequests:     5,
+			FailureRatio:    0.6,
+			OpenTimeout:     "invalid-duration",
+			HalfOpenMaxReqs: 3,
+			CountInterval:   "also-invalid",
+		}
+
+		// Should not panic, should use default durations
+		manager := NewCircuitBreakerManagerFromConfig(exchangeCfg, nil, nil)
+
+		require.NotNil(t, manager)
+		require.NotNil(t, manager.Exchange())
+		assert.Equal(t, gobreaker.StateClosed, manager.Exchange().State())
+	})
+}

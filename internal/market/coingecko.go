@@ -256,15 +256,9 @@ func (c *CoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrenc
 			Currency: vsCurrency,
 		}
 
-		// Store in Redis cache if available (fire-and-forget, don't fail on cache errors)
+		// Store in Redis cache if available (fire-and-forget, failures logged internally)
 		if c.cache != nil {
-			if cacheErr := c.cache.Set(ctx, symbol, vsCurrency, price); cacheErr != nil {
-				log.Warn().
-					Err(cacheErr).
-					Str("symbol", symbol).
-					Str("vs_currency", vsCurrency).
-					Msg("Failed to cache price in Redis - continuing anyway")
-			}
+			c.cache.Set(ctx, symbol, vsCurrency, price)
 		}
 
 		return priceResult, nil

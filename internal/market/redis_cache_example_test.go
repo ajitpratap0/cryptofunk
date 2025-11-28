@@ -24,12 +24,8 @@ func ExampleRedisPriceCache() {
 
 	ctx := context.Background()
 
-	// Set a price
-	err := cache.Set(ctx, "bitcoin", "usd", 50000.0)
-	if err != nil {
-		fmt.Printf("Failed to cache price: %v\n", err)
-		return
-	}
+	// Set a price (fire-and-forget, no error returned)
+	cache.Set(ctx, "bitcoin", "usd", 50000.0)
 
 	// Get the cached price
 	price, found := cache.Get(ctx, "bitcoin", "usd")
@@ -162,19 +158,11 @@ func ExampleRedisPriceCache_customTTL() {
 
 	ctx := context.Background()
 
-	// Cache stable coins with longer TTL (5 minutes)
-	err := cache.SetWithTTL(ctx, "usdt", "usd", 1.0, 5*time.Minute)
-	if err != nil {
-		fmt.Printf("Failed to cache: %v\n", err)
-		return
-	}
+	// Cache stable coins with longer TTL (5 minutes) - fire-and-forget
+	cache.SetWithTTL(ctx, "usdt", "usd", 1.0, 5*time.Minute)
 
-	// Cache volatile coins with shorter TTL (30 seconds)
-	err = cache.SetWithTTL(ctx, "bitcoin", "usd", 50000.0, 30*time.Second)
-	if err != nil {
-		fmt.Printf("Failed to cache: %v\n", err)
-		return
-	}
+	// Cache volatile coins with shorter TTL (30 seconds) - fire-and-forget
+	cache.SetWithTTL(ctx, "bitcoin", "usd", 50000.0, 30*time.Second)
 
 	fmt.Println("Prices cached with custom TTLs")
 }

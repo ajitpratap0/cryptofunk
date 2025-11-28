@@ -35,35 +35,35 @@ func TestNewCoinGeckoClient(t *testing.T) {
 
 			if tt.wantError {
 				if err == nil {
-					t.Error("Expected error, got nil")
+					t.Errorf("Expected error for test case %q, but got no error", tt.name)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				t.Errorf("Expected no error for test case %q, but got: %v", tt.name, err)
 				return
 			}
 
 			if client == nil {
-				t.Fatal("Expected non-nil client")
+				t.Fatalf("Expected non-nil client for test case %q, but got nil", tt.name)
 			}
 
 			if client.timeout != defaultTimeout {
-				t.Errorf("Expected timeout %v, got %v", defaultTimeout, client.timeout)
+				t.Errorf("Expected timeout %v for test case %q, got %v", defaultTimeout, tt.name, client.timeout)
 			}
 
 			if client.maxRetries != defaultMaxRetries {
-				t.Errorf("Expected max retries %d, got %d", defaultMaxRetries, client.maxRetries)
+				t.Errorf("Expected max retries %d for test case %q, got %d", defaultMaxRetries, tt.name, client.maxRetries)
 			}
 
 			if client.rateLimiter == nil {
-				t.Error("Expected non-nil rate limiter")
+				t.Errorf("Expected non-nil rate limiter for test case %q, but got nil", tt.name)
 			}
 
 			// Clean up
 			if err := client.Close(); err != nil {
-				t.Errorf("Failed to close client: %v", err)
+				t.Errorf("Failed to close client for test case %q: %v", tt.name, err)
 			}
 		})
 	}
@@ -115,44 +115,44 @@ func TestNewCoinGeckoClientWithOptions(t *testing.T) {
 
 			if tt.wantError {
 				if err == nil {
-					t.Error("Expected error, got nil")
+					t.Errorf("Expected error for test case %q, but got no error", tt.name)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				t.Errorf("Expected no error for test case %q, but got: %v", tt.name, err)
 				return
 			}
 
 			if client == nil {
-				t.Fatal("Expected non-nil client")
+				t.Fatalf("Expected non-nil client for test case %q, but got nil", tt.name)
 			}
 
 			// Verify options were applied
 			if tt.opts.Timeout != 0 && client.timeout != tt.opts.Timeout {
-				t.Errorf("Expected timeout %v, got %v", tt.opts.Timeout, client.timeout)
+				t.Errorf("Expected timeout %v for test case %q, got %v", tt.opts.Timeout, tt.name, client.timeout)
 			}
 
 			if tt.opts.MaxRetries != 0 && client.maxRetries != tt.opts.MaxRetries {
-				t.Errorf("Expected max retries %d, got %d", tt.opts.MaxRetries, client.maxRetries)
+				t.Errorf("Expected max retries %d for test case %q, got %d", tt.opts.MaxRetries, tt.name, client.maxRetries)
 			}
 
 			if tt.opts.RetryDelay != 0 && client.retryDelay != tt.opts.RetryDelay {
-				t.Errorf("Expected retry delay %v, got %v", tt.opts.RetryDelay, client.retryDelay)
+				t.Errorf("Expected retry delay %v for test case %q, got %v", tt.opts.RetryDelay, tt.name, client.retryDelay)
 			}
 
 			if tt.opts.EnableRateLimiting && client.rateLimiter == nil {
-				t.Error("Expected non-nil rate limiter when enabled")
+				t.Errorf("Expected non-nil rate limiter when EnableRateLimiting=true for test case %q, but got nil", tt.name)
 			}
 
 			if !tt.opts.EnableRateLimiting && client.rateLimiter != nil {
-				t.Error("Expected nil rate limiter when disabled")
+				t.Errorf("Expected nil rate limiter when EnableRateLimiting=false for test case %q, but got non-nil", tt.name)
 			}
 
 			// Clean up
 			if err := client.Close(); err != nil {
-				t.Errorf("Failed to close client: %v", err)
+				t.Errorf("Failed to close client for test case %q: %v", tt.name, err)
 			}
 		})
 	}
@@ -210,30 +210,30 @@ func TestGetPrice(t *testing.T) {
 
 			if tt.wantError {
 				if err == nil {
-					t.Error("Expected error, got nil")
+					t.Errorf("Expected error for GetPrice(%q, %q), but got no error", tt.symbol, tt.vsCurrency)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				t.Errorf("Expected no error for GetPrice(%q, %q), but got: %v", tt.symbol, tt.vsCurrency, err)
 				return
 			}
 
 			if result == nil {
-				t.Fatal("Expected non-nil result")
+				t.Fatalf("Expected non-nil result for GetPrice(%q, %q), but got nil", tt.symbol, tt.vsCurrency)
 			}
 
 			if result.Symbol != tt.symbol {
-				t.Errorf("Expected symbol %s, got %s", tt.symbol, result.Symbol)
+				t.Errorf("Expected symbol %q in result, got %q", tt.symbol, result.Symbol)
 			}
 
 			if result.Currency != tt.vsCurrency {
-				t.Errorf("Expected currency %s, got %s", tt.vsCurrency, result.Currency)
+				t.Errorf("Expected currency %q in result, got %q", tt.vsCurrency, result.Currency)
 			}
 
 			if result.Price <= 0 {
-				t.Errorf("Expected positive price, got %.2f", result.Price)
+				t.Errorf("Expected positive price for %s/%s, got %.2f", tt.symbol, tt.vsCurrency, result.Price)
 			}
 
 			t.Logf("✓ %s price in %s: $%.2f", tt.symbol, tt.vsCurrency, result.Price)
@@ -292,36 +292,37 @@ func TestGetMarketChart(t *testing.T) {
 
 			if tt.wantError {
 				if err == nil {
-					t.Error("Expected error, got nil")
+					t.Errorf("Expected error for GetMarketChart(%q, %d), but got no error", tt.symbol, tt.days)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				t.Errorf("Expected no error for GetMarketChart(%q, %d), but got: %v", tt.symbol, tt.days, err)
 				return
 			}
 
 			if result == nil {
-				t.Fatal("Expected non-nil result")
+				t.Fatalf("Expected non-nil result for GetMarketChart(%q, %d), but got nil", tt.symbol, tt.days)
 			}
 
 			if len(result.Prices) == 0 {
-				t.Error("Expected non-empty prices array")
+				t.Errorf("Expected non-empty prices array for %s (%d days), got length 0", tt.symbol, tt.days)
 			}
 
 			if len(result.MarketCaps) == 0 {
-				t.Error("Expected non-empty market caps array")
+				t.Errorf("Expected non-empty market caps array for %s (%d days), got length 0", tt.symbol, tt.days)
 			}
 
 			if len(result.TotalVolumes) == 0 {
-				t.Error("Expected non-empty volumes array")
+				t.Errorf("Expected non-empty volumes array for %s (%d days), got length 0", tt.symbol, tt.days)
 			}
 
 			// Verify timestamps are ordered
 			for i := 1; i < len(result.Prices); i++ {
 				if result.Prices[i].Timestamp.Before(result.Prices[i-1].Timestamp) {
-					t.Error("Timestamps should be in ascending order")
+					t.Errorf("Timestamps should be in ascending order: price[%d] (%v) is before price[%d] (%v)",
+						i, result.Prices[i].Timestamp, i-1, result.Prices[i-1].Timestamp)
 					break
 				}
 			}
@@ -329,7 +330,7 @@ func TestGetMarketChart(t *testing.T) {
 			// Verify all prices are positive
 			for i, p := range result.Prices {
 				if p.Value <= 0 {
-					t.Errorf("Price at index %d should be positive, got %.2f", i, p.Value)
+					t.Errorf("Price at index %d should be positive for %s, got %.10f", i, tt.symbol, p.Value)
 				}
 			}
 
@@ -380,38 +381,38 @@ func TestGetCoinInfo(t *testing.T) {
 
 			if tt.wantError {
 				if err == nil {
-					t.Error("Expected error, got nil")
+					t.Errorf("Expected error for GetCoinInfo(%q), but got no error", tt.coinID)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				t.Errorf("Expected no error for GetCoinInfo(%q), but got: %v", tt.coinID, err)
 				return
 			}
 
 			if result == nil {
-				t.Fatal("Expected non-nil result")
+				t.Fatalf("Expected non-nil result for GetCoinInfo(%q), but got nil", tt.coinID)
 			}
 
 			if result.ID != tt.coinID {
-				t.Errorf("Expected ID %s, got %s", tt.coinID, result.ID)
+				t.Errorf("Expected ID %q in result, got %q", tt.coinID, result.ID)
 			}
 
 			if result.Name == "" {
-				t.Error("Expected non-empty name")
+				t.Errorf("Expected non-empty name for coin %q, got empty string", tt.coinID)
 			}
 
 			if result.Symbol == "" {
-				t.Error("Expected non-empty symbol")
+				t.Errorf("Expected non-empty symbol for coin %q, got empty string", tt.coinID)
 			}
 
 			if result.Description == "" {
-				t.Error("Expected non-empty description")
+				t.Errorf("Expected non-empty description for coin %q, got empty string", tt.coinID)
 			}
 
 			if len(result.Links) == 0 {
-				t.Error("Expected at least one link")
+				t.Errorf("Expected at least one link for coin %q, got 0 links", tt.coinID)
 			}
 
 			t.Logf("✓ %s info: %s (%s)", tt.coinID, result.Name, result.Symbol)
@@ -536,7 +537,7 @@ func TestRateLimiting(t *testing.T) {
 
 	// Test that rate limiter exists
 	if client.rateLimiter == nil {
-		t.Fatal("Expected non-nil rate limiter")
+		t.Fatal("Expected non-nil rate limiter when EnableRateLimiting=true, but got nil")
 	}
 
 	// Test rate limiting behavior
@@ -582,12 +583,14 @@ func TestRetryLogic(t *testing.T) {
 	}()
 
 	// Verify retry configuration
-	if client.maxRetries != 3 {
-		t.Errorf("Expected max retries 3, got %d", client.maxRetries)
+	expectedMaxRetries := 3
+	if client.maxRetries != expectedMaxRetries {
+		t.Errorf("Expected max retries %d (from options), got %d", expectedMaxRetries, client.maxRetries)
 	}
 
-	if client.retryDelay != 100*time.Millisecond {
-		t.Errorf("Expected retry delay 100ms, got %v", client.retryDelay)
+	expectedRetryDelay := 100 * time.Millisecond
+	if client.retryDelay != expectedRetryDelay {
+		t.Errorf("Expected retry delay %v (from options), got %v", expectedRetryDelay, client.retryDelay)
 	}
 }
 
@@ -612,7 +615,7 @@ func TestHealth(t *testing.T) {
 
 	err = client.Health(ctx)
 	if err != nil {
-		t.Errorf("Health check failed: %v", err)
+		t.Errorf("Health check failed for operational CoinGecko client: %v", err)
 	} else {
 		t.Log("✓ Health check passed")
 	}
@@ -630,13 +633,13 @@ func TestClose(t *testing.T) {
 
 	err = client.Close()
 	if err != nil {
-		t.Errorf("Unexpected error closing client: %v", err)
+		t.Errorf("Expected no error on first Close(), but got: %v", err)
 	}
 
 	// Verify client can be closed multiple times without error
 	err = client.Close()
 	if err != nil {
-		t.Errorf("Second close should not error: %v", err)
+		t.Errorf("Expected no error on second Close() (idempotent), but got: %v", err)
 	}
 }
 
@@ -662,10 +665,10 @@ func TestContextCancellation(t *testing.T) {
 	// Attempt operations with cancelled context
 	_, err = client.GetPrice(ctx, "bitcoin", "usd")
 	if err == nil {
-		t.Error("Expected error with cancelled context")
+		t.Error("Expected error when calling GetPrice with cancelled context, but got no error")
 	}
 
 	if ctx.Err() == nil {
-		t.Error("Expected context to be cancelled")
+		t.Error("Expected context.Err() to be non-nil for cancelled context, but got nil")
 	}
 }

@@ -85,10 +85,12 @@ func (c *RedisPriceCache) Get(ctx context.Context, symbol string, currency strin
 	return entry.Price, true
 }
 
-// Set stores a price in cache with the configured TTL
-func (c *RedisPriceCache) Set(ctx context.Context, symbol string, currency string, price float64) error {
+// Set stores a price in cache with the configured TTL (fire-and-forget)
+// Cache failures are logged but do not return errors - caching is optional and should degrade gracefully
+func (c *RedisPriceCache) Set(ctx context.Context, symbol string, currency string, price float64) {
 	if c == nil || c.client == nil {
-		return fmt.Errorf("cache not initialized")
+		// Silently skip if cache not initialized
+		return
 	}
 
 	key := c.buildKey(symbol, currency)
@@ -102,7 +104,12 @@ func (c *RedisPriceCache) Set(ctx context.Context, symbol string, currency strin
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("failed to marshal price entry: %w", err)
+		log.Warn().
+			Err(err).
+			Str("symbol", symbol).
+			Str("currency", currency).
+			Msg("Failed to marshal price entry for cache")
+		return
 	}
 
 	// Use a short timeout for cache operations
@@ -115,7 +122,7 @@ func (c *RedisPriceCache) Set(ctx context.Context, symbol string, currency strin
 			Err(err).
 			Str("key", key).
 			Msg("Failed to cache price")
-		return err
+		return
 	}
 
 	log.Debug().
@@ -124,14 +131,14 @@ func (c *RedisPriceCache) Set(ctx context.Context, symbol string, currency strin
 		Float64("price", price).
 		Dur("ttl", c.ttl).
 		Msg("Cached price")
-
-	return nil
 }
 
-// SetWithTTL stores a price in cache with a custom TTL
-func (c *RedisPriceCache) SetWithTTL(ctx context.Context, symbol string, currency string, price float64, ttl time.Duration) error {
+// SetWithTTL stores a price in cache with a custom TTL (fire-and-forget)
+// Cache failures are logged but do not return errors - caching is optional and should degrade gracefully
+func (c *RedisPriceCache) SetWithTTL(ctx context.Context, symbol string, currency string, price float64, ttl time.Duration) {
 	if c == nil || c.client == nil {
-		return fmt.Errorf("cache not initialized")
+		// Silently skip if cache not initialized
+		return
 	}
 
 	key := c.buildKey(symbol, currency)
@@ -145,7 +152,12 @@ func (c *RedisPriceCache) SetWithTTL(ctx context.Context, symbol string, currenc
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("failed to marshal price entry: %w", err)
+		log.Warn().
+			Err(err).
+			Str("symbol", symbol).
+			Str("currency", currency).
+			Msg("Failed to marshal price entry for cache")
+		return
 	}
 
 	cacheCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -156,7 +168,7 @@ func (c *RedisPriceCache) SetWithTTL(ctx context.Context, symbol string, currenc
 			Err(err).
 			Str("key", key).
 			Msg("Failed to cache price with custom TTL")
-		return err
+		return
 	}
 
 	log.Debug().
@@ -165,8 +177,19 @@ func (c *RedisPriceCache) SetWithTTL(ctx context.Context, symbol string, currenc
 		Float64("price", price).
 		Dur("ttl", ttl).
 		Msg("Cached price with custom TTL")
+}
 
-	return nil
+// SetAsync stores a price in cache asynchronously (non-blocking)
+// Runs in a goroutine and doesn't block the caller
+// Useful for high-throughput scenarios where even minimal cache latency is unacceptable
+func (c *RedisPriceCache) SetAsync(ctx context.Context, symbol string, currency string, price float64) {
+	go c.Set(ctx, symbol, currency, price)
+}
+
+// SetWithTTLAsync stores a price in cache with custom TTL asynchronously (non-blocking)
+// Runs in a goroutine and doesn't block the caller
+func (c *RedisPriceCache) SetWithTTLAsync(ctx context.Context, symbol string, currency string, price float64, ttl time.Duration) {
+	go c.SetWithTTL(ctx, symbol, currency, price, ttl)
 }
 
 // Delete removes a price from cache

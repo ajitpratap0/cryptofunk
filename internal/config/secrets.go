@@ -72,12 +72,70 @@ var commonWeakPasswords = []string{
 	"football",
 }
 
+// Keyboard patterns that should be detected
+var keyboardPatterns = []string{
+	// Top row
+	"qwerty",
+	"qwertyuiop",
+	"qwertyui",
+	"ytrewq", // reversed
+	"poiuytrewq",
+	// Middle row
+	"asdfgh",
+	"asdfghjkl",
+	"asdfghjk",
+	"hgfdsa", // reversed
+	"lkjhgfdsa",
+	// Bottom row
+	"zxcvbn",
+	"zxcvbnm",
+	"nbvcxz", // reversed
+	"mnbvcxz",
+	// Common number sequences
+	"12345678",
+	"123456789",
+	"1234567890",
+	"87654321", // reversed
+	"987654321",
+	"0987654321",
+	// Diagonal patterns
+	"1qaz2wsx",
+	"qazwsx",
+	"zaq1xsw2",
+}
+
 // SecretValidationResult contains the result of secret validation
 type SecretValidationResult struct {
 	IsValid  bool
 	Strength SecretStrength
 	Errors   []string
 	Warnings []string
+}
+
+// containsKeyboardPattern checks if the secret contains common keyboard patterns
+// Returns the pattern found, or empty string if none found
+// Patterns are checked in order, with longer patterns checked first
+func containsKeyboardPattern(lowerSecret string) string {
+	// Check patterns sorted by length (longest first) to catch longer patterns before substrings
+	// We create a slice and sort it each time to ensure we catch the most specific pattern
+	patternsCopy := make([]string, len(keyboardPatterns))
+	copy(patternsCopy, keyboardPatterns)
+
+	// Sort by length descending (longest first)
+	for i := 0; i < len(patternsCopy); i++ {
+		for j := i + 1; j < len(patternsCopy); j++ {
+			if len(patternsCopy[j]) > len(patternsCopy[i]) {
+				patternsCopy[i], patternsCopy[j] = patternsCopy[j], patternsCopy[i]
+			}
+		}
+	}
+
+	for _, pattern := range patternsCopy {
+		if strings.Contains(lowerSecret, pattern) {
+			return pattern
+		}
+	}
+	return ""
 }
 
 // ValidateSecret validates a secret/password for strength and security
@@ -118,6 +176,14 @@ func ValidateSecret(secret string, name string, minLength int, requireStrong boo
 			result.Errors = append(result.Errors, fmt.Sprintf("%s is a commonly known weak password", name))
 			return result
 		}
+	}
+
+	// Check for keyboard patterns
+	if pattern := containsKeyboardPattern(lowerSecret); pattern != "" {
+		result.IsValid = false
+		result.Strength = SecretStrengthWeak
+		result.Errors = append(result.Errors, fmt.Sprintf("%s contains keyboard pattern (%s)", name, pattern))
+		return result
 	}
 
 	// Check length

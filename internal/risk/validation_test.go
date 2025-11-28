@@ -317,13 +317,15 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		for _, symbol := range invalidSymbols {
 			_, err := calc.LoadHistoricalPrices(ctx, symbol, "1h", 30)
 			if err == nil {
-				t.Errorf("LoadHistoricalPrices should reject invalid symbol: %s", symbol)
-			}
-			if err != nil && err.Error() != "invalid symbol format: "+symbol {
-				// If error is not about invalid format, it's coming from nil pool
-				// which means validation was not called first
-				if err.Error() == "no database pool available" {
-					t.Errorf("LoadHistoricalPrices should validate symbol before checking pool")
+				t.Errorf("LoadHistoricalPrices should reject invalid symbol %q, but got no error", symbol)
+			} else {
+				// Check for specific validation error message
+				expectedErr := "invalid symbol format: " + symbol
+				if err.Error() != expectedErr {
+					// If error is not about invalid format, validation was not called first
+					if err.Error() == "no database pool available" {
+						t.Errorf("LoadHistoricalPrices should validate symbol before checking pool, got %q instead of %q", err.Error(), expectedErr)
+					}
 				}
 			}
 		}
@@ -331,10 +333,12 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		// Test valid symbol (should fail on nil pool check, not validation)
 		_, err := calc.LoadHistoricalPrices(ctx, validSymbol, "1h", 30)
 		if err == nil {
-			t.Error("Expected error due to nil pool")
-		}
-		if err.Error() == "invalid symbol format: "+validSymbol {
-			t.Error("Valid symbol should not trigger validation error")
+			t.Error("Expected error due to nil pool, but got no error")
+		} else {
+			unexpectedErr := "invalid symbol format: " + validSymbol
+			if err.Error() == unexpectedErr {
+				t.Errorf("Valid symbol %q should not trigger validation error, but got: %v", validSymbol, err)
+			}
 		}
 	})
 
@@ -344,11 +348,13 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		for _, symbol := range invalidSymbols {
 			_, err := calc.GetCurrentPrice(ctx, symbol, "1h")
 			if err == nil {
-				t.Errorf("GetCurrentPrice should reject invalid symbol: %s", symbol)
-			}
-			if err != nil && err.Error() != "invalid symbol format: "+symbol {
-				if err.Error() == "no database pool available" {
-					t.Errorf("GetCurrentPrice should validate symbol before checking pool")
+				t.Errorf("GetCurrentPrice should reject invalid symbol %q, but got no error", symbol)
+			} else {
+				expectedErr := "invalid symbol format: " + symbol
+				if err.Error() != expectedErr {
+					if err.Error() == "no database pool available" {
+						t.Errorf("GetCurrentPrice should validate symbol before checking pool, got %q instead of %q", err.Error(), expectedErr)
+					}
 				}
 			}
 		}
@@ -356,10 +362,12 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		// Test valid symbol
 		_, err := calc.GetCurrentPrice(ctx, validSymbol, "1h")
 		if err == nil {
-			t.Error("Expected error due to nil pool")
-		}
-		if err.Error() == "invalid symbol format: "+validSymbol {
-			t.Error("Valid symbol should not trigger validation error")
+			t.Error("Expected error due to nil pool, but got no error")
+		} else {
+			unexpectedErr := "invalid symbol format: " + validSymbol
+			if err.Error() == unexpectedErr {
+				t.Errorf("Valid symbol %q should not trigger validation error, but got: %v", validSymbol, err)
+			}
 		}
 	})
 
@@ -373,7 +381,7 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 			}
 			_, err := calc.CalculateWinRate(ctx, symbol)
 			if err == nil {
-				t.Errorf("CalculateWinRate should reject invalid symbol: %s", symbol)
+				t.Errorf("CalculateWinRate should reject invalid symbol %q, but got no error", symbol)
 			}
 			// For this function, nil pool returns default values, not error
 		}
@@ -381,10 +389,10 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		// Test empty symbol (should be allowed)
 		result, err := calc.CalculateWinRate(ctx, "")
 		if err != nil {
-			t.Error("Empty symbol should be allowed for CalculateWinRate")
+			t.Errorf("Empty symbol should be allowed for CalculateWinRate, but got error: %v", err)
 		}
 		if result == nil {
-			t.Error("Should return default values for empty symbol with nil pool")
+			t.Error("CalculateWinRate should return default values for empty symbol with nil pool, but got nil result")
 		}
 	})
 
@@ -394,12 +402,12 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		for _, symbol := range invalidSymbols {
 			_, err := calc.DetectMarketRegime(ctx, symbol, 30)
 			if err == nil {
-				t.Errorf("DetectMarketRegime should reject invalid symbol: %s", symbol)
-			}
-			if err != nil && err.Error() != "invalid symbol format: "+symbol {
+				t.Errorf("DetectMarketRegime should reject invalid symbol %q, but got no error", symbol)
+			} else {
 				// Should get validation error before LoadHistoricalPrices is called
-				if err.Error() != "invalid symbol format: "+symbol {
-					t.Errorf("Expected validation error for symbol %s, got: %v", symbol, err)
+				expectedErr := "invalid symbol format: " + symbol
+				if err.Error() != expectedErr {
+					t.Errorf("Expected validation error %q for symbol %q, but got: %v", expectedErr, symbol, err)
 				}
 			}
 		}
@@ -411,12 +419,12 @@ func TestSymbolValidationInFunctions(t *testing.T) {
 		for _, symbol := range invalidSymbols {
 			_, _, err := calc.CalculateVaRFromPrices(ctx, symbol, "1h", 30, 0.95)
 			if err == nil {
-				t.Errorf("CalculateVaRFromPrices should reject invalid symbol: %s", symbol)
-			}
-			if err != nil && err.Error() != "invalid symbol format: "+symbol {
+				t.Errorf("CalculateVaRFromPrices should reject invalid symbol %q, but got no error", symbol)
+			} else {
 				// Should get validation error before LoadHistoricalPrices is called
-				if err.Error() != "invalid symbol format: "+symbol {
-					t.Errorf("Expected validation error for symbol %s, got: %v", symbol, err)
+				expectedErr := "invalid symbol format: " + symbol
+				if err.Error() != expectedErr {
+					t.Errorf("Expected validation error %q for symbol %q, but got: %v", expectedErr, symbol, err)
 				}
 			}
 		}

@@ -16,6 +16,12 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
 
+const (
+	// defaultLLMTimeout is the default timeout for LLM API calls
+	// LLM calls can take longer for complex reasoning, so we use a longer timeout
+	defaultLLMTimeout = 60 * time.Second
+)
+
 // Client represents an LLM client that communicates with Bifrost gateway
 type Client struct {
 	endpoint       string
@@ -54,7 +60,7 @@ func NewClient(config ClientConfig) *Client {
 		config.MaxTokens = 2000
 	}
 	if config.Timeout == 0 {
-		config.Timeout = 60 * time.Second // LLM calls can take longer for complex reasoning
+		config.Timeout = defaultLLMTimeout
 	}
 
 	// Create circuit breaker if not provided
