@@ -309,6 +309,11 @@ func (s *APIServer) setupRoutes() {
 		// Strategy import/export routes (T310) with rate limiting
 		strategyHandler := api.NewStrategyHandler()
 		strategyHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
+
+		// Backtest routes (T312) with rate limiting
+		// Backtesting operations can be computationally expensive, so we apply stricter rate limits
+		backtestHandler := api.NewBacktestHandler(s.db.Pool())
+		backtestHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 	}
 
 	// Root endpoint

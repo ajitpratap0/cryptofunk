@@ -1,0 +1,310 @@
+# CryptoFunk Strategy Configuration Schema
+# This file documents the complete strategy configuration format
+# Use this as a reference when creating or modifying trading strategies
+#
+# Schema Version: 1.0
+# Documentation: https://github.com/ajitpratap0/cryptofunk/docs/strategy.md
+
+# ==============================================================================
+# METADATA - Strategy Identification and Information
+# ==============================================================================
+metadata:
+  # Schema version for compatibility (REQUIRED)
+  schema_version: "1.0"
+
+  # Unique identifier (auto-generated on export if not provided)
+  id: "550e8400-e29b-41d4-a716-446655440000"
+
+  # Strategy name (REQUIRED, max 100 characters)
+  name: "Conservative Trend Following"
+
+  # Description of the strategy (max 2000 characters)
+  description: |
+    A low-risk trend following strategy that combines technical indicators
+    with strict risk management. Targets 2:1 risk/reward ratio with tight
+    stop losses. Suitable for conservative traders.
+
+  # Author information
+  author: "CryptoFunk Team"
+
+  # Strategy version (user-defined, not schema version)
+  version: "1.2.0"
+
+  # Tags for categorization (max 20 tags, each max 50 characters)
+  tags:
+    - "trend-following"
+    - "conservative"
+    - "low-risk"
+    - "technical-analysis"
+
+  # Timestamps (auto-generated on export)
+  created_at: "2024-01-15T10:30:00Z"
+  updated_at: "2024-01-20T15:45:00Z"
+
+  # Source of the strategy (user, marketplace, backup, etc.)
+  source: "user"
+
+# ==============================================================================
+# AGENTS - Trading Agent Configuration
+# ==============================================================================
+agents:
+  # Agent voting weights (0-1, used for weighted consensus)
+  weights:
+    technical: 0.25   # Technical analysis agent weight
+    orderbook: 0.15   # Order book analysis agent weight
+    sentiment: 0.10   # Sentiment analysis agent weight
+    trend: 0.40       # Trend following agent weight (highest for this strategy)
+    reversion: 0.10   # Mean reversion agent weight (lower for trend strategy)
+    arbitrage: 0.00   # Arbitrage agent weight (disabled)
+
+  # Which agents are enabled (risk agent should always be true)
+  enabled:
+    technical: true
+    orderbook: true
+    sentiment: true
+    trend: true
+    reversion: true
+    arbitrage: false  # Disabled for this strategy
+    risk: true        # ALWAYS keep enabled
+
+  # Technical Analysis Agent Configuration
+  technical:
+    step_interval: "30s"  # How often to analyze
+
+    lookback_periods:
+      short: "1h"
+      medium: "4h"
+      long: "24h"
+
+    # Weights for different indicators in confidence calculation (should sum to 1.0)
+    confidence_weights:
+      rsi: 0.25
+      macd: 0.30
+      bollinger: 0.20
+      trend: 0.15
+      volume: 0.10
+
+    # Minimum confidence to generate a signal (0-1)
+    confidence_threshold: 0.70
+
+  # Sentiment Analysis Agent Configuration
+  sentiment:
+    step_interval: "5m"
+    sentiment_threshold: 0.6    # Minimum sentiment score
+    news_weight: 0.7            # Weight for news sentiment
+    fear_greed_weight: 0.3      # Weight for fear/greed index
+    min_articles: 5             # Minimum articles to analyze
+    include_fear_greed: true
+
+  # Order Book Analysis Agent Configuration
+  orderbook:
+    step_interval: "10s"
+    depth_levels: 20           # Number of order book levels to analyze
+    imbalance_threshold: 0.3   # Buy/sell imbalance threshold
+    large_order_threshold: 100000  # USD value for "large" orders
+    min_confidence: 0.6
+
+  # Trend Following Agent Configuration
+  trend:
+    step_interval: "1m"
+    fast_ema_period: 12        # Fast EMA period (must be < slow)
+    slow_ema_period: 26        # Slow EMA period
+    adx_period: 14             # ADX calculation period
+    adx_threshold: 25.0        # Minimum ADX for strong trend (0-100)
+    lookback_candles: 100      # Historical candles to analyze
+    confidence_threshold: 0.65 # Minimum confidence to signal
+    vote_weight: 1.0           # Weight in voting (legacy, use agents.weights instead)
+
+    # Risk management specific to trend agent
+    risk_management:
+      stop_loss_pct: 0.02      # 2% stop loss
+      take_profit_pct: 0.04    # 4% take profit (2:1 R:R)
+      trailing_stop_pct: 0.015 # 1.5% trailing stop
+      use_trailing_stop: true
+      min_risk_reward: 2.0     # Minimum 2:1 risk/reward ratio
+
+  # Mean Reversion Agent Configuration
+  reversion:
+    step_interval: "2m"
+    confidence_threshold: 0.70
+    vote_weight: 1.0
+
+    # Entry conditions for mean reversion trades
+    entry_conditions:
+      rsi_oversold: 30         # RSI oversold threshold (0-50)
+      bollinger_touch: true    # Require price at Bollinger Band
+      volume_spike: 1.5        # Volume multiplier for confirmation
+
+    # Exit conditions for mean reversion trades
+    exit_conditions:
+      rsi_neutral: 50          # RSI neutral level to exit (50-100)
+      bollinger_middle: true   # Exit when price returns to middle band
+      take_profit_pct: 0.03    # 3% take profit
+      stop_loss_pct: 0.015     # 1.5% stop loss
+
+  # Arbitrage Agent Configuration (disabled in this strategy)
+  arbitrage:
+    step_interval: "5s"
+    min_spread: 0.005          # Minimum 0.5% spread to trigger
+    exchanges:
+      - "binance"
+      - "coinbase"
+    max_latency_ms: 100        # Maximum acceptable latency
+    confidence_threshold: 0.80
+    vote_weight: 1.0
+
+# ==============================================================================
+# RISK MANAGEMENT - Portfolio and Trade Risk Settings
+# ==============================================================================
+risk:
+  # Portfolio exposure limits
+  max_portfolio_exposure: 0.50  # Max 50% of portfolio in positions (0-1)
+  max_position_size: 0.10       # Max 10% of portfolio per position (0-1)
+  max_positions: 3              # Maximum concurrent positions (>= 1)
+  max_correlation: 0.70         # Maximum correlation between positions
+
+  # Risk metrics and limits
+  max_daily_loss: 0.02          # Stop trading if 2% daily loss (0-1)
+  max_drawdown: 0.10            # Maximum 10% drawdown allowed (0-1)
+  min_sharpe_ratio: 1.0         # Minimum Sharpe ratio for strategy
+  max_var_95: 0.05              # Maximum 5% Value at Risk (95% confidence)
+
+  # Trade approval requirements
+  min_strategy_confidence: 0.70 # Minimum 70% confidence to trade (0-1)
+  min_consensus_votes: 2        # Minimum agents that must agree (>= 1)
+  max_leverage: 1.0             # No leverage for conservative strategy
+
+  # Default stop loss and take profit for all trades
+  default_stop_loss: 0.02       # 2% default stop loss (0-0.5)
+  default_take_profit: 0.04     # 4% default take profit (0-1)
+
+  # Circuit breakers - emergency halt conditions
+  circuit_breakers:
+    enabled: true
+    max_trades_per_hour: 10     # Halt if > 10 trades/hour
+    max_losses_per_day: 3       # Halt if 3 consecutive losses
+    volatility_threshold: 0.05  # Halt if volatility > 5%
+    drawdown_halt: 0.08         # Emergency halt at 8% drawdown (0-1)
+
+  # Position sizing
+  kelly_fraction: 0.25          # Use 25% of Kelly criterion (0-1)
+  min_position_usd: 100.0       # Minimum position size in USD
+  max_position_usd: 10000.0     # Maximum position size in USD
+
+# ==============================================================================
+# ORCHESTRATION - Decision Making and Coordination
+# ==============================================================================
+orchestration:
+  # Voting configuration
+  voting_enabled: true
+  voting_method: "weighted_consensus"  # "weighted_consensus" or "majority"
+  min_votes: 2                  # Minimum votes required for decision (>= 1)
+  quorum: 0.60                  # 60% of enabled agents must vote (0-1)
+
+  # Decision timing
+  step_interval: "30s"          # How often orchestrator makes decisions
+  max_signal_age: "5m"          # Discard signals older than 5 minutes
+  min_consensus: 0.65           # 65% agreement required (0-1)
+  min_confidence: 0.70          # 70% minimum confidence (0-1)
+
+  # LLM reasoning for decision making (optional)
+  llm_reasoning_enabled: true
+  llm_temperature: 0.5          # LLM temperature for analysis (0-2)
+
+# ==============================================================================
+# INDICATORS - Technical Indicator Configuration
+# ==============================================================================
+indicators:
+  # RSI (Relative Strength Index)
+  rsi:
+    period: 14            # Calculation period (>= 1)
+    overbought: 70        # Overbought threshold (50-100)
+    oversold: 30          # Oversold threshold (0-50)
+
+  # MACD (Moving Average Convergence Divergence)
+  macd:
+    fast_period: 12       # Fast EMA period (>= 1, must be < slow)
+    slow_period: 26       # Slow EMA period (>= 1, must be > fast)
+    signal_period: 9      # Signal line period (>= 1)
+
+  # Bollinger Bands
+  bollinger:
+    period: 20            # Moving average period (>= 1)
+    std_dev: 2.0          # Standard deviations (> 0)
+
+  # EMA (Exponential Moving Average)
+  ema:
+    periods: [9, 21, 50, 200]  # Multiple EMA periods to calculate
+
+  # ADX (Average Directional Index)
+  adx:
+    period: 14            # Calculation period (>= 1)
+    trend_threshold: 25.0 # Minimum ADX for strong trend (0-100)
+
+# ==============================================================================
+# VALIDATION RULES
+# ==============================================================================
+# The following validation rules are enforced on import:
+#
+# REQUIRED FIELDS:
+# - metadata.schema_version (must be supported version)
+# - metadata.name (max 100 chars)
+# - At least one agent enabled (besides risk)
+# - All risk parameters within valid ranges
+#
+# WEIGHT VALIDATION:
+# - All agent weights must be 0-1
+# - Enabled agents should have non-zero weights
+#
+# RISK VALIDATION:
+# - max_position_size <= max_portfolio_exposure
+# - max_daily_loss <= max_drawdown
+# - default_stop_loss < default_take_profit
+# - circuit_breakers.drawdown_halt <= max_drawdown
+#
+# INDICATOR VALIDATION:
+# - RSI: oversold < overbought
+# - MACD: fast_period < slow_period
+# - All periods >= 1
+#
+# ORCHESTRATION VALIDATION:
+# - voting_method in ["weighted_consensus", "majority"]
+# - step_interval and max_signal_age: valid duration strings (e.g., "30s", "5m")
+# - All percentages 0-1
+# - LLM temperature 0-2
+#
+# ==============================================================================
+# USAGE EXAMPLES
+# ==============================================================================
+#
+# EXPORT CURRENT STRATEGY:
+#   GET /api/v1/strategies/export?format=yaml
+#   GET /api/v1/strategies/export?format=json
+#
+# IMPORT STRATEGY:
+#   POST /api/v1/strategies/import
+#   Content-Type: multipart/form-data
+#   file: strategy.yaml
+#
+# VALIDATE STRATEGY:
+#   POST /api/v1/strategies/validate
+#   {"data": "<yaml or json content>", "strict": true}
+#
+# CLONE STRATEGY:
+#   POST /api/v1/strategies/clone
+#   {"name": "My Strategy Copy"}
+#
+# MERGE STRATEGIES:
+#   POST /api/v1/strategies/merge
+#   {"override": {...}, "apply": true}
+#
+# ==============================================================================
+# STRATEGY TEMPLATES
+# ==============================================================================
+#
+# See configs/examples/ for complete strategy templates:
+# - conservative.yaml  - Low-risk, tight stops, high confidence
+# - aggressive.yaml    - Higher risk, looser stops, more positions
+# - paper-trading.yaml - Safe defaults for testing
+#
+# ==============================================================================

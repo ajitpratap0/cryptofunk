@@ -238,3 +238,15 @@ api:
 monitoring:
   prometheus_port: 9100
   enable_metrics: true
+
+telegram:
+  enabled: false                      # Enable Telegram bot integration
+  bot_token: "${TELEGRAM_BOT_TOKEN}"  # Set via environment variable
+  webhook_url: ""                     # Optional: for webhook mode (leave empty for polling)
+  polling_timeout: 60                 # Polling timeout in seconds
+  debug: false                        # Enable debug mode for bot API
+  # Notification preferences (defaults for new users)
+  default_preferences:
+    receive_alerts: true
+    receive_trade_notifications: true
+    receive_daily_summary: true

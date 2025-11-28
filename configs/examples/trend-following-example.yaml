@@ -1,0 +1,141 @@
+# CryptoFunk Strategy Configuration
+# Schema Version: 1.0
+# Exported: 2024-01-20T15:45:00Z
+# Documentation: https://github.com/ajitpratap0/cryptofunk/docs/strategy.md
+
+metadata:
+  schema_version: "1.0"
+  name: "Conservative Trend Following"
+  description: "Low-risk trend following strategy with 2:1 risk/reward ratio and strict risk management"
+  author: "CryptoFunk Team"
+  version: "1.0"
+  tags:
+    - "trend-following"
+    - "conservative"
+    - "low-risk"
+  source: "export"
+
+agents:
+  weights:
+    technical: 0.2
+    orderbook: 0.15
+    sentiment: 0.1
+    trend: 0.4
+    reversion: 0.15
+    arbitrage: 0.0
+  enabled:
+    technical: true
+    orderbook: true
+    sentiment: true
+    trend: true
+    reversion: true
+    arbitrage: false
+    risk: true
+  technical:
+    step_interval: "30s"
+    lookback_periods:
+      short: "1h"
+      medium: "4h"
+      long: "24h"
+    confidence_weights:
+      rsi: 0.25
+      macd: 0.3
+      bollinger: 0.2
+      trend: 0.15
+      volume: 0.1
+    confidence_threshold: 0.7
+  sentiment:
+    step_interval: "5m"
+    sentiment_threshold: 0.6
+    news_weight: 0.7
+    fear_greed_weight: 0.3
+    min_articles: 5
+    include_fear_greed: true
+  orderbook:
+    step_interval: "10s"
+    depth_levels: 20
+    imbalance_threshold: 0.3
+    large_order_threshold: 100000
+    min_confidence: 0.6
+  trend:
+    step_interval: "1m"
+    fast_ema_period: 12
+    slow_ema_period: 26
+    adx_period: 14
+    adx_threshold: 25
+    lookback_candles: 100
+    confidence_threshold: 0.65
+    vote_weight: 1.0
+    risk_management:
+      stop_loss_pct: 0.02
+      take_profit_pct: 0.04
+      trailing_stop_pct: 0.015
+      use_trailing_stop: true
+      min_risk_reward: 2.0
+  reversion:
+    step_interval: "2m"
+    confidence_threshold: 0.7
+    vote_weight: 1.0
+    entry_conditions:
+      rsi_oversold: 30
+      bollinger_touch: true
+      volume_spike: 1.5
+    exit_conditions:
+      rsi_neutral: 50
+      bollinger_middle: true
+      take_profit_pct: 0.03
+      stop_loss_pct: 0.015
+
+risk:
+  max_portfolio_exposure: 0.5
+  max_position_size: 0.1
+  max_positions: 3
+  max_correlation: 0.7
+  max_daily_loss: 0.02
+  max_drawdown: 0.1
+  min_sharpe_ratio: 1.0
+  max_var_95: 0.05
+  min_strategy_confidence: 0.7
+  min_consensus_votes: 2
+  max_leverage: 1.0
+  default_stop_loss: 0.02
+  default_take_profit: 0.04
+  circuit_breakers:
+    enabled: true
+    max_trades_per_hour: 10
+    max_losses_per_day: 3
+    volatility_threshold: 0.05
+    drawdown_halt: 0.08
+  kelly_fraction: 0.25
+  min_position_usd: 100.0
+  max_position_usd: 10000.0
+
+orchestration:
+  voting_enabled: true
+  voting_method: "weighted_consensus"
+  min_votes: 2
+  quorum: 0.6
+  step_interval: "30s"
+  max_signal_age: "5m"
+  min_consensus: 0.65
+  min_confidence: 0.7
+  llm_reasoning_enabled: true
+  llm_temperature: 0.5
+
+indicators:
+  rsi:
+    period: 14
+    overbought: 70
+    oversold: 30
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+  bollinger:
+    period: 20
+    std_dev: 2
+  ema:
+    periods: [9, 21, 50, 200]
+  adx:
+    period: 14
+    trend_threshold: 25

@@ -948,3 +948,147 @@ func BenchmarkDeepCopy_FullyPopulated(b *testing.B) {
 		_ = original.DeepCopy()
 	}
 }
+
+// =============================================================================
+// Real-World Example Strategy Tests
+// =============================================================================
+
+func TestImportExampleStrategy(t *testing.T) {
+	// Test importing the example strategy file we created
+	examplePath := "../../configs/examples/trend-following-example.yaml"
+
+	// Check if file exists
+	if _, err := os.Stat(examplePath); os.IsNotExist(err) {
+		t.Skip("Example strategy file not found - this is expected if running tests from a different location")
+	}
+
+	opts := DefaultImportOptions()
+	s, err := ImportFromFile(examplePath, opts)
+	require.NoError(t, err, "Failed to import example strategy")
+	assert.NotNil(t, s)
+
+	// Verify key metadata fields
+	assert.Equal(t, "1.0", s.Metadata.SchemaVersion)
+	assert.Equal(t, "Conservative Trend Following", s.Metadata.Name)
+	assert.Contains(t, s.Metadata.Description, "Low-risk trend following")
+	assert.Contains(t, s.Metadata.Tags, "trend-following")
+	assert.Contains(t, s.Metadata.Tags, "conservative")
+
+	// Verify agent configuration
+	assert.True(t, s.Agents.Enabled.Trend, "Trend agent should be enabled")
+	assert.True(t, s.Agents.Enabled.Risk, "Risk agent should always be enabled")
+	assert.Equal(t, 0.4, s.Agents.Weights.Trend, "Trend agent should have 40% weight")
+	assert.Equal(t, 0.2, s.Agents.Weights.Technical)
+
+	// Verify risk settings
+	assert.Equal(t, 0.1, s.Risk.MaxPositionSize, "Max position size should be 10%")
+	assert.Equal(t, 0.02, s.Risk.DefaultStopLoss, "Default stop loss should be 2%")
+	assert.Equal(t, 0.04, s.Risk.DefaultTakeProfit, "Default take profit should be 4%")
+	assert.Equal(t, 3, s.Risk.MaxPositions)
+	assert.True(t, s.Risk.CircuitBreakers.Enabled)
+
+	// Verify orchestration settings
+	assert.Equal(t, "weighted_consensus", s.Orchestration.VotingMethod)
+	assert.True(t, s.Orchestration.VotingEnabled)
+	assert.Equal(t, "30s", s.Orchestration.StepInterval)
+
+	// Verify indicator settings
+	assert.Equal(t, 14, s.Indicators.RSI.Period)
+	assert.Equal(t, 70, s.Indicators.RSI.Overbought)
+	assert.Equal(t, 30, s.Indicators.RSI.Oversold)
+	assert.Equal(t, 12, s.Indicators.MACD.FastPeriod)
+	assert.Equal(t, 26, s.Indicators.MACD.SlowPeriod)
+
+	// Verify trend agent specific config
+	require.NotNil(t, s.Agents.Trend, "Trend agent config should be present")
+	assert.Equal(t, 12, s.Agents.Trend.FastEMAPeriod)
+	assert.Equal(t, 26, s.Agents.Trend.SlowEMAPeriod)
+	assert.Equal(t, 25.0, s.Agents.Trend.ADXThreshold)
+
+	// Most importantly, verify the strategy validates successfully
+	err = s.Validate()
+	assert.NoError(t, err, "Example strategy should pass full validation")
+}
+
+func TestExportImportRoundTrip(t *testing.T) {
+	// Create a comprehensive strategy with all fields populated
+	original := NewDefaultStrategy("Round Trip Test")
+	original.Metadata.Description = "Testing round-trip export/import"
+	original.Metadata.Author = "Test Author"
+	original.Metadata.Version = "2.1.0"
+	original.Metadata.Tags = []string{"test", "roundtrip", "comprehensive"}
+	original.Agents.Weights.Technical = 0.30
+	original.Agents.Weights.Trend = 0.35
+	original.Risk.MaxPositionSize = 0.12
+	original.Risk.KellyFraction = 0.30
+
+	// Add optional agent configs
+	original.Agents.Technical = &TechnicalAgentConfig{
+		StepInterval: "45s",
+		ConfidenceWeights: TechnicalWeights{
+			RSI:       0.3,
+			MACD:      0.3,
+			Bollinger: 0.2,
+			Trend:     0.1,
+			Volume:    0.1,
+		},
+		ConfidenceThreshold: 0.75,
+	}
+
+	// Test both YAML and JSON formats
+	formats := []struct {
+		name   string
+		format ExportFormat
+	}{
+		{"YAML", FormatYAML},
+		{"JSON", FormatJSON},
+	}
+
+	for _, tt := range formats {
+		t.Run(tt.name, func(t *testing.T) {
+			// Export
+			exportOpts := DefaultExportOptions()
+			exportOpts.Format = tt.format
+			data, err := Export(original, exportOpts)
+			require.NoError(t, err)
+			assert.NotEmpty(t, data)
+
+			// Import
+			importOpts := DefaultImportOptions()
+			importOpts.GenerateNewID = false // Keep original ID for comparison
+			imported, err := Import(data, importOpts)
+			require.NoError(t, err)
+			assert.NotNil(t, imported)
+
+			// Compare key fields
+			assert.Equal(t, original.Metadata.Name, imported.Metadata.Name)
+			assert.Equal(t, original.Metadata.Description, imported.Metadata.Description)
+			assert.Equal(t, original.Metadata.Author, imported.Metadata.Author)
+			assert.Equal(t, original.Metadata.Version, imported.Metadata.Version)
+			assert.Equal(t, original.Metadata.Tags, imported.Metadata.Tags)
+
+			// Compare agent weights
+			assert.Equal(t, original.Agents.Weights.Technical, imported.Agents.Weights.Technical)
+			assert.Equal(t, original.Agents.Weights.Trend, imported.Agents.Weights.Trend)
+
+			// Compare risk settings
+			assert.Equal(t, original.Risk.MaxPositionSize, imported.Risk.MaxPositionSize)
+			assert.Equal(t, original.Risk.DefaultStopLoss, imported.Risk.DefaultStopLoss)
+			assert.Equal(t, original.Risk.KellyFraction, imported.Risk.KellyFraction)
+
+			// Compare orchestration settings
+			assert.Equal(t, original.Orchestration.VotingMethod, imported.Orchestration.VotingMethod)
+			assert.Equal(t, original.Orchestration.StepInterval, imported.Orchestration.StepInterval)
+
+			// Compare optional agent configs
+			require.NotNil(t, imported.Agents.Technical)
+			assert.Equal(t, original.Agents.Technical.StepInterval, imported.Agents.Technical.StepInterval)
+			assert.Equal(t, original.Agents.Technical.ConfidenceThreshold, imported.Agents.Technical.ConfidenceThreshold)
+			assert.Equal(t, original.Agents.Technical.ConfidenceWeights, imported.Agents.Technical.ConfidenceWeights)
+
+			// Verify imported strategy validates
+			err = imported.Validate()
+			assert.NoError(t, err, "Imported strategy should validate successfully")
+		})
+	}
+}

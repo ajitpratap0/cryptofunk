@@ -33,6 +33,7 @@ tasks:
       - build-servers
       - build-agents
       - build-api
+      - build-telegram-bot
     cmds:
       - echo "✓ All services built successfully"
 
@@ -198,6 +199,19 @@ tasks:
     cmds:
       - mkdir -p {{.BINARY_DIR}}
       - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/api cmd/api/main.go
+
+  build-telegram-bot:
+    desc: "Build Telegram bot"
+    sources:
+      - cmd/telegram-bot/**/*.go
+      - internal/telegram/**/*.go
+      - internal/**/*.go
+    generates:
+      - "{{.BINARY_DIR}}/telegram-bot"
+    cmds:
+      - mkdir -p {{.BINARY_DIR}}
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/telegram-bot cmd/telegram-bot/main.go
+      - echo "✓ Telegram bot built"
 
   # ===========================================
   # Development Tasks
@@ -419,6 +433,14 @@ tasks:
     cmds:
       - echo "Starting API server..."
       - ./{{.BINARY_DIR}}/api
+
+  run-telegram-bot:
+    desc: "Run Telegram bot"
+    deps:
+      - build-telegram-bot
+    cmds:
+      - echo "Starting Telegram bot..."
+      - ./{{.BINARY_DIR}}/telegram-bot
 
   run-paper:
     desc: "Start in paper trading mode"
