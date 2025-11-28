@@ -391,7 +391,7 @@ func TestServiceIntegration(t *testing.T) {
 			"quantity": 0.1,
 		}
 
-		result, err := service.PlaceMarketOrder(args)
+		result, err := service.PlaceMarketOrder(context.Background(), args)
 		require.NoError(t, err)
 
 		order := result.(*Order)
@@ -410,7 +410,7 @@ func TestServiceIntegration(t *testing.T) {
 			"price":    3100.0,
 		}
 
-		result, err := service.PlaceLimitOrder(args)
+		result, err := service.PlaceLimitOrder(context.Background(), args)
 		require.NoError(t, err)
 
 		order := result.(*Order)
@@ -431,7 +431,7 @@ func TestServiceIntegration(t *testing.T) {
 			"price":    48000.0,
 		}
 
-		result, err := service.PlaceLimitOrder(args)
+		result, err := service.PlaceLimitOrder(context.Background(), args)
 		require.NoError(t, err)
 		order := result.(*Order)
 
@@ -440,7 +440,7 @@ func TestServiceIntegration(t *testing.T) {
 			"order_id": order.ID,
 		}
 
-		cancelResult, err := service.CancelOrder(cancelArgs)
+		cancelResult, err := service.CancelOrder(context.Background(), cancelArgs)
 		require.NoError(t, err)
 
 		cancelledOrder := cancelResult.(*Order)
@@ -456,7 +456,7 @@ func TestServiceIntegration(t *testing.T) {
 			"quantity": 0.05,
 		}
 
-		result, err := service.PlaceMarketOrder(args)
+		result, err := service.PlaceMarketOrder(context.Background(), args)
 		require.NoError(t, err)
 		order := result.(*Order)
 
@@ -465,7 +465,7 @@ func TestServiceIntegration(t *testing.T) {
 			"order_id": order.ID,
 		}
 
-		statusResult, err := service.GetOrderStatus(statusArgs)
+		statusResult, err := service.GetOrderStatus(context.Background(), statusArgs)
 		require.NoError(t, err)
 
 		statusMap := statusResult.(map[string]interface{})
@@ -475,7 +475,7 @@ func TestServiceIntegration(t *testing.T) {
 	})
 
 	t.Run("Get positions (without session)", func(t *testing.T) {
-		result, err := service.GetPositions(map[string]interface{}{})
+		result, err := service.GetPositions(context.Background(), map[string]interface{}{})
 		require.NoError(t, err)
 
 		resultMap := result.(map[string]interface{})
@@ -490,7 +490,7 @@ func TestServiceIntegration(t *testing.T) {
 			"symbol": "BTCUSDT",
 		}
 
-		result, err := service.GetPositionBySymbol(args)
+		result, err := service.GetPositionBySymbol(context.Background(), args)
 		require.NoError(t, err)
 
 		resultMap := result.(map[string]interface{})
@@ -507,7 +507,7 @@ func TestServiceIntegration(t *testing.T) {
 			},
 		}
 
-		result, err := service.UpdatePositionPnL(args)
+		result, err := service.UpdatePositionPnL(context.Background(), args)
 		require.NoError(t, err)
 
 		resultMap := result.(map[string]interface{})
@@ -522,7 +522,7 @@ func TestServiceIntegration(t *testing.T) {
 			"symbol": "BTCUSDT",
 		}
 
-		_, err := service.ClosePositionBySymbol(args)
+		_, err := service.ClosePositionBySymbol(context.Background(), args)
 		// Should return error when no position exists
 		assert.Error(t, err)
 	})

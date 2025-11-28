@@ -153,6 +153,37 @@ risk:
   llm_approval_required: true  # Require LLM approval for trades
   min_confidence: 0.7          # Minimum confidence for signals
 
+  # Circuit Breaker Configuration
+  # Automatically halt operations when failure thresholds are exceeded
+  # Each service type (exchange, llm, database) has independent settings
+  circuit_breaker:
+    # Exchange Circuit Breaker
+    # Protects against exchange API failures and rate limits
+    exchange:
+      min_requests: 5           # Minimum requests before circuit can trip
+      failure_ratio: 0.6        # Trip after 60% failure rate
+      open_timeout: "30s"       # Wait 30s before attempting recovery
+      half_open_max_reqs: 3     # Test with 3 requests in half-open state
+      count_interval: "10s"     # Count failures over 10s window
+
+    # LLM Circuit Breaker
+    # Protects against LLM service failures with longer recovery times
+    llm:
+      min_requests: 3           # Minimum requests before circuit can trip
+      failure_ratio: 0.6        # Trip after 60% failure rate
+      open_timeout: "60s"       # Wait 60s before attempting recovery (AI services need more time)
+      half_open_max_reqs: 2     # Test with 2 requests in half-open state
+      count_interval: "10s"     # Count failures over 10s window
+
+    # Database Circuit Breaker
+    # Protects against database connection issues with fast recovery
+    database:
+      min_requests: 10          # Minimum requests before circuit can trip
+      failure_ratio: 0.6        # Trip after 60% failure rate
+      open_timeout: "15s"       # Wait 15s before attempting recovery (quick recovery for DB)
+      half_open_max_reqs: 5     # Test with 5 requests in half-open state
+      count_interval: "10s"     # Count failures over 10s window
+
 exchanges:
   binance:
     api_key: "${BINANCE_API_KEY}"

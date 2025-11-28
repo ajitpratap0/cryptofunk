@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -268,9 +269,10 @@ func TestHandleRequest_ToolsCall_UnknownTool(t *testing.T) {
 // TestPaperTradingService tests the paper trading service directly
 func TestPaperTradingService(t *testing.T) {
 	service := exchange.NewServicePaper(nil)
+	ctx := context.Background()
 
 	t.Run("PlaceMarketOrder", func(t *testing.T) {
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(ctx, map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": 0.1,
@@ -285,7 +287,7 @@ func TestPaperTradingService(t *testing.T) {
 	})
 
 	t.Run("PlaceLimitOrder", func(t *testing.T) {
-		result, err := service.PlaceLimitOrder(map[string]interface{}{
+		result, err := service.PlaceLimitOrder(ctx, map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "sell",
 			"quantity": 0.1,
@@ -303,7 +305,7 @@ func TestPaperTradingService(t *testing.T) {
 
 	t.Run("InvalidParameters", func(t *testing.T) {
 		// Missing symbol
-		result, err := service.PlaceMarketOrder(map[string]interface{}{
+		result, err := service.PlaceMarketOrder(ctx, map[string]interface{}{
 			"side":     "buy",
 			"quantity": 0.1,
 		})
@@ -311,7 +313,7 @@ func TestPaperTradingService(t *testing.T) {
 		assert.Nil(t, result)
 
 		// Invalid side
-		result, err = service.PlaceMarketOrder(map[string]interface{}{
+		result, err = service.PlaceMarketOrder(ctx, map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "invalid",
 			"quantity": 0.1,
@@ -320,7 +322,7 @@ func TestPaperTradingService(t *testing.T) {
 		assert.Nil(t, result)
 
 		// Invalid quantity
-		result, err = service.PlaceMarketOrder(map[string]interface{}{
+		result, err = service.PlaceMarketOrder(ctx, map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
 			"quantity": -0.1,

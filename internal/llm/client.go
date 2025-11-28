@@ -11,27 +11,38 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/sony/gobreaker"
+
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
+)
+
+const (
+	// defaultLLMTimeout is the default timeout for LLM API calls
+	// LLM calls can take longer for complex reasoning, so we use a longer timeout
+	defaultLLMTimeout = 60 * time.Second
 )
 
 // Client represents an LLM client that communicates with Bifrost gateway
 type Client struct {
-	endpoint    string
-	apiKey      string
-	model       string
-	temperature float64
-	maxTokens   int
-	timeout     time.Duration
-	httpClient  *http.Client
+	endpoint       string
+	apiKey         string
+	model          string
+	temperature    float64
+	maxTokens      int
+	timeout        time.Duration
+	httpClient     *http.Client
+	circuitBreaker *risk.CircuitBreakerManager
 }
 
 // ClientConfig contains configuration for the LLM client
 type ClientConfig struct {
-	Endpoint    string
-	APIKey      string
-	Model       string
-	Temperature float64
-	MaxTokens   int
-	Timeout     time.Duration
+	Endpoint       string
+	APIKey         string
+	Model          string
+	Temperature    float64
+	MaxTokens      int
+	Timeout        time.Duration
+	CircuitBreaker *risk.CircuitBreakerManager // Optional circuit breaker
 }
 
 // NewClient creates a new LLM client
@@ -49,16 +60,23 @@ func NewClient(config ClientConfig) *Client {
 		config.MaxTokens = 2000
 	}
 	if config.Timeout == 0 {
-		config.Timeout = 30 * time.Second
+		config.Timeout = defaultLLMTimeout
+	}
+
+	// Create circuit breaker if not provided
+	circuitBreaker := config.CircuitBreaker
+	if circuitBreaker == nil {
+		circuitBreaker = risk.NewCircuitBreakerManager()
 	}
 
 	return &Client{
-		endpoint:    config.Endpoint,
-		apiKey:      config.APIKey,
-		model:       config.Model,
-		temperature: config.Temperature,
-		maxTokens:   config.MaxTokens,
-		timeout:     config.Timeout,
+		endpoint:       config.Endpoint,
+		apiKey:         config.APIKey,
+		model:          config.Model,
+		temperature:    config.Temperature,
+		maxTokens:      config.MaxTokens,
+		timeout:        config.Timeout,
+		circuitBreaker: circuitBreaker,
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
@@ -67,6 +85,27 @@ func NewClient(config ClientConfig) *Client {
 
 // Complete sends a chat completion request to the LLM
 func (c *Client) Complete(ctx context.Context, messages []ChatMessage) (*ChatResponse, error) {
+	// Wrap the LLM call with circuit breaker
+	result, err := c.circuitBreaker.LLM().Execute(func() (interface{}, error) {
+		return c.doComplete(ctx, messages)
+	})
+
+	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			c.circuitBreaker.Metrics().RecordRequest("llm", false)
+			return nil, fmt.Errorf("LLM circuit breaker is open, service unavailable")
+		}
+		c.circuitBreaker.Metrics().RecordRequest("llm", false)
+		return nil, err
+	}
+
+	c.circuitBreaker.Metrics().RecordRequest("llm", true)
+	return result.(*ChatResponse), nil
+}
+
+// doComplete performs the actual LLM request (internal method)
+func (c *Client) doComplete(ctx context.Context, messages []ChatMessage) (*ChatResponse, error) {
 	request := ChatRequest{
 		Model:       c.model,
 		Messages:    messages,

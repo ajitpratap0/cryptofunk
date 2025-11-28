@@ -508,6 +508,23 @@ tasks:
       - cmd: start http://localhost:3000
         platforms: [windows]
 
+  test-alerts:
+    desc: "Test AlertManager integration end-to-end"
+    cmds:
+      - echo "Testing AlertManager alert delivery..."
+      - ./scripts/test-alerts.sh
+
+  alertmanager:
+    desc: "Open AlertManager UI"
+    cmds:
+      - echo "Opening AlertManager (http://localhost:9093)..."
+      - cmd: open http://localhost:9093
+        platforms: [darwin]
+      - cmd: xdg-open http://localhost:9093
+        platforms: [linux]
+      - cmd: start http://localhost:9093
+        platforms: [windows]
+
   metrics:
     desc: "Show current metrics"
     cmds:

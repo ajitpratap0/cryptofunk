@@ -1,9 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 )
 
@@ -129,13 +131,30 @@ type TradingConfig struct {
 
 // RiskConfig contains risk management settings
 type RiskConfig struct {
-	MaxPositionSize     float64 `mapstructure:"max_position_size"`     // 0.1 (10% of portfolio)
-	MaxDailyLoss        float64 `mapstructure:"max_daily_loss"`        // 0.02 (2%)
-	MaxDrawdown         float64 `mapstructure:"max_drawdown"`          // 0.1 (10%)
-	DefaultStopLoss     float64 `mapstructure:"default_stop_loss"`     // 0.02 (2%)
-	DefaultTakeProfit   float64 `mapstructure:"default_take_profit"`   // 0.05 (5%)
-	LLMApprovalRequired bool    `mapstructure:"llm_approval_required"` // true
-	MinConfidence       float64 `mapstructure:"min_confidence"`        // 0.7
+	MaxPositionSize     float64              `mapstructure:"max_position_size"`     // 0.1 (10% of portfolio)
+	MaxDailyLoss        float64              `mapstructure:"max_daily_loss"`        // 0.02 (2%)
+	MaxDrawdown         float64              `mapstructure:"max_drawdown"`          // 0.1 (10%)
+	DefaultStopLoss     float64              `mapstructure:"default_stop_loss"`     // 0.02 (2%)
+	DefaultTakeProfit   float64              `mapstructure:"default_take_profit"`   // 0.05 (5%)
+	LLMApprovalRequired bool                 `mapstructure:"llm_approval_required"` // true
+	MinConfidence       float64              `mapstructure:"min_confidence"`        // 0.7
+	CircuitBreaker      CircuitBreakerConfig `mapstructure:"circuit_breaker"`       // Circuit breaker thresholds
+}
+
+// CircuitBreakerConfig contains circuit breaker settings for different service types
+type CircuitBreakerConfig struct {
+	Exchange CircuitBreakerSettings `mapstructure:"exchange"` // Exchange circuit breaker settings
+	LLM      CircuitBreakerSettings `mapstructure:"llm"`      // LLM circuit breaker settings
+	Database CircuitBreakerSettings `mapstructure:"database"` // Database circuit breaker settings
+}
+
+// CircuitBreakerSettings contains individual circuit breaker configuration
+type CircuitBreakerSettings struct {
+	MinRequests     uint32  `mapstructure:"min_requests"`       // Minimum requests before tripping
+	FailureRatio    float64 `mapstructure:"failure_ratio"`      // Failure ratio threshold (0.0-1.0)
+	OpenTimeout     string  `mapstructure:"open_timeout"`       // How long circuit stays open (duration string)
+	HalfOpenMaxReqs uint32  `mapstructure:"half_open_max_reqs"` // Max requests in half-open state
+	CountInterval   string  `mapstructure:"count_interval"`     // Window for counting failures (duration string)
 }
 
 // ExchangeConfig contains exchange-specific settings
@@ -180,6 +199,7 @@ type MonitoringConfig struct {
 }
 
 // Load loads configuration from file and environment variables
+// If Vault is enabled, secrets are loaded from Vault; otherwise falls back to environment variables
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
@@ -212,6 +232,19 @@ func Load(configPath string) (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Load secrets from Vault if enabled (with fallback to env vars)
+	ctx := context.Background()
+	vaultCfg := GetVaultConfigFromEnv()
+	if vaultCfg.Enabled {
+		log.Info().Msg("Vault integration enabled - loading secrets from Vault")
+		if err := LoadSecretsFromVault(ctx, &cfg, vaultCfg); err != nil {
+			log.Warn().Err(err).Msg("Failed to load secrets from Vault - falling back to environment variables")
+			// Continue with env vars as fallback
+		}
+	} else {
+		log.Info().Msg("Vault integration disabled - using environment variables for secrets")
 	}
 
 	// Validate configuration using comprehensive validation
@@ -304,10 +337,38 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("risk.llm_approval_required", true)
 	v.SetDefault("risk.min_confidence", 0.7)
 
+	// Circuit Breaker defaults - Exchange
+	v.SetDefault("risk.circuit_breaker.exchange.min_requests", 5)
+	v.SetDefault("risk.circuit_breaker.exchange.failure_ratio", 0.6)
+	v.SetDefault("risk.circuit_breaker.exchange.open_timeout", "30s")
+	v.SetDefault("risk.circuit_breaker.exchange.half_open_max_reqs", 3)
+	v.SetDefault("risk.circuit_breaker.exchange.count_interval", "10s")
+
+	// Circuit Breaker defaults - LLM (longer timeouts for AI calls)
+	v.SetDefault("risk.circuit_breaker.llm.min_requests", 3)
+	v.SetDefault("risk.circuit_breaker.llm.failure_ratio", 0.6)
+	v.SetDefault("risk.circuit_breaker.llm.open_timeout", "60s")
+	v.SetDefault("risk.circuit_breaker.llm.half_open_max_reqs", 2)
+	v.SetDefault("risk.circuit_breaker.llm.count_interval", "10s")
+
+	// Circuit Breaker defaults - Database (faster recovery)
+	v.SetDefault("risk.circuit_breaker.database.min_requests", 10)
+	v.SetDefault("risk.circuit_breaker.database.failure_ratio", 0.6)
+	v.SetDefault("risk.circuit_breaker.database.open_timeout", "15s")
+	v.SetDefault("risk.circuit_breaker.database.half_open_max_reqs", 5)
+	v.SetDefault("risk.circuit_breaker.database.count_interval", "10s")
+
 	// API defaults
 	v.SetDefault("api.host", "0.0.0.0")
 	v.SetDefault("api.port", 8081)
 	v.SetDefault("api.orchestrator_url", "http://localhost:8081")
+
+	// API Authentication defaults
+	// Authentication is disabled by default for development/testing
+	// For production deployments, set api.auth.enabled = true in config.yaml
+	v.SetDefault("api.auth.enabled", false)
+	v.SetDefault("api.auth.header_name", "X-API-Key")
+	v.SetDefault("api.auth.require_https", true)
 
 	// Monitoring defaults
 	v.SetDefault("monitoring.prometheus_port", 9100)
@@ -351,4 +412,24 @@ func (c *APIConfig) GetOrchestratorURL() string {
 // GetTimeout returns the LLM timeout as time.Duration
 func (c *LLMConfig) GetTimeout() time.Duration {
 	return time.Duration(c.Timeout) * time.Millisecond
+}
+
+// ParseDuration parses a duration string and returns the duration or zero if invalid
+func (s *CircuitBreakerSettings) ParseDuration(durationStr string) (time.Duration, error) {
+	if durationStr == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(durationStr)
+}
+
+// GetOpenTimeout returns the OpenTimeout as time.Duration, returns zero on parse error
+func (s *CircuitBreakerSettings) GetOpenTimeout() time.Duration {
+	duration, _ := s.ParseDuration(s.OpenTimeout)
+	return duration
+}
+
+// GetCountInterval returns the CountInterval as time.Duration, returns zero on parse error
+func (s *CircuitBreakerSettings) GetCountInterval() time.Duration {
+	duration, _ := s.ParseDuration(s.CountInterval)
+	return duration
 }

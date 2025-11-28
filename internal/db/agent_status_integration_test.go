@@ -18,6 +18,10 @@ import (
 
 // TestAgentStatusCRUDWithTestcontainers tests complete CRUD operations for agent status
 func TestAgentStatusCRUDWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -296,6 +300,10 @@ func TestAgentStatusCRUDWithTestcontainers(t *testing.T) {
 
 // TestAgentStatusMetadataWithTestcontainers tests complex metadata handling
 func TestAgentStatusMetadataWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -463,6 +471,10 @@ func TestAgentStatusMetadataWithTestcontainers(t *testing.T) {
 
 // TestAgentStatusConcurrencyWithTestcontainers tests concurrent agent status updates
 func TestAgentStatusConcurrencyWithTestcontainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
@@ -694,6 +706,10 @@ func TestAgentStatusConcurrencyWithTestcontainers(t *testing.T) {
 
 // TestAgentStatusEdgeCases tests edge cases and error conditions
 func TestAgentStatusEdgeCases(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)

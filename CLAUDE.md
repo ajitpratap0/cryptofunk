@@ -47,8 +47,12 @@ task db-reset               # Reset database (WARNING: destructive)
 task db-shell               # Open PostgreSQL shell
 
 # Health checks
-curl http://localhost:8081/health   # Orchestrator
-curl http://localhost:8080/health   # API
+curl http://localhost:8081/health        # Orchestrator basic health
+curl http://localhost:8081/liveness      # Orchestrator K8s liveness probe
+curl http://localhost:8081/readiness     # Orchestrator K8s readiness probe (checks DB/NATS/Redis)
+curl http://localhost:8081/api/v1/status # Orchestrator status (active agents, sessions)
+curl http://localhost:8081/metrics       # Orchestrator Prometheus metrics
+curl http://localhost:8080/health        # API
 ```
 
 ## Architecture Overview

@@ -315,6 +315,11 @@ func (a *TrendAgent) Step(ctx context.Context) error {
 		return err
 	}
 
+	// Check if trading is paused and skip if so
+	if a.CheckPausedAndSkip() {
+		return nil
+	}
+
 	log.Debug().Msg("Executing trend following strategy step")
 
 	// Step 1: Fetch market data
@@ -1276,6 +1281,16 @@ func main() {
 	ctx := context.Background()
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
+	}
+
+	// Setup control subscription for pause/resume events
+	natsURL := viper.GetString("nats.url")
+	if natsURL == "" {
+		natsURL = "nats://localhost:4222"
+	}
+	controlTopic := "cryptofunk.orchestrator.control"
+	if err := agent.SetupControlSubscription(natsURL, controlTopic); err != nil {
+		log.Warn().Err(err).Msg("Failed to setup control subscription - pause/resume will not work")
 	}
 
 	// Set up graceful shutdown

@@ -72,12 +72,70 @@ var commonWeakPasswords = []string{
 	"football",
 }
 
+// Keyboard patterns that should be detected
+var keyboardPatterns = []string{
+	// Top row
+	"qwerty",
+	"qwertyuiop",
+	"qwertyui",
+	"ytrewq", // reversed
+	"poiuytrewq",
+	// Middle row
+	"asdfgh",
+	"asdfghjkl",
+	"asdfghjk",
+	"hgfdsa", // reversed
+	"lkjhgfdsa",
+	// Bottom row
+	"zxcvbn",
+	"zxcvbnm",
+	"nbvcxz", // reversed
+	"mnbvcxz",
+	// Common number sequences
+	"12345678",
+	"123456789",
+	"1234567890",
+	"87654321", // reversed
+	"987654321",
+	"0987654321",
+	// Diagonal patterns
+	"1qaz2wsx",
+	"qazwsx",
+	"zaq1xsw2",
+}
+
 // SecretValidationResult contains the result of secret validation
 type SecretValidationResult struct {
 	IsValid  bool
 	Strength SecretStrength
 	Errors   []string
 	Warnings []string
+}
+
+// containsKeyboardPattern checks if the secret contains common keyboard patterns
+// Returns the pattern found, or empty string if none found
+// Patterns are checked in order, with longer patterns checked first
+func containsKeyboardPattern(lowerSecret string) string {
+	// Check patterns sorted by length (longest first) to catch longer patterns before substrings
+	// We create a slice and sort it each time to ensure we catch the most specific pattern
+	patternsCopy := make([]string, len(keyboardPatterns))
+	copy(patternsCopy, keyboardPatterns)
+
+	// Sort by length descending (longest first)
+	for i := 0; i < len(patternsCopy); i++ {
+		for j := i + 1; j < len(patternsCopy); j++ {
+			if len(patternsCopy[j]) > len(patternsCopy[i]) {
+				patternsCopy[i], patternsCopy[j] = patternsCopy[j], patternsCopy[i]
+			}
+		}
+	}
+
+	for _, pattern := range patternsCopy {
+		if strings.Contains(lowerSecret, pattern) {
+			return pattern
+		}
+	}
+	return ""
 }
 
 // ValidateSecret validates a secret/password for strength and security
@@ -118,6 +176,14 @@ func ValidateSecret(secret string, name string, minLength int, requireStrong boo
 			result.Errors = append(result.Errors, fmt.Sprintf("%s is a commonly known weak password", name))
 			return result
 		}
+	}
+
+	// Check for keyboard patterns
+	if pattern := containsKeyboardPattern(lowerSecret); pattern != "" {
+		result.IsValid = false
+		result.Strength = SecretStrengthWeak
+		result.Errors = append(result.Errors, fmt.Sprintf("%s contains keyboard pattern (%s)", name, pattern))
+		return result
 	}
 
 	// Check length
@@ -527,7 +593,7 @@ func loadDatabaseSecrets(ctx context.Context, vc *VaultClient, cfg *Config) erro
 
 	if password, ok := secrets["password"].(string); ok && password != "" {
 		cfg.Database.Password = password
-		log.Info().Msg("✓ Loaded database password from Vault")
+		log.Debug().Msg("✓ Loaded database password from Vault")
 	}
 
 	if user, ok := secrets["user"].(string); ok && user != "" {
@@ -546,7 +612,7 @@ func loadRedisSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 
 	if password, ok := secrets["password"].(string); ok && password != "" {
 		cfg.Redis.Password = password
-		log.Info().Msg("✓ Loaded Redis password from Vault")
+		log.Debug().Msg("✓ Loaded Redis password from Vault")
 	}
 
 	return nil
@@ -573,7 +639,7 @@ func loadExchangeSecrets(ctx context.Context, vc *VaultClient, cfg *Config) erro
 		}
 
 		cfg.Exchanges[exchangeName] = exchangeConfig
-		log.Info().Str("exchange", exchangeName).Msg("✓ Loaded exchange API keys from Vault")
+		log.Debug().Str("exchange", exchangeName).Msg("✓ Loaded exchange API keys from Vault")
 	}
 
 	return nil
@@ -591,7 +657,7 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 		if err := os.Setenv("ANTHROPIC_API_KEY", anthropicKey); err != nil {
 			log.Warn().Err(err).Msg("Failed to set ANTHROPIC_API_KEY environment variable")
 		} else {
-			log.Info().Msg("✓ Loaded Anthropic API key from Vault")
+			log.Debug().Msg("✓ Loaded Anthropic API key from Vault")
 		}
 	}
 
@@ -599,7 +665,7 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 		if err := os.Setenv("OPENAI_API_KEY", openaiKey); err != nil {
 			log.Warn().Err(err).Msg("Failed to set OPENAI_API_KEY environment variable")
 		} else {
-			log.Info().Msg("✓ Loaded OpenAI API key from Vault")
+			log.Debug().Msg("✓ Loaded OpenAI API key from Vault")
 		}
 	}
 
@@ -607,7 +673,7 @@ func loadLLMSecrets(ctx context.Context, vc *VaultClient, cfg *Config) error {
 		if err := os.Setenv("GEMINI_API_KEY", geminiKey); err != nil {
 			log.Warn().Err(err).Msg("Failed to set GEMINI_API_KEY environment variable")
 		} else {
-			log.Info().Msg("✓ Loaded Gemini API key from Vault")
+			log.Debug().Msg("✓ Loaded Gemini API key from Vault")
 		}
 	}
 

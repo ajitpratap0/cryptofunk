@@ -8,6 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
 )
 
 // CachedCoinGeckoClient wraps CoinGeckoClient with Redis caching
@@ -15,6 +16,7 @@ type CachedCoinGeckoClient struct {
 	client   *CoinGeckoClient
 	redis    *redis.Client
 	cacheTTL time.Duration
+	group    singleflight.Group // Prevents cache stampede
 }
 
 // NewCachedCoinGeckoClient creates a new cached CoinGecko client
@@ -26,7 +28,7 @@ func NewCachedCoinGeckoClient(client *CoinGeckoClient, redisClient *redis.Client
 	}
 }
 
-// GetPrice fetches price with caching
+// GetPrice fetches price with caching and singleflight protection
 func (c *CachedCoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsCurrency string) (*PriceResult, error) {
 	// Generate cache key
 	cacheKey := fmt.Sprintf("coingecko:price:%s:%s", symbol, vsCurrency)
@@ -51,42 +53,57 @@ func (c *CachedCoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsC
 		log.Warn().Err(err).Msg("Redis error during cache lookup")
 	}
 
-	// Cache miss or error - fetch from CoinGecko MCP
+	// Cache miss or error - use singleflight to prevent thundering herd
 	log.Debug().
 		Str("symbol", symbol).
 		Str("vs_currency", vsCurrency).
-		Msg("Cache miss, fetching from CoinGecko MCP")
+		Msg("Cache miss, fetching from CoinGecko MCP with singleflight protection")
 
-	result, err := c.client.GetPrice(ctx, symbol, vsCurrency)
-	if err != nil {
-		return nil, err
-	}
+	// Use singleflight to ensure only one fetch happens for concurrent requests
+	v, err, shared := c.group.Do(cacheKey, func() (interface{}, error) {
+		// Fetch from CoinGecko MCP
+		result, err := c.client.GetPrice(ctx, symbol, vsCurrency)
+		if err != nil {
+			return nil, err
+		}
 
-	// Store in cache (async, don't block on cache write failure)
-	go func() {
+		// Store in cache (synchronously within singleflight to ensure it's cached before other goroutines proceed)
 		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		data, err := json.Marshal(result)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to marshal price for cache")
-			return
+		data, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			log.Warn().Err(marshalErr).Msg("Failed to marshal price for cache")
+			// Return result anyway, just skip caching
+			return result, nil
 		}
 
-		if err := c.redis.Set(cacheCtx, cacheKey, data, c.cacheTTL).Err(); err != nil {
-			log.Warn().Err(err).Msg("Failed to cache price result")
+		if cacheErr := c.redis.Set(cacheCtx, cacheKey, data, c.cacheTTL).Err(); cacheErr != nil {
+			log.Warn().Err(cacheErr).Msg("Failed to cache price result")
 		} else {
 			log.Debug().
 				Str("cache_key", cacheKey).
 				Dur("ttl", c.cacheTTL).
 				Msg("Cached price result")
 		}
-	}()
 
-	return result, nil
+		return result, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if shared {
+		log.Debug().
+			Str("cache_key", cacheKey).
+			Msg("Request deduplicated by singleflight")
+	}
+
+	return v.(*PriceResult), nil
 }
 
-// GetMarketChart fetches market chart with caching
+// GetMarketChart fetches market chart with caching and singleflight protection
 func (c *CachedCoinGeckoClient) GetMarketChart(ctx context.Context, symbol string, days int) (*MarketChart, error) {
 	// Generate cache key
 	cacheKey := fmt.Sprintf("coingecko:chart:%s:%d", symbol, days)
@@ -110,26 +127,29 @@ func (c *CachedCoinGeckoClient) GetMarketChart(ctx context.Context, symbol strin
 		log.Warn().Err(err).Msg("Redis error during cache lookup")
 	}
 
-	// Cache miss or error - fetch from CoinGecko MCP
+	// Cache miss or error - use singleflight to prevent thundering herd
 	log.Debug().
 		Str("symbol", symbol).
 		Int("days", days).
-		Msg("Cache miss, fetching from CoinGecko MCP")
+		Msg("Cache miss, fetching from CoinGecko MCP with singleflight protection")
 
-	result, err := c.client.GetMarketChart(ctx, symbol, days)
-	if err != nil {
-		return nil, err
-	}
+	// Use singleflight to ensure only one fetch happens for concurrent requests
+	v, err, shared := c.group.Do(cacheKey, func() (interface{}, error) {
+		// Fetch from CoinGecko MCP
+		result, err := c.client.GetMarketChart(ctx, symbol, days)
+		if err != nil {
+			return nil, err
+		}
 
-	// Store in cache (async)
-	go func() {
+		// Store in cache (synchronously within singleflight)
 		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		data, err := json.Marshal(result)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to marshal market chart for cache")
-			return
+		data, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			log.Warn().Err(marshalErr).Msg("Failed to marshal market chart for cache")
+			// Return result anyway, just skip caching
+			return result, nil
 		}
 
 		// Historical data can be cached longer (e.g., 5 minutes for daily charts)
@@ -138,20 +158,32 @@ func (c *CachedCoinGeckoClient) GetMarketChart(ctx context.Context, symbol strin
 			ttl = 5 * time.Minute // Historical data changes less frequently
 		}
 
-		if err := c.redis.Set(cacheCtx, cacheKey, data, ttl).Err(); err != nil {
-			log.Warn().Err(err).Msg("Failed to cache market chart")
+		if cacheErr := c.redis.Set(cacheCtx, cacheKey, data, ttl).Err(); cacheErr != nil {
+			log.Warn().Err(cacheErr).Msg("Failed to cache market chart")
 		} else {
 			log.Debug().
 				Str("cache_key", cacheKey).
 				Dur("ttl", ttl).
 				Msg("Cached market chart")
 		}
-	}()
 
-	return result, nil
+		return result, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if shared {
+		log.Debug().
+			Str("cache_key", cacheKey).
+			Msg("Request deduplicated by singleflight")
+	}
+
+	return v.(*MarketChart), nil
 }
 
-// GetCoinInfo fetches coin info with caching
+// GetCoinInfo fetches coin info with caching and singleflight protection
 func (c *CachedCoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*CoinInfo, error) {
 	// Generate cache key
 	cacheKey := fmt.Sprintf("coingecko:info:%s", coinID)
@@ -174,41 +206,56 @@ func (c *CachedCoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) 
 		log.Warn().Err(err).Msg("Redis error during cache lookup")
 	}
 
-	// Cache miss or error - fetch from CoinGecko MCP
+	// Cache miss or error - use singleflight to prevent thundering herd
 	log.Debug().
 		Str("coin_id", coinID).
-		Msg("Cache miss, fetching from CoinGecko MCP")
+		Msg("Cache miss, fetching from CoinGecko MCP with singleflight protection")
 
-	result, err := c.client.GetCoinInfo(ctx, coinID)
-	if err != nil {
-		return nil, err
-	}
+	// Use singleflight to ensure only one fetch happens for concurrent requests
+	v, err, shared := c.group.Do(cacheKey, func() (interface{}, error) {
+		// Fetch from CoinGecko MCP
+		result, err := c.client.GetCoinInfo(ctx, coinID)
+		if err != nil {
+			return nil, err
+		}
 
-	// Store in cache (async)
-	go func() {
+		// Store in cache (synchronously within singleflight)
 		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		data, err := json.Marshal(result)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to marshal coin info for cache")
-			return
+		data, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			log.Warn().Err(marshalErr).Msg("Failed to marshal coin info for cache")
+			// Return result anyway, just skip caching
+			return result, nil
 		}
 
 		// Coin metadata changes infrequently, cache for 10 minutes
 		ttl := 10 * time.Minute
 
-		if err := c.redis.Set(cacheCtx, cacheKey, data, ttl).Err(); err != nil {
-			log.Warn().Err(err).Msg("Failed to cache coin info")
+		if cacheErr := c.redis.Set(cacheCtx, cacheKey, data, ttl).Err(); cacheErr != nil {
+			log.Warn().Err(cacheErr).Msg("Failed to cache coin info")
 		} else {
 			log.Debug().
 				Str("cache_key", cacheKey).
 				Dur("ttl", ttl).
 				Msg("Cached coin info")
 		}
-	}()
 
-	return result, nil
+		return result, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if shared {
+		log.Debug().
+			Str("cache_key", cacheKey).
+			Msg("Request deduplicated by singleflight")
+	}
+
+	return v.(*CoinInfo), nil
 }
 
 // Health checks both CoinGecko and Redis health

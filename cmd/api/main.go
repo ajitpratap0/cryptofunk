@@ -63,6 +63,19 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to load or validate configuration")
 	}
 
+	// CRITICAL SECURITY CHECK: Prevent production deployment with API auth disabled
+	// This validation MUST happen before any server initialization
+	isProduction := cfg.App.Environment == envProduction || cfg.App.Environment == "prod"
+	if isProduction && !cfg.API.Auth.Enabled {
+		log.Fatal().
+			Str("environment", cfg.App.Environment).
+			Bool("auth_enabled", cfg.API.Auth.Enabled).
+			Msg("CRITICAL SECURITY ERROR: Cannot start API server in production with authentication disabled. " +
+				"This would expose all trading control endpoints (start/stop/pause/resume) without protection. " +
+				"Set api.auth.enabled=true in config.yaml or change environment to non-production.")
+		os.Exit(1)
+	}
+
 	// Initialize database
 	ctx := context.Background()
 	database, err := db.New(ctx)
@@ -173,12 +186,28 @@ func (s *APIServer) setupRoutes() {
 	s.rateLimiter.StartCleanupWorker(5 * time.Minute)
 
 	// Initialize API key store for authentication
-	// Auth is disabled by default - enable via config.yaml: api.auth.enabled = true
+	// Auth is disabled by default for development - enable via config.yaml: api.auth.enabled = true
 	s.apiKeyStore = api.NewAPIKeyStore(s.db.Pool(), s.config.API.Auth.Enabled)
+
+	isProduction := s.config.App.Environment == envProduction
+
 	if s.config.API.Auth.Enabled {
-		log.Info().Msg("API key authentication enabled")
+		log.Info().
+			Bool("require_https", s.config.API.Auth.RequireHTTPS).
+			Str("header_name", s.config.API.Auth.HeaderName).
+			Msg("API key authentication enabled")
 	} else {
-		log.Info().Msg("API key authentication disabled (enable via api.auth.enabled in config)")
+		// Always warn when authentication is disabled - security risk regardless of environment
+		// Production warning is more severe, but all environments should be aware
+		if isProduction {
+			log.Error().
+				Str("environment", s.config.App.Environment).
+				Msg("CRITICAL: API authentication is DISABLED in production - all endpoints including trading control (pause/resume/start/stop) are unprotected. This is a security vulnerability. Enable via api.auth.enabled=true in config.yaml")
+		} else {
+			log.Warn().
+				Str("environment", s.config.App.Environment).
+				Msg("API authentication is disabled - all endpoints including trading control are unprotected. This is acceptable for development. Enable via api.auth.enabled=true for production.")
+		}
 	}
 
 	// Apply global rate limiting to all API requests
@@ -226,9 +255,28 @@ func (s *APIServer) setupRoutes() {
 			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
 		}
 
-		// Trading control routes (critical ops, strictest rate limiting)
+		// Create authentication config for protected endpoints
+		authConfig := &api.AuthConfig{
+			Enabled:      s.config.API.Auth.Enabled,
+			HeaderName:   s.config.API.Auth.HeaderName,
+			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+		}
+		if authConfig.HeaderName == "" {
+			authConfig.HeaderName = "X-API-Key" // Default header name
+		}
+
+		// Trading control routes (critical ops, strictest rate limiting + authentication)
+		// These endpoints control trading operations and require authentication when enabled
 		trade := v1.Group("/trade")
 		trade.Use(s.rateLimiter.ControlMiddleware())
+
+		// Add authentication middleware for critical trading operations
+		// When auth is enabled, these endpoints require a valid API key
+		// This protects against unauthorized trading control
+		if s.config.API.Auth.Enabled {
+			trade.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
+
 		{
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
@@ -247,14 +295,6 @@ func (s *APIServer) setupRoutes() {
 		// Search uses dedicated rate limiter for expensive vector operations
 		// Auth is optional - allows both authenticated and anonymous access
 		// When auth is enabled, authenticated users get enhanced audit logging
-		authConfig := &api.AuthConfig{
-			Enabled:      s.config.API.Auth.Enabled,
-			HeaderName:   s.config.API.Auth.HeaderName,
-			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
-		}
-		if authConfig.HeaderName == "" {
-			authConfig.HeaderName = "X-API-Key" // Default header name
-		}
 		optionalAuth := api.OptionalAuth(s.apiKeyStore, authConfig)
 
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())

@@ -18,6 +18,11 @@ import (
 func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 	t.Helper()
 
+	// Skip integration tests in short mode
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	// Use testhelpers for consistent database setup
 	tc := testhelpers.SetupTestDatabase(t)
 

@@ -3,17 +3,28 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+)
+
+const (
+	// agentShutdownTimeout is the timeout for graceful agent shutdown operations
+	agentShutdownTimeout = 5 * time.Second
+
+	// mcpToolCallTimeout is the default timeout for MCP tool calls
+	// This is set to 60 seconds to accommodate LLM calls and external API requests
+	mcpToolCallTimeout = 60 * time.Second
 )
 
 // MCPServerConfig holds configuration for a single MCP server
@@ -60,6 +71,13 @@ type BaseAgent struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// Trading control
+	paused           bool
+	pausedMutex      sync.RWMutex
+	natsConn         *nats.Conn
+	controlSub       *nats.Subscription
+	controlTopicName string
 
 	// Logger
 	log zerolog.Logger
@@ -321,6 +339,21 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 		a.cancel()
 	}
 
+	// Unsubscribe from NATS control topic
+	if a.controlSub != nil {
+		if err := a.controlSub.Unsubscribe(); err != nil {
+			a.log.Error().Err(err).Msg("Error unsubscribing from control topic")
+		} else {
+			a.log.Debug().Str("topic", a.controlTopicName).Msg("Unsubscribed from control topic")
+		}
+	}
+
+	// Close NATS connection
+	if a.natsConn != nil {
+		a.natsConn.Close()
+		a.log.Debug().Msg("NATS connection closed")
+	}
+
 	// Close all MCP sessions
 	for name, session := range a.mcpSessions {
 		if err := session.Close(); err != nil {
@@ -332,7 +365,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 
 	// Shutdown metrics server
 	if a.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), agentShutdownTimeout)
 		defer cancel()
 		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
 			a.log.Error().Err(err).Msg("Error shutting down metrics server")
@@ -360,7 +393,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// CallMCPTool calls a tool on a specific MCP server
+// CallMCPTool calls a tool on a specific MCP server with a 60-second timeout
 func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName string, arguments map[string]interface{}) (*mcp.CallToolResult, error) {
 	start := time.Now()
 	defer func() {
@@ -376,8 +409,12 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 		return nil, fmt.Errorf("MCP server %s not found", serverName)
 	}
 
+	// Create context with timeout for MCP tool calls
+	toolCtx, cancel := context.WithTimeout(ctx, mcpToolCallTimeout)
+	defer cancel()
+
 	// Call tool on session
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+	result, err := session.CallTool(toolCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
@@ -424,4 +461,89 @@ func (a *BaseAgent) GetType() string {
 // GetVersion returns the agent's version
 func (a *BaseAgent) GetVersion() string {
 	return a.version
+}
+
+// SetupControlSubscription connects to NATS and subscribes to orchestrator control events
+// This should be called by agents that need to respond to pause/resume commands
+func (a *BaseAgent) SetupControlSubscription(natsURL, controlTopic string) error {
+	// Connect to NATS if not already connected
+	if a.natsConn == nil {
+		nc, err := nats.Connect(natsURL)
+		if err != nil {
+			return fmt.Errorf("failed to connect to NATS: %w", err)
+		}
+		a.natsConn = nc
+		a.log.Info().Str("url", natsURL).Msg("Connected to NATS for control events")
+	}
+
+	// Store control topic name
+	a.controlTopicName = controlTopic
+
+	// Subscribe to control topic
+	sub, err := a.natsConn.Subscribe(controlTopic, a.handleControlEvent)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to control topic: %w", err)
+	}
+	a.controlSub = sub
+
+	a.log.Info().Str("topic", controlTopic).Msg("Subscribed to orchestrator control events")
+	return nil
+}
+
+// handleControlEvent processes control events from the orchestrator
+func (a *BaseAgent) handleControlEvent(msg *nats.Msg) {
+	var event map[string]interface{}
+	if err := json.Unmarshal(msg.Data, &event); err != nil {
+		a.log.Error().Err(err).Msg("Failed to unmarshal control event")
+		return
+	}
+
+	eventType, ok := event["event"].(string)
+	if !ok {
+		a.log.Warn().Msg("Control event missing 'event' field")
+		return
+	}
+
+	switch eventType {
+	case "trading_paused":
+		a.pausedMutex.Lock()
+		a.paused = true
+		a.pausedMutex.Unlock()
+
+		reason := "unknown"
+		if r, ok := event["reason"].(string); ok {
+			reason = r
+		}
+
+		a.log.Info().
+			Str("reason", reason).
+			Msg("Trading paused by orchestrator - halting signal generation")
+
+	case "trading_resumed":
+		a.pausedMutex.Lock()
+		a.paused = false
+		a.pausedMutex.Unlock()
+
+		a.log.Info().Msg("Trading resumed by orchestrator - resuming signal generation")
+
+	default:
+		a.log.Debug().Str("event", eventType).Msg("Unknown control event received")
+	}
+}
+
+// IsPaused returns whether trading is currently paused
+func (a *BaseAgent) IsPaused() bool {
+	a.pausedMutex.RLock()
+	defer a.pausedMutex.RUnlock()
+	return a.paused
+}
+
+// CheckPausedAndSkip checks if trading is paused and logs if skipping
+// Returns true if paused (should skip), false if not paused (should continue)
+func (a *BaseAgent) CheckPausedAndSkip() bool {
+	if a.IsPaused() {
+		a.log.Debug().Msg("Trading is paused, skipping agent step")
+		return true
+	}
+	return false
 }

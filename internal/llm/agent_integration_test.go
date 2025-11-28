@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
 
 // TestAgentWithFallbackClient simulates a real agent using FallbackClient
@@ -218,13 +220,17 @@ func TestAgentWithCircuitBreaker(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Use passthrough circuit breaker to avoid interference from the inner Client's circuit breaker
+	passthroughCB := risk.NewPassthroughCircuitBreakerManager()
+
 	config := FallbackConfig{
 		PrimaryConfig: ClientConfig{
-			Endpoint:    server.URL,
-			Model:       "claude-sonnet-4",
-			Temperature: 0.7,
-			MaxTokens:   2000,
-			Timeout:     5 * time.Second,
+			Endpoint:       server.URL,
+			Model:          "claude-sonnet-4",
+			Temperature:    0.7,
+			MaxTokens:      2000,
+			Timeout:        5 * time.Second,
+			CircuitBreaker: passthroughCB, // Passthrough - never trips
 		},
 		PrimaryName: "claude-sonnet-4",
 		CircuitBreakerConfig: CircuitBreakerConfig{

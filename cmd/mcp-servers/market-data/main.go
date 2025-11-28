@@ -82,6 +82,12 @@ func main() {
 	logger := log.With().Str("server", serverName).Logger()
 	logger.Info().Msg("Starting Market Data MCP Server")
 
+	// Load configuration (includes Vault secrets if enabled)
+	cfg, err := config.Load("")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to load configuration")
+	}
+
 	// Start metrics server on port 9201
 	metricsServer := metrics.NewServer(9201, logger)
 	if err := metricsServer.Start(); err != nil {
@@ -89,10 +95,26 @@ func main() {
 	}
 	logger.Info().Msg("Metrics server started on :9201")
 
-	// Get API keys from environment
-	binanceAPIKey := os.Getenv("BINANCE_API_KEY")
-	binanceSecretKey := os.Getenv("BINANCE_API_SECRET")
+	// Get API keys from configuration (Vault or env vars)
+	var binanceAPIKey, binanceSecretKey string
+	if binanceCfg, ok := cfg.Exchanges["binance"]; ok {
+		binanceAPIKey = binanceCfg.APIKey
+		binanceSecretKey = binanceCfg.SecretKey
+	}
+
+	// Allow environment variable override for development
+	if envKey := os.Getenv("BINANCE_API_KEY"); envKey != "" {
+		binanceAPIKey = envKey
+	}
+	if envSecret := os.Getenv("BINANCE_API_SECRET"); envSecret != "" {
+		binanceSecretKey = envSecret
+	}
+
 	coingeckoAPIKey := os.Getenv("COINGECKO_API_KEY") // Optional for free tier
+
+	logger.Info().
+		Bool("vault_enabled", config.GetVaultConfigFromEnv().Enabled).
+		Msg("Configuration loaded successfully")
 
 	// Initialize Binance client (testnet)
 	binanceClient := binance.NewClient(binanceAPIKey, binanceSecretKey)

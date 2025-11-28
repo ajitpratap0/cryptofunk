@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
@@ -28,20 +30,46 @@ func main() {
 	// Setup logging to stderr (stdout is reserved for MCP protocol)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
-	// Read configuration from environment
-	tradingMode := os.Getenv("TRADING_MODE")
-	if tradingMode == "" {
-		tradingMode = "paper" // Default to paper trading
+	log.Info().Msg("Order Executor MCP Server starting...")
+
+	// Load configuration (includes Vault secrets if enabled)
+	cfg, err := config.Load("")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
-	binanceAPIKey := os.Getenv("BINANCE_API_KEY")
-	binanceSecret := os.Getenv("BINANCE_API_SECRET")
-	binanceTestnet := os.Getenv("BINANCE_TESTNET") == "true"
+	// Read trading mode from environment or config
+	tradingMode := os.Getenv("TRADING_MODE")
+	if tradingMode == "" {
+		tradingMode = cfg.Trading.Mode
+	}
+
+	// Get Binance configuration (from Vault or env vars via config)
+	var binanceAPIKey, binanceSecret string
+	var binanceTestnet bool
+
+	if binanceCfg, ok := cfg.Exchanges["binance"]; ok {
+		binanceAPIKey = binanceCfg.APIKey
+		binanceSecret = binanceCfg.SecretKey
+		binanceTestnet = binanceCfg.Testnet
+	}
+
+	// Allow environment variable override for development
+	if envKey := os.Getenv("BINANCE_API_KEY"); envKey != "" {
+		binanceAPIKey = envKey
+	}
+	if envSecret := os.Getenv("BINANCE_API_SECRET"); envSecret != "" {
+		binanceSecret = envSecret
+	}
+	if os.Getenv("BINANCE_TESTNET") == "true" {
+		binanceTestnet = true
+	}
 
 	log.Info().
 		Str("mode", tradingMode).
 		Bool("testnet", binanceTestnet).
-		Msg("Order Executor MCP Server starting...")
+		Bool("vault_enabled", config.GetVaultConfigFromEnv().Enabled).
+		Msg("Configuration loaded successfully")
 
 	// Initialize database connection
 	ctx := context.Background()
@@ -54,14 +82,14 @@ func main() {
 	log.Info().Msg("Database connection established")
 
 	// Create exchange service with configuration
-	config := exchange.ServiceConfig{
+	exchangeConfig := exchange.ServiceConfig{
 		Mode:           exchange.TradingMode(tradingMode),
 		BinanceAPIKey:  binanceAPIKey,
 		BinanceSecret:  binanceSecret,
 		BinanceTestnet: binanceTestnet,
 	}
 
-	exchangeService, err := exchange.NewService(database, config)
+	exchangeService, err := exchange.NewService(database, exchangeConfig)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create exchange service")
 	}
@@ -317,21 +345,26 @@ func (s *MCPServer) listTools() interface{} {
 
 // callTool executes the specified tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
+	// Create a context with timeout for tool execution
+	// 60 seconds for operations that might involve multiple API calls or database operations
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	switch name {
 	case toolPlaceMarketOrder:
-		return s.service.PlaceMarketOrder(args)
+		return s.service.PlaceMarketOrder(ctx, args)
 	case toolPlaceLimitOrder:
-		return s.service.PlaceLimitOrder(args)
+		return s.service.PlaceLimitOrder(ctx, args)
 	case toolCancelOrder:
-		return s.service.CancelOrder(args)
+		return s.service.CancelOrder(ctx, args)
 	case toolGetOrderStatus:
-		return s.service.GetOrderStatus(args)
+		return s.service.GetOrderStatus(ctx, args)
 	case toolStartSession:
-		return s.service.StartSession(args)
+		return s.service.StartSession(ctx, args)
 	case toolStopSession:
-		return s.service.StopSession(args)
+		return s.service.StopSession(ctx, args)
 	case toolGetSessionStats:
-		return s.service.GetSessionStats(args)
+		return s.service.GetSessionStats(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}

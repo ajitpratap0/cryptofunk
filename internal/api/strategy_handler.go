@@ -47,6 +47,12 @@ const (
 	// DefaultValidationTimeout is the default timeout for validation operations
 	DefaultValidationTimeout = 30 * time.Second
 
+	// strategyDBLoadTimeout is the timeout for loading strategy from database during initialization
+	strategyDBLoadTimeout = 10 * time.Second
+
+	// strategyDBReloadTimeout is the timeout for reloading strategy from database after failed write
+	strategyDBReloadTimeout = 5 * time.Second
+
 	// ExportFormatJSON is the JSON export format identifier
 	ExportFormatJSON = "json"
 
@@ -115,7 +121,7 @@ func NewStrategyHandlerWithDB(repo *db.StrategyRepository, auditLogger *audit.Lo
 
 	// Try to load active strategy from database
 	if repo != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), strategyDBLoadTimeout)
 		defer cancel()
 
 		activeStrategy, err := repo.GetActive(ctx)
@@ -405,7 +411,7 @@ func (h *StrategyHandler) GetCurrentStrategy(c *gin.Context) {
 // Returns the current strategy (reloaded or existing).
 func (h *StrategyHandler) reloadFromDB(parentCtx context.Context) *strategy.StrategyConfig {
 	// Create timeout context for DB operation BEFORE acquiring lock
-	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parentCtx, strategyDBReloadTimeout)
 	defer cancel()
 
 	h.mu.Lock()

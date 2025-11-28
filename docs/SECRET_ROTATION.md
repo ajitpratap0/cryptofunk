@@ -20,9 +20,46 @@ This document outlines procedures for rotating secrets in the CryptoFunk trading
 
 ## Overview
 
-CryptoFunk uses HashiCorp Vault for secure secrets management. All production secrets should be stored in Vault and never committed to version control or stored in plain text.
+CryptoFunk uses HashiCorp Vault for secure secrets management in production. All production secrets should be stored in Vault and never committed to version control or stored in plain text.
 
 **Security Principle**: Regular secret rotation reduces the window of vulnerability if credentials are compromised.
+
+**Implementation Status**: ✅ **Complete** - Vault integration is fully implemented in `internal/config/secrets.go` and integrated into all services through `config.Load()`. Services automatically load secrets from Vault when `VAULT_ENABLED=true`, with graceful fallback to environment variables when disabled.
+
+**Key Features**:
+- **Automatic Vault Integration**: All services use `config.Load()` which automatically loads secrets from Vault when enabled
+- **Graceful Fallback**: If Vault is unavailable or disabled, services fall back to environment variables (Kubernetes secrets)
+- **Multiple Auth Methods**: Supports Kubernetes service account, token, and AppRole authentication
+- **Zero Code Changes**: MCP servers and agents automatically benefit from Vault integration through the config package
+- **Development Friendly**: Local development uses environment variables by default (no Vault required)
+
+**Architecture**:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     CryptoFunk Services                      │
+│  (orchestrator, api, mcp-servers, agents, bifrost)          │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ config.Load()
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│              internal/config/secrets.go                      │
+│  • GetVaultConfigFromEnv()                                  │
+│  • LoadSecretsFromVault()                                   │
+│  • NewVaultClient()                                         │
+└──────────┬──────────────────────────┬──────────────────────┘
+           │ VAULT_ENABLED=true       │ VAULT_ENABLED=false
+           ↓                          ↓
+┌─────────────────────┐    ┌─────────────────────────────┐
+│  HashiCorp Vault    │    │   Environment Variables     │
+│  • K8s Auth         │    │   (from K8s secrets)        │
+│  • KV v2 Engine     │    │   • POSTGRES_PASSWORD       │
+│  • Secrets:         │    │   • BINANCE_API_KEY         │
+│    - database       │    │   • ANTHROPIC_API_KEY       │
+│    - redis          │    │   • etc.                    │
+│    - exchanges/*    │    │                             │
+│    - llm            │    │   Fallback for dev/testing  │
+└─────────────────────┘    └─────────────────────────────┘
+```
 
 ## Prerequisites
 
@@ -294,6 +331,192 @@ If you suspect credentials have been compromised:
    ```
 
 5. **Document incident** in incident log and update security procedures
+
+## Implementation Guide
+
+### How It Works
+
+CryptoFunk's Vault integration is designed to be **transparent** and **backwards-compatible**:
+
+1. **On Service Startup**:
+   - Service calls `config.Load("")` to load configuration
+   - `config.Load()` checks `VAULT_ENABLED` environment variable
+   - If enabled, it calls `LoadSecretsFromVault()` to fetch secrets from Vault
+   - If disabled or Vault fails, it falls back to environment variables
+   - Configuration is validated before service continues
+
+2. **Secret Loading Priority**:
+   ```
+   1. Vault (if VAULT_ENABLED=true and connection succeeds)
+   2. Environment variables (fallback or when Vault disabled)
+   3. Configuration file placeholders (development only)
+   ```
+
+3. **Supported Secrets**:
+   - **Database**: `secret/data/cryptofunk/production/database` → `password`, `user`
+   - **Redis**: `secret/data/cryptofunk/production/redis` → `password`
+   - **Exchanges**: `secret/data/cryptofunk/production/exchanges/{name}` → `api_key`, `secret_key`
+   - **LLM**: `secret/data/cryptofunk/production/llm` → `anthropic_api_key`, `openai_api_key`, `gemini_api_key`
+
+### Code Examples
+
+#### Loading Configuration with Vault (All Services)
+
+All services use the same pattern:
+
+```go
+package main
+
+import (
+    "github.com/ajitpratap0/cryptofunk/internal/config"
+)
+
+func main() {
+    // Load configuration (automatically handles Vault if enabled)
+    cfg, err := config.Load("")
+    if err != nil {
+        log.Fatal().Err(err).Msg("Failed to load configuration")
+    }
+
+    // Access secrets - they're already loaded from Vault or env vars
+    dbPassword := cfg.Database.Password
+    binanceKey := cfg.Exchanges["binance"].APIKey
+
+    // Use secrets...
+}
+```
+
+#### Checking Vault Status
+
+```go
+vaultCfg := config.GetVaultConfigFromEnv()
+if vaultCfg.Enabled {
+    log.Info().Msg("Vault integration is enabled")
+} else {
+    log.Info().Msg("Using environment variables for secrets")
+}
+```
+
+#### Manual Vault Client (Advanced)
+
+For custom secret loading:
+
+```go
+import "github.com/ajitpratap0/cryptofunk/internal/config"
+
+vaultCfg := config.GetVaultConfigFromEnv()
+vaultClient, err := config.NewVaultClient(vaultCfg)
+if err != nil {
+    return err
+}
+
+// Get a specific secret
+secret, err := vaultClient.GetSecretString(ctx, "custom/path", "key_name")
+if err != nil {
+    return err
+}
+```
+
+### Kubernetes Deployment
+
+#### Step 1: Apply Vault Resources
+
+```bash
+# Apply Vault service account, role bindings, and config
+kubectl apply -f deployments/k8s/base/vault-integration.yaml
+```
+
+#### Step 2: Configure Vault Address
+
+```bash
+# Edit vault-config ConfigMap
+kubectl edit configmap vault-config -n cryptofunk
+
+# Update:
+# VAULT_ADDR: "https://your-vault-server:8200"
+# VAULT_ENABLED: "true"
+```
+
+#### Step 3: Update Deployments
+
+All deployments now include Vault configuration. Example for orchestrator:
+
+```yaml
+spec:
+  template:
+    spec:
+      serviceAccountName: cryptofunk-vault  # Required for K8s auth
+
+      containers:
+      - name: orchestrator
+        env:
+        # Vault Configuration (from vault-config ConfigMap)
+        - name: VAULT_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_ENABLED
+        - name: VAULT_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: vault-config
+              key: VAULT_ADDR
+        # ... more Vault config ...
+
+        # Fallback secrets (used when VAULT_ENABLED=false)
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: POSTGRES_PASSWORD
+```
+
+See `deployments/k8s/base/vault-example-deployment.yaml` for complete example.
+
+#### Step 4: Restart Services
+
+```bash
+kubectl rollout restart deployment -n cryptofunk
+```
+
+### Local Development
+
+For local development (without Vault):
+
+```bash
+# In your terminal or .env file
+export VAULT_ENABLED=false  # This is the default
+
+# Set secrets as environment variables
+export POSTGRES_PASSWORD="dev_password"
+export BINANCE_API_KEY="dev_key"
+export BINANCE_API_SECRET="dev_secret"
+
+# Run service
+go run cmd/orchestrator/main.go
+```
+
+Services will log:
+```
+INFO  Vault integration disabled - using environment variables for secrets
+```
+
+### Testing Vault Integration
+
+```bash
+# Test with Vault enabled
+export VAULT_ENABLED=true
+export VAULT_ADDR="http://localhost:8200"
+export VAULT_TOKEN="your-token"
+
+go run cmd/orchestrator/main.go
+
+# Expected logs:
+# INFO  Vault integration enabled - loading secrets from Vault
+# INFO  Vault client initialized successfully
+# INFO  ✓ Loaded database password from Vault
+# INFO  ✓ Loaded exchange API keys from Vault
+```
 
 ## Vault Setup
 

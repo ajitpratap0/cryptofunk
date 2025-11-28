@@ -100,11 +100,11 @@ func NewServicePaper(database *db.DB) *Service {
 }
 
 // PlaceMarketOrder places a market order
-func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, error) {
+func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceMarketOrder called")
 
 	// Create context with 30-second timeout for exchange API calls
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	exchangeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Extract symbol
@@ -143,7 +143,7 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 	// Place order through circuit breaker
 	var resp *PlaceOrderResponse
 	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
-		return s.exchange.PlaceOrder(ctx, req)
+		return s.exchange.PlaceOrder(exchangeCtx, req)
 	})
 
 	if err != nil {
@@ -159,19 +159,50 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
 	resp = cbResult.(*PlaceOrderResponse)
 
-	// Get order details
-	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
+	// Get order details through circuit breaker
+	var order *Order
+	orderResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrder(exchangeCtx, resp.OrderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Str("order_id", resp.OrderID).Msg("Circuit breaker open: failed to retrieve order after placement")
+			return resp, nil // Still return the response even if we can't get details
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
 		return resp, nil // Still return the response even if we can't get details
 	}
 
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = orderResult.(*Order)
+
 	// Update positions if order was filled
 	if order.Status == OrderStatusFilled {
-		fills, err := s.exchange.GetOrderFills(ctx, order.ID)
-		if err == nil && len(fills) > 0 {
-			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
-				log.Error().Err(err).Msg("Failed to update positions after order fill")
+		// Get order fills through circuit breaker
+		fillsResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+			return s.exchange.GetOrderFills(exchangeCtx, order.ID)
+		})
+
+		if err != nil {
+			// Check if circuit breaker is open
+			if err == gobreaker.ErrOpenState {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Str("order_id", order.ID).Msg("Circuit breaker open: failed to get order fills for position update")
+			} else {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Err(err).Str("order_id", order.ID).Msg("Failed to get order fills for position update")
+			}
+		} else {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+			fills := fillsResult.([]Fill)
+			if len(fills) > 0 {
+				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
+					log.Error().Err(err).Msg("Failed to update positions after order fill")
+				}
 			}
 		}
 	}
@@ -180,11 +211,11 @@ func (s *Service) PlaceMarketOrder(args map[string]interface{}) (interface{}, er
 }
 
 // PlaceLimitOrder places a limit order
-func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, error) {
+func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceLimitOrder called")
 
 	// Create context with 30-second timeout for exchange API calls
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	exchangeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Extract symbol
@@ -230,25 +261,69 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 		Price:    price,
 	}
 
-	// Place order
-	resp, err := s.exchange.PlaceOrder(ctx, req)
+	// Place order through circuit breaker
+	var resp *PlaceOrderResponse
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.PlaceOrder(exchangeCtx, req)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to place order: %w", err)
 	}
 
-	// Get order details
-	order, err := s.exchange.GetOrder(ctx, resp.OrderID)
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	resp = cbResult.(*PlaceOrderResponse)
+
+	// Get order details through circuit breaker
+	var order *Order
+	orderResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrder(exchangeCtx, resp.OrderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Str("order_id", resp.OrderID).Msg("Circuit breaker open: failed to retrieve order after placement")
+			return resp, nil // Still return the response even if we can't get details
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		log.Error().Err(err).Str("order_id", resp.OrderID).Msg("Failed to retrieve order after placement")
-		return resp, nil
+		return resp, nil // Still return the response even if we can't get details
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = orderResult.(*Order)
 
 	// Update positions if order was filled (limit orders may fill immediately in some cases)
 	if order.Status == OrderStatusFilled {
-		fills, err := s.exchange.GetOrderFills(ctx, order.ID)
-		if err == nil && len(fills) > 0 {
-			if err := s.positionManager.OnOrderFilled(ctx, order, fills); err != nil {
-				log.Error().Err(err).Msg("Failed to update positions after order fill")
+		// Get order fills through circuit breaker
+		fillsResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+			return s.exchange.GetOrderFills(exchangeCtx, order.ID)
+		})
+
+		if err != nil {
+			// Check if circuit breaker is open
+			if err == gobreaker.ErrOpenState {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Str("order_id", order.ID).Msg("Circuit breaker open: failed to get order fills for position update")
+			} else {
+				s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+				log.Error().Err(err).Str("order_id", order.ID).Msg("Failed to get order fills for position update")
+			}
+		} else {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+			fills := fillsResult.([]Fill)
+			if len(fills) > 0 {
+				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
+					log.Error().Err(err).Msg("Failed to update positions after order fill")
+				}
 			}
 		}
 	}
@@ -257,10 +332,10 @@ func (s *Service) PlaceLimitOrder(args map[string]interface{}) (interface{}, err
 }
 
 // CancelOrder cancels an existing order
-func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) {
+func (s *Service) CancelOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("CancelOrder called")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	exchangeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Extract order_id
@@ -269,20 +344,33 @@ func (s *Service) CancelOrder(args map[string]interface{}) (interface{}, error) 
 		return nil, fmt.Errorf("order_id is required and must be a string")
 	}
 
-	// Cancel order
-	order, err := s.exchange.CancelOrder(ctx, orderID)
+	// Cancel order through circuit breaker
+	var order *Order
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.CancelOrder(exchangeCtx, orderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to cancel order: %w", err)
 	}
+
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = cbResult.(*Order)
 
 	return order, nil
 }
 
 // GetOrderStatus retrieves order status
-func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, error) {
+func (s *Service) GetOrderStatus(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetOrderStatus called")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	exchangeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Extract order_id
@@ -291,17 +379,44 @@ func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, erro
 		return nil, fmt.Errorf("order_id is required and must be a string")
 	}
 
-	// Get order
-	order, err := s.exchange.GetOrder(ctx, orderID)
+	// Get order through circuit breaker
+	var order *Order
+	cbResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrder(exchangeCtx, orderID)
+	})
+
 	if err != nil {
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			return nil, fmt.Errorf("exchange circuit breaker is open, system unavailable")
+		}
+		s.circuitBreaker.Metrics().RecordRequest("exchange", false)
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
 
-	// Get fills
-	fills, err := s.exchange.GetOrderFills(ctx, orderID)
+	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+	order = cbResult.(*Order)
+
+	// Get fills through circuit breaker
+	var fills []Fill
+	fillsResult, err := s.circuitBreaker.Exchange().Execute(func() (interface{}, error) {
+		return s.exchange.GetOrderFills(exchangeCtx, orderID)
+	})
+
 	if err != nil {
-		log.Error().Err(err).Str("order_id", orderID).Msg("Failed to get order fills")
+		// Check if circuit breaker is open
+		if err == gobreaker.ErrOpenState {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Str("order_id", orderID).Msg("Circuit breaker open: failed to get order fills")
+		} else {
+			s.circuitBreaker.Metrics().RecordRequest("exchange", false)
+			log.Error().Err(err).Str("order_id", orderID).Msg("Failed to get order fills")
+		}
 		// Continue even if we can't get fills
+	} else {
+		s.circuitBreaker.Metrics().RecordRequest("exchange", true)
+		fills = fillsResult.([]Fill)
 	}
 
 	return map[string]interface{}{
@@ -311,7 +426,7 @@ func (s *Service) GetOrderStatus(args map[string]interface{}) (interface{}, erro
 }
 
 // StartSession starts a new trading session
-func (s *Service) StartSession(args map[string]interface{}) (interface{}, error) {
+func (s *Service) StartSession(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("StartSession called")
 
 	// Extract symbol
@@ -345,9 +460,9 @@ func (s *Service) StartSession(args map[string]interface{}) (interface{}, error)
 		Config:         config,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := s.db.CreateSession(ctx, session); err != nil {
+	if err := s.db.CreateSession(dbCtx, session); err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
@@ -374,7 +489,7 @@ func (s *Service) StartSession(args map[string]interface{}) (interface{}, error)
 }
 
 // StopSession stops the current trading session
-func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) {
+func (s *Service) StopSession(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("StopSession called")
 
 	// Get current session from exchange
@@ -393,9 +508,9 @@ func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) 
 	}
 
 	// Stop session in database
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := s.db.StopSession(ctx, *sessionID, finalCapital); err != nil {
+	if err := s.db.StopSession(dbCtx, *sessionID, finalCapital); err != nil {
 		return nil, fmt.Errorf("failed to stop session: %w", err)
 	}
 
@@ -406,7 +521,7 @@ func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) 
 	s.positionManager.SetSession(nil)
 
 	// Get final session data
-	session, err := s.db.GetSession(ctx, *sessionID)
+	session, err := s.db.GetSession(dbCtx, *sessionID)
 	if err != nil {
 		log.Error().Err(err).Str("session_id", sessionID.String()).Msg("Failed to retrieve session after stopping")
 		return map[string]interface{}{
@@ -441,7 +556,7 @@ func (s *Service) StopSession(args map[string]interface{}) (interface{}, error) 
 }
 
 // GetSessionStats retrieves current session statistics
-func (s *Service) GetSessionStats(args map[string]interface{}) (interface{}, error) {
+func (s *Service) GetSessionStats(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetSessionStats called")
 
 	// Get current session from exchange
@@ -451,9 +566,9 @@ func (s *Service) GetSessionStats(args map[string]interface{}) (interface{}, err
 	}
 
 	// Get session from database
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	session, err := s.db.GetSession(ctx, *sessionID)
+	session, err := s.db.GetSession(dbCtx, *sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -475,7 +590,7 @@ func (s *Service) GetSessionStats(args map[string]interface{}) (interface{}, err
 }
 
 // GetPositions retrieves current open positions
-func (s *Service) GetPositions(args map[string]interface{}) (interface{}, error) {
+func (s *Service) GetPositions(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetPositions called")
 
 	positions := s.positionManager.GetOpenPositions()
@@ -487,7 +602,7 @@ func (s *Service) GetPositions(args map[string]interface{}) (interface{}, error)
 }
 
 // GetPositionBySymbol retrieves a specific position by symbol
-func (s *Service) GetPositionBySymbol(args map[string]interface{}) (interface{}, error) {
+func (s *Service) GetPositionBySymbol(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("GetPositionBySymbol called")
 
 	symbol, ok := args["symbol"].(string)
@@ -510,7 +625,7 @@ func (s *Service) GetPositionBySymbol(args map[string]interface{}) (interface{},
 }
 
 // UpdatePositionPnL updates unrealized P&L for positions based on current prices
-func (s *Service) UpdatePositionPnL(args map[string]interface{}) (interface{}, error) {
+func (s *Service) UpdatePositionPnL(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("UpdatePositionPnL called")
 
 	// Extract prices map
@@ -534,9 +649,9 @@ func (s *Service) UpdatePositionPnL(args map[string]interface{}) (interface{}, e
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	err := s.positionManager.UpdateUnrealizedPnL(ctx, prices)
+	err := s.positionManager.UpdateUnrealizedPnL(dbCtx, prices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update P&L: %w", err)
 	}
@@ -550,7 +665,7 @@ func (s *Service) UpdatePositionPnL(args map[string]interface{}) (interface{}, e
 }
 
 // ClosePositionBySymbol closes a position for a specific symbol
-func (s *Service) ClosePositionBySymbol(args map[string]interface{}) (interface{}, error) {
+func (s *Service) ClosePositionBySymbol(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("ClosePositionBySymbol called")
 
 	symbol, ok := args["symbol"].(string)
@@ -573,9 +688,9 @@ func (s *Service) ClosePositionBySymbol(args map[string]interface{}) (interface{
 		return nil, fmt.Errorf("no open position for symbol: %s", symbol)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	err = s.db.ClosePosition(ctx, position.ID, exitPrice, exitReason, 0.0)
+	err = s.db.ClosePosition(dbCtx, position.ID, exitPrice, exitReason, 0.0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to close position: %w", err)
 	}
