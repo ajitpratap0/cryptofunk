@@ -22,6 +22,9 @@ import (
 )
 
 const (
+	// AnonymousUser is the default user ID when no authentication is present
+	AnonymousUser = "anonymous"
+
 	// MaxStrategyUploadSize is the maximum allowed size for strategy file uploads (10MB)
 	MaxStrategyUploadSize = 10 * 1024 * 1024
 
@@ -321,7 +324,7 @@ func (h *StrategyHandler) logAuditEvent(c *gin.Context, eventType audit.EventTyp
 	// Extract user info from context (if authentication is implemented)
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "anonymous"
+		userID = AnonymousUser
 	}
 
 	ipAddress := c.ClientIP()

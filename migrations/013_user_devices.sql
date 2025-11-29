@@ -2,6 +2,8 @@
 -- Description: Add tables for push notification device tokens and user preferences
 
 -- User devices table for push notification tokens
+-- Note: user_id is stored without FK constraint as users table doesn't exist yet
+-- FK constraint can be added when a central users table is introduced
 CREATE TABLE IF NOT EXISTS user_devices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
@@ -9,8 +11,7 @@ CREATE TABLE IF NOT EXISTS user_devices (
     platform VARCHAR(20) NOT NULL CHECK (platform IN ('ios', 'android', 'web')),
     enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_used_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_user_devices_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    last_used_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for efficient lookups
@@ -19,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_user_devices_token ON user_devices(device_token) 
 CREATE INDEX IF NOT EXISTS idx_user_devices_platform ON user_devices(platform);
 
 -- Notification preferences table
+-- Note: user_id is stored without FK constraint as users table doesn't exist yet
 CREATE TABLE IF NOT EXISTS notification_preferences (
     user_id UUID PRIMARY KEY,
     trade_executions BOOLEAN DEFAULT TRUE,
@@ -26,11 +28,11 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     circuit_breaker BOOLEAN DEFAULT TRUE,
     consensus_failures BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_notification_prefs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Notification log table for tracking sent notifications
+-- Note: user_id is stored without FK constraint as users table doesn't exist yet
 CREATE TABLE IF NOT EXISTS notification_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
@@ -41,8 +43,7 @@ CREATE TABLE IF NOT EXISTS notification_log (
     data JSONB,
     status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
     error_message TEXT,
-    sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_notification_log_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for notification log
