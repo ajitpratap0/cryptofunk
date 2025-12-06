@@ -14,7 +14,7 @@ import (
 
 // handleStart handles the /start command
 func handleStart(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
-	welcomeText := fmt.Sprintf(`Welcome to *CryptoFunk Trading Bot*! 🚀
+	welcomeText := `Welcome to *CryptoFunk Trading Bot*! 🚀
 
 I'm your AI-powered trading assistant. I can help you monitor your trading sessions, positions, and performance.
 
@@ -34,10 +34,10 @@ To receive alerts and notifications, please verify your account using:
 
 Get your verification code from the CryptoFunk dashboard.
 
-Happy trading! 📈`)
+Happy trading! 📈`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err := bot.api.Send(msg)
 	return err
@@ -68,7 +68,7 @@ func handleHelp(ctx context.Context, bot *Bot, message *tgbotapi.Message) error 
 For more information, visit the CryptoFunk dashboard.`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, helpText)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err := bot.api.Send(msg)
 	return err
@@ -125,7 +125,7 @@ func handleStatus(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -173,7 +173,7 @@ func handlePositions(ctx context.Context, bot *Bot, message *tgbotapi.Message) e
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -219,7 +219,7 @@ func handlePL(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -249,7 +249,7 @@ Use /resume to resume trading.
 Use /positions to check your open positions.`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, responseText)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -278,7 +278,7 @@ Trading has been resumed. The system is now actively monitoring markets and exec
 Use /status to check the system status.`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, responseText)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -323,7 +323,7 @@ func handleDecisions(ctx context.Context, bot *Bot, message *tgbotapi.Message) e
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -355,7 +355,7 @@ func handleSettings(ctx context.Context, bot *Bot, message *tgbotapi.Message) er
 	sb.WriteString("\nTo change settings, use the CryptoFunk dashboard.")
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -397,7 +397,7 @@ Use /settings to manage your notification preferences.
 Use /help to see all available commands.`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, successText)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err = bot.api.Send(msg)
 	return err
@@ -417,7 +417,7 @@ Please verify your account to use this command.
 If you need help, use /help`
 
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err := bot.api.Send(msg)
 	return err

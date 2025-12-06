@@ -151,7 +151,7 @@ func (f *FCMBackend) SendMulticast(ctx context.Context, deviceTokens []string, n
 	}
 
 	// Send multicast message
-	response, err := f.client.SendMulticast(ctx, msg)
+	response, err := f.client.SendEachForMulticast(ctx, msg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send FCM multicast: %w", err)
 	}

@@ -10,6 +10,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	// ParseModeMarkdown is the constant for Markdown parse mode in Telegram messages
+	ParseModeMarkdown = "Markdown"
+)
+
 // Bot represents the Telegram bot
 type Bot struct {
 	api      *tgbotapi.BotAPI
@@ -232,7 +237,7 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 // SendMessage sends a text message to a chat
 func (b *Bot) SendMessage(chatID int64, text string) error {
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = ParseModeMarkdown
 
 	_, err := b.api.Send(msg)
 	if err != nil {

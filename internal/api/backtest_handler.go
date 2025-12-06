@@ -79,7 +79,7 @@ func (h *BacktestHandler) RunBacktest(c *gin.Context) {
 	// Extract user info from context (if authentication is implemented)
 	createdBy := c.GetString("user_id")
 	if createdBy == "" {
-		createdBy = "anonymous"
+		createdBy = AnonymousUser
 	}
 
 	// Create job
@@ -188,7 +188,7 @@ func (h *BacktestHandler) ListBacktests(c *gin.Context) {
 	// Extract user info from context (if authentication is implemented)
 	createdBy := c.GetString("user_id")
 	if createdBy == "" {
-		createdBy = "anonymous"
+		createdBy = AnonymousUser
 	}
 
 	ctx := c.Request.Context()
@@ -248,7 +248,7 @@ func (h *BacktestHandler) DeleteBacktest(c *gin.Context) {
 	// Verify ownership (if authentication is implemented)
 	createdBy := c.GetString("user_id")
 	if createdBy == "" {
-		createdBy = "anonymous"
+		createdBy = AnonymousUser
 	}
 
 	if job.CreatedBy != createdBy {

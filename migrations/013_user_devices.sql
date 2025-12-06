@@ -2,6 +2,8 @@
 -- Description: Add tables for push notification device tokens and user preferences
 
 -- User devices table for push notification tokens
+-- Note: user_id is stored without FK constraint as users table doesn't exist yet
+-- FK constraint can be added when a central users table is introduced
 CREATE TABLE IF NOT EXISTS user_devices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
@@ -9,8 +11,7 @@ CREATE TABLE IF NOT EXISTS user_devices (
     platform VARCHAR(20) NOT NULL CHECK (platform IN ('ios', 'android', 'web')),
     enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_used_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_user_devices_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    last_used_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for efficient lookups
@@ -19,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_user_devices_token ON user_devices(device_token) 
 CREATE INDEX IF NOT EXISTS idx_user_devices_platform ON user_devices(platform);
 
 -- Notification preferences table
+-- Note: user_id is stored without FK constraint as users table doesn't exist yet
 CREATE TABLE IF NOT EXISTS notification_preferences (
     user_id UUID PRIMARY KEY,
     trade_executions BOOLEAN DEFAULT TRUE,
@@ -26,13 +28,14 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     circuit_breaker BOOLEAN DEFAULT TRUE,
     consensus_failures BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_notification_prefs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Notification log table for tracking sent notifications
+-- Note: user_id is stored without FK constraint as users table doesn't exist yet
+-- Note: For TimescaleDB hypertables, we use a composite primary key including the partition column
 CREATE TABLE IF NOT EXISTS notification_log (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     device_token TEXT,
     notification_type VARCHAR(50) NOT NULL,
@@ -41,18 +44,18 @@ CREATE TABLE IF NOT EXISTS notification_log (
     data JSONB,
     status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
     error_message TEXT,
-    sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_notification_log_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    sent_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id, sent_at)
 );
 
--- Indexes for notification log
-CREATE INDEX IF NOT EXISTS idx_notification_log_user_id ON notification_log(user_id);
-CREATE INDEX IF NOT EXISTS idx_notification_log_type ON notification_log(notification_type);
-CREATE INDEX IF NOT EXISTS idx_notification_log_status ON notification_log(status);
-CREATE INDEX IF NOT EXISTS idx_notification_log_sent_at ON notification_log(sent_at DESC);
-
 -- Convert notification_log to hypertable for efficient time-series queries
+-- Must be done before creating indexes
 SELECT create_hypertable('notification_log', 'sent_at', if_not_exists => TRUE);
+
+-- Indexes for notification log (created after hypertable conversion)
+CREATE INDEX IF NOT EXISTS idx_notification_log_user_id ON notification_log(user_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_log_type ON notification_log(notification_type, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_log_status ON notification_log(status, sent_at DESC);
 
 -- Trigger to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_notification_preferences_updated_at()
