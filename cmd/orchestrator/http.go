@@ -88,6 +88,11 @@ func (h *HTTPServer) Start() error {
 	// Status endpoint
 	mux.HandleFunc("/api/v1/status", h.handleStatus)
 
+	// Control endpoints (pause/resume trading)
+	mux.HandleFunc("/pause", h.orchestrator.HandlePauseRequest)
+	mux.HandleFunc("/resume", h.orchestrator.HandleResumeRequest)
+	mux.HandleFunc("/status", h.orchestrator.HandleControlStatusRequest)
+
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 

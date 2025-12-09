@@ -15,12 +15,15 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
@@ -31,23 +34,24 @@ import (
 
 // RiskAgentConfig holds risk agent configuration
 type RiskAgentConfig struct {
-	AgentName          string  `yaml:"agent_name"`
-	AgentType          string  `yaml:"agent_type"`
-	Weight             float64 `yaml:"weight"`
-	NATSUrl            string  `yaml:"nats_url"`
-	SignalTopic        string  `yaml:"signal_topic"`
-	HeartbeatTopic     string  `yaml:"heartbeat_topic"`
-	DecisionTopic      string  `yaml:"decision_topic"`
-	HeartbeatInterval  string  `yaml:"heartbeat_interval"`
-	MaxPositionSize    float64 `yaml:"max_position_size"`
-	MaxTotalExposure   float64 `yaml:"max_total_exposure"`
-	MaxConcentration   float64 `yaml:"max_concentration"`
-	MaxOpenPositions   int     `yaml:"max_open_positions"`
-	MaxDrawdownPercent float64 `yaml:"max_drawdown_percent"`
-	MinSharpeRatio     float64 `yaml:"min_sharpe_ratio"`
-	KellyFraction      float64 `yaml:"kelly_fraction"`
-	StopLossMultiplier float64 `yaml:"stop_loss_multiplier"`
-	RiskFreeRate       float64 `yaml:"risk_free_rate"`
+	AgentName          string  `mapstructure:"agent_name"`
+	AgentType          string  `mapstructure:"agent_type"`
+	Weight             float64 `mapstructure:"weight"`
+	NATSUrl            string  `mapstructure:"nats_url"`
+	SignalTopic        string  `mapstructure:"signal_topic"`
+	HeartbeatTopic     string  `mapstructure:"heartbeat_topic"`
+	DecisionTopic      string  `mapstructure:"decision_topic"`
+	HeartbeatInterval  string  `mapstructure:"heartbeat_interval"`
+	MetricsPort        int     `mapstructure:"metrics_port"`
+	MaxPositionSize    float64 `mapstructure:"max_position_size"`
+	MaxTotalExposure   float64 `mapstructure:"max_total_exposure"`
+	MaxConcentration   float64 `mapstructure:"max_concentration"`
+	MaxOpenPositions   int     `mapstructure:"max_open_positions"`
+	MaxDrawdownPercent float64 `mapstructure:"max_drawdown_percent"`
+	MinSharpeRatio     float64 `mapstructure:"min_sharpe_ratio"`
+	KellyFraction      float64 `mapstructure:"kelly_fraction"`
+	StopLossMultiplier float64 `mapstructure:"stop_loss_multiplier"`
+	RiskFreeRate       float64 `mapstructure:"risk_free_rate"`
 }
 
 // ============================================================================
@@ -84,6 +88,24 @@ type RiskAgent struct {
 	vetoCount      int64
 	approvalCount  int64
 	totalDecisions int64
+
+	// Metrics
+	metricsServer *metrics.Server
+	riskMetrics   *RiskMetrics
+}
+
+// RiskMetrics holds Prometheus metrics for the risk agent
+type RiskMetrics struct {
+	VetoCount         prometheus.Counter
+	ApprovalCount     prometheus.Counter
+	DecisionsTotal    prometheus.Counter
+	DrawdownCurrent   prometheus.Gauge
+	DrawdownMax       prometheus.Gauge
+	ExposureTotal     prometheus.Gauge
+	SharpeRatio       prometheus.Gauge
+	OpenPositions     prometheus.Gauge
+	LimitsUtilization prometheus.Gauge
+	AgentStatus       prometheus.Gauge
 }
 
 // RiskBeliefs represents the agent's current understanding of portfolio risk
@@ -179,6 +201,7 @@ func main() {
 	viper.SetDefault("risk_agent.heartbeat_topic", "cryptofunk.agent.heartbeat")
 	viper.SetDefault("risk_agent.decision_topic", "cryptofunk.orchestrator.decisions")
 	viper.SetDefault("risk_agent.heartbeat_interval", "30s")
+	viper.SetDefault("risk_agent.metrics_port", 9108)
 	viper.SetDefault("risk_agent.max_position_size", 10000.0)
 	viper.SetDefault("risk_agent.max_total_exposure", 50000.0)
 	viper.SetDefault("risk_agent.max_concentration", 0.25)
@@ -197,6 +220,62 @@ func main() {
 	var config RiskAgentConfig
 	if err := viper.UnmarshalKey("risk_agent", &config); err != nil {
 		log.Fatal().Err(err).Msg("Failed to parse configuration")
+	}
+
+	// Apply defaults for empty fields (UnmarshalKey doesn't apply SetDefault values)
+	if config.AgentName == "" {
+		config.AgentName = viper.GetString("risk_agent.agent_name")
+	}
+	if config.AgentType == "" {
+		config.AgentType = viper.GetString("risk_agent.agent_type")
+	}
+	if config.Weight == 0 {
+		config.Weight = viper.GetFloat64("risk_agent.weight")
+	}
+	if config.NATSUrl == "" {
+		config.NATSUrl = viper.GetString("risk_agent.nats_url")
+	}
+	if config.SignalTopic == "" {
+		config.SignalTopic = viper.GetString("risk_agent.signal_topic")
+	}
+	if config.HeartbeatTopic == "" {
+		config.HeartbeatTopic = viper.GetString("risk_agent.heartbeat_topic")
+	}
+	if config.DecisionTopic == "" {
+		config.DecisionTopic = viper.GetString("risk_agent.decision_topic")
+	}
+	if config.HeartbeatInterval == "" {
+		config.HeartbeatInterval = viper.GetString("risk_agent.heartbeat_interval")
+	}
+	if config.MetricsPort == 0 {
+		config.MetricsPort = viper.GetInt("risk_agent.metrics_port")
+	}
+	if config.MaxPositionSize == 0 {
+		config.MaxPositionSize = viper.GetFloat64("risk_agent.max_position_size")
+	}
+	if config.MaxTotalExposure == 0 {
+		config.MaxTotalExposure = viper.GetFloat64("risk_agent.max_total_exposure")
+	}
+	if config.MaxConcentration == 0 {
+		config.MaxConcentration = viper.GetFloat64("risk_agent.max_concentration")
+	}
+	if config.MaxOpenPositions == 0 {
+		config.MaxOpenPositions = viper.GetInt("risk_agent.max_open_positions")
+	}
+	if config.MaxDrawdownPercent == 0 {
+		config.MaxDrawdownPercent = viper.GetFloat64("risk_agent.max_drawdown_percent")
+	}
+	if config.MinSharpeRatio == 0 {
+		config.MinSharpeRatio = viper.GetFloat64("risk_agent.min_sharpe_ratio")
+	}
+	if config.KellyFraction == 0 {
+		config.KellyFraction = viper.GetFloat64("risk_agent.kelly_fraction")
+	}
+	if config.StopLossMultiplier == 0 {
+		config.StopLossMultiplier = viper.GetFloat64("risk_agent.stop_loss_multiplier")
+	}
+	if config.RiskFreeRate == 0 {
+		config.RiskFreeRate = viper.GetFloat64("risk_agent.risk_free_rate")
 	}
 
 	log.Info().
@@ -348,6 +427,53 @@ func NewRiskAgent(config *RiskAgentConfig, database *db.DB, riskService *risk.Se
 		log.Info().Msg("Using rule-based risk analysis")
 	}
 
+	// Create Prometheus metrics for risk agent
+	riskMetrics := &RiskMetrics{
+		VetoCount: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "risk_agent_veto_total",
+			Help: "Total number of trades vetoed by risk agent",
+		}),
+		ApprovalCount: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "risk_agent_approval_total",
+			Help: "Total number of trades approved by risk agent",
+		}),
+		DecisionsTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "risk_agent_decisions_total",
+			Help: "Total number of risk decisions made",
+		}),
+		DrawdownCurrent: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_drawdown_current_percent",
+			Help: "Current portfolio drawdown percentage",
+		}),
+		DrawdownMax: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_drawdown_max_percent",
+			Help: "Maximum portfolio drawdown percentage",
+		}),
+		ExposureTotal: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_exposure_total",
+			Help: "Total portfolio exposure in USD",
+		}),
+		SharpeRatio: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_sharpe_ratio",
+			Help: "Current Sharpe ratio",
+		}),
+		OpenPositions: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_open_positions",
+			Help: "Number of open positions",
+		}),
+		LimitsUtilization: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_limits_utilization",
+			Help: "Portfolio limits utilization (0.0 to 1.0)",
+		}),
+		AgentStatus: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "risk_agent_status",
+			Help: "Risk agent status (1=running, 0=stopped)",
+		}),
+	}
+
+	// Create metrics server
+	metricsServer := metrics.NewServer(config.MetricsPort, log.Logger)
+
 	return &RiskAgent{
 		config:        config,
 		db:            database,
@@ -377,6 +503,8 @@ func NewRiskAgent(config *RiskAgentConfig, database *db.DB, riskService *risk.Se
 			shouldVeto:      false,
 			monitorDrawdown: true,
 		},
+		metricsServer: metricsServer,
+		riskMetrics:   riskMetrics,
 	}, nil
 }
 
@@ -404,6 +532,21 @@ func (a *RiskAgent) Initialize(ctx context.Context) error {
 	// Load current portfolio state from database
 	if err := a.loadPortfolioState(ctx); err != nil {
 		log.Warn().Err(err).Msg("Failed to load initial portfolio state")
+	}
+
+	// Start metrics server
+	if a.metricsServer != nil {
+		if err := a.metricsServer.Start(); err != nil {
+			log.Error().Err(err).Msg("Failed to start metrics server")
+			// Don't fail agent initialization if metrics server fails
+		} else {
+			log.Info().Int("port", a.config.MetricsPort).Msg("Metrics server started")
+		}
+	}
+
+	// Set agent status to running
+	if a.riskMetrics != nil {
+		a.riskMetrics.AgentStatus.Set(1)
 	}
 
 	log.Info().Msg("Risk agent initialized successfully")
@@ -460,6 +603,22 @@ func (a *RiskAgent) Shutdown(ctx context.Context) error {
 	if a.natsConn != nil {
 		a.natsConn.Close()
 		log.Info().Msg("NATS connection closed")
+	}
+
+	// Shutdown metrics server
+	if a.metricsServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("Error shutting down metrics server")
+		} else {
+			log.Info().Msg("Metrics server shutdown complete")
+		}
+	}
+
+	// Set agent status to stopped
+	if a.riskMetrics != nil {
+		a.riskMetrics.AgentStatus.Set(0)
 	}
 
 	return nil
@@ -729,6 +888,18 @@ func (a *RiskAgent) updateBeliefs(ctx context.Context) error {
 	a.beliefs.lastUpdate = time.Now()
 	a.beliefs.mu.Unlock()
 
+	// Update Prometheus metrics
+	if a.riskMetrics != nil {
+		a.beliefs.mu.RLock()
+		a.riskMetrics.DrawdownCurrent.Set(a.beliefs.currentDrawdown)
+		a.riskMetrics.DrawdownMax.Set(a.beliefs.maxDrawdown)
+		a.riskMetrics.ExposureTotal.Set(a.beliefs.totalExposure)
+		a.riskMetrics.SharpeRatio.Set(a.beliefs.sharpeRatio)
+		a.riskMetrics.OpenPositions.Set(float64(a.beliefs.openPositionCount))
+		a.riskMetrics.LimitsUtilization.Set(a.beliefs.limitsUtilization)
+		a.beliefs.mu.RUnlock()
+	}
+
 	log.Debug().
 		Float64("total_exposure", a.beliefs.totalExposure).
 		Float64("current_drawdown", a.beliefs.currentDrawdown).
@@ -748,14 +919,16 @@ func (a *RiskAgent) loadPortfolioState(ctx context.Context) error {
 	}
 
 	// Query database for open positions
+	// Note: position_side enum is 'LONG', 'SHORT', 'FLAT' (not 'BUY'/'SELL')
+	// Open positions are identified by exit_time IS NULL
 	query := `
 		SELECT symbol,
-		       SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) as net_quantity,
-		       AVG(CASE WHEN side = 'BUY' THEN price ELSE NULL END) as avg_entry_price
+		       SUM(CASE WHEN side = 'LONG' THEN quantity ELSE -quantity END) as net_quantity,
+		       AVG(CASE WHEN side = 'LONG' THEN entry_price ELSE NULL END) as avg_entry_price
 		FROM positions
-		WHERE status = 'OPEN'
+		WHERE exit_time IS NULL
 		GROUP BY symbol
-		HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) > 0
+		HAVING SUM(CASE WHEN side = 'LONG' THEN quantity ELSE -quantity END) > 0
 	`
 
 	rows, err := a.db.Pool().Query(ctx, query)
@@ -1108,6 +1281,9 @@ func (a *RiskAgent) evaluateProposalRuleBased(ctx context.Context, symbol string
 // assessRisk performs comprehensive risk assessment and generates signal
 func (a *RiskAgent) assessRisk(ctx context.Context, symbol string, action string) (string, float64, string) {
 	a.totalDecisions++
+	if a.riskMetrics != nil {
+		a.riskMetrics.DecisionsTotal.Inc()
+	}
 
 	// Default size for assessment
 	proposedSize := a.config.MaxPositionSize * 0.5 // 50% of max
@@ -1127,6 +1303,9 @@ func (a *RiskAgent) assessRisk(ctx context.Context, symbol string, action string
 		confidence = intentions.confidenceScore
 		reasoning = buildVetoReasoning(intentions, a.beliefs, a.config)
 		a.vetoCount++
+		if a.riskMetrics != nil {
+			a.riskMetrics.VetoCount.Inc()
+		}
 
 		log.Warn().
 			Str("symbol", symbol).
@@ -1138,6 +1317,9 @@ func (a *RiskAgent) assessRisk(ctx context.Context, symbol string, action string
 		confidence = intentions.confidenceScore
 		reasoning = buildApprovalReasoning(intentions, a.beliefs, a.config)
 		a.approvalCount++
+		if a.riskMetrics != nil {
+			a.riskMetrics.ApprovalCount.Inc()
+		}
 
 		log.Info().
 			Str("symbol", symbol).

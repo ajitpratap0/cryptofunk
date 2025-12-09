@@ -38,10 +38,10 @@ scrape_configs:
       - targets: ['bifrost:9091']
     metrics_path: '/metrics'
 
-  # NATS Monitoring
+  # NATS Monitoring (via prometheus-nats-exporter)
   - job_name: 'nats'
     static_configs:
-      - targets: ['nats:8222']
+      - targets: ['nats-exporter:7777']
     metrics_path: '/metrics'
 
   # PostgreSQL Exporter (if enabled)

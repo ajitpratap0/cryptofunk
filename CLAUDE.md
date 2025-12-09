@@ -22,11 +22,13 @@ task dev                    # Setup complete dev environment (Docker + DB + migr
 task docker-up              # Start infrastructure (PostgreSQL, Redis, NATS)
 task db-migrate             # Run database migrations
 task build                  # Build all binaries to bin/ directory
+task validate               # Quick validation (format, vet, build)
 
 # Testing
 task test                   # Run all tests with race detector and coverage
 task test-unit              # Run unit tests only (go test -short)
 task test-integration       # Run integration tests (go test -tags=integration)
+task test-fast              # Quick validation checks (skip slow tests)
 task lint                   # Run golangci-lint
 task check                  # Run fmt, lint, test (pre-commit)
 
@@ -38,6 +40,7 @@ task run-orchestrator       # Run MCP orchestrator
 task run-agent-technical    # Run technical analysis agent
 task run-agent-trend        # Run trend following agent
 task run-agent-risk         # Run risk management agent
+task run-telegram-bot       # Run Telegram bot
 task run-paper              # Start paper trading mode (safe)
 task run-live               # Start live trading (CAUTION: real money)
 
@@ -45,6 +48,10 @@ task run-live               # Start live trading (CAUTION: real money)
 task db-status              # Show migration status
 task db-reset               # Reset database (WARNING: destructive)
 task db-shell               # Open PostgreSQL shell
+
+# Git Hooks
+task install-hooks          # Install pre-commit hooks
+task pre-commit             # Run pre-commit checks manually
 
 # Health checks
 curl http://localhost:8081/health        # Orchestrator basic health
@@ -127,6 +134,7 @@ cryptofunk/
 │   │   ├── arbitrage-agent/
 │   │   └── risk-agent/
 │   ├── api/                       # REST/WebSocket API server
+│   ├── telegram-bot/              # Telegram bot for notifications
 │   └── migrate/                   # Database migration CLI
 ├── internal/
 │   ├── agents/                    # Base agent infrastructure
@@ -144,6 +152,7 @@ cryptofunk/
 │   ├── metrics/                   # Prometheus metrics
 │   ├── orchestrator/              # Orchestrator logic (voting, consensus)
 │   ├── risk/                      # Risk management logic
+│   ├── telegram/                  # Telegram bot logic
 │   └── validation/                # Input validation
 ├── migrations/                    # SQL migrations
 │   ├── 001_initial_schema.sql     # Core schema with TimescaleDB + pgvector
@@ -232,24 +241,7 @@ rsiValues := <-rsiChan
 
 ## Testing
 
-```bash
-# All tests with coverage
-task test
-
-# Unit tests only
-task test-unit
-
-# Integration tests (requires Docker)
-task test-integration
-
-# Specific package
-go test -v ./internal/exchange/...
-
-# Specific test with race detection
-go test -v -race -run TestPlaceMarketOrder ./internal/exchange/...
-```
-
-**Build Tags**: Integration tests use `-tags=integration`.
+**Build Tags**: Integration tests use `-tags=integration`. Test commands are in Essential Commands section above.
 
 ## Deployment
 
@@ -267,6 +259,12 @@ kubectl get pods -n cryptofunk
 ```
 
 ## Troubleshooting
+
+**Debug Mode**:
+```bash
+LOG_LEVEL=debug ./bin/orchestrator    # Enable debug logging
+MCP_TRACE=1 ./bin/technical-agent     # Enable MCP message tracing
+```
 
 **MCP Server Not Responding**: Check stderr logs. Ensure no stdout debugging.
 

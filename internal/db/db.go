@@ -11,6 +11,7 @@ import (
 	"github.com/sony/gobreaker"
 
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
+	"github.com/ajitpratap0/cryptofunk/internal/vault"
 )
 
 // DB wraps the PostgreSQL connection pool
@@ -19,12 +20,28 @@ type DB struct {
 	circuitBreaker *risk.CircuitBreakerManager
 }
 
-// New creates a new database connection pool
+// New creates a new database connection pool.
+// It first tries to get credentials from Vault, then falls back to DATABASE_URL env var.
 func New(ctx context.Context) (*DB, error) {
-	// Get database URL from environment
-	databaseURL := os.Getenv("DATABASE_URL")
+	var databaseURL string
+
+	// Try to get database URL from Vault first
+	if vaultClient, err := vault.NewClientFromEnv(); err == nil {
+		if dbConfig, err := vaultClient.GetDatabaseConfig(ctx); err == nil {
+			databaseURL = dbConfig.ConnectionString()
+			log.Info().Msg("Database credentials loaded from Vault")
+		} else {
+			log.Debug().Err(err).Msg("Could not load database config from Vault, falling back to env")
+		}
+	}
+
+	// Fall back to environment variable
 	if databaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL environment variable is not set")
+		databaseURL = os.Getenv("DATABASE_URL")
+	}
+
+	if databaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL not set and Vault credentials not available")
 	}
 
 	// Configure connection pool

@@ -94,3 +94,4 @@ checkpoints/
 
 # Certificate files (generated for local development)
 certs/
+.task/

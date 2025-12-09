@@ -22,42 +22,38 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # CryptoFunk Orchestrator
+  # CryptoFunk Orchestrator (host.docker.internal for Docker->host access)
   - job_name: 'orchestrator'
     static_configs:
-      - targets: ['orchestrator:8081']
+      - targets: ['host.docker.internal:8081']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
   # CryptoFunk API Server
   - job_name: 'api'
     static_configs:
-      - targets: ['api:8080']
+      - targets: ['host.docker.internal:8080']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
-  # MCP Servers
+  # MCP Servers (not currently running as separate processes)
   - job_name: 'mcp-servers'
     static_configs:
-      - targets:
-        - 'market-data-server:9201'
-        - 'technical-indicators-server:9202'
-        - 'risk-analyzer-server:9203'
-        - 'order-executor-server:9204'
+      - targets: []  # MCP servers run as subprocesses, not separate services
     metrics_path: '/metrics'
     scrape_interval: 10s
 
-  # Trading Agents
+  # Trading Agents (actual ports from agent logs)
   - job_name: 'agents'
     static_configs:
       - targets:
-        - 'technical-agent:9101'
-        - 'orderbook-agent:9102'
-        - 'sentiment-agent:9103'
-        - 'trend-agent:9104'
-        - 'reversion-agent:9105'
-        - 'arbitrage-agent:9106'
-        - 'risk-agent:9107'
+        - 'host.docker.internal:9101'  # technical-agent
+        - 'host.docker.internal:9102'  # trend-agent
+        - 'host.docker.internal:9104'  # sentiment-agent
+        - 'host.docker.internal:9105'  # orderbook-agent
+        - 'host.docker.internal:9106'  # reversion-agent
+        - 'host.docker.internal:9107'  # arbitrage-agent
+        - 'host.docker.internal:9108'  # risk-agent
     metrics_path: '/metrics'
     scrape_interval: 15s
 
@@ -71,9 +67,9 @@ scrape_configs:
     static_configs:
       - targets: []  # Add redis-exporter:9121 if deployed
 
-  # NATS server metrics
+  # NATS server metrics (via prometheus-nats-exporter)
   - job_name: 'nats'
     static_configs:
-      - targets: ['nats:8222']
-    metrics_path: '/varz'
+      - targets: ['nats-exporter:7777']
+    metrics_path: '/metrics'
     scrape_interval: 15s

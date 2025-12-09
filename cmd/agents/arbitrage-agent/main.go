@@ -113,8 +113,10 @@ type ArbitrageAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn  *nats.Conn
-	natsTopic string
+	natsConn       *nats.Conn
+	natsTopic      string
+	heartbeatTopic string
+	heartbeatStop  chan struct{}
 
 	// Strategy configuration
 	symbols          []string // Symbols to monitor
@@ -246,6 +248,13 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 		Str("nats_url", natsURL).
 		Str("topic", a.natsTopic).
 		Msg("Connected to NATS")
+
+	// Get heartbeat topic for agent registration with orchestrator
+	a.heartbeatTopic = viper.GetString("strategy_agents.arbitrage.heartbeat_topic")
+	if a.heartbeatTopic == "" {
+		a.heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+	a.heartbeatStop = make(chan struct{})
 
 	// Initialize beliefs about market state
 	a.beliefs.UpdateBelief("agent_status", "initialized", 1.0, "system")
@@ -1070,6 +1079,58 @@ func (a *ArbitrageAgent) buildReasoning(topOpp *ArbitrageOpportunity, allOpps []
 	return reasoning
 }
 
+// startHeartbeat starts the heartbeat publishing goroutine
+func (a *ArbitrageAgent) startHeartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		// Publish immediately on start
+		a.publishHeartbeat()
+		for {
+			select {
+			case <-ticker.C:
+				a.publishHeartbeat()
+			case <-a.heartbeatStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
+}
+
+// publishHeartbeat publishes a heartbeat message to the orchestrator
+func (a *ArbitrageAgent) publishHeartbeat() {
+	heartbeat := struct {
+		AgentName string    `json:"agent_name"`
+		AgentType string    `json:"agent_type"`
+		Timestamp time.Time `json:"timestamp"`
+		Status    string    `json:"status"`
+	}{
+		AgentName: a.GetConfig().Name,
+		AgentType: a.GetConfig().Type,
+		Timestamp: time.Now(),
+		Status:    "healthy",
+	}
+
+	data, err := json.Marshal(heartbeat)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal heartbeat")
+		return
+	}
+
+	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
+		log.Error().Err(err).Msg("Failed to publish heartbeat")
+		return
+	}
+
+	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
+}
+
+// stopHeartbeat stops the heartbeat publishing goroutine
+func (a *ArbitrageAgent) stopHeartbeat() {
+	close(a.heartbeatStop)
+}
+
 // publishSignal publishes signal to NATS
 func (a *ArbitrageAgent) publishSignal(signal *ArbitrageSignal) error {
 	data, err := json.Marshal(signal)
@@ -1149,10 +1210,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = arbitrageConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Arbitrage agent uses port 9107
+	metricsPort := viper.GetInt("strategy_agents.arbitrage.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9103 // Default for arbitrage agent
+		metricsPort = 9107 // Default port for arbitrage-agent
 	}
 
 	// Parse MCP servers
@@ -1262,9 +1324,15 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.startHeartbeat()
+
 	if err := agent.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatal().Err(err).Msg("Agent runtime error")
 	}
+
+	// Stop heartbeat publishing
+	agent.stopHeartbeat()
 
 	if err := agent.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")

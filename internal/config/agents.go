@@ -63,6 +63,7 @@ type RiskAgent struct {
 type MCPServerConnection struct {
 	Name    string   `mapstructure:"name"`
 	Type    string   `mapstructure:"type"`    // "external" or "internal"
+	URL     string   `mapstructure:"url"`     // For external servers (e.g., CoinGecko MCP)
 	Command string   `mapstructure:"command"` // For internal servers
 	Tools   []string `mapstructure:"tools"`   // Tools agent will use
 }

@@ -30,8 +30,10 @@ type SentimentAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn  *nats.Conn
-	natsTopic string
+	natsConn       *nats.Conn
+	natsTopic      string
+	heartbeatTopic string
+	heartbeatStop  chan struct{}
 
 	// HTTP client for API calls
 	httpClient *http.Client
@@ -240,6 +242,12 @@ func NewSentimentAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		newsSourceWeights["cryptopanic"] = 1.0
 	}
 
+	// Get heartbeat topic for agent registration with orchestrator
+	heartbeatTopic := viper.GetString("analysis_agents.sentiment.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
 	// Create HTTP client with timeout
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
@@ -249,6 +257,8 @@ func NewSentimentAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:          baseAgent,
 		natsConn:           nc,
 		natsTopic:          natsTopic,
+		heartbeatTopic:     heartbeatTopic,
+		heartbeatStop:      make(chan struct{}),
 		httpClient:         httpClient,
 		symbol:             symbol,
 		newsAPIKey:         newsAPIKey,
@@ -860,6 +870,58 @@ func max(a, b int) int {
 	return b
 }
 
+// startHeartbeat starts the heartbeat publishing goroutine
+func (a *SentimentAgent) startHeartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		// Publish immediately on start
+		a.publishHeartbeat()
+		for {
+			select {
+			case <-ticker.C:
+				a.publishHeartbeat()
+			case <-a.heartbeatStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
+}
+
+// publishHeartbeat publishes a heartbeat message to the orchestrator
+func (a *SentimentAgent) publishHeartbeat() {
+	heartbeat := struct {
+		AgentName string    `json:"agent_name"`
+		AgentType string    `json:"agent_type"`
+		Timestamp time.Time `json:"timestamp"`
+		Status    string    `json:"status"`
+	}{
+		AgentName: a.GetConfig().Name,
+		AgentType: a.GetConfig().Type,
+		Timestamp: time.Now(),
+		Status:    "healthy",
+	}
+
+	data, err := json.Marshal(heartbeat)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal heartbeat")
+		return
+	}
+
+	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
+		log.Error().Err(err).Msg("Failed to publish heartbeat")
+		return
+	}
+
+	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
+}
+
+// stopHeartbeat stops the heartbeat publishing goroutine
+func (a *SentimentAgent) stopHeartbeat() {
+	close(a.heartbeatStop)
+}
+
 func main() {
 	// Configure logging to stderr (stdout reserved for MCP protocol)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -899,10 +961,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = sentimentConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port from global config
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Sentiment agent uses port 9104
+	metricsPort := viper.GetInt("analysis_agents.sentiment.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9103 // Default port for sentiment agent
+		metricsPort = 9104 // Default port for sentiment-agent
 	}
 
 	// Get MCP server configurations (if any)
@@ -974,6 +1037,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.startHeartbeat()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -993,6 +1059,9 @@ func main() {
 			log.Error().Err(err).Msg("Agent run error")
 		}
 	}
+
+	// Stop heartbeat publishing
+	agent.stopHeartbeat()
 
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

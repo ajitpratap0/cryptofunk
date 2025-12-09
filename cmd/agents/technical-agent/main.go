@@ -32,8 +32,10 @@ type TechnicalAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn  *nats.Conn
-	natsTopic string
+	natsConn       *nats.Conn
+	natsTopic      string
+	heartbeatTopic string
+	heartbeatStop  chan struct{}
 
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
@@ -211,6 +213,11 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		natsTopic = "agents.analysis.technical" // Default
 	}
 
+	heartbeatTopic := viper.GetString("risk_agent.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
 	// Connect to NATS
 	log.Info().Str("url", natsURL).Str("topic", natsTopic).Msg("Connecting to NATS")
 	nc, err := nats.Connect(natsURL)
@@ -292,6 +299,8 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:         baseAgent,
 		natsConn:          nc,
 		natsTopic:         natsTopic,
+		heartbeatTopic:    heartbeatTopic,
+		heartbeatStop:     make(chan struct{}),
 		llmClient:         llmClient,
 		promptBuilder:     promptBuilder,
 		useLLM:            useLLM,
@@ -304,6 +313,59 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		confidenceWeights: getMapFloatConfig(agentConfig, "confidence_weights"),
 		beliefs:           NewBeliefBase(),
 	}, nil
+}
+
+// startHeartbeat starts the heartbeat publishing goroutine
+func (a *TechnicalAgent) startHeartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		// Publish immediately on start
+		a.publishHeartbeat()
+
+		for {
+			select {
+			case <-ticker.C:
+				a.publishHeartbeat()
+			case <-a.heartbeatStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
+}
+
+// publishHeartbeat publishes a single heartbeat message
+func (a *TechnicalAgent) publishHeartbeat() {
+	heartbeat := struct {
+		AgentName string    `json:"agent_name"`
+		AgentType string    `json:"agent_type"`
+		Timestamp time.Time `json:"timestamp"`
+		Status    string    `json:"status"`
+	}{
+		AgentName: a.GetConfig().Name,
+		AgentType: a.GetConfig().Type,
+		Timestamp: time.Now(),
+		Status:    "healthy",
+	}
+
+	data, err := json.Marshal(heartbeat)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal heartbeat")
+		return
+	}
+
+	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
+		log.Error().Err(err).Msg("Failed to publish heartbeat")
+		return
+	}
+
+	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
+}
+
+// stopHeartbeat stops the heartbeat publishing
+func (a *TechnicalAgent) stopHeartbeat() {
+	close(a.heartbeatStop)
 }
 
 // updateBeliefs updates the agent's beliefs based on current market observations
@@ -1740,10 +1802,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = technicalConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port from global config
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Technical agent uses port 9101
+	metricsPort := viper.GetInt("analysis_agents.technical.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9101 // Default port
+		metricsPort = 9101 // Default port for technical-agent
 	}
 
 	// Get MCP server configurations
@@ -1834,6 +1897,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing to orchestrator
+	agent.startHeartbeat()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -1856,6 +1922,9 @@ func main() {
 
 	// Cancel main context to stop agent operations
 	cancel()
+
+	// Stop heartbeat publishing
+	agent.stopHeartbeat()
 
 	// Graceful shutdown with separate timeout context
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

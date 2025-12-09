@@ -39,8 +39,10 @@ type OrderBookAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn  *nats.Conn
-	natsTopic string
+	natsConn       *nats.Conn
+	natsTopic      string
+	heartbeatTopic string
+	heartbeatStop  chan struct{}
 
 	// Configuration
 	symbol               string
@@ -205,6 +207,12 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	log.Info().Msg("Successfully connected to NATS")
 
+	// Get heartbeat topic for agent registration with orchestrator
+	heartbeatTopic := viper.GetString("analysis_agents.orderbook.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
 	// Parse configuration
 	symbol := getStringConfig(agentConfig, "symbol", "bitcoin")
 	depthLevels := getIntConfig(agentConfig, "depth_levels", 20)
@@ -222,6 +230,8 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:            baseAgent,
 		natsConn:             nc,
 		natsTopic:            natsTopic,
+		heartbeatTopic:       heartbeatTopic,
+		heartbeatStop:        make(chan struct{}),
 		symbol:               symbol,
 		depthLevels:          depthLevels,
 		largeOrderMultiplier: largeOrderMultiplier,
@@ -831,6 +841,58 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 	return finalSignal, finalConfidence
 }
 
+// startHeartbeat starts the heartbeat publishing goroutine
+func (a *OrderBookAgent) startHeartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		// Publish immediately on start
+		a.publishHeartbeat()
+		for {
+			select {
+			case <-ticker.C:
+				a.publishHeartbeat()
+			case <-a.heartbeatStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
+}
+
+// publishHeartbeat publishes a heartbeat message to the orchestrator
+func (a *OrderBookAgent) publishHeartbeat() {
+	heartbeat := struct {
+		AgentName string    `json:"agent_name"`
+		AgentType string    `json:"agent_type"`
+		Timestamp time.Time `json:"timestamp"`
+		Status    string    `json:"status"`
+	}{
+		AgentName: a.GetConfig().Name,
+		AgentType: a.GetConfig().Type,
+		Timestamp: time.Now(),
+		Status:    "healthy",
+	}
+
+	data, err := json.Marshal(heartbeat)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal heartbeat")
+		return
+	}
+
+	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
+		log.Error().Err(err).Msg("Failed to publish heartbeat")
+		return
+	}
+
+	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
+}
+
+// stopHeartbeat stops the heartbeat publishing goroutine
+func (a *OrderBookAgent) stopHeartbeat() {
+	close(a.heartbeatStop)
+}
+
 // publishSignal publishes an order book signal to NATS
 func (a *OrderBookAgent) publishSignal(ctx context.Context, signal *OrderBookSignal) error {
 	data, err := json.Marshal(signal)
@@ -980,10 +1042,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = orderbookConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Orderbook agent uses port 9105
+	metricsPort := viper.GetInt("analysis_agents.orderbook.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9102 // Default port for orderbook agent
+		metricsPort = 9105 // Default port for orderbook-agent
 	}
 
 	// Get MCP server configurations
@@ -1051,6 +1114,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.startHeartbeat()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -1070,6 +1136,9 @@ func main() {
 			log.Error().Err(err).Msg("Agent run error")
 		}
 	}
+
+	// Stop heartbeat publishing
+	agent.stopHeartbeat()
 
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

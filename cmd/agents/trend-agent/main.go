@@ -30,8 +30,10 @@ type TrendAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn  *nats.Conn
-	natsTopic string
+	natsConn       *nats.Conn
+	natsTopic      string
+	heartbeatTopic string
+	heartbeatStop  chan struct{}
 
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
@@ -285,10 +287,18 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 		}
 	}
 
+	// Get heartbeat topic for agent registration with orchestrator
+	heartbeatTopic := viper.GetString("strategy_agents.trend.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
 	return &TrendAgent{
 		BaseAgent:       baseAgent,
 		natsConn:        nc,
 		natsTopic:       natsTopic,
+		heartbeatTopic:  heartbeatTopic,
+		heartbeatStop:   make(chan struct{}),
 		llmClient:       llmClient,
 		promptBuilder:   promptBuilder,
 		useLLM:          useLLM,
@@ -1081,6 +1091,58 @@ func (a *TrendAgent) publishSignal(ctx context.Context, signal *TrendSignal) err
 	return nil
 }
 
+// startHeartbeat starts the heartbeat publishing goroutine
+func (a *TrendAgent) startHeartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		// Publish immediately on start
+		a.publishHeartbeat()
+		for {
+			select {
+			case <-ticker.C:
+				a.publishHeartbeat()
+			case <-a.heartbeatStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
+}
+
+// publishHeartbeat publishes a heartbeat message to the orchestrator
+func (a *TrendAgent) publishHeartbeat() {
+	heartbeat := struct {
+		AgentName string    `json:"agent_name"`
+		AgentType string    `json:"agent_type"`
+		Timestamp time.Time `json:"timestamp"`
+		Status    string    `json:"status"`
+	}{
+		AgentName: a.GetConfig().Name,
+		AgentType: a.GetConfig().Type,
+		Timestamp: time.Now(),
+		Status:    "healthy",
+	}
+
+	data, err := json.Marshal(heartbeat)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal heartbeat")
+		return
+	}
+
+	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
+		log.Error().Err(err).Msg("Failed to publish heartbeat")
+		return
+	}
+
+	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
+}
+
+// stopHeartbeat stops the heartbeat publishing goroutine
+func (a *TrendAgent) stopHeartbeat() {
+	close(a.heartbeatStop)
+}
+
 // getSymbolsToAnalyze returns symbols from config
 func (a *TrendAgent) getSymbolsToAnalyze() []string {
 	if len(a.symbols) > 0 {
@@ -1217,9 +1279,11 @@ func main() {
 
 	agentConfig.Config = trendConfig.Get("config").(map[string]interface{})
 
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Trend agent uses port 9102
+	metricsPort := viper.GetInt("strategy_agents.trend.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9103
+		metricsPort = 9102 // Default port for trend-agent
 	}
 
 	// Get MCP servers
@@ -1293,6 +1357,9 @@ func main() {
 		log.Warn().Err(err).Msg("Failed to setup control subscription - pause/resume will not work")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.startHeartbeat()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -1316,6 +1383,9 @@ func main() {
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// Stop heartbeat publishing
+	agent.stopHeartbeat()
 
 	if err := agent.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")

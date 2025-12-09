@@ -8,7 +8,15 @@ global:
   default_step_interval: "30s"  # Default decision cycle interval
   default_confidence_threshold: 0.7
   enable_metrics: true
-  metrics_port: 9101  # Prometheus metrics port for agents
+  # Note: Each agent should have its own metrics_port to avoid conflicts
+  # See individual agent sections for port assignments:
+  # - technical-agent: 9101
+  # - trend-agent: 9102
+  # - risk-agent: 9103
+  # - sentiment-agent: 9104
+  # - orderbook-agent: 9105
+  # - reversion-agent: 9106
+  # - arbitrage-agent: 9107
 
 # ================================================================================
 # ANALYSIS AGENTS
@@ -79,7 +87,7 @@ analysis_agents:
         volume: 0.10
 
   orderbook:
-    enabled: false  # Phase 3.3 - not yet implemented
+    enabled: true  # Phase 3.3 - orderbook analysis
     name: "orderbook-agent"
     type: "analysis"
     version: "1.0.0"
@@ -214,7 +222,7 @@ strategy_agents:
       vote_weight: 0.4  # Weight in consensus voting
 
   mean_reversion:
-    enabled: false  # Phase 3.6 - not yet implemented
+    enabled: true  # Phase 3.6 - mean reversion strategy
     name: "reversion-agent"
     type: "strategy"
     version: "1.0.0"
@@ -252,7 +260,7 @@ strategy_agents:
       vote_weight: 0.3
 
   arbitrage:
-    enabled: false  # Phase 3.7 - not yet implemented
+    enabled: true  # Phase 3.7 - arbitrage strategy
     name: "arbitrage-agent"
     type: "strategy"
     version: "1.0.0"
@@ -293,6 +301,29 @@ risk_agent:
   name: "risk-agent"
   type: "risk"
   version: "1.0.0"
+
+  # Agent identification (required by RiskAgentConfig)
+  agent_name: "risk-agent"
+  agent_type: "risk"
+  weight: 1.0
+
+  # NATS configuration
+  nats_url: "nats://localhost:4222"
+  signal_topic: "cryptofunk.agent.signals"
+  heartbeat_topic: "cryptofunk.agent.heartbeat"
+  decision_topic: "cryptofunk.orchestrator.decisions"
+  heartbeat_interval: "30s"
+
+  # Risk management parameters (flat fields for RiskAgentConfig struct)
+  max_position_size: 10000.0
+  max_total_exposure: 50000.0
+  max_concentration: 0.25
+  max_open_positions: 5
+  max_drawdown_percent: 20.0
+  min_sharpe_ratio: 1.0
+  kelly_fraction: 0.25
+  stop_loss_multiplier: 2.0
+  risk_free_rate: 0.03
 
   mcp_servers:
     - name: "risk_analyzer"
