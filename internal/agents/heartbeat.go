@@ -3,6 +3,7 @@ package agents
 
 import (
 	"encoding/json"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -41,7 +42,7 @@ type HeartbeatPublisher struct {
 	agentType string
 	log       zerolog.Logger
 	stopChan  chan struct{}
-	running   bool
+	running   atomic.Bool
 }
 
 // NewHeartbeatPublisher creates a new heartbeat publisher
@@ -65,7 +66,7 @@ func (h *HeartbeatPublisher) SetNATSConn(conn *nats.Conn) {
 // Start begins publishing heartbeat messages at the configured interval
 // The goroutine will publish immediately on start, then at the configured interval
 func (h *HeartbeatPublisher) Start() {
-	if h.running {
+	if h.running.Load() {
 		h.log.Warn().Msg("Heartbeat publisher already running")
 		return
 	}
@@ -74,7 +75,7 @@ func (h *HeartbeatPublisher) Start() {
 		return
 	}
 
-	h.running = true
+	h.running.Store(true)
 	ticker := time.NewTicker(h.config.Interval)
 
 	go func() {
@@ -87,7 +88,7 @@ func (h *HeartbeatPublisher) Start() {
 				h.publish()
 			case <-h.stopChan:
 				ticker.Stop()
-				h.running = false
+				h.running.Store(false)
 				h.log.Info().Str("topic", h.config.Topic).Msg("Heartbeat publishing stopped")
 				return
 			}
@@ -130,7 +131,7 @@ func (h *HeartbeatPublisher) publish() {
 
 // Stop stops the heartbeat publisher
 func (h *HeartbeatPublisher) Stop() {
-	if !h.running {
+	if !h.running.Load() {
 		return
 	}
 	close(h.stopChan)
@@ -138,7 +139,7 @@ func (h *HeartbeatPublisher) Stop() {
 
 // IsRunning returns whether the heartbeat publisher is currently running
 func (h *HeartbeatPublisher) IsRunning() bool {
-	return h.running
+	return h.running.Load()
 }
 
 // PublishNow immediately publishes a heartbeat message (useful for status updates)
