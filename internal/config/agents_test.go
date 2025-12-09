@@ -43,10 +43,10 @@ func TestAnalysisAgentConfig(t *testing.T) {
 	assert.Equal(t, "internal", technicalAgent.MCPServers[1].Type)
 	assert.Equal(t, "./bin/technical-indicators-server", technicalAgent.MCPServers[1].Command)
 
-	// Test orderbook agent (should be disabled)
+	// Test orderbook agent (now enabled for testing)
 	orderbookAgent, ok := cfg.AnalysisAgents["orderbook"]
 	require.True(t, ok)
-	assert.False(t, orderbookAgent.Enabled)
+	assert.True(t, orderbookAgent.Enabled)
 	assert.Equal(t, "orderbook-agent", orderbookAgent.Name)
 	assert.Equal(t, "10s", orderbookAgent.StepInterval)
 
@@ -81,16 +81,16 @@ func TestStrategyAgentConfig(t *testing.T) {
 	assert.Equal(t, "coingecko", trendAgent.MCPServers[0].Name)
 	assert.Equal(t, "technical_indicators", trendAgent.MCPServers[1].Name)
 
-	// Test mean reversion agent (should be disabled)
+	// Test mean reversion agent (now enabled for testing)
 	reversionAgent, ok := cfg.StrategyAgents["mean_reversion"]
 	require.True(t, ok)
-	assert.False(t, reversionAgent.Enabled)
+	assert.True(t, reversionAgent.Enabled)
 	assert.Equal(t, "reversion-agent", reversionAgent.Name)
 
-	// Test arbitrage agent (should be disabled)
+	// Test arbitrage agent (now enabled for testing)
 	arbitrageAgent, ok := cfg.StrategyAgents["arbitrage"]
 	require.True(t, ok)
-	assert.False(t, arbitrageAgent.Enabled)
+	assert.True(t, arbitrageAgent.Enabled)
 	assert.Equal(t, "arbitrage-agent", arbitrageAgent.Name)
 	assert.Equal(t, "5s", arbitrageAgent.StepInterval)
 }
@@ -217,17 +217,17 @@ func TestGetEnabledAgents(t *testing.T) {
 	cfg, err := LoadAgentConfig("../../configs/agents.yaml")
 	require.NoError(t, err)
 
-	// Test enabled analysis agents
+	// Test enabled analysis agents (all now enabled for testing)
 	enabledAnalysis := cfg.GetEnabledAnalysisAgents()
 	assert.Contains(t, enabledAnalysis, "technical")
-	assert.NotContains(t, enabledAnalysis, "orderbook") // disabled
-	assert.Contains(t, enabledAnalysis, "sentiment")    // enabled (Phase 3.4 complete)
+	assert.Contains(t, enabledAnalysis, "orderbook") // now enabled
+	assert.Contains(t, enabledAnalysis, "sentiment") // enabled (Phase 3.4 complete)
 
-	// Test enabled strategy agents (key changed from "trend_following" to "trend")
+	// Test enabled strategy agents (all now enabled for testing)
 	enabledStrategy := cfg.GetEnabledStrategyAgents()
 	assert.Contains(t, enabledStrategy, "trend")
-	assert.NotContains(t, enabledStrategy, "mean_reversion") // disabled
-	assert.NotContains(t, enabledStrategy, "arbitrage")      // disabled
+	assert.Contains(t, enabledStrategy, "mean_reversion") // now enabled
+	assert.Contains(t, enabledStrategy, "arbitrage")      // now enabled
 
 	// Test risk agent
 	assert.True(t, cfg.IsRiskAgentEnabled())
