@@ -102,6 +102,24 @@ Monitoring: Prometheus + Grafana
 
 **Circuit Breakers**: System halts trading on max drawdown, high volatility, or excessive order rate.
 
+### Port Allocation Strategy
+
+All services use fixed ports to avoid conflicts and enable Prometheus scraping:
+
+| Port  | Service            | Purpose                    |
+|-------|--------------------|-----------------------------|
+| 8080  | API Server         | REST/WebSocket API          |
+| 8081  | Orchestrator       | MCP coordination + metrics  |
+| 9101  | technical-agent    | Technical analysis metrics  |
+| 9102  | trend-agent        | Trend following metrics     |
+| 9104  | sentiment-agent    | Sentiment analysis metrics  |
+| 9105  | orderbook-agent    | Order book analysis metrics |
+| 9106  | reversion-agent    | Mean reversion metrics      |
+| 9107  | arbitrage-agent    | Arbitrage strategy metrics  |
+| 9108  | risk-agent         | Risk management metrics     |
+
+**Note**: Port 9103 is reserved/skipped. Prometheus scrape config in `deployments/prometheus/prometheus.yml` must match these ports.
+
 ## Technology Stack
 
 - **Language**: Go 1.24+ (requires generics for cinar/indicator v2)

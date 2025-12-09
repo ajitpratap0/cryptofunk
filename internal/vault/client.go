@@ -247,9 +247,9 @@ type DatabaseConfig struct {
 }
 
 // GetDatabaseConfig retrieves database configuration from Vault.
-// Uses the default 'secret' mount with path cryptofunk/database
+// Uses the 'cryptofunk' KV v2 mount with path cryptofunk/data/database
 func (c *Client) GetDatabaseConfig(ctx context.Context) (*DatabaseConfig, error) {
-	data, err := c.GetSecret(ctx, "secret/data/cryptofunk/database")
+	data, err := c.GetSecret(ctx, "cryptofunk/data/database")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database secret: %w", err)
 	}

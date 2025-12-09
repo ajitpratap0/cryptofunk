@@ -1,11 +1,40 @@
 #!/bin/bash
 # CryptoFunk Vault Initialization Script
 # This script initializes Vault with secrets for local development
+#
+# ============================================================================
+# SECURITY WARNING - LOCAL DEVELOPMENT ONLY
+# ============================================================================
+# This script contains HARDCODED CREDENTIALS intended ONLY for local
+# development with Docker Compose. These credentials MUST NOT be used in
+# production environments.
+#
+# For production deployment:
+#   1. Use Vault AppRole or Kubernetes auth instead of static tokens
+#   2. Generate unique, strong credentials for each service
+#   3. Use external secrets management (Vault agent, external-secrets, etc.)
+#   4. Enable Vault audit logging
+#   5. Use TLS for Vault communication
+#   6. Implement proper secret rotation
+#
+# The default dev token below is predictable and should NEVER be used
+# outside of local development.
+# ============================================================================
 
 set -e
 
 VAULT_ADDR="${VAULT_ADDR:-http://localhost:8200}"
 VAULT_TOKEN="${VAULT_DEV_TOKEN:-cryptofunk-dev-token}"
+
+# Warn if running in non-development context
+if [[ -z "${CRYPTOFUNK_DEV_MODE}" ]]; then
+    echo "============================================================"
+    echo "WARNING: This script uses hardcoded development credentials."
+    echo "Set CRYPTOFUNK_DEV_MODE=1 to suppress this warning."
+    echo "For production, use proper Vault initialization procedures."
+    echo "============================================================"
+    echo ""
+fi
 
 echo "=== CryptoFunk Vault Initialization ==="
 echo "Vault Address: $VAULT_ADDR"
