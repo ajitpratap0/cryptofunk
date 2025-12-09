@@ -39,10 +39,9 @@ type OrderBookAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn       *nats.Conn
-	natsTopic      string
-	heartbeatTopic string
-	heartbeatStop  chan struct{}
+	natsConn  *nats.Conn
+	natsTopic string
+	heartbeat *agents.HeartbeatPublisher
 
 	// Configuration
 	symbol               string
@@ -213,6 +212,19 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
 	}
 
+	// Create heartbeat publisher
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+
 	// Parse configuration
 	symbol := getStringConfig(agentConfig, "symbol", "bitcoin")
 	depthLevels := getIntConfig(agentConfig, "depth_levels", 20)
@@ -230,8 +242,7 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:            baseAgent,
 		natsConn:             nc,
 		natsTopic:            natsTopic,
-		heartbeatTopic:       heartbeatTopic,
-		heartbeatStop:        make(chan struct{}),
+		heartbeat:            heartbeatPublisher,
 		symbol:               symbol,
 		depthLevels:          depthLevels,
 		largeOrderMultiplier: largeOrderMultiplier,
@@ -841,58 +852,6 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 	return finalSignal, finalConfidence
 }
 
-// startHeartbeat starts the heartbeat publishing goroutine
-func (a *OrderBookAgent) startHeartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
-	go func() {
-		// Publish immediately on start
-		a.publishHeartbeat()
-		for {
-			select {
-			case <-ticker.C:
-				a.publishHeartbeat()
-			case <-a.heartbeatStop:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
-}
-
-// publishHeartbeat publishes a heartbeat message to the orchestrator
-func (a *OrderBookAgent) publishHeartbeat() {
-	heartbeat := struct {
-		AgentName string    `json:"agent_name"`
-		AgentType string    `json:"agent_type"`
-		Timestamp time.Time `json:"timestamp"`
-		Status    string    `json:"status"`
-	}{
-		AgentName: a.GetConfig().Name,
-		AgentType: a.GetConfig().Type,
-		Timestamp: time.Now(),
-		Status:    "healthy",
-	}
-
-	data, err := json.Marshal(heartbeat)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to marshal heartbeat")
-		return
-	}
-
-	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
-		log.Error().Err(err).Msg("Failed to publish heartbeat")
-		return
-	}
-
-	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
-}
-
-// stopHeartbeat stops the heartbeat publishing goroutine
-func (a *OrderBookAgent) stopHeartbeat() {
-	close(a.heartbeatStop)
-}
-
 // publishSignal publishes an order book signal to NATS
 func (a *OrderBookAgent) publishSignal(ctx context.Context, signal *OrderBookSignal) error {
 	data, err := json.Marshal(signal)
@@ -1115,7 +1074,7 @@ func main() {
 	}
 
 	// Start heartbeat publishing for orchestrator registration
-	agent.startHeartbeat()
+	agent.heartbeat.Start()
 
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -1138,7 +1097,7 @@ func main() {
 	}
 
 	// Stop heartbeat publishing
-	agent.stopHeartbeat()
+	agent.heartbeat.Stop()
 
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

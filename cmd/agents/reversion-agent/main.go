@@ -114,10 +114,9 @@ type ReversionAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn       *nats.Conn
-	natsTopic      string
-	heartbeatTopic string
-	heartbeatStop  chan struct{}
+	natsConn  *nats.Conn
+	natsTopic string
+	heartbeat *agents.HeartbeatPublisher
 
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
@@ -220,6 +219,19 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
 	}
 
+	// Create heartbeat publisher
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+
 	// Extract strategy parameters from config (with defaults)
 	rsiPeriod := getIntFromConfig(agentConfig, "rsi_period", 14)
 	rsiOversold := getFloatFromConfig(agentConfig, "entry_conditions.rsi_oversold", 30.0)
@@ -310,8 +322,7 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:            baseAgent,
 		natsConn:             nc,
 		natsTopic:            natsTopic,
-		heartbeatTopic:       heartbeatTopic,
-		heartbeatStop:        make(chan struct{}),
+		heartbeat:            heartbeatPublisher,
 		llmClient:            llmClient,
 		promptBuilder:        promptBuilder,
 		useLLM:               useLLM,
@@ -1295,58 +1306,6 @@ func (a *ReversionAgent) generateTradingSignal(
 	return tradingSignal
 }
 
-// startHeartbeat starts the heartbeat publishing goroutine
-func (a *ReversionAgent) startHeartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
-	go func() {
-		// Publish immediately on start
-		a.publishHeartbeat()
-		for {
-			select {
-			case <-ticker.C:
-				a.publishHeartbeat()
-			case <-a.heartbeatStop:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
-}
-
-// publishHeartbeat publishes a heartbeat message to the orchestrator
-func (a *ReversionAgent) publishHeartbeat() {
-	heartbeat := struct {
-		AgentName string    `json:"agent_name"`
-		AgentType string    `json:"agent_type"`
-		Timestamp time.Time `json:"timestamp"`
-		Status    string    `json:"status"`
-	}{
-		AgentName: a.GetConfig().Name,
-		AgentType: a.GetConfig().Type,
-		Timestamp: time.Now(),
-		Status:    "healthy",
-	}
-
-	data, err := json.Marshal(heartbeat)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to marshal heartbeat")
-		return
-	}
-
-	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
-		log.Error().Err(err).Msg("Failed to publish heartbeat")
-		return
-	}
-
-	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
-}
-
-// stopHeartbeat stops the heartbeat publishing goroutine
-func (a *ReversionAgent) stopHeartbeat() {
-	close(a.heartbeatStop)
-}
-
 // publishSignal publishes a trading signal to NATS
 func (a *ReversionAgent) publishSignal(ctx context.Context, signal *ReversionSignal) error {
 	data, err := json.Marshal(signal)
@@ -1519,7 +1478,7 @@ func main() {
 	}
 
 	// Start heartbeat publishing for orchestrator registration
-	agent.startHeartbeat()
+	agent.heartbeat.Start()
 
 	log.Info().Str("name", agent.GetName()).Msg("Mean Reversion Agent started")
 
@@ -1542,7 +1501,7 @@ func main() {
 	log.Info().Msg("Shutdown signal received, gracefully stopping...")
 
 	// Stop heartbeat publishing
-	agent.stopHeartbeat()
+	agent.heartbeat.Stop()
 
 	// Cancel run context
 	runCancel()

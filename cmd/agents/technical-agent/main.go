@@ -32,10 +32,11 @@ type TechnicalAgent struct {
 	*agents.BaseAgent
 
 	// NATS connection for signal publishing
-	natsConn       *nats.Conn
-	natsTopic      string
-	heartbeatTopic string
-	heartbeatStop  chan struct{}
+	natsConn  *nats.Conn
+	natsTopic string
+
+	// Heartbeat publisher (shared component)
+	heartbeat *agents.HeartbeatPublisher
 
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
@@ -227,6 +228,19 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	log.Info().Msg("Successfully connected to NATS")
 
+	// Create heartbeat publisher using shared component
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+
 	// Initialize LLM client if enabled
 	var llmClient llm.LLMClient
 	var promptBuilder *llm.PromptBuilder
@@ -299,8 +313,7 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:         baseAgent,
 		natsConn:          nc,
 		natsTopic:         natsTopic,
-		heartbeatTopic:    heartbeatTopic,
-		heartbeatStop:     make(chan struct{}),
+		heartbeat:         heartbeatPublisher,
 		llmClient:         llmClient,
 		promptBuilder:     promptBuilder,
 		useLLM:            useLLM,
@@ -313,59 +326,6 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		confidenceWeights: getMapFloatConfig(agentConfig, "confidence_weights"),
 		beliefs:           NewBeliefBase(),
 	}, nil
-}
-
-// startHeartbeat starts the heartbeat publishing goroutine
-func (a *TechnicalAgent) startHeartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
-	go func() {
-		// Publish immediately on start
-		a.publishHeartbeat()
-
-		for {
-			select {
-			case <-ticker.C:
-				a.publishHeartbeat()
-			case <-a.heartbeatStop:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-	log.Info().Str("topic", a.heartbeatTopic).Msg("Heartbeat publishing started")
-}
-
-// publishHeartbeat publishes a single heartbeat message
-func (a *TechnicalAgent) publishHeartbeat() {
-	heartbeat := struct {
-		AgentName string    `json:"agent_name"`
-		AgentType string    `json:"agent_type"`
-		Timestamp time.Time `json:"timestamp"`
-		Status    string    `json:"status"`
-	}{
-		AgentName: a.GetConfig().Name,
-		AgentType: a.GetConfig().Type,
-		Timestamp: time.Now(),
-		Status:    "healthy",
-	}
-
-	data, err := json.Marshal(heartbeat)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to marshal heartbeat")
-		return
-	}
-
-	if err := a.natsConn.Publish(a.heartbeatTopic, data); err != nil {
-		log.Error().Err(err).Msg("Failed to publish heartbeat")
-		return
-	}
-
-	log.Debug().Str("topic", a.heartbeatTopic).Msg("Heartbeat published")
-}
-
-// stopHeartbeat stops the heartbeat publishing
-func (a *TechnicalAgent) stopHeartbeat() {
-	close(a.heartbeatStop)
 }
 
 // updateBeliefs updates the agent's beliefs based on current market observations
@@ -1897,8 +1857,8 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
-	// Start heartbeat publishing to orchestrator
-	agent.startHeartbeat()
+	// Start heartbeat publishing to orchestrator (using shared component)
+	agent.heartbeat.Start()
 
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -1924,7 +1884,7 @@ func main() {
 	cancel()
 
 	// Stop heartbeat publishing
-	agent.stopHeartbeat()
+	agent.heartbeat.Stop()
 
 	// Graceful shutdown with separate timeout context
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

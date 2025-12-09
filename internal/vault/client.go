@@ -1,5 +1,25 @@
 // Package vault provides a client for HashiCorp Vault integration.
 // It enables CryptoFunk services to retrieve secrets from Vault.
+//
+// ============================================================================
+// SECURITY NOTICE
+// ============================================================================
+// This client supports both development and production Vault configurations.
+//
+// For LOCAL DEVELOPMENT:
+//   - Uses VAULT_DEV_TOKEN environment variable (predictable, insecure)
+//   - Vault runs in dev mode with no authentication required
+//   - Secrets are stored in memory and lost on restart
+//
+// For PRODUCTION:
+//   - Use VAULT_TOKEN with proper AppRole/Kubernetes authentication
+//   - Enable TLS for Vault communication (VAULT_ADDR should use https://)
+//   - Implement secret rotation and lease management
+//   - Enable Vault audit logging
+//   - Use Vault Agent for automatic token renewal
+//
+// NEVER use development tokens in production environments.
+// ============================================================================
 package vault
 
 import (
@@ -9,11 +29,21 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/rs/zerolog/log"
 )
+
+// Known insecure development tokens that should trigger warnings.
+var insecureDevTokens = map[string]bool{
+	"cryptofunk-dev-token": true,
+	"root":                 true,
+	"dev":                  true,
+	"test":                 true,
+}
 
 // Client represents a Vault client for retrieving secrets.
 type Client struct {
@@ -70,15 +100,42 @@ func NewClient(cfg Config) (*Client, error) {
 		}
 	}
 
+	tokenSource := "config"
 	if cfg.Token == "" {
 		cfg.Token = os.Getenv("VAULT_TOKEN")
-		if cfg.Token == "" {
+		if cfg.Token != "" {
+			tokenSource = "VAULT_TOKEN"
+		} else {
 			cfg.Token = os.Getenv("VAULT_DEV_TOKEN")
+			if cfg.Token != "" {
+				tokenSource = "VAULT_DEV_TOKEN"
+			}
 		}
 	}
 
 	if cfg.Token == "" {
 		return nil, fmt.Errorf("vault token is required (set VAULT_TOKEN or VAULT_DEV_TOKEN)")
+	}
+
+	// Security warnings for development tokens
+	if insecureDevTokens[cfg.Token] {
+		log.Warn().
+			Str("token_source", tokenSource).
+			Str("vault_addr", cfg.Address).
+			Msg("SECURITY WARNING: Using known insecure development token. DO NOT use in production!")
+	}
+
+	// Warn if using HTTP instead of HTTPS in non-localhost environments
+	if strings.HasPrefix(cfg.Address, "http://") && !strings.Contains(cfg.Address, "localhost") && !strings.Contains(cfg.Address, "127.0.0.1") {
+		log.Warn().
+			Str("vault_addr", cfg.Address).
+			Msg("SECURITY WARNING: Using unencrypted HTTP connection to non-localhost Vault. Use HTTPS in production!")
+	}
+
+	// Warn if using VAULT_DEV_TOKEN environment variable
+	if tokenSource == "VAULT_DEV_TOKEN" {
+		log.Warn().
+			Msg("Using VAULT_DEV_TOKEN environment variable. This is only appropriate for local development.")
 	}
 
 	if cfg.CacheTTL == 0 {
@@ -88,6 +145,13 @@ func NewClient(cfg Config) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
+
+	log.Info().
+		Str("vault_addr", cfg.Address).
+		Str("token_source", tokenSource).
+		Dur("cache_ttl", cfg.CacheTTL).
+		Dur("timeout", cfg.Timeout).
+		Msg("Vault client initialized")
 
 	return &Client{
 		address: cfg.Address,
@@ -105,14 +169,22 @@ func NewClient(cfg Config) (*Client, error) {
 func (c *Client) GetSecret(ctx context.Context, path string) (map[string]interface{}, error) {
 	// Check cache first
 	if cached := c.getCached(path); cached != nil {
+		log.Debug().Str("path", path).Msg("Vault secret retrieved from cache")
 		return cached, nil
 	}
+
+	// Record cache miss
+	metrics.RecordVaultCacheMiss()
+
+	// Track request duration
+	startTime := time.Now()
 
 	// Build the URL for KV v2 (note: data is in the path for KV v2)
 	url := fmt.Sprintf("%s/v1/%s", c.address, path)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("Failed to create Vault request")
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -120,34 +192,64 @@ func (c *Client) GetSecret(ctx context.Context, path string) (map[string]interfa
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		durationMs := float64(time.Since(startTime).Milliseconds())
+		metrics.RecordVaultRequest(durationMs, err)
+		log.Warn().Err(err).Str("path", path).Str("vault_addr", c.address).Msg("Failed to fetch secret from Vault - is Vault running?")
 		return nil, fmt.Errorf("failed to fetch secret from vault: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		durationMs := float64(time.Since(startTime).Milliseconds())
+		metrics.RecordVaultRequest(durationMs, err)
+		log.Error().Err(err).Str("path", path).Msg("Failed to read Vault response body")
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("vault returned status %d: %s", resp.StatusCode, string(body))
+		durationMs := float64(time.Since(startTime).Milliseconds())
+		statusErr := fmt.Errorf("vault returned status %d: %s", resp.StatusCode, string(body))
+		metrics.RecordVaultRequest(durationMs, statusErr)
+		log.Warn().
+			Int("status_code", resp.StatusCode).
+			Str("path", path).
+			Str("response", string(body)).
+			Msg("Vault returned non-OK status")
+		return nil, statusErr
 	}
 
 	var secretResp SecretResponse
 	if err := json.Unmarshal(body, &secretResp); err != nil {
+		durationMs := float64(time.Since(startTime).Milliseconds())
+		metrics.RecordVaultRequest(durationMs, err)
+		log.Error().Err(err).Str("path", path).Msg("Failed to parse Vault secret response")
 		return nil, fmt.Errorf("failed to parse secret response: %w", err)
 	}
 
 	if len(secretResp.Errors) > 0 {
-		return nil, fmt.Errorf("vault errors: %v", secretResp.Errors)
+		durationMs := float64(time.Since(startTime).Milliseconds())
+		vaultErr := fmt.Errorf("vault errors: %v", secretResp.Errors)
+		metrics.RecordVaultRequest(durationMs, vaultErr)
+		log.Warn().Strs("errors", secretResp.Errors).Str("path", path).Msg("Vault returned errors")
+		return nil, vaultErr
 	}
 
 	if secretResp.Data == nil || secretResp.Data.Data == nil {
-		return nil, fmt.Errorf("secret not found at path: %s", path)
+		durationMs := float64(time.Since(startTime).Milliseconds())
+		notFoundErr := fmt.Errorf("secret not found at path: %s", path)
+		metrics.RecordVaultRequest(durationMs, notFoundErr)
+		log.Warn().Str("path", path).Msg("Secret not found in Vault")
+		return nil, notFoundErr
 	}
+
+	// Record successful request
+	durationMs := float64(time.Since(startTime).Milliseconds())
+	metrics.RecordVaultRequest(durationMs, nil)
 
 	// Cache the result
 	c.setCached(path, secretResp.Data.Data)
+	log.Debug().Str("path", path).Int("version", secretResp.Data.Metadata.Version).Msg("Vault secret retrieved and cached")
 
 	return secretResp.Data.Data, nil
 }
@@ -186,6 +288,8 @@ func (c *Client) getCached(path string) map[string]interface{} {
 		return nil
 	}
 
+	// Record cache hit metric
+	metrics.RecordVaultCacheHit()
 	return cached.data
 }
 
@@ -198,6 +302,9 @@ func (c *Client) setCached(path string, data map[string]interface{}) {
 		data:      data,
 		expiresAt: time.Now().Add(c.cacheTTL),
 	}
+
+	// Update cache size metric
+	metrics.UpdateVaultCacheSize(len(c.cache))
 }
 
 // ClearCache clears the secret cache.
@@ -206,6 +313,9 @@ func (c *Client) ClearCache() {
 	defer c.cacheMu.Unlock()
 
 	c.cache = make(map[string]*cachedSecret)
+
+	// Reset cache size metric
+	metrics.UpdateVaultCacheSize(0)
 }
 
 // Health checks if Vault is healthy.

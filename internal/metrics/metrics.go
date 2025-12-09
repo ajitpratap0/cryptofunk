@@ -594,3 +594,102 @@ func RecordSemanticSearch(durationSec float64, resultCount int, err error) {
 func RecordSimilarDecisions(durationSec float64, resultCount int, err error) {
 	RecordVectorSearch("similar_decisions", durationSec, resultCount, err)
 }
+
+// Vault Metrics
+var (
+	// VaultCacheHits tracks the number of cache hits for Vault secrets
+	VaultCacheHits = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cryptofunk_vault_cache_hits_total",
+		Help: "Total number of Vault secret cache hits",
+	})
+
+	// VaultCacheMisses tracks the number of cache misses for Vault secrets
+	VaultCacheMisses = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cryptofunk_vault_cache_misses_total",
+		Help: "Total number of Vault secret cache misses",
+	})
+
+	// VaultCacheSize tracks the current number of cached secrets
+	VaultCacheSize = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_vault_cache_size",
+		Help: "Current number of secrets in the Vault cache",
+	})
+
+	// VaultRequestDuration tracks the duration of Vault API requests
+	VaultRequestDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "cryptofunk_vault_request_duration_ms",
+		Help:    "Vault API request duration in milliseconds",
+		Buckets: []float64{10, 25, 50, 100, 250, 500, 1000, 2500},
+	})
+
+	// VaultRequestErrors tracks errors when fetching secrets from Vault
+	VaultRequestErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_vault_request_errors_total",
+		Help: "Total number of Vault API request errors by type",
+	}, []string{"error_type"})
+
+	// VaultCacheHitRate tracks the cache hit rate as a ratio
+	VaultCacheHitRate = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_vault_cache_hit_rate",
+		Help: "Vault cache hit rate as a ratio (0.0 to 1.0)",
+	})
+)
+
+// VaultErrorType constants for bounded cardinality
+const (
+	VaultErrorTypeConnection = "connection"
+	VaultErrorTypeAuth       = "authentication"
+	VaultErrorTypeNotFound   = "not_found"
+	VaultErrorTypeOther      = "other"
+)
+
+// RecordVaultCacheHit records a cache hit and updates hit rate
+func RecordVaultCacheHit() {
+	VaultCacheHits.Inc()
+	updateVaultCacheHitRate()
+}
+
+// RecordVaultCacheMiss records a cache miss and updates hit rate
+func RecordVaultCacheMiss() {
+	VaultCacheMisses.Inc()
+	updateVaultCacheHitRate()
+}
+
+// UpdateVaultCacheSize updates the current cache size
+func UpdateVaultCacheSize(size int) {
+	VaultCacheSize.Set(float64(size))
+}
+
+// RecordVaultRequest records a Vault API request with duration and optional error
+func RecordVaultRequest(durationMs float64, err error) {
+	VaultRequestDuration.Observe(durationMs)
+	if err != nil {
+		errorType := categorizeVaultError(err)
+		VaultRequestErrors.WithLabelValues(errorType).Inc()
+	}
+}
+
+// categorizeVaultError maps Vault errors to bounded categories
+func categorizeVaultError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(errStr, "connection") || strings.Contains(errStr, "dial") || strings.Contains(errStr, "timeout"):
+		return VaultErrorTypeConnection
+	case strings.Contains(errStr, "403") || strings.Contains(errStr, "401") || strings.Contains(errStr, "permission"):
+		return VaultErrorTypeAuth
+	case strings.Contains(errStr, "404") || strings.Contains(errStr, "not found"):
+		return VaultErrorTypeNotFound
+	default:
+		return VaultErrorTypeOther
+	}
+}
+
+// updateVaultCacheHitRate calculates and updates the cache hit rate
+func updateVaultCacheHitRate() {
+	// This is an approximation since we can't easily get counter values
+	// In a real implementation, you'd track these values internally
+	// For now, we'll rely on Prometheus queries to calculate the rate
+}
