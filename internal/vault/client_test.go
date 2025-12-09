@@ -419,7 +419,7 @@ func TestClient_CacheFallbackOnVaultFailure(t *testing.T) {
 	}
 
 	// Second request with cache - should use cache (Vault still available)
-	data, err = client.GetSecret(ctx, "cryptofunk/data/api")
+	_, err = client.GetSecret(ctx, "cryptofunk/data/api")
 	if err != nil {
 		t.Fatalf("Cached GetSecret() error = %v", err)
 	}

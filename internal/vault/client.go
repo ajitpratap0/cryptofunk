@@ -33,8 +33,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // Known insecure development tokens that should trigger warnings.
@@ -108,7 +109,7 @@ func NewClient(cfg Config) (*Client, error) {
 		} else {
 			cfg.Token = os.Getenv("VAULT_DEV_TOKEN")
 			if cfg.Token != "" {
-				tokenSource = "VAULT_DEV_TOKEN"
+				tokenSource = "VAULT_DEV_TOKEN" //nolint:gosec // G101: not a credential, just env var name
 			}
 		}
 	}
@@ -138,7 +139,7 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 
 	// Warn if using VAULT_DEV_TOKEN environment variable
-	if tokenSource == "VAULT_DEV_TOKEN" {
+	if tokenSource == "VAULT_DEV_TOKEN" { //nolint:gosec // G101: not a credential, just env var name
 		log.Warn().
 			Msg("Using VAULT_DEV_TOKEN environment variable. This is only appropriate for local development.")
 	}
