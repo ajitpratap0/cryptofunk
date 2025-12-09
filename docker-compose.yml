@@ -151,6 +151,7 @@ services:
       - '--storage.tsdb.retention.time=30d'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
+    # Allow Prometheus container to scrape metrics from host-bound agent services via host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

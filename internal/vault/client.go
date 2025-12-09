@@ -119,10 +119,15 @@ func NewClient(cfg Config) (*Client, error) {
 
 	// Security warnings for development tokens
 	if insecureDevTokens[cfg.Token] {
+		tokenPrefix := cfg.Token
+		if len(cfg.Token) > 8 {
+			tokenPrefix = cfg.Token[:8] + "..."
+		}
 		log.Warn().
 			Str("token_source", tokenSource).
+			Str("token_prefix", tokenPrefix).
 			Str("vault_addr", cfg.Address).
-			Msg("SECURITY WARNING: Using known insecure development token. DO NOT use in production!")
+			Msg("SECURITY WARNING: Using known insecure development token - DO NOT use in production")
 	}
 
 	// Warn if using HTTP instead of HTTPS in non-localhost environments
