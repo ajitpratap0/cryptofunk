@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
-	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
 
@@ -194,14 +193,15 @@ type Orchestrator struct {
 	pausedMutex sync.RWMutex
 
 	// Metrics
-	metrics       *OrchestratorMetrics
-	metricsServer *metrics.Server
+	metrics *OrchestratorMetrics
 
 	// Circuit breaker for external dependencies
 	circuitBreaker *risk.CircuitBreakerManager
 }
 
 // NewOrchestrator creates a new orchestrator instance
+// Note: metricsPort is kept for API compatibility but is no longer used internally.
+// The HTTP server in cmd/orchestrator handles metrics/health endpoints.
 func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, database *db.DB, metricsPort int) (*Orchestrator, error) {
 	// Create metrics (singleton pattern to avoid Prometheus registration conflicts)
 	orchestratorMetrics := getOrCreateOrchestratorMetrics()
@@ -209,14 +209,14 @@ func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, database *d
 	// Create logger for orchestrator
 	orchestratorLog := log.With().Str("component", "orchestrator").Logger()
 
-	// Create metrics server
-	metricsServer := metrics.NewServer(metricsPort, orchestratorLog)
-
 	// Create circuit breaker manager
 	circuitBreaker := risk.NewCircuitBreakerManager()
 
 	// Note: NATS connection is deferred to Initialize() to allow unit tests
 	// to create orchestrator without requiring NATS server
+
+	// Suppress unused variable warning for API compatibility
+	_ = metricsPort
 
 	return &Orchestrator{
 		config:         config,
@@ -226,7 +226,6 @@ func NewOrchestrator(config *OrchestratorConfig, log zerolog.Logger, database *d
 		natsConn:       nil, // Will be set in Initialize()
 		signalBuffer:   make([]*AgentSignal, 0),
 		metrics:        orchestratorMetrics,
-		metricsServer:  metricsServer,
 		circuitBreaker: circuitBreaker,
 		startTime:      time.Now(),
 	}, nil
@@ -288,21 +287,6 @@ func (o *Orchestrator) Initialize(ctx context.Context) error {
 	o.heartbeatSub = heartbeatSub
 
 	o.log.Info().Str("topic", o.config.HeartbeatTopic).Msg("Subscribed to agent heartbeats")
-
-	// Start metrics server
-	if o.metricsServer != nil {
-		if err := o.metricsServer.Start(); err != nil {
-			o.log.Error().Err(err).Msg("Failed to start metrics server")
-		} else {
-			o.log.Info().Msg("Metrics server started successfully")
-
-			// Register control endpoints
-			o.metricsServer.RegisterHandler("/pause", o.handlePauseRequest)
-			o.metricsServer.RegisterHandler("/resume", o.handleResumeRequest)
-			o.metricsServer.RegisterHandler("/status", o.handleStatusRequest)
-			o.log.Info().Msg("Control endpoints registered")
-		}
-	}
 
 	// Start health check routine
 	o.wg.Add(1)
@@ -920,9 +904,10 @@ func (o *Orchestrator) IsPaused() bool {
 	return o.paused
 }
 
-// HTTP handlers for control endpoints
+// HTTP handlers for control endpoints (exported for use by cmd/orchestrator/http.go)
 
-func (o *Orchestrator) handlePauseRequest(w http.ResponseWriter, r *http.Request) {
+// HandlePauseRequest handles POST /pause to pause trading
+func (o *Orchestrator) HandlePauseRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -952,7 +937,8 @@ func (o *Orchestrator) handlePauseRequest(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (o *Orchestrator) handleResumeRequest(w http.ResponseWriter, r *http.Request) {
+// HandleResumeRequest handles POST /resume to resume trading
+func (o *Orchestrator) HandleResumeRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -982,7 +968,8 @@ func (o *Orchestrator) handleResumeRequest(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (o *Orchestrator) handleStatusRequest(w http.ResponseWriter, r *http.Request) {
+// HandleControlStatusRequest handles GET /status for control status (distinct from /api/v1/status)
+func (o *Orchestrator) HandleControlStatusRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1032,17 +1019,6 @@ func (o *Orchestrator) Shutdown(ctx context.Context) error {
 	if o.natsConn != nil {
 		o.natsConn.Close()
 		o.log.Info().Msg("NATS connection closed")
-	}
-
-	// Shutdown metrics server
-	if o.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := o.metricsServer.Shutdown(shutdownCtx); err != nil {
-			o.log.Error().Err(err).Msg("Error shutting down metrics server")
-		} else {
-			o.log.Info().Msg("Metrics server shutdown successfully")
-		}
 	}
 
 	// Wait for goroutines

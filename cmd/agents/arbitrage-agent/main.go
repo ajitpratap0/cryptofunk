@@ -116,6 +116,9 @@ type ArbitrageAgent struct {
 	natsConn  *nats.Conn
 	natsTopic string
 
+	// Heartbeat publisher (shared component)
+	heartbeat *agents.HeartbeatPublisher
+
 	// Strategy configuration
 	symbols          []string // Symbols to monitor
 	exchanges        []string // Exchanges to compare
@@ -246,6 +249,24 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 		Str("nats_url", natsURL).
 		Str("topic", a.natsTopic).
 		Msg("Connected to NATS")
+
+	// Create heartbeat publisher using shared component
+	heartbeatTopic := viper.GetString("strategy_agents.arbitrage.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		a.GetConfig().Name,
+		a.GetConfig().Type,
+		heartbeatConfig,
+		log.Logger,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+	a.heartbeat = heartbeatPublisher
 
 	// Initialize beliefs about market state
 	a.beliefs.UpdateBelief("agent_status", "initialized", 1.0, "system")
@@ -1149,10 +1170,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = arbitrageConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Arbitrage agent uses port 9107
+	metricsPort := viper.GetInt("strategy_agents.arbitrage.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9103 // Default for arbitrage agent
+		metricsPort = 9107 // Default port for arbitrage-agent
 	}
 
 	// Parse MCP servers
@@ -1262,9 +1284,15 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.heartbeat.Start()
+
 	if err := agent.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatal().Err(err).Msg("Agent runtime error")
 	}
+
+	// Stop heartbeat publishing
+	agent.heartbeat.Stop()
 
 	if err := agent.Shutdown(ctx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")

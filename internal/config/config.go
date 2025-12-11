@@ -433,3 +433,44 @@ func (s *CircuitBreakerSettings) GetCountInterval() time.Duration {
 	duration, _ := s.ParseDuration(s.CountInterval)
 	return duration
 }
+
+// ToRiskSettings converts CircuitBreakerSettings to risk.CircuitBreakerConfigSettings format
+// This enables the config package to provide settings to the risk package without import cycles
+type RiskCircuitBreakerSettings struct {
+	MinRequests     uint32
+	FailureRatio    float64
+	OpenTimeout     string
+	HalfOpenMaxReqs uint32
+	CountInterval   string
+}
+
+// ToRiskSettings converts CircuitBreakerSettings to RiskCircuitBreakerSettings
+func (s *CircuitBreakerSettings) ToRiskSettings() *RiskCircuitBreakerSettings {
+	return &RiskCircuitBreakerSettings{
+		MinRequests:     s.MinRequests,
+		FailureRatio:    s.FailureRatio,
+		OpenTimeout:     s.OpenTimeout,
+		HalfOpenMaxReqs: s.HalfOpenMaxReqs,
+		CountInterval:   s.CountInterval,
+	}
+}
+
+// GetExchangeRiskSettings returns exchange circuit breaker settings for the risk package
+func (c *CircuitBreakerConfig) GetExchangeRiskSettings() *RiskCircuitBreakerSettings {
+	return c.Exchange.ToRiskSettings()
+}
+
+// GetLLMRiskSettings returns LLM circuit breaker settings for the risk package
+func (c *CircuitBreakerConfig) GetLLMRiskSettings() *RiskCircuitBreakerSettings {
+	return c.LLM.ToRiskSettings()
+}
+
+// GetDatabaseRiskSettings returns database circuit breaker settings for the risk package
+func (c *CircuitBreakerConfig) GetDatabaseRiskSettings() *RiskCircuitBreakerSettings {
+	return c.Database.ToRiskSettings()
+}
+
+// IsConfigured returns true if the circuit breaker settings have valid values
+func (s *RiskCircuitBreakerSettings) IsConfigured() bool {
+	return s.MinRequests > 0 || s.FailureRatio > 0 || s.OpenTimeout != "" || s.HalfOpenMaxReqs > 0
+}

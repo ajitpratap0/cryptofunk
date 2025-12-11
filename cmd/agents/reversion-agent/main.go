@@ -116,6 +116,7 @@ type ReversionAgent struct {
 	// NATS connection for signal publishing
 	natsConn  *nats.Conn
 	natsTopic string
+	heartbeat *agents.HeartbeatPublisher
 
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
@@ -212,6 +213,25 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	log.Info().Msg("Successfully connected to NATS")
 
+	// Get heartbeat topic for agent registration with orchestrator
+	heartbeatTopic := viper.GetString("strategy_agents.mean_reversion.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
+	// Create heartbeat publisher
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+
 	// Extract strategy parameters from config (with defaults)
 	rsiPeriod := getIntFromConfig(agentConfig, "rsi_period", 14)
 	rsiOversold := getFloatFromConfig(agentConfig, "entry_conditions.rsi_oversold", 30.0)
@@ -302,6 +322,7 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:            baseAgent,
 		natsConn:             nc,
 		natsTopic:            natsTopic,
+		heartbeat:            heartbeatPublisher,
 		llmClient:            llmClient,
 		promptBuilder:        promptBuilder,
 		useLLM:               useLLM,
@@ -1434,10 +1455,11 @@ func main() {
 		Enabled:      reversionConfig.Enabled,
 	}
 
-	// Get metrics port from global config
-	metricsPort := agentCfg.Global.MetricsPort
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Reversion agent uses port 9106
+	metricsPort := viper.GetInt("strategy_agents.mean_reversion.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9101
+		metricsPort = 9106 // Default port for reversion-agent
 	}
 
 	// Create agent logger
@@ -1454,6 +1476,9 @@ func main() {
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
+
+	// Start heartbeat publishing for orchestrator registration
+	agent.heartbeat.Start()
 
 	log.Info().Str("name", agent.GetName()).Msg("Mean Reversion Agent started")
 
@@ -1474,6 +1499,9 @@ func main() {
 
 	<-sigChan
 	log.Info().Msg("Shutdown signal received, gracefully stopping...")
+
+	// Stop heartbeat publishing
+	agent.heartbeat.Stop()
 
 	// Cancel run context
 	runCancel()
@@ -1496,6 +1524,7 @@ func convertMCPServers(servers []config.MCPServerConnection) []agents.MCPServerC
 		result[i] = agents.MCPServerConfig{
 			Name:    server.Name,
 			Type:    server.Type,
+			URL:     server.URL,
 			Command: server.Command,
 		}
 	}

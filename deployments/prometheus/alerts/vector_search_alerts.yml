@@ -111,7 +111,7 @@ groups:
           component: database
         annotations:
           summary: "Database connection pool nearly exhausted"
-          description: "{{ $value | humanizePercentage }} of database connections are in use ({{ $value | multiply 10 | printf \"%.0f\" }}/10). Vector search and other queries may be queued."
+          description: "{{ $value | humanizePercentage }} of database connections are in use. Vector search and other queries may be queued."
 
       # Critical connection pool exhaustion
       - alert: DatabaseConnectionPoolCritical

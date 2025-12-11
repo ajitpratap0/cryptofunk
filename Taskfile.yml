@@ -8,12 +8,6 @@ vars:
   GO_FLAGS: -v
   DOCKER_COMPOSE: docker-compose
 
-# Global task options
-set:
-  - nounset
-  - errexit
-  - pipefail
-
 tasks:
   # Help is the default task
   default:
@@ -35,7 +29,7 @@ tasks:
       - build-api
       - build-telegram-bot
     cmds:
-      - echo "✓ All services built successfully"
+      - echo "SUCCESS - All services built successfully"
 
   build-orchestrator:
     desc: "Build orchestrator"
@@ -46,8 +40,8 @@ tasks:
       - "{{.BINARY_DIR}}/orchestrator"
     cmds:
       - mkdir -p {{.BINARY_DIR}}
-      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/orchestrator cmd/orchestrator/main.go
-      - echo "✓ Orchestrator built"
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/orchestrator ./cmd/orchestrator/
+      - echo "SUCCESS - Orchestrator built"
 
   build-servers:
     desc: "Build all MCP servers"
@@ -198,7 +192,7 @@ tasks:
       - "{{.BINARY_DIR}}/api"
     cmds:
       - mkdir -p {{.BINARY_DIR}}
-      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/api cmd/api/main.go
+      - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/api ./cmd/api/
 
   build-telegram-bot:
     desc: "Build Telegram bot"
@@ -211,7 +205,7 @@ tasks:
     cmds:
       - mkdir -p {{.BINARY_DIR}}
       - go build {{.GO_FLAGS}} -o {{.BINARY_DIR}}/telegram-bot cmd/telegram-bot/main.go
-      - echo "✓ Telegram bot built"
+      - echo "SUCCESS - Telegram bot built"
 
   # ===========================================
   # Development Tasks
@@ -223,7 +217,7 @@ tasks:
       - echo "Downloading dependencies..."
       - go mod download
       - go mod tidy
-      - echo "✓ Dependencies updated"
+      - echo "SUCCESS - Dependencies updated"
 
   dev-deps:
     desc: "Install development dependencies"
@@ -231,7 +225,7 @@ tasks:
       - echo "Installing development tools..."
       - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
       - go install github.com/vektra/mockery/v2@latest
-      - echo "✓ Development tools installed"
+      - echo "SUCCESS - Development tools installed"
 
   # ===========================================
   # Test Tasks
@@ -242,7 +236,7 @@ tasks:
     cmds:
       - echo "Running tests..."
       - go test -v -race -coverprofile=coverage.out ./...
-      - echo "✓ Tests passed"
+      - echo "SUCCESS - Tests passed"
 
   test-unit:
     desc: "Run unit tests only"
@@ -259,7 +253,7 @@ tasks:
     cmds:
       - go test -coverprofile=coverage.out ./...
       - go tool cover -html=coverage.out -o coverage.html
-      - echo "✓ Coverage report generated: coverage.html"
+      - echo "Coverage report generated at coverage.html"
 
   test-watch:
     desc: "Watch and run tests on file changes"
@@ -278,7 +272,7 @@ tasks:
     cmds:
       - echo "Running linter..."
       - golangci-lint run ./...
-      - echo "✓ Linting complete"
+      - echo "SUCCESS - Linting complete"
 
   fmt:
     desc: "Format code"
@@ -286,7 +280,7 @@ tasks:
       - echo "Formatting code..."
       - go fmt ./...
       - gofmt -s -w .
-      - echo "✓ Code formatted"
+      - echo "SUCCESS - Code formatted"
 
   check:
     desc: "Run all checks (fmt, lint, test)"
@@ -306,14 +300,14 @@ tasks:
       - "{{.DOCKER_COMPOSE}} up -d"
       - sleep 3
       - task: docker-status
-      - echo "✓ Docker services started"
+      - echo "SUCCESS - Docker services started"
 
   docker-down:
     desc: "Stop Docker services"
     cmds:
       - echo "Stopping Docker services..."
       - "{{.DOCKER_COMPOSE}} down"
-      - echo "✓ Docker services stopped"
+      - echo "SUCCESS - Docker services stopped"
 
   docker-restart:
     desc: "Restart Docker services"
@@ -346,7 +340,7 @@ tasks:
     prompt: "This will delete all Docker data. Continue?"
     cmds:
       - "{{.DOCKER_COMPOSE}} down -v"
-      - echo "✓ Docker volumes removed"
+      - echo "SUCCESS - Docker volumes removed"
 
   # ===========================================
   # Database Tasks
@@ -357,7 +351,7 @@ tasks:
     cmds:
       - echo "Running database migrations..."
       - go run cmd/migrate/main.go -command=migrate
-      - echo "✓ Migrations complete"
+      - echo "SUCCESS - Migrations complete"
 
   db-status:
     desc: "Show database migration status"
@@ -372,7 +366,7 @@ tasks:
       - docker exec -i $(docker-compose ps -q postgres) psql -U postgres -c "DROP DATABASE IF EXISTS cryptofunk;"
       - docker exec -i $(docker-compose ps -q postgres) psql -U postgres -c "CREATE DATABASE cryptofunk;"
       - task: db-migrate
-      - echo "✓ Database reset complete"
+      - echo "SUCCESS - Database reset complete"
 
   db-shell:
     desc: "Open PostgreSQL shell"
@@ -382,13 +376,10 @@ tasks:
 
   db-backup:
     desc: "Backup database"
-    vars:
-      TIMESTAMP:
-        sh: date +%Y%m%d_%H%M%S
     cmds:
       - echo "Backing up database..."
-      - docker exec $(docker-compose ps -q postgres) pg_dump -U postgres cryptofunk > backup_{{.TIMESTAMP}}.sql
-      - echo "✓ Backup saved: backup_{{.TIMESTAMP}}.sql"
+      - docker exec $(docker-compose ps -q postgres) pg_dump -U postgres cryptofunk > backup_$(date +%Y%m%d_%H%M%S).sql
+      - echo "Backup saved successfully"
 
   # ===========================================
   # Run Tasks
@@ -470,11 +461,11 @@ tasks:
       - task: deps
       - task: build
       - echo ""
-      - echo "✓ Development environment ready"
+      - echo "SUCCESS - Development environment ready"
       - echo ""
-      - echo "Next steps:"
+      - 'echo "Next steps:"'
       - echo "  1. Run 'task run-orchestrator' in one terminal"
-      - echo "  2. Run agents in separate terminals:"
+      - 'echo "  2. Run agents in separate terminals:"'
       - echo "     - task run-agent-technical"
       - echo "     - task run-agent-trend"
       - echo "     - task run-agent-risk"
@@ -484,7 +475,7 @@ tasks:
     cmds:
       - task: docker-down
       - task: clean
-      - echo "✓ Development environment cleaned"
+      - echo "SUCCESS - Development environment cleaned"
 
   dev-watch:
     desc: "Watch and rebuild on file changes"
@@ -504,7 +495,7 @@ tasks:
       - echo "Cleaning build artifacts..."
       - rm -rf {{.BINARY_DIR}}
       - rm -f coverage.out coverage.html
-      - echo "✓ Clean complete"
+      - echo "SUCCESS - Clean complete"
 
   clean-all:
     desc: "Remove all artifacts and stop services"
@@ -512,7 +503,7 @@ tasks:
       - task: clean
       - task: docker-down
       - go clean -cache -testcache -modcache
-      - echo "✓ All clean"
+      - echo "SUCCESS - All clean"
 
   # ===========================================
   # Monitoring Tasks
@@ -521,8 +512,8 @@ tasks:
   monitor:
     desc: "Open monitoring dashboards"
     cmds:
-      - echo "Opening Grafana (http://localhost:3000)..."
-      - echo "Opening Prometheus (http://localhost:9090)..."
+      - 'echo "Opening Grafana (http://localhost:3000)..."'
+      - 'echo "Opening Prometheus (http://localhost:9090)..."'
       - cmd: open http://localhost:3000
         platforms: [darwin]
       - cmd: xdg-open http://localhost:3000
@@ -539,7 +530,7 @@ tasks:
   alertmanager:
     desc: "Open AlertManager UI"
     cmds:
-      - echo "Opening AlertManager (http://localhost:9093)..."
+      - 'echo "Opening AlertManager (http://localhost:9093)..."'
       - cmd: open http://localhost:9093
         platforms: [darwin]
       - cmd: xdg-open http://localhost:9093
@@ -590,7 +581,7 @@ tasks:
           echo "❌ POSTGRES_PASSWORD not set"
           exit 1
         fi
-      - echo "✓ All required environment variables are set"
+      - echo "SUCCESS - All required environment variables are set"
 
   verify-keys:
     desc: "Verify exchange API keys"
@@ -609,9 +600,9 @@ tasks:
       - task: db-migrate
       - task: build
       - echo ""
-      - echo "✓ Project initialized successfully!"
+      - echo "SUCCESS - Project initialized successfully!"
       - echo ""
-      - echo "Next steps:"
+      - 'echo "Next steps:"'
       - echo "  1. Copy .env.example to .env and add your API keys"
       - echo "  2. Run 'task check-env' to verify"
       - echo "  3. Run 'task dev' to start development"
@@ -620,21 +611,21 @@ tasks:
     desc: "Show version information"
     cmds:
       - echo "CryptoFunk Trading Platform"
-      - echo "Version: 1.0.0"
+      - 'echo "Version: 1.0.0"'
       - go version
 
   install-task:
     desc: "Show instructions to install Task"
     cmds:
-      - echo "To install Task, run:"
+      - 'echo "To install Task, run:"'
       - echo ""
-      - echo "macOS/Linux (Homebrew):"
+      - 'echo "macOS/Linux (Homebrew):"'
       - echo "  brew install go-task/tap/go-task"
       - echo ""
-      - echo "Windows (Winget):"
+      - 'echo "Windows (Winget):"'
       - echo "  winget install Task.Task"
       - echo ""
-      - echo "Or download from: https://taskfile.dev/installation/"
+      - 'echo "Or download from: https://taskfile.dev/installation/"'
     silent: true
 
   # ===========================================
@@ -646,21 +637,21 @@ tasks:
     cmds:
       - echo "Installing Git hooks..."
       - ./scripts/install-hooks.sh
-      - echo "✓ Git hooks installed successfully"
+      - echo "SUCCESS - Git hooks installed successfully"
 
   test-all:
     desc: "Run all validation checks (full mode)"
     cmds:
       - echo "Running comprehensive validation checks..."
       - ./scripts/test-all.sh
-      - echo "✓ All checks passed"
+      - echo "SUCCESS - All checks passed"
 
   test-fast:
     desc: "Run quick validation checks (skip slow tests)"
     cmds:
       - echo "Running fast validation checks..."
       - ./scripts/test-all.sh --fast
-      - echo "✓ Fast checks passed"
+      - echo "SUCCESS - Fast checks passed"
 
   pre-commit:
     desc: "Run pre-commit checks manually"
@@ -675,4 +666,4 @@ tasks:
       - go fmt ./...
       - go vet ./...
       - go build ./...
-      - echo "✓ Code validation passed"
+      - echo "SUCCESS - Code validation passed"

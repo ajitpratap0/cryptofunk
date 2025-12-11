@@ -35,6 +35,9 @@ type TechnicalAgent struct {
 	natsConn  *nats.Conn
 	natsTopic string
 
+	// Heartbeat publisher (shared component)
+	heartbeat *agents.HeartbeatPublisher
+
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
 	promptBuilder *llm.PromptBuilder
@@ -211,6 +214,11 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		natsTopic = "agents.analysis.technical" // Default
 	}
 
+	heartbeatTopic := viper.GetString("risk_agent.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
 	// Connect to NATS
 	log.Info().Str("url", natsURL).Str("topic", natsTopic).Msg("Connecting to NATS")
 	nc, err := nats.Connect(natsURL)
@@ -219,6 +227,19 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 	}
 
 	log.Info().Msg("Successfully connected to NATS")
+
+	// Create heartbeat publisher using shared component
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
 
 	// Initialize LLM client if enabled
 	var llmClient llm.LLMClient
@@ -292,6 +313,7 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:         baseAgent,
 		natsConn:          nc,
 		natsTopic:         natsTopic,
+		heartbeat:         heartbeatPublisher,
 		llmClient:         llmClient,
 		promptBuilder:     promptBuilder,
 		useLLM:            useLLM,
@@ -1740,10 +1762,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = technicalConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port from global config
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Technical agent uses port 9101
+	metricsPort := viper.GetInt("analysis_agents.technical.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9101 // Default port
+		metricsPort = 9101 // Default port for technical-agent
 	}
 
 	// Get MCP server configurations
@@ -1834,6 +1857,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing to orchestrator (using shared component)
+	agent.heartbeat.Start()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -1856,6 +1882,9 @@ func main() {
 
 	// Cancel main context to stop agent operations
 	cancel()
+
+	// Stop heartbeat publishing
+	agent.heartbeat.Stop()
 
 	// Graceful shutdown with separate timeout context
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

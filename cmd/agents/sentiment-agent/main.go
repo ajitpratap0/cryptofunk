@@ -32,6 +32,7 @@ type SentimentAgent struct {
 	// NATS connection for signal publishing
 	natsConn  *nats.Conn
 	natsTopic string
+	heartbeat *agents.HeartbeatPublisher
 
 	// HTTP client for API calls
 	httpClient *http.Client
@@ -240,6 +241,25 @@ func NewSentimentAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		newsSourceWeights["cryptopanic"] = 1.0
 	}
 
+	// Get heartbeat topic for agent registration with orchestrator
+	heartbeatTopic := viper.GetString("analysis_agents.sentiment.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
+	// Create heartbeat publisher
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+
 	// Create HTTP client with timeout
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
@@ -249,6 +269,7 @@ func NewSentimentAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		BaseAgent:          baseAgent,
 		natsConn:           nc,
 		natsTopic:          natsTopic,
+		heartbeat:          heartbeatPublisher,
 		httpClient:         httpClient,
 		symbol:             symbol,
 		newsAPIKey:         newsAPIKey,
@@ -899,10 +920,11 @@ func main() {
 	// Get agent-specific config
 	agentConfig.Config = sentimentConfig.Get("config").(map[string]interface{})
 
-	// Get metrics port from global config
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Sentiment agent uses port 9104
+	metricsPort := viper.GetInt("analysis_agents.sentiment.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9103 // Default port for sentiment agent
+		metricsPort = 9104 // Default port for sentiment-agent
 	}
 
 	// Get MCP server configurations (if any)
@@ -974,6 +996,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.heartbeat.Start()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -993,6 +1018,9 @@ func main() {
 			log.Error().Err(err).Msg("Agent run error")
 		}
 	}
+
+	// Stop heartbeat publishing
+	agent.heartbeat.Stop()
 
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

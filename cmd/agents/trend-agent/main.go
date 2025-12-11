@@ -32,6 +32,7 @@ type TrendAgent struct {
 	// NATS connection for signal publishing
 	natsConn  *nats.Conn
 	natsTopic string
+	heartbeat *agents.HeartbeatPublisher
 
 	// LLM client for AI-powered analysis
 	llmClient     llm.LLMClient // Interface supports both Client and FallbackClient
@@ -285,10 +286,30 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 		}
 	}
 
+	// Get heartbeat topic for agent registration with orchestrator
+	heartbeatTopic := viper.GetString("strategy_agents.trend.heartbeat_topic")
+	if heartbeatTopic == "" {
+		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
+	}
+
+	// Create heartbeat publisher
+	heartbeatConfig := agents.HeartbeatConfig{
+		Interval: 30 * time.Second,
+		Topic:    heartbeatTopic,
+	}
+	heartbeatPublisher := agents.NewHeartbeatPublisher(
+		config.Name,
+		config.Type,
+		heartbeatConfig,
+		log,
+	)
+	heartbeatPublisher.SetNATSConn(nc)
+
 	return &TrendAgent{
 		BaseAgent:       baseAgent,
 		natsConn:        nc,
 		natsTopic:       natsTopic,
+		heartbeat:       heartbeatPublisher,
 		llmClient:       llmClient,
 		promptBuilder:   promptBuilder,
 		useLLM:          useLLM,
@@ -1217,9 +1238,11 @@ func main() {
 
 	agentConfig.Config = trendConfig.Get("config").(map[string]interface{})
 
-	metricsPort := viper.GetInt("global.metrics_port")
+	// Get metrics port - use agent-specific port to avoid conflicts
+	// Trend agent uses port 9102
+	metricsPort := viper.GetInt("strategy_agents.trend.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9103
+		metricsPort = 9102 // Default port for trend-agent
 	}
 
 	// Get MCP servers
@@ -1293,6 +1316,9 @@ func main() {
 		log.Warn().Err(err).Msg("Failed to setup control subscription - pause/resume will not work")
 	}
 
+	// Start heartbeat publishing for orchestrator registration
+	agent.heartbeat.Start()
+
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -1316,6 +1342,9 @@ func main() {
 	// Graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// Stop heartbeat publishing
+	agent.heartbeat.Stop()
 
 	if err := agent.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")

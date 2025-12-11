@@ -131,6 +131,64 @@ func NewCircuitBreakerManager() *CircuitBreakerManager {
 	return NewCircuitBreakerManagerWithSettings(nil, nil, nil)
 }
 
+// NewCircuitBreakerManagerFromRiskConfig creates a circuit breaker manager from risk config settings
+// This accepts the RiskCircuitBreakerSettings from the config package (avoiding import cycles)
+// The settings struct must have: MinRequests, FailureRatio, OpenTimeout (string), HalfOpenMaxReqs, CountInterval (string)
+type RiskConfigSettings interface {
+	GetMinRequests() uint32
+	GetFailureRatio() float64
+	GetOpenTimeout() string
+	GetHalfOpenMaxReqs() uint32
+	GetCountInterval() string
+}
+
+// CircuitBreakerSettingsAdapter adapts raw settings to the CircuitBreakerConfigSettings format
+type CircuitBreakerSettingsAdapter struct {
+	MinRequests     uint32
+	FailureRatio    float64
+	OpenTimeout     string
+	HalfOpenMaxReqs uint32
+	CountInterval   string
+}
+
+// NewCircuitBreakerManagerFromSettings creates a manager from simple settings adapters
+// This is the primary entry point for services using config-based circuit breakers
+func NewCircuitBreakerManagerFromSettings(exchange, llm, database *CircuitBreakerSettingsAdapter) *CircuitBreakerManager {
+	var exchangeCfg, llmCfg, dbCfg *CircuitBreakerConfigSettings
+
+	if exchange != nil {
+		exchangeCfg = &CircuitBreakerConfigSettings{
+			MinRequests:     exchange.MinRequests,
+			FailureRatio:    exchange.FailureRatio,
+			OpenTimeout:     exchange.OpenTimeout,
+			HalfOpenMaxReqs: exchange.HalfOpenMaxReqs,
+			CountInterval:   exchange.CountInterval,
+		}
+	}
+
+	if llm != nil {
+		llmCfg = &CircuitBreakerConfigSettings{
+			MinRequests:     llm.MinRequests,
+			FailureRatio:    llm.FailureRatio,
+			OpenTimeout:     llm.OpenTimeout,
+			HalfOpenMaxReqs: llm.HalfOpenMaxReqs,
+			CountInterval:   llm.CountInterval,
+		}
+	}
+
+	if database != nil {
+		dbCfg = &CircuitBreakerConfigSettings{
+			MinRequests:     database.MinRequests,
+			FailureRatio:    database.FailureRatio,
+			OpenTimeout:     database.OpenTimeout,
+			HalfOpenMaxReqs: database.HalfOpenMaxReqs,
+			CountInterval:   database.CountInterval,
+		}
+	}
+
+	return NewCircuitBreakerManagerFromConfig(exchangeCfg, llmCfg, dbCfg)
+}
+
 // NewCircuitBreakerManagerFromConfig creates a circuit breaker manager from config settings
 // This is a convenience function that converts CircuitBreakerConfigSettings to ServiceSettings
 func NewCircuitBreakerManagerFromConfig(exchangeCfg, llmCfg, dbCfg *CircuitBreakerConfigSettings) *CircuitBreakerManager {
