@@ -13,7 +13,8 @@ on:
 jobs:
   claude-review:
     # Skip Dependabot PRs (auto-generated dependency updates don't need AI review)
-    if: github.actor != 'dependabot[bot]'
+    # Use PR author instead of actor since actor changes when someone rebases the PR
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
     permissions:
