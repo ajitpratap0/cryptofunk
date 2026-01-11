@@ -27,11 +27,19 @@ type PostgresContainer struct {
 	t             *testing.T
 }
 
-// SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector
+// SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector.
+// If DATABASE_URL environment variable is set, it uses the existing database instead
+// of creating a new container (useful for CI environments).
 func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	t.Helper()
 
 	ctx := context.Background()
+
+	// Check if DATABASE_URL is set (CI environment)
+	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+		t.Log("Using existing database from DATABASE_URL environment variable")
+		return setupFromExistingDatabase(t, ctx, connStr)
+	}
 
 	// Create PostgreSQL container with TimescaleDB image (includes pgvector)
 	container, err := postgres.Run(ctx,
@@ -95,6 +103,54 @@ func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	}
 
 	// Set up cleanup
+	t.Cleanup(func() {
+		tc.Cleanup()
+	})
+
+	return tc
+}
+
+// setupFromExistingDatabase connects to an existing database using the provided connection string.
+// This is used in CI environments where the database is already running.
+func setupFromExistingDatabase(t *testing.T, ctx context.Context, connStr string) *PostgresContainer {
+	t.Helper()
+
+	// Create test database connection
+	config, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		t.Fatalf("Failed to parse connection string: %v", err)
+	}
+
+	// Configure connection pool
+	config.MaxConns = 5
+	config.MinConns = 1
+	config.MaxConnLifetime = time.Hour
+	config.MaxConnIdleTime = 30 * time.Minute
+
+	// Create pool
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("Failed to create connection pool: %v", err)
+	}
+
+	// Test connection
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		t.Fatalf("Failed to ping database: %v", err)
+	}
+
+	database := &db.DB{}
+	database.SetPool(pool)
+
+	tc := &PostgresContainer{
+		Container:     nil, // No container when using existing database
+		ConnectionStr: connStr,
+		DB:            database,
+		cleanupFuncs:  []func(){},
+		t:             t,
+	}
+
+	// Set up cleanup (just close the connection, don't terminate container)
 	t.Cleanup(func() {
 		tc.Cleanup()
 	})

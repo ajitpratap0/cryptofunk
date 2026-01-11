@@ -26,11 +26,14 @@ func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 	// Use testhelpers for consistent database setup
 	tc := testhelpers.SetupTestDatabase(t)
 
-	// Apply migrations for tests that need schema
-	// Note: Migrations path is relative to the cmd/mcp-servers/order-executor directory
-	err := tc.ApplyMigrations("../../../migrations")
-	if err != nil {
-		t.Fatalf("Failed to apply migrations: %v", err)
+	// Apply migrations only if we're using a testcontainer (not CI with existing DB)
+	// In CI, migrations are applied separately before tests run
+	if tc.Container != nil {
+		// Note: Migrations path is relative to the cmd/mcp-servers/order-executor directory
+		err := tc.ApplyMigrations("../../../migrations")
+		if err != nil {
+			t.Fatalf("Failed to apply migrations: %v", err)
+		}
 	}
 
 	// Return database and cleanup function

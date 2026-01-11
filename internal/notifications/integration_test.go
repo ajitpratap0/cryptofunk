@@ -37,10 +37,13 @@ func TestIntegration_SetEnabled(t *testing.T) {
 }
 
 func TestIntegration_EmitTradeExecuted(t *testing.T) {
-	// Create test server
+	// Create test server with proper synchronization
+	var mu sync.Mutex
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		called = true
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -70,7 +73,10 @@ func TestIntegration_EmitTradeExecuted(t *testing.T) {
 
 	// Wait for async operation
 	time.Sleep(100 * time.Millisecond)
-	assert.True(t, called)
+	mu.Lock()
+	wasCalled := called
+	mu.Unlock()
+	assert.True(t, wasCalled)
 }
 
 func TestIntegration_Cooldowns(t *testing.T) {
