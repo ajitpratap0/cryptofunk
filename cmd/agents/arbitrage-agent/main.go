@@ -648,9 +648,9 @@ func (a *ArbitrageAgent) loadExchangeFees() map[string]*ExchangeFees {
 				// For unknown exchanges, use a conservative default
 				fees[exchange] = &ExchangeFees{
 					Exchange:    exchange,
-					MakerFee:    0.002,  // 0.2% maker (conservative)
-					TakerFee:    0.002,  // 0.2% taker (conservative)
-					WithdrawFee: 0.001,  // 0.1% withdraw (conservative)
+					MakerFee:    0.002, // 0.2% maker (conservative)
+					TakerFee:    0.002, // 0.2% taker (conservative)
+					WithdrawFee: 0.001, // 0.1% withdraw (conservative)
 				}
 				log.Warn().
 					Str("exchange", exchange).
