@@ -28,8 +28,8 @@ type PostgresContainer struct {
 }
 
 // SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector.
-// If DATABASE_URL environment variable is set, it uses the existing database instead
-// of creating a new container (useful for CI environments).
+// If DATABASE_URL environment variable is set and SKIP_TESTCONTAINER_TESTS is set,
+// the test will be skipped. Otherwise it uses the existing database.
 func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	t.Helper()
 
@@ -37,6 +37,11 @@ func SetupTestDatabase(t *testing.T) *PostgresContainer {
 
 	// Check if DATABASE_URL is set (CI environment)
 	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+		// Skip testcontainer-based tests in CI to avoid test pollution
+		// These tests expect a fresh database per test
+		if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+			t.Skip("Skipping testcontainer test in CI environment")
+		}
 		t.Log("Using existing database from DATABASE_URL environment variable")
 		return setupFromExistingDatabase(t, ctx, connStr)
 	}
@@ -148,6 +153,11 @@ func setupFromExistingDatabase(t *testing.T, ctx context.Context, connStr string
 		DB:            database,
 		cleanupFuncs:  []func(){},
 		t:             t,
+	}
+
+	// Clean up existing test data to ensure test isolation
+	if err := tc.TruncateAllTables(); err != nil {
+		t.Logf("Warning: failed to truncate tables: %v", err)
 	}
 
 	// Set up cleanup (just close the connection, don't terminate container)
