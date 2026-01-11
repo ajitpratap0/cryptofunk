@@ -20,6 +20,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Query parameter value constants
+const (
+	queryParamTrue = "true"
+)
+
 // KeysHandler handles API key management HTTP requests
 type KeysHandler struct {
 	keyManager *KeyManager
@@ -40,15 +45,15 @@ func (h *KeysHandler) GetKeyManager() *KeyManager {
 // CreateKeyRequest represents a request to create a new API key
 type CreateKeyRequest struct {
 	Name        string   `json:"name" binding:"required,min=1,max=255"`
-	Permissions []string `json:"permissions"`           // Optional, defaults to ["read:decisions"]
-	ExpiresIn   string   `json:"expires_in,omitempty"`  // Optional duration string (e.g., "720h" for 30 days)
-	ExpiresAt   string   `json:"expires_at,omitempty"`  // Optional RFC3339 timestamp
+	Permissions []string `json:"permissions"`          // Optional, defaults to ["read:decisions"]
+	ExpiresIn   string   `json:"expires_in,omitempty"` // Optional duration string (e.g., "720h" for 30 days)
+	ExpiresAt   string   `json:"expires_at,omitempty"` // Optional RFC3339 timestamp
 }
 
 // CreateKeyResponse represents the response when creating a new API key
 type CreateKeyResponse struct {
 	ID          string     `json:"id"`
-	Key         string     `json:"key"`      // Plaintext key - shown only once
+	Key         string     `json:"key"` // Plaintext key - shown only once
 	Name        string     `json:"name"`
 	UserID      string     `json:"user_id"`
 	Permissions []string   `json:"permissions"`
@@ -221,7 +226,7 @@ func (h *KeysHandler) HandleListKeys(c *gin.Context) {
 	}
 
 	// Optional query param to include inactive keys
-	includeInactive := c.Query("include_inactive") == "true"
+	includeInactive := c.Query("include_inactive") == queryParamTrue
 
 	ctx := c.Request.Context()
 	keys, err := h.keyManager.ListAPIKeys(ctx, userID.(string), includeInactive)
