@@ -158,9 +158,18 @@ func setupFromExistingDatabase(t *testing.T, ctx context.Context, connStr string
 	return tc
 }
 
-// ApplyMigrations runs SQL migrations from the migrations directory
+// ApplyMigrations runs SQL migrations from the migrations directory.
+// If using an existing database (DATABASE_URL set), migrations are skipped
+// since they should already be applied in CI environments.
 func (tc *PostgresContainer) ApplyMigrations(migrationsPath string) error {
 	tc.t.Helper()
+
+	// Skip migrations if using existing database (CI environment)
+	// In CI, migrations are applied separately before tests run
+	if tc.Container == nil {
+		tc.t.Log("Skipping migrations - using existing database")
+		return nil
+	}
 
 	ctx := context.Background()
 	pool := tc.DB.Pool()
