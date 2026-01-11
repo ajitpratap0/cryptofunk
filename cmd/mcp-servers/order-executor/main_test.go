@@ -880,6 +880,9 @@ func TestCompleteSessionLifecycle(t *testing.T) {
 		service: exchangeService,
 	}
 
+	// Set market price for BTC (required for safety guard validation)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
+
 	// 1. Start session
 	startReq := MCPRequest{
 		JSONRPC: "2.0",

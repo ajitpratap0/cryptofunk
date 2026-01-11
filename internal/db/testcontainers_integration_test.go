@@ -705,6 +705,12 @@ func TestGetSessionsBySymbolWithTestcontainers(t *testing.T) {
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
+
+	// Skip this test when using existing database (CI) as it expects a fresh database
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
+
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
