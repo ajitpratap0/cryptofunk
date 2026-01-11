@@ -173,6 +173,8 @@ func TestTradingHoursConfig_InvalidTimezone(t *testing.T) {
 }
 
 func TestTradingHoursConfig_InvalidTimeFormat(t *testing.T) {
+	// Note: Go's time.Parse("15:04", ...) accepts formats like "9:00" (without leading zero)
+	// So we use actually unparseable formats to test fail-open behavior
 	testCases := []struct {
 		name  string
 		start string
@@ -180,13 +182,13 @@ func TestTradingHoursConfig_InvalidTimeFormat(t *testing.T) {
 	}{
 		{
 			name:  "Invalid start format",
-			start: "9:00", // Missing leading zero
+			start: "invalid", // Actually unparseable
 			end:   "16:00",
 		},
 		{
 			name:  "Invalid end format",
 			start: "09:00",
-			end:   "4:00", // Missing leading zero
+			end:   "notvalid", // Actually unparseable
 		},
 		{
 			name:  "Invalid both",
