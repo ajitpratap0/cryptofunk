@@ -445,10 +445,8 @@ func RecordDatabaseQuery(queryType string, durationMs float64) {
 	DatabaseQueryDuration.WithLabelValues(queryType).Observe(durationMs)
 }
 
-// RecordMCPToolCall records an MCP tool call
-func RecordMCPToolCall(toolName, server string, durationMs float64) {
-	MCPToolCallDuration.WithLabelValues(toolName, server).Observe(durationMs)
-}
+// Note: RecordMCPToolCall is defined in mcp_metrics.go with an enhanced signature
+// that includes success status. The old signature is deprecated.
 
 // RecordAgentSignal records an agent signal
 func RecordAgentSignal(agentType, signalType string, confidence float64) {

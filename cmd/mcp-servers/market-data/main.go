@@ -187,7 +187,7 @@ func (s *MCPServer) Run() error {
 
 // handleRequest routes MCP requests to appropriate handlers
 func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
-	startTime := time.Now()
+	timer := metrics.NewMCPRequestTimer(serverName, req.Method)
 
 	response := &MCPResponse{
 		JSONRPC: "2.0",
@@ -195,14 +195,11 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	}
 
 	defer func() {
-		// TODO: Add MCP request metrics when they are defined in internal/metrics
-		// status := "success"
-		// if response.Error != nil {
-		// 	status = "error"
-		// }
-		// metrics.MCPRequestsTotal.WithLabelValues(serverName, req.Method, status).Inc()
-		// metrics.MCPRequestDuration.WithLabelValues(serverName, req.Method).Observe(time.Since(startTime).Seconds())
-		_ = startTime // Suppress unused variable warning
+		success := response.Error == nil
+		timer.Record(success)
+		if response.Error != nil {
+			metrics.RecordMCPError(serverName, req.Method, response.Error.Code)
+		}
 	}()
 
 	switch req.Method {
@@ -366,7 +363,7 @@ func (s *MCPServer) listTools() interface{} {
 
 // callTool executes the requested tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
-	startTime := time.Now()
+	timer := metrics.NewMCPToolTimer(serverName, name)
 
 	s.service.logger.Debug().
 		Str("tool", name).
@@ -394,13 +391,7 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 	}
 
 	// Record metrics
-	// TODO: Add MCPToolCallsTotal metric when defined in internal/metrics
-	// status := "success"
-	// if err != nil {
-	// 	status = "error"
-	// }
-	// metrics.MCPToolCallsTotal.WithLabelValues(serverName, name, status).Inc()
-	metrics.MCPToolCallDuration.WithLabelValues(name, serverName).Observe(time.Since(startTime).Seconds())
+	timer.Record(err == nil)
 
 	return result, err
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 )
 
@@ -37,7 +38,7 @@ func TestTechnicalIndicatorsServer_Initialize(t *testing.T) {
 	serverInfo, ok := result["serverInfo"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "technical-indicators", serverInfo["name"])
-	assert.Equal(t, "1.0.0", serverInfo["version"])
+	assert.Equal(t, config.Version, serverInfo["version"])
 }
 
 func TestTechnicalIndicatorsServer_ListTools(t *testing.T) {

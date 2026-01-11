@@ -9,6 +9,12 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+)
+
+const (
+	serverName = "risk-analyzer"
 )
 
 func main() {
@@ -90,10 +96,20 @@ type MCPError struct {
 
 // handleRequest routes the request to the appropriate handler
 func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
+	timer := metrics.NewMCPRequestTimer(serverName, req.Method)
+
 	resp := &MCPResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 	}
+
+	defer func() {
+		success := resp.Error == nil
+		timer.Record(success)
+		if resp.Error != nil {
+			metrics.RecordMCPError(serverName, req.Method, resp.Error.Code)
+		}
+	}()
 
 	switch req.Method {
 	case "initialize":
@@ -105,7 +121,7 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 				},
 			},
 			"serverInfo": map[string]string{
-				"name":    "risk-analyzer",
+				"name":    serverName,
 				"version": "1.0.0",
 			},
 		}
@@ -251,20 +267,30 @@ func (s *MCPServer) listTools() interface{} {
 
 // callTool executes the specified tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
+	timer := metrics.NewMCPToolTimer(serverName, name)
+
+	var result interface{}
+	var err error
+
 	switch name {
 	case "calculate_position_size":
-		return s.calculatePositionSize(args)
+		result, err = s.calculatePositionSize(args)
 	case "calculate_var":
-		return s.calculateVaR(args)
+		result, err = s.calculateVaR(args)
 	case "check_portfolio_limits":
-		return s.checkPortfolioLimits(args)
+		result, err = s.checkPortfolioLimits(args)
 	case "calculate_sharpe":
-		return s.calculateSharpe(args)
+		result, err = s.calculateSharpe(args)
 	case "calculate_drawdown":
-		return s.calculateDrawdown(args)
+		result, err = s.calculateDrawdown(args)
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", name)
+		err = fmt.Errorf("unknown tool: %s", name)
 	}
+
+	// Record metrics
+	timer.Record(err == nil)
+
+	return result, err
 }
 
 // extractFloat extracts a float64 from the args map

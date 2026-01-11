@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -149,41 +150,46 @@ func TestRecordDatabaseQuery(t *testing.T) {
 
 func TestRecordMCPToolCall(t *testing.T) {
 	tests := []struct {
-		name       string
-		toolName   string
-		server     string
-		durationMs float64
+		name     string
+		toolName string
+		server   string
+		duration time.Duration
+		success  bool
 	}{
 		{
-			name:       "get_price call",
-			toolName:   "get_price",
-			server:     "market-data",
-			durationMs: 25.5,
+			name:     "get_price call success",
+			toolName: "get_price",
+			server:   "market-data",
+			duration: 25 * time.Millisecond,
+			success:  true,
 		},
 		{
-			name:       "calculate_rsi call",
-			toolName:   "calculate_rsi",
-			server:     "technical-indicators",
-			durationMs: 45.3,
+			name:     "calculate_rsi call success",
+			toolName: "calculate_rsi",
+			server:   "technical-indicators",
+			duration: 45 * time.Millisecond,
+			success:  true,
 		},
 		{
-			name:       "place_order call",
-			toolName:   "place_order",
-			server:     "order-executor",
-			durationMs: 150.2,
+			name:     "place_order call failure",
+			toolName: "place_order",
+			server:   "order-executor",
+			duration: 150 * time.Millisecond,
+			success:  false,
 		},
 		{
-			name:       "fast call",
-			toolName:   "get_cache",
-			server:     "cache",
-			durationMs: 1.0,
+			name:     "fast call success",
+			toolName: "get_cache",
+			server:   "cache",
+			duration: 1 * time.Millisecond,
+			success:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.NotPanics(t, func() {
-				RecordMCPToolCall(tt.toolName, tt.server, tt.durationMs)
+				RecordMCPToolCall(tt.server, tt.toolName, tt.duration, tt.success)
 			})
 		})
 	}

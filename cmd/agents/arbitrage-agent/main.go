@@ -207,27 +207,9 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 	// Initialize price cache
 	a.priceCache = make(map[string]map[string]*ExchangePrice)
 
-	// Initialize default exchange fees (TODO: Make configurable)
-	a.exchangeFees = map[string]*ExchangeFees{
-		"binance": {
-			Exchange:    "binance",
-			MakerFee:    0.001,  // 0.1% maker
-			TakerFee:    0.001,  // 0.1% taker
-			WithdrawFee: 0.0005, // 0.05% withdraw
-		},
-		"coinbase": {
-			Exchange:    "coinbase",
-			MakerFee:    0.004, // 0.4% maker
-			TakerFee:    0.006, // 0.6% taker
-			WithdrawFee: 0.001, // 0.1% withdraw
-		},
-		"kraken": {
-			Exchange:    "kraken",
-			MakerFee:    0.0016, // 0.16% maker
-			TakerFee:    0.0026, // 0.26% taker
-			WithdrawFee: 0.0009, // 0.09% withdraw
-		},
-	}
+	// Initialize exchange fees from configuration
+	// Fees are loaded from agents.yaml under strategy_agents.arbitrage.config.exchange_fees
+	a.exchangeFees = a.loadExchangeFees()
 
 	// Connect to NATS for signal publishing
 	natsURL := viper.GetString("nats.url")
@@ -572,6 +554,116 @@ func (a *ArbitrageAgent) updatePriceCache(price *ExchangePrice) {
 		Str("exchange", price.Exchange).
 		Float64("price", price.Price).
 		Msg("Price cache updated")
+}
+
+// loadExchangeFees loads exchange fee configuration from agents.yaml
+// Falls back to sensible defaults if configuration is not found
+func (a *ArbitrageAgent) loadExchangeFees() map[string]*ExchangeFees {
+	fees := make(map[string]*ExchangeFees)
+
+	// Default fees used when config is not available
+	defaults := map[string]*ExchangeFees{
+		"binance": {
+			Exchange:    "binance",
+			MakerFee:    0.001,  // 0.1% maker
+			TakerFee:    0.001,  // 0.1% taker
+			WithdrawFee: 0.0005, // 0.05% withdraw
+		},
+		"coinbase": {
+			Exchange:    "coinbase",
+			MakerFee:    0.004, // 0.4% maker
+			TakerFee:    0.006, // 0.6% taker
+			WithdrawFee: 0.001, // 0.1% withdraw
+		},
+		"kraken": {
+			Exchange:    "kraken",
+			MakerFee:    0.0016, // 0.16% maker
+			TakerFee:    0.0026, // 0.26% taker
+			WithdrawFee: 0.0009, // 0.09% withdraw
+		},
+	}
+
+	// Try to load fees from config
+	exchangeFeesConfig := viper.GetStringMap("strategy_agents.arbitrage.config.exchange_fees")
+	if len(exchangeFeesConfig) == 0 {
+		log.Warn().Msg("No exchange fees configured in agents.yaml, using defaults")
+		return defaults
+	}
+
+	// Parse each exchange's fee configuration
+	for exchange, feeData := range exchangeFeesConfig {
+		feeMap, ok := feeData.(map[string]interface{})
+		if !ok {
+			log.Warn().
+				Str("exchange", exchange).
+				Msg("Invalid fee configuration format, using defaults")
+			if defaultFee, exists := defaults[exchange]; exists {
+				fees[exchange] = defaultFee
+			}
+			continue
+		}
+
+		fee := &ExchangeFees{Exchange: exchange}
+
+		// Parse maker fee
+		if makerFee, ok := feeMap["maker_fee"].(float64); ok {
+			fee.MakerFee = makerFee
+		} else if defaultFee, exists := defaults[exchange]; exists {
+			fee.MakerFee = defaultFee.MakerFee
+		}
+
+		// Parse taker fee
+		if takerFee, ok := feeMap["taker_fee"].(float64); ok {
+			fee.TakerFee = takerFee
+		} else if defaultFee, exists := defaults[exchange]; exists {
+			fee.TakerFee = defaultFee.TakerFee
+		}
+
+		// Parse withdraw fee
+		if withdrawFee, ok := feeMap["withdraw_fee"].(float64); ok {
+			fee.WithdrawFee = withdrawFee
+		} else if defaultFee, exists := defaults[exchange]; exists {
+			fee.WithdrawFee = defaultFee.WithdrawFee
+		}
+
+		fees[exchange] = fee
+
+		log.Debug().
+			Str("exchange", exchange).
+			Float64("maker_fee", fee.MakerFee).
+			Float64("taker_fee", fee.TakerFee).
+			Float64("withdraw_fee", fee.WithdrawFee).
+			Msg("Loaded exchange fee configuration")
+	}
+
+	// Add defaults for any configured exchanges not in the fee config
+	for _, exchange := range a.exchanges {
+		if _, exists := fees[exchange]; !exists {
+			if defaultFee, hasDefault := defaults[exchange]; hasDefault {
+				fees[exchange] = defaultFee
+				log.Debug().
+					Str("exchange", exchange).
+					Msg("Using default fees for exchange not configured")
+			} else {
+				// For unknown exchanges, use a conservative default
+				fees[exchange] = &ExchangeFees{
+					Exchange:    exchange,
+					MakerFee:    0.002,  // 0.2% maker (conservative)
+					TakerFee:    0.002,  // 0.2% taker (conservative)
+					WithdrawFee: 0.001,  // 0.1% withdraw (conservative)
+				}
+				log.Warn().
+					Str("exchange", exchange).
+					Msg("Using conservative default fees for unknown exchange")
+			}
+		}
+	}
+
+	log.Info().
+		Int("exchanges", len(fees)).
+		Msg("Exchange fees loaded from configuration")
+
+	return fees
 }
 
 // calculateSpreads calculates price spreads between exchanges

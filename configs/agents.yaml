@@ -291,6 +291,22 @@ strategy_agents:
       confidence_threshold: 0.80
       vote_weight: 0.3
 
+      # Exchange fee configuration for arbitrage calculations
+      # Format: maker_fee, taker_fee, withdraw_fee (as decimal percentages)
+      exchange_fees:
+        binance:
+          maker_fee: 0.001     # 0.1% maker fee
+          taker_fee: 0.001     # 0.1% taker fee
+          withdraw_fee: 0.0005 # 0.05% withdrawal fee
+        coinbase:
+          maker_fee: 0.004     # 0.4% maker fee
+          taker_fee: 0.006     # 0.6% taker fee
+          withdraw_fee: 0.001  # 0.1% withdrawal fee
+        kraken:
+          maker_fee: 0.0016    # 0.16% maker fee
+          taker_fee: 0.0026    # 0.26% taker fee
+          withdraw_fee: 0.0009 # 0.09% withdrawal fee
+
 # ================================================================================
 # RISK MANAGEMENT AGENT
 # Oversees all trades with veto power

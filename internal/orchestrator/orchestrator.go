@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
@@ -1101,7 +1102,7 @@ func (o *Orchestrator) GetStatus() *OrchestratorStatus {
 
 	return &OrchestratorStatus{
 		Status:       "running",
-		Version:      "1.0.0", // TODO: Set from build flags
+		Version:      config.GetVersion(),
 		Uptime:       uptime,
 		ActiveAgents: len(o.agents),
 		TotalSignals: totalSignals,

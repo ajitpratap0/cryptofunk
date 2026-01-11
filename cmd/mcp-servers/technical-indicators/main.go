@@ -10,6 +10,11 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/indicators"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+)
+
+const (
+	serverName = "technical-indicators"
 )
 
 func main() {
@@ -97,10 +102,20 @@ type MCPError struct {
 
 // handleRequest routes the request to the appropriate handler
 func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
+	timer := metrics.NewMCPRequestTimer(serverName, req.Method)
+
 	response := &MCPResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 	}
+
+	defer func() {
+		success := response.Error == nil
+		timer.Record(success)
+		if response.Error != nil {
+			metrics.RecordMCPError(serverName, req.Method, response.Error.Code)
+		}
+	}()
 
 	// Handle different MCP methods
 	switch req.Method {
@@ -295,23 +310,33 @@ func (s *MCPServer) listTools() interface{} {
 
 // callTool executes the requested tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
+	timer := metrics.NewMCPToolTimer(serverName, name)
+
 	log.Debug().
 		Str("tool", name).
 		Interface("args", args).
 		Msg("Calling tool")
 
+	var result interface{}
+	var err error
+
 	switch name {
 	case "calculate_rsi":
-		return s.service.CalculateRSI(args)
+		result, err = s.service.CalculateRSI(args)
 	case "calculate_macd":
-		return s.service.CalculateMACD(args)
+		result, err = s.service.CalculateMACD(args)
 	case "calculate_bollinger_bands":
-		return s.service.CalculateBollingerBands(args)
+		result, err = s.service.CalculateBollingerBands(args)
 	case "calculate_ema":
-		return s.service.CalculateEMA(args)
+		result, err = s.service.CalculateEMA(args)
 	case "calculate_adx":
-		return s.service.CalculateADX(args)
+		result, err = s.service.CalculateADX(args)
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", name)
+		err = fmt.Errorf("unknown tool: %s", name)
 	}
+
+	// Record metrics
+	timer.Record(err == nil)
+
+	return result, err
 }

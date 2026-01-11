@@ -13,6 +13,11 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+)
+
+const (
+	serverName = "order-executor"
 )
 
 // MCP Tool Names - defined as constants to avoid repetition
@@ -171,10 +176,20 @@ type MCPError struct {
 
 // handleRequest routes the request to the appropriate handler
 func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
+	timer := metrics.NewMCPRequestTimer(serverName, req.Method)
+
 	resp := &MCPResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 	}
+
+	defer func() {
+		success := resp.Error == nil
+		timer.Record(success)
+		if resp.Error != nil {
+			metrics.RecordMCPError(serverName, req.Method, resp.Error.Code)
+		}
+	}()
 
 	switch req.Method {
 	case "initialize":
@@ -186,7 +201,7 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 				},
 			},
 			"serverInfo": map[string]string{
-				"name":    "order-executor",
+				"name":    serverName,
 				"version": "1.0.0",
 			},
 		}
@@ -345,27 +360,37 @@ func (s *MCPServer) listTools() interface{} {
 
 // callTool executes the specified tool
 func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
+	timer := metrics.NewMCPToolTimer(serverName, name)
+
 	// Create a context with timeout for tool execution
 	// 60 seconds for operations that might involve multiple API calls or database operations
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	var result interface{}
+	var err error
+
 	switch name {
 	case toolPlaceMarketOrder:
-		return s.service.PlaceMarketOrder(ctx, args)
+		result, err = s.service.PlaceMarketOrder(ctx, args)
 	case toolPlaceLimitOrder:
-		return s.service.PlaceLimitOrder(ctx, args)
+		result, err = s.service.PlaceLimitOrder(ctx, args)
 	case toolCancelOrder:
-		return s.service.CancelOrder(ctx, args)
+		result, err = s.service.CancelOrder(ctx, args)
 	case toolGetOrderStatus:
-		return s.service.GetOrderStatus(ctx, args)
+		result, err = s.service.GetOrderStatus(ctx, args)
 	case toolStartSession:
-		return s.service.StartSession(ctx, args)
+		result, err = s.service.StartSession(ctx, args)
 	case toolStopSession:
-		return s.service.StopSession(ctx, args)
+		result, err = s.service.StopSession(ctx, args)
 	case toolGetSessionStats:
-		return s.service.GetSessionStats(ctx, args)
+		result, err = s.service.GetSessionStats(ctx, args)
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", name)
+		err = fmt.Errorf("unknown tool: %s", name)
 	}
+
+	// Record metrics
+	timer.Record(err == nil)
+
+	return result, err
 }
