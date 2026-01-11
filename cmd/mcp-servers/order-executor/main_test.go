@@ -194,6 +194,9 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 		service: exchangeService,
 	}
 
+	// Set market price for BTC (required for safety guard validation)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
+
 	// Start session first
 	startReq := MCPRequest{
 		JSONRPC: "2.0",
@@ -434,6 +437,9 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 	server := &MCPServer{
 		service: exchangeService,
 	}
+
+	// Set market price for BTC (required for safety guard validation)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// Start session
 	startReq := MCPRequest{

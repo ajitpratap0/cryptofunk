@@ -66,11 +66,12 @@ func isDockerAvailable() bool {
 
 // PostgresContainer holds the testcontainer instance and connection details
 type PostgresContainer struct {
-	Container     *postgres.PostgresContainer
-	ConnectionStr string
-	DB            *db.DB
-	cleanupFuncs  []func()
-	t             *testing.T
+	Container       *postgres.PostgresContainer
+	ConnectionStr   string
+	DB              *db.DB
+	cleanupFuncs    []func()
+	t               *testing.T
+	UsingExistingDB bool // True when using DATABASE_URL instead of testcontainer
 }
 
 // SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector.
@@ -207,11 +208,12 @@ func setupFromExistingDatabase(t *testing.T, ctx context.Context, connStr string
 	database.SetPool(pool)
 
 	tc := &PostgresContainer{
-		Container:     nil, // No container when using existing database
-		ConnectionStr: connStr,
-		DB:            database,
-		cleanupFuncs:  []func(){},
-		t:             t,
+		Container:       nil, // No container when using existing database
+		ConnectionStr:   connStr,
+		DB:              database,
+		cleanupFuncs:    []func(){},
+		t:               t,
+		UsingExistingDB: true, // Mark that we're using existing database
 	}
 
 	// Note: We don't truncate tables here because tests may run in parallel
