@@ -11,17 +11,18 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	App        AppConfig                 `mapstructure:"app"`
-	Database   DatabaseConfig            `mapstructure:"database"`
-	Redis      RedisConfig               `mapstructure:"redis"`
-	NATS       NATSConfig                `mapstructure:"nats"`
-	LLM        LLMConfig                 `mapstructure:"llm"`
-	MCP        MCPConfig                 `mapstructure:"mcp"`
-	Trading    TradingConfig             `mapstructure:"trading"`
-	Risk       RiskConfig                `mapstructure:"risk"`
-	Exchanges  map[string]ExchangeConfig `mapstructure:"exchanges"`
-	API        APIConfig                 `mapstructure:"api"`
-	Monitoring MonitoringConfig          `mapstructure:"monitoring"`
+	App           AppConfig                 `mapstructure:"app"`
+	Database      DatabaseConfig            `mapstructure:"database"`
+	Redis         RedisConfig               `mapstructure:"redis"`
+	NATS          NATSConfig                `mapstructure:"nats"`
+	LLM           LLMConfig                 `mapstructure:"llm"`
+	MCP           MCPConfig                 `mapstructure:"mcp"`
+	Trading       TradingConfig             `mapstructure:"trading"`
+	Risk          RiskConfig                `mapstructure:"risk"`
+	Exchanges     map[string]ExchangeConfig `mapstructure:"exchanges"`
+	API           APIConfig                 `mapstructure:"api"`
+	Monitoring    MonitoringConfig          `mapstructure:"monitoring"`
+	Notifications NotificationsConfig       `mapstructure:"notifications"`
 }
 
 // AppConfig contains application-level settings
@@ -139,6 +140,31 @@ type RiskConfig struct {
 	LLMApprovalRequired bool                 `mapstructure:"llm_approval_required"` // true
 	MinConfidence       float64              `mapstructure:"min_confidence"`        // 0.7
 	CircuitBreaker      CircuitBreakerConfig `mapstructure:"circuit_breaker"`       // Circuit breaker thresholds
+	SafetyGuard         SafetyGuardConfig    `mapstructure:"safety_guard"`          // Live trading safety guards
+}
+
+// SafetyGuardConfig contains safety guard settings for live trading protection
+type SafetyGuardConfig struct {
+	Enabled              bool               `mapstructure:"enabled"`                // Enable/disable safety guards
+	MaxDailyDrawdown     float64            `mapstructure:"max_daily_drawdown"`     // Max daily drawdown before halting (e.g., 0.05 = 5%)
+	MaxPositionSize      float64            `mapstructure:"max_position_size"`      // Max single position as fraction of capital (e.g., 0.1 = 10%)
+	MaxTotalExposure     float64            `mapstructure:"max_total_exposure"`     // Max total exposure as fraction of capital (e.g., 0.5 = 50%)
+	MaxDailyTrades       int                `mapstructure:"max_daily_trades"`       // Max trades per day (0 = unlimited)
+	MaxConsecutiveLosses int                `mapstructure:"max_consecutive_losses"` // Consecutive losses before circuit breaker (e.g., 3)
+	CooldownPeriod       string             `mapstructure:"cooldown_period"`        // Duration to wait after circuit breaker trips (e.g., "1h")
+	MaxOrderValue        float64            `mapstructure:"max_order_value"`        // Max single order value in base currency (e.g., 10000.0)
+	MinOrderInterval     string             `mapstructure:"min_order_interval"`     // Min time between orders (e.g., "5s")
+	RequireConfirmation  bool               `mapstructure:"require_confirmation"`   // Require confirmation for large trades
+	LargeTradeThreshold  float64            `mapstructure:"large_trade_threshold"`  // Threshold for "large trade" (fraction of capital)
+	TradingHours         TradingHoursConfig `mapstructure:"trading_hours"`          // Trading hours restriction
+}
+
+// TradingHoursConfig contains trading hours restriction settings
+type TradingHoursConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`  // Enable/disable trading hours restriction
+	Start    string `mapstructure:"start"`    // Start time in HH:MM format (e.g., "09:00")
+	End      string `mapstructure:"end"`      // End time in HH:MM format (e.g., "16:00")
+	Timezone string `mapstructure:"timezone"` // Timezone (e.g., "America/New_York", "UTC")
 }
 
 // CircuitBreakerConfig contains circuit breaker settings for different service types
@@ -196,6 +222,54 @@ type AuthConfig struct {
 type MonitoringConfig struct {
 	PrometheusPort int  `mapstructure:"prometheus_port"`
 	EnableMetrics  bool `mapstructure:"enable_metrics"`
+}
+
+// NotificationsConfig contains notification settings for Email and Slack
+type NotificationsConfig struct {
+	Enabled bool                        `mapstructure:"enabled"` // Enable/disable notifications globally
+	Email   EmailNotifConfig            `mapstructure:"email"`   // Email notification settings
+	Slack   SlackNotifConfig            `mapstructure:"slack"`   // Slack notification settings
+	Events  map[string]NotifEventConfig `mapstructure:"events"`  // Event routing configuration
+}
+
+// NotifEventConfig contains configuration for a specific notification event type
+type NotifEventConfig struct {
+	Enabled  bool     `mapstructure:"enabled"`  // Enable/disable this event type
+	Channels []string `mapstructure:"channels"` // Channels to send to: "email", "slack"
+	Priority string   `mapstructure:"priority"` // Priority: "high" or "normal"
+}
+
+// EmailNotifConfig contains email notification settings
+type EmailNotifConfig struct {
+	Enabled            bool     `mapstructure:"enabled"`               // Enable/disable email notifications
+	Host               string   `mapstructure:"host"`                  // SMTP server host
+	Port               int      `mapstructure:"port"`                  // SMTP server port
+	Username           string   `mapstructure:"username"`              // SMTP username
+	Password           string   `mapstructure:"password"`              // SMTP password
+	FromAddress        string   `mapstructure:"from_address"`          // Sender email address
+	FromName           string   `mapstructure:"from_name"`             // Sender name
+	Recipients         []string `mapstructure:"recipients"`            // Default recipient email addresses
+	UseTLS             bool     `mapstructure:"use_tls"`               // Use TLS from start (port 465)
+	UseStartTLS        bool     `mapstructure:"use_starttls"`          // Use STARTTLS upgrade (port 587)
+	SkipVerify         bool     `mapstructure:"skip_verify"`           // Skip TLS certificate verification
+	AuthRequired       bool     `mapstructure:"auth_required"`         // Whether SMTP auth is required
+	RateLimitPerMinute int      `mapstructure:"rate_limit_per_minute"` // Max emails per minute
+	RetryAttempts      int      `mapstructure:"retry_attempts"`        // Number of retry attempts
+	RetryDelaySeconds  int      `mapstructure:"retry_delay_seconds"`   // Delay between retries in seconds
+}
+
+// SlackNotifConfig contains Slack notification settings
+type SlackNotifConfig struct {
+	Enabled            bool   `mapstructure:"enabled"`               // Enable/disable Slack notifications
+	WebhookURL         string `mapstructure:"webhook_url"`           // Slack incoming webhook URL
+	Channel            string `mapstructure:"channel"`               // Default channel (optional)
+	Username           string `mapstructure:"username"`              // Bot username
+	IconEmoji          string `mapstructure:"icon_emoji"`            // Bot icon emoji
+	IconURL            string `mapstructure:"icon_url"`              // Bot icon URL (overrides emoji)
+	RateLimitPerMinute int    `mapstructure:"rate_limit_per_minute"` // Max messages per minute
+	RetryAttempts      int    `mapstructure:"retry_attempts"`        // Number of retry attempts
+	RetryDelaySeconds  int    `mapstructure:"retry_delay_seconds"`   // Delay between retries in seconds
+	TimeoutSeconds     int    `mapstructure:"timeout_seconds"`       // HTTP request timeout
 }
 
 // Load loads configuration from file and environment variables
@@ -358,6 +432,25 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("risk.circuit_breaker.database.half_open_max_reqs", 5)
 	v.SetDefault("risk.circuit_breaker.database.count_interval", "10s")
 
+	// Safety Guard defaults - Live trading protection
+	v.SetDefault("risk.safety_guard.enabled", true)               // Enabled by default
+	v.SetDefault("risk.safety_guard.max_daily_drawdown", 0.05)    // 5% max daily drawdown
+	v.SetDefault("risk.safety_guard.max_position_size", 0.1)      // 10% max position size
+	v.SetDefault("risk.safety_guard.max_total_exposure", 0.5)     // 50% max total exposure
+	v.SetDefault("risk.safety_guard.max_daily_trades", 50)        // 50 trades per day
+	v.SetDefault("risk.safety_guard.max_consecutive_losses", 3)   // 3 consecutive losses trigger circuit breaker
+	v.SetDefault("risk.safety_guard.cooldown_period", "1h")       // 1 hour cooldown after circuit breaker
+	v.SetDefault("risk.safety_guard.max_order_value", 10000.0)    // $10,000 max order value
+	v.SetDefault("risk.safety_guard.min_order_interval", "5s")    // 5 seconds between orders
+	v.SetDefault("risk.safety_guard.require_confirmation", true)  // Require confirmation for large trades
+	v.SetDefault("risk.safety_guard.large_trade_threshold", 0.05) // 5% of capital is "large trade"
+
+	// Trading Hours defaults - Optional time-based trading restrictions
+	v.SetDefault("risk.safety_guard.trading_hours.enabled", false)               // Disabled by default
+	v.SetDefault("risk.safety_guard.trading_hours.start", "09:00")               // Default market open
+	v.SetDefault("risk.safety_guard.trading_hours.end", "16:00")                 // Default market close
+	v.SetDefault("risk.safety_guard.trading_hours.timezone", "America/New_York") // Default to Eastern Time
+
 	// API defaults
 	v.SetDefault("api.host", "0.0.0.0")
 	v.SetDefault("api.port", 8081)
@@ -381,6 +474,71 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("exchanges.binance.fees.market_impact", 0.0001) // 0.01% market impact
 	v.SetDefault("exchanges.binance.fees.max_slippage", 0.003)   // 0.3% max slippage
 	v.SetDefault("exchanges.binance.fees.withdrawal", 0.0)       // No withdrawal fee by default
+
+	// Notifications defaults
+	v.SetDefault("notifications.enabled", true)
+
+	// Email notification defaults
+	v.SetDefault("notifications.email.enabled", false) // Disabled by default until configured
+	v.SetDefault("notifications.email.port", 587)
+	v.SetDefault("notifications.email.from_name", "CryptoFunk Trading")
+	v.SetDefault("notifications.email.use_tls", false)
+	v.SetDefault("notifications.email.use_starttls", true)
+	v.SetDefault("notifications.email.skip_verify", false)
+	v.SetDefault("notifications.email.auth_required", true)
+	v.SetDefault("notifications.email.rate_limit_per_minute", 30)
+	v.SetDefault("notifications.email.retry_attempts", 3)
+	v.SetDefault("notifications.email.retry_delay_seconds", 5)
+
+	// Slack notification defaults
+	v.SetDefault("notifications.slack.enabled", false) // Disabled by default until configured
+	v.SetDefault("notifications.slack.username", "CryptoFunk Bot")
+	v.SetDefault("notifications.slack.icon_emoji", ":chart_with_upwards_trend:")
+	v.SetDefault("notifications.slack.rate_limit_per_minute", 30)
+	v.SetDefault("notifications.slack.retry_attempts", 3)
+	v.SetDefault("notifications.slack.retry_delay_seconds", 2)
+	v.SetDefault("notifications.slack.timeout_seconds", 30)
+
+	// Event routing defaults - which events go to which channels
+	// trade_executed: sent to both email and slack (high priority trades)
+	v.SetDefault("notifications.events.trade_executed.enabled", true)
+	v.SetDefault("notifications.events.trade_executed.channels", []string{"email", "slack"})
+	v.SetDefault("notifications.events.trade_executed.priority", "high")
+
+	// position_closed: sent to slack only (frequent updates)
+	v.SetDefault("notifications.events.position_closed.enabled", true)
+	v.SetDefault("notifications.events.position_closed.channels", []string{"slack"})
+	v.SetDefault("notifications.events.position_closed.priority", "normal")
+
+	// safety_guard: sent to both (critical alerts)
+	v.SetDefault("notifications.events.safety_guard.enabled", true)
+	v.SetDefault("notifications.events.safety_guard.channels", []string{"email", "slack"})
+	v.SetDefault("notifications.events.safety_guard.priority", "high")
+
+	// system_error: sent to both (critical errors)
+	v.SetDefault("notifications.events.system_error.enabled", true)
+	v.SetDefault("notifications.events.system_error.channels", []string{"email", "slack"})
+	v.SetDefault("notifications.events.system_error.priority", "high")
+
+	// daily_summary: sent to email only (daily digest)
+	v.SetDefault("notifications.events.daily_summary.enabled", true)
+	v.SetDefault("notifications.events.daily_summary.channels", []string{"email"})
+	v.SetDefault("notifications.events.daily_summary.priority", "normal")
+
+	// pnl_alert: sent to slack for quick visibility
+	v.SetDefault("notifications.events.pnl_alert.enabled", true)
+	v.SetDefault("notifications.events.pnl_alert.channels", []string{"slack"})
+	v.SetDefault("notifications.events.pnl_alert.priority", "high")
+
+	// circuit_breaker: sent to both (critical)
+	v.SetDefault("notifications.events.circuit_breaker.enabled", true)
+	v.SetDefault("notifications.events.circuit_breaker.channels", []string{"email", "slack"})
+	v.SetDefault("notifications.events.circuit_breaker.priority", "high")
+
+	// consensus_failure: sent to slack (informational)
+	v.SetDefault("notifications.events.consensus_failure.enabled", true)
+	v.SetDefault("notifications.events.consensus_failure.channels", []string{"slack"})
+	v.SetDefault("notifications.events.consensus_failure.priority", "normal")
 }
 
 // Note: Comprehensive validation is now in validation.go
@@ -473,4 +631,96 @@ func (c *CircuitBreakerConfig) GetDatabaseRiskSettings() *RiskCircuitBreakerSett
 // IsConfigured returns true if the circuit breaker settings have valid values
 func (s *RiskCircuitBreakerSettings) IsConfigured() bool {
 	return s.MinRequests > 0 || s.FailureRatio > 0 || s.OpenTimeout != "" || s.HalfOpenMaxReqs > 0
+}
+
+// GetCooldownPeriod returns the cooldown period as time.Duration
+func (c *SafetyGuardConfig) GetCooldownPeriod() time.Duration {
+	if c.CooldownPeriod == "" {
+		return time.Hour // Default 1 hour
+	}
+	duration, err := time.ParseDuration(c.CooldownPeriod)
+	if err != nil {
+		return time.Hour // Default on parse error
+	}
+	return duration
+}
+
+// GetMinOrderInterval returns the minimum order interval as time.Duration
+func (c *SafetyGuardConfig) GetMinOrderInterval() time.Duration {
+	if c.MinOrderInterval == "" {
+		return 5 * time.Second // Default 5 seconds
+	}
+	duration, err := time.ParseDuration(c.MinOrderInterval)
+	if err != nil {
+		return 5 * time.Second // Default on parse error
+	}
+	return duration
+}
+
+// IsLargeOrder returns true if the order value exceeds the large trade threshold
+func (c *SafetyGuardConfig) IsLargeOrder(orderValue, capital float64) bool {
+	if capital <= 0 || c.LargeTradeThreshold <= 0 {
+		return false
+	}
+	return orderValue/capital >= c.LargeTradeThreshold
+}
+
+// IsWithinTradingHours checks if the current time is within configured trading hours
+// Returns true if trading hours are disabled or if within the configured window
+func (c *TradingHoursConfig) IsWithinTradingHours(now time.Time) bool {
+	if !c.Enabled {
+		return true // Trading hours restriction is disabled
+	}
+
+	// Parse timezone
+	loc := time.UTC // Default to UTC
+	if c.Timezone != "" {
+		var err error
+		loc, err = time.LoadLocation(c.Timezone)
+		if err != nil {
+			// If timezone parsing fails, default to UTC and log would happen in caller
+			loc = time.UTC
+		}
+	}
+
+	// Convert current time to configured timezone
+	localTime := now.In(loc)
+
+	// Parse start and end times
+	startTime, err := time.Parse("15:04", c.Start)
+	if err != nil {
+		return true // Invalid start time, allow trading
+	}
+	endTime, err := time.Parse("15:04", c.End)
+	if err != nil {
+		return true // Invalid end time, allow trading
+	}
+
+	// Create today's start and end times in the local timezone
+	todayStart := time.Date(localTime.Year(), localTime.Month(), localTime.Day(),
+		startTime.Hour(), startTime.Minute(), 0, 0, loc)
+	todayEnd := time.Date(localTime.Year(), localTime.Month(), localTime.Day(),
+		endTime.Hour(), endTime.Minute(), 0, 0, loc)
+
+	// Handle overnight trading (e.g., start: 20:00, end: 04:00)
+	if todayEnd.Before(todayStart) || todayEnd.Equal(todayStart) {
+		// Trading window spans midnight
+		// Check if current time is after start OR before end
+		return localTime.After(todayStart) || localTime.Before(todayEnd) || localTime.Equal(todayStart)
+	}
+
+	// Normal trading window (same day)
+	return (localTime.After(todayStart) || localTime.Equal(todayStart)) && localTime.Before(todayEnd)
+}
+
+// GetLocation returns the configured timezone location
+func (c *TradingHoursConfig) GetLocation() *time.Location {
+	if c.Timezone == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(c.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }

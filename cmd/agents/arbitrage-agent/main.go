@@ -324,19 +324,51 @@ func (a *ArbitrageAgent) Step(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown performs cleanup
+// Shutdown performs cleanup with proper NATS drain and logging
 func (a *ArbitrageAgent) Shutdown(ctx context.Context) error {
-	log.Info().Str("agent", "arbitrage").Msg("Shutting down Arbitrage Agent")
+	shutdownStart := time.Now()
+	log.Info().Str("agent", "arbitrage").Msg("Starting graceful Arbitrage Agent shutdown")
 
-	// Update status
+	// Update status belief
 	a.beliefs.UpdateBelief("agent_status", "shutdown", 1.0, "system")
+	log.Debug().Msg("Shutdown: Updated agent status to shutdown")
 
-	// Close NATS connection
+	// Drain and close NATS connection
 	if a.natsConn != nil {
-		a.natsConn.Close()
+		log.Debug().Msg("Shutdown: Draining NATS connection")
+
+		// Create a timeout for NATS drain (5 seconds)
+		drainTimeout := 5 * time.Second
+		drainDone := make(chan error, 1)
+		go func() {
+			drainDone <- a.natsConn.Drain()
+		}()
+
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				log.Warn().Err(err).Msg("Shutdown: Error draining NATS connection, closing directly")
+				a.natsConn.Close()
+			} else {
+				log.Debug().Msg("Shutdown: NATS connection drained successfully")
+			}
+		case <-time.After(drainTimeout):
+			log.Warn().Dur("timeout", drainTimeout).Msg("Shutdown: NATS drain timeout, closing directly")
+			a.natsConn.Close()
+		case <-ctx.Done():
+			log.Warn().Msg("Shutdown: Context cancelled during NATS drain, closing directly")
+			a.natsConn.Close()
+		}
+		log.Info().Msg("Shutdown: NATS connection closed")
 	}
 
-	log.Info().Msg("Arbitrage Agent shutdown complete")
+	// Call base agent shutdown for MCP sessions and metrics
+	if err := a.BaseAgent.Shutdown(ctx); err != nil {
+		log.Warn().Err(err).Msg("Shutdown: Base agent shutdown returned error")
+	}
+
+	shutdownDuration := time.Since(shutdownStart)
+	log.Info().Dur("duration", shutdownDuration).Msg("Shutdown: Arbitrage Agent shutdown complete")
 	return nil
 }
 
@@ -1360,18 +1392,11 @@ func main() {
 
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	go func() {
-		sig := <-sigChan
-		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
-		cancel()
-	}()
-
-	// Initialize and run agent
+	// Initialize agent
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
@@ -1379,15 +1404,39 @@ func main() {
 	// Start heartbeat publishing for orchestrator registration
 	agent.heartbeat.Start()
 
-	if err := agent.Run(ctx); err != nil && err != context.Canceled {
-		log.Fatal().Err(err).Msg("Agent runtime error")
+	// Run agent in goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- agent.Run(ctx)
+	}()
+
+	// Wait for shutdown signal or error
+	select {
+	case sig := <-sigChan:
+		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal - initiating graceful shutdown")
+	case err := <-errChan:
+		if err != nil && err != context.Canceled {
+			log.Error().Err(err).Msg("Agent runtime error")
+		}
 	}
 
-	// Stop heartbeat publishing
+	// Cancel context to stop agent operations
+	log.Debug().Msg("Cancelling context to stop agent operations")
+	cancel()
+
+	// Stop heartbeat publishing first (before NATS drains)
+	log.Debug().Msg("Stopping heartbeat publisher")
 	agent.heartbeat.Stop()
 
-	if err := agent.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("Error during shutdown")
+	// Graceful shutdown with configurable timeout from base agent
+	shutdownConfig := agent.GetShutdownConfig()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownConfig.Timeout)
+	defer shutdownCancel()
+
+	log.Debug().Dur("timeout", shutdownConfig.Timeout).Msg("Starting graceful shutdown with timeout")
+	if err := agent.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Error during graceful shutdown")
+		os.Exit(1)
 	}
 
 	log.Info().Msg("Arbitrage Agent terminated")

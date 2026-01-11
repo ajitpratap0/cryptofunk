@@ -113,7 +113,7 @@ func TestListTools(t *testing.T) {
 
 	tools, ok := resultMap["tools"].([]map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, tools, 7)
+	assert.Len(t, tools, 12)
 
 	// Verify all expected tools are present
 	toolNames := make(map[string]bool)
@@ -135,6 +135,11 @@ func TestListTools(t *testing.T) {
 		toolStartSession,
 		toolStopSession,
 		toolGetSessionStats,
+		toolGetSafetyGuardStats,
+		toolSetSafetyGuardCapital,
+		toolRecordTradePnL,
+		toolResetSafetyGuard,
+		toolResetDailyCounters,
 	}
 
 	for _, expected := range expectedTools {
@@ -188,7 +193,7 @@ func TestHandleRequest_ListTools(t *testing.T) {
 
 	tools, ok := resultMap["tools"].([]map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, tools, 7)
+	assert.Len(t, tools, 12)
 }
 
 // TestMCPRequestStructure tests the MCP request structure
@@ -296,8 +301,8 @@ func TestToolCount(t *testing.T) {
 	resultMap := result.(map[string]interface{})
 	tools := resultMap["tools"].([]map[string]interface{})
 
-	// We expect exactly 7 tools
-	assert.Equal(t, 7, len(tools), "Should have exactly 7 tools defined")
+	// We expect exactly 12 tools (7 original + 5 safety guard tools)
+	assert.Equal(t, 12, len(tools), "Should have exactly 12 tools defined")
 }
 
 // TestMCPErrorCodes tests standard MCP error codes

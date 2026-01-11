@@ -330,18 +330,18 @@ func main() {
 	// Wait for shutdown signal or error
 	select {
 	case sig := <-sigChan:
-		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
+		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal - initiating graceful shutdown")
 	case err := <-errChan:
 		log.Error().Err(err).Msg("Agent error")
 	}
 
-	// Shutdown agent
-	log.Info().Msg("Shutting down agent...")
+	// Graceful shutdown with configurable timeout
+	log.Debug().Msg("Starting graceful shutdown with 10 second timeout")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := agent.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Error during shutdown")
+		log.Error().Err(err).Msg("Error during graceful shutdown")
 		os.Exit(1)
 	}
 
@@ -591,28 +591,60 @@ func (a *RiskAgent) Run(ctx context.Context) error {
 	}
 }
 
-// Shutdown gracefully stops the agent
+// Shutdown gracefully stops the agent with proper cleanup and logging
+// The shutdown process follows this order:
+// 1. Stop accepting new work
+// 2. Drain NATS subscriptions (allows in-flight messages to complete)
+// 3. Close NATS connection
+// 4. Shutdown metrics server
 func (a *RiskAgent) Shutdown(ctx context.Context) error {
-	log.Info().Msg("Shutting down risk agent")
+	shutdownStart := time.Now()
+	log.Info().Msg("Starting graceful risk agent shutdown")
 
+	// Step 1: Stop accepting new work
 	a.mu.Lock()
 	a.running = false
 	a.mu.Unlock()
+	log.Debug().Msg("Shutdown: Stopped accepting new work")
 
-	// Close NATS connection
+	// Step 2: Drain and close NATS connection
 	if a.natsConn != nil {
-		a.natsConn.Close()
-		log.Info().Msg("NATS connection closed")
+		log.Debug().Msg("Shutdown: Draining NATS connection")
+
+		// Create a timeout context for NATS drain (5 seconds)
+		drainTimeout := 5 * time.Second
+		drainDone := make(chan error, 1)
+		go func() {
+			drainDone <- a.natsConn.Drain()
+		}()
+
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				log.Warn().Err(err).Msg("Shutdown: Error draining NATS connection, closing directly")
+				a.natsConn.Close()
+			} else {
+				log.Debug().Msg("Shutdown: NATS connection drained successfully")
+			}
+		case <-time.After(drainTimeout):
+			log.Warn().Dur("timeout", drainTimeout).Msg("Shutdown: NATS drain timeout, closing directly")
+			a.natsConn.Close()
+		case <-ctx.Done():
+			log.Warn().Msg("Shutdown: Context cancelled during NATS drain, closing directly")
+			a.natsConn.Close()
+		}
+		log.Info().Msg("Shutdown: NATS connection closed")
 	}
 
-	// Shutdown metrics server
+	// Step 3: Shutdown metrics server
 	if a.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		log.Debug().Msg("Shutdown: Stopping metrics server")
+		metricsCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
-			log.Error().Err(err).Msg("Error shutting down metrics server")
+		if err := a.metricsServer.Shutdown(metricsCtx); err != nil {
+			log.Error().Err(err).Msg("Shutdown: Error shutting down metrics server")
 		} else {
-			log.Info().Msg("Metrics server shutdown complete")
+			log.Info().Msg("Shutdown: Metrics server stopped")
 		}
 	}
 
@@ -620,6 +652,9 @@ func (a *RiskAgent) Shutdown(ctx context.Context) error {
 	if a.riskMetrics != nil {
 		a.riskMetrics.AgentStatus.Set(0)
 	}
+
+	shutdownDuration := time.Since(shutdownStart)
+	log.Info().Dur("duration", shutdownDuration).Msg("Shutdown: Risk agent shutdown complete")
 
 	return nil
 }

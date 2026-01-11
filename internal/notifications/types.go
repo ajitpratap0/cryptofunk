@@ -12,6 +12,10 @@ const (
 	NotificationTypePnLAlert         NotificationType = "pnl_alert"
 	NotificationTypeCircuitBreaker   NotificationType = "circuit_breaker"
 	NotificationTypeConsensusFailure NotificationType = "consensus_failure"
+	NotificationTypePositionClosed   NotificationType = "position_closed"
+	NotificationTypeSafetyGuard      NotificationType = "safety_guard"
+	NotificationTypeSystemError      NotificationType = "system_error"
+	NotificationTypeDailySummary     NotificationType = "daily_summary"
 )
 
 // Platform represents the device platform
@@ -38,6 +42,10 @@ type Preferences struct {
 	PnLAlerts         bool `json:"pnl_alerts"`
 	CircuitBreaker    bool `json:"circuit_breaker"`
 	ConsensusFailures bool `json:"consensus_failures"`
+	PositionClosed    bool `json:"position_closed"`
+	SafetyGuard       bool `json:"safety_guard"`
+	SystemErrors      bool `json:"system_errors"`
+	DailySummary      bool `json:"daily_summary"`
 }
 
 // DefaultPreferences returns the default notification preferences
@@ -47,6 +55,10 @@ func DefaultPreferences() Preferences {
 		PnLAlerts:         true,
 		CircuitBreaker:    true,
 		ConsensusFailures: true,
+		PositionClosed:    true,
+		SafetyGuard:       true,
+		SystemErrors:      true,
+		DailySummary:      true,
 	}
 }
 
@@ -61,6 +73,14 @@ func (p Preferences) IsEnabled(notifType NotificationType) bool {
 		return p.CircuitBreaker
 	case NotificationTypeConsensusFailure:
 		return p.ConsensusFailures
+	case NotificationTypePositionClosed:
+		return p.PositionClosed
+	case NotificationTypeSafetyGuard:
+		return p.SafetyGuard
+	case NotificationTypeSystemError:
+		return p.SystemErrors
+	case NotificationTypeDailySummary:
+		return p.DailySummary
 	default:
 		return false
 	}
@@ -134,6 +154,56 @@ func ConsensusFailureNotificationData(symbol, reason string, agentCount int) map
 		"symbol":      symbol,
 		"reason":      reason,
 		"agent_count": formatInt(agentCount),
+	}
+}
+
+// PositionClosedNotificationData creates data payload for position closed notifications
+func PositionClosedNotificationData(positionID, symbol, side string, quantity, entryPrice, exitPrice, pnl, pnlPercent float64) map[string]string {
+	return map[string]string{
+		"position_id": positionID,
+		"symbol":      symbol,
+		"side":        side,
+		"quantity":    formatFloat(quantity),
+		"entry_price": formatFloat(entryPrice),
+		"exit_price":  formatFloat(exitPrice),
+		"pnl":         formatFloat(pnl),
+		"pnl_percent": formatFloat(pnlPercent),
+	}
+}
+
+// SafetyGuardNotificationData creates data payload for safety guard triggered alerts
+func SafetyGuardNotificationData(guardType, reason string, currentValue, threshold float64) map[string]string {
+	return map[string]string{
+		"guard_type":    guardType,
+		"reason":        reason,
+		"current_value": formatFloat(currentValue),
+		"threshold":     formatFloat(threshold),
+	}
+}
+
+// SystemErrorNotificationData creates data payload for system error notifications
+func SystemErrorNotificationData(component, errorType, errorMsg string) map[string]string {
+	return map[string]string{
+		"component":  component,
+		"error_type": errorType,
+		"error_msg":  errorMsg,
+	}
+}
+
+// DailySummaryNotificationData creates data payload for daily summary notifications
+func DailySummaryNotificationData(
+	date string,
+	totalTrades, winningTrades, losingTrades int,
+	totalPnL, totalPnLPercent, winRate float64,
+) map[string]string {
+	return map[string]string{
+		"date":              date,
+		"total_trades":      formatInt(totalTrades),
+		"winning_trades":    formatInt(winningTrades),
+		"losing_trades":     formatInt(losingTrades),
+		"total_pnl":         formatFloat(totalPnL),
+		"total_pnl_percent": formatFloat(totalPnLPercent),
+		"win_rate":          formatFloat(winRate),
 	}
 }
 

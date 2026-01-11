@@ -22,13 +22,18 @@ const (
 
 // MCP Tool Names - defined as constants to avoid repetition
 const (
-	toolPlaceMarketOrder = "place_market_order"
-	toolPlaceLimitOrder  = "place_limit_order"
-	toolCancelOrder      = "cancel_order"
-	toolGetOrderStatus   = "get_order_status"
-	toolStartSession     = "start_session"
-	toolStopSession      = "stop_session"
-	toolGetSessionStats  = "get_session_stats"
+	toolPlaceMarketOrder      = "place_market_order"
+	toolPlaceLimitOrder       = "place_limit_order"
+	toolCancelOrder           = "cancel_order"
+	toolGetOrderStatus        = "get_order_status"
+	toolStartSession          = "start_session"
+	toolStopSession           = "stop_session"
+	toolGetSessionStats       = "get_session_stats"
+	toolGetSafetyGuardStats   = "get_safety_guard_stats"
+	toolSetSafetyGuardCapital = "set_safety_guard_capital"
+	toolRecordTradePnL        = "record_trade_pnl"
+	toolResetSafetyGuard      = "reset_safety_guard"
+	toolResetDailyCounters    = "reset_daily_counters"
 )
 
 func main() {
@@ -92,6 +97,7 @@ func main() {
 		BinanceAPIKey:  binanceAPIKey,
 		BinanceSecret:  binanceSecret,
 		BinanceTestnet: binanceTestnet,
+		SafetyGuard:    cfg.Risk.SafetyGuard, // Pass safety guard configuration
 	}
 
 	exchangeService, err := exchange.NewService(database, exchangeConfig)
@@ -354,6 +360,67 @@ func (s *MCPServer) listTools() interface{} {
 					"required":   []string{},
 				},
 			},
+			// Safety Guard Tools
+			{
+				"name":        toolGetSafetyGuardStats,
+				"description": "Get current safety guard statistics including daily P&L, trade count, consecutive losses, and circuit breaker status",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+					"required":   []string{},
+				},
+			},
+			{
+				"name":        toolSetSafetyGuardCapital,
+				"description": "Set the capital for safety guard percentage calculations",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"capital": map[string]interface{}{
+							"type":        "number",
+							"description": "Current capital amount for safety guard calculations",
+						},
+					},
+					"required": []string{"capital"},
+				},
+			},
+			{
+				"name":        toolRecordTradePnL,
+				"description": "Record a trade's profit/loss for safety guard tracking. Negative values represent losses.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"pnl": map[string]interface{}{
+							"type":        "number",
+							"description": "Profit (positive) or loss (negative) from the trade",
+						},
+					},
+					"required": []string{"pnl"},
+				},
+			},
+			{
+				"name":        toolResetSafetyGuard,
+				"description": "Manually reset the safety guard circuit breaker to resume trading",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+					"required":   []string{},
+				},
+			},
+			{
+				"name":        toolResetDailyCounters,
+				"description": "Reset daily counters for a new trading day",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"capital": map[string]interface{}{
+							"type":        "number",
+							"description": "Starting capital for the new trading day",
+						},
+					},
+					"required": []string{"capital"},
+				},
+			},
 		},
 	}
 }
@@ -385,6 +452,17 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 		result, err = s.service.StopSession(ctx, args)
 	case toolGetSessionStats:
 		result, err = s.service.GetSessionStats(ctx, args)
+	// Safety Guard Tools
+	case toolGetSafetyGuardStats:
+		result, err = s.service.GetSafetyGuardStats(ctx, args)
+	case toolSetSafetyGuardCapital:
+		result, err = s.service.SetSafetyGuardCapital(ctx, args)
+	case toolRecordTradePnL:
+		result, err = s.service.RecordTradePnL(ctx, args)
+	case toolResetSafetyGuard:
+		result, err = s.service.ResetSafetyGuardCircuitBreaker(ctx, args)
+	case toolResetDailyCounters:
+		result, err = s.service.ResetDailyCounters(ctx, args)
 	default:
 		err = fmt.Errorf("unknown tool: %s", name)
 	}

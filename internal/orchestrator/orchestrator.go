@@ -995,34 +995,77 @@ func (o *Orchestrator) HandleControlStatusRequest(w http.ResponseWriter, r *http
 	}
 }
 
-// Shutdown gracefully stops the orchestrator
+// Shutdown gracefully stops the orchestrator with proper cleanup and logging
+// The shutdown process follows this order:
+// 1. Cancel internal context to stop all operations
+// 2. Drain NATS subscriptions (allows in-flight messages to complete)
+// 3. Drain and close NATS connection
+// 4. Wait for all goroutines to complete
 func (o *Orchestrator) Shutdown(ctx context.Context) error {
-	o.log.Info().Msg("Shutting down orchestrator")
+	shutdownStart := time.Now()
+	o.log.Info().Msg("Starting graceful orchestrator shutdown")
 
-	// Cancel internal context
+	// Step 1: Cancel internal context to signal all operations to stop
 	if o.cancel != nil {
 		o.cancel()
+		o.log.Debug().Msg("Shutdown: Internal context cancelled")
 	}
 
-	// Unsubscribe from NATS
+	// Step 2: Drain NATS subscriptions (allows in-flight messages to complete)
 	if o.signalSub != nil {
-		if err := o.signalSub.Unsubscribe(); err != nil {
-			o.log.Error().Err(err).Msg("Error unsubscribing from signals")
+		o.log.Debug().Str("topic", o.config.SignalTopic).Msg("Shutdown: Draining signal subscription")
+		if err := o.signalSub.Drain(); err != nil {
+			o.log.Warn().Err(err).Str("topic", o.config.SignalTopic).Msg("Shutdown: Error draining signal subscription, falling back to unsubscribe")
+			if err := o.signalSub.Unsubscribe(); err != nil {
+				o.log.Error().Err(err).Msg("Shutdown: Error unsubscribing from signals")
+			}
+		} else {
+			o.log.Debug().Str("topic", o.config.SignalTopic).Msg("Shutdown: Signal subscription drained")
 		}
 	}
 	if o.heartbeatSub != nil {
-		if err := o.heartbeatSub.Unsubscribe(); err != nil {
-			o.log.Error().Err(err).Msg("Error unsubscribing from heartbeats")
+		o.log.Debug().Str("topic", o.config.HeartbeatTopic).Msg("Shutdown: Draining heartbeat subscription")
+		if err := o.heartbeatSub.Drain(); err != nil {
+			o.log.Warn().Err(err).Str("topic", o.config.HeartbeatTopic).Msg("Shutdown: Error draining heartbeat subscription, falling back to unsubscribe")
+			if err := o.heartbeatSub.Unsubscribe(); err != nil {
+				o.log.Error().Err(err).Msg("Shutdown: Error unsubscribing from heartbeats")
+			}
+		} else {
+			o.log.Debug().Str("topic", o.config.HeartbeatTopic).Msg("Shutdown: Heartbeat subscription drained")
 		}
 	}
 
-	// Close NATS connection
+	// Step 3: Drain and close NATS connection
 	if o.natsConn != nil {
-		o.natsConn.Close()
-		o.log.Info().Msg("NATS connection closed")
+		o.log.Debug().Msg("Shutdown: Draining NATS connection")
+
+		// Create a timeout context for NATS drain (5 seconds)
+		drainTimeout := 5 * time.Second
+		drainDone := make(chan error, 1)
+		go func() {
+			drainDone <- o.natsConn.Drain()
+		}()
+
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				o.log.Warn().Err(err).Msg("Shutdown: Error draining NATS connection, closing directly")
+				o.natsConn.Close()
+			} else {
+				o.log.Debug().Msg("Shutdown: NATS connection drained successfully")
+			}
+		case <-time.After(drainTimeout):
+			o.log.Warn().Dur("timeout", drainTimeout).Msg("Shutdown: NATS drain timeout, closing directly")
+			o.natsConn.Close()
+		case <-ctx.Done():
+			o.log.Warn().Msg("Shutdown: Context cancelled during NATS drain, closing directly")
+			o.natsConn.Close()
+		}
+		o.log.Info().Msg("Shutdown: NATS connection closed")
 	}
 
-	// Wait for goroutines
+	// Step 4: Wait for goroutines to complete
+	o.log.Debug().Msg("Shutdown: Waiting for in-flight operations to complete")
 	done := make(chan struct{})
 	go func() {
 		o.wg.Wait()
@@ -1031,9 +1074,15 @@ func (o *Orchestrator) Shutdown(ctx context.Context) error {
 
 	select {
 	case <-done:
-		o.log.Info().Msg("Orchestrator shutdown complete")
+		shutdownDuration := time.Since(shutdownStart)
+		o.log.Info().
+			Dur("duration", shutdownDuration).
+			Msg("Shutdown: Orchestrator shutdown complete")
 	case <-ctx.Done():
-		o.log.Warn().Msg("Orchestrator shutdown timeout")
+		shutdownDuration := time.Since(shutdownStart)
+		o.log.Warn().
+			Dur("duration", shutdownDuration).
+			Msg("Shutdown: Orchestrator shutdown timeout - some operations may not have completed")
 		return ctx.Err()
 	}
 
