@@ -11,6 +11,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -25,9 +26,22 @@ const (
 	queryParamTrue = "true"
 )
 
+// KeyManagerInterface defines the operations needed by KeysHandler
+// This interface allows for mocking in tests
+type KeyManagerInterface interface {
+	CreateAPIKey(ctx context.Context, userID, name string, permissions []string, expiresIn time.Duration) (*CreatedAPIKey, error)
+	GetAPIKey(ctx context.Context, keyID uuid.UUID) (*APIKeyDetails, error)
+	ListAPIKeys(ctx context.Context, userID string, includeInactive bool) ([]*APIKeyDetails, error)
+	RotateAPIKey(ctx context.Context, keyID uuid.UUID, newExpiresIn *time.Duration) (*CreatedAPIKey, error)
+	RevokeAPIKey(ctx context.Context, keyID uuid.UUID) error
+	GetKeyRotationHistory(ctx context.Context, keyID uuid.UUID) ([]*APIKeyDetails, error)
+	StartCleanupWorker(ctx context.Context, interval time.Duration)
+	StopCleanupWorker()
+}
+
 // KeysHandler handles API key management HTTP requests
 type KeysHandler struct {
-	keyManager *KeyManager
+	keyManager KeyManagerInterface
 }
 
 // NewKeysHandler creates a new KeysHandler
@@ -37,8 +51,16 @@ func NewKeysHandler(db *pgxpool.Pool) *KeysHandler {
 	}
 }
 
+// NewKeysHandlerWithKeyManager creates a new KeysHandler with a custom KeyManager implementation
+// This is primarily used for testing with mock implementations
+func NewKeysHandlerWithKeyManager(km KeyManagerInterface) *KeysHandler {
+	return &KeysHandler{
+		keyManager: km,
+	}
+}
+
 // GetKeyManager returns the underlying key manager for use by other components
-func (h *KeysHandler) GetKeyManager() *KeyManager {
+func (h *KeysHandler) GetKeyManager() KeyManagerInterface {
 	return h.keyManager
 }
 

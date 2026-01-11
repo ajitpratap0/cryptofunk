@@ -37,7 +37,7 @@ type APIServer struct {
 	orchestratorClient *http.Client
 	rateLimiter        *RateLimiterMiddleware
 	apiKeyStore        *api.APIKeyStore
-	keyManager         *api.KeyManager // TB-006: API key lifecycle management
+	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling

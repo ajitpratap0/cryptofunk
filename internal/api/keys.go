@@ -35,20 +35,38 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
+// KeyManagerDB is an interface for database operations used by KeyManager.
+// This allows for mocking in tests while supporting both pgxpool.Pool and pgxmock.
+type KeyManagerDB interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 // KeyManager handles API key lifecycle operations
 type KeyManager struct {
-	db            *pgxpool.Pool
+	db            KeyManagerDB
 	cleanupCancel context.CancelFunc
 	cleanupWG     sync.WaitGroup
 	mu            sync.Mutex
 }
 
 // NewKeyManager creates a new KeyManager instance
-func NewKeyManager(db *pgxpool.Pool) *KeyManager {
+func NewKeyManager(db KeyManagerDB) *KeyManager {
+	return &KeyManager{
+		db: db,
+	}
+}
+
+// NewKeyManagerWithPool creates a new KeyManager with a pgxpool.Pool
+// This is a convenience function for production code.
+func NewKeyManagerWithPool(db *pgxpool.Pool) *KeyManager {
 	return &KeyManager{
 		db: db,
 	}
