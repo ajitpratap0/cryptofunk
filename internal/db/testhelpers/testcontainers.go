@@ -155,10 +155,11 @@ func setupFromExistingDatabase(t *testing.T, ctx context.Context, connStr string
 		t:             t,
 	}
 
-	// Clean up existing test data to ensure test isolation
-	if err := tc.TruncateAllTables(); err != nil {
-		t.Logf("Warning: failed to truncate tables: %v", err)
-	}
+	// Note: We don't truncate tables here because tests may run in parallel
+	// and truncating would cause race conditions. Tests that need a clean
+	// database should either:
+	// 1. Use unique identifiers that won't conflict with other tests
+	// 2. Call TruncateAllTables() explicitly if they need isolation
 
 	// Set up cleanup (just close the connection, don't terminate container)
 	t.Cleanup(func() {

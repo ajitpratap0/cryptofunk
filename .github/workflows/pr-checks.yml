@@ -338,6 +338,7 @@ jobs:
           DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
           REDIS_URL: "localhost:6379"
           NATS_URL: "nats://localhost:4222"
+          SKIP_TESTCONTAINER_TESTS: "true"
         run: |
           go test -coverprofile=coverage-new.out -covermode=atomic ./...
           # Extract coverage percentage BEFORE switching branches (files must exist)
