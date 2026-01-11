@@ -598,3 +598,88 @@ func TestGetTradingHoursInfo(t *testing.T) {
 	assert.Equal(t, "16:00", end)
 	assert.Equal(t, "America/New_York", timezone)
 }
+
+func TestValidateOrder_InvalidOrderValue(t *testing.T) {
+	cfg := config.SafetyGuardConfig{
+		Enabled: true,
+	}
+
+	sg := NewSafetyGuard(cfg)
+
+	testCases := []struct {
+		name       string
+		orderValue float64
+	}{
+		{"zero order value", 0},
+		{"negative order value", -100.0},
+		{"very small negative", -0.01},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := sg.ValidateOrder(context.Background(), OrderRequest{
+				Symbol:     "BTC/USDT",
+				Side:       "buy",
+				OrderType:  "market",
+				Quantity:   0.01,
+				OrderValue: tc.orderValue,
+			})
+
+			assert.False(t, result.Allowed)
+			assert.Equal(t, ViolationInvalidOrderValue, result.Violation)
+			assert.Contains(t, result.Message, "must be positive")
+		})
+	}
+}
+
+func TestSetCapital_InvalidValues(t *testing.T) {
+	cfg := config.SafetyGuardConfig{
+		Enabled: true,
+	}
+
+	sg := NewSafetyGuard(cfg)
+
+	// Set a valid capital first
+	sg.SetCapital(10000.0)
+	stats := sg.GetStats()
+	assert.Equal(t, 10000.0, stats.Capital)
+
+	// Try to set zero capital - should be ignored
+	sg.SetCapital(0)
+	stats = sg.GetStats()
+	assert.Equal(t, 10000.0, stats.Capital, "Capital should remain unchanged after setting zero")
+
+	// Try to set negative capital - should be ignored
+	sg.SetCapital(-5000.0)
+	stats = sg.GetStats()
+	assert.Equal(t, 10000.0, stats.Capital, "Capital should remain unchanged after setting negative value")
+}
+
+func TestGetStats_DayResetRace(t *testing.T) {
+	// This test verifies that GetStats handles day boundary correctly
+	// by checking that it doesn't return stale data after a day change
+	cfg := config.SafetyGuardConfig{
+		Enabled: true,
+	}
+
+	sg := NewSafetyGuard(cfg)
+	sg.SetCapital(10000.0)
+
+	// Record some trades
+	sg.RecordTrade(100.0)
+	sg.RecordTrade(50.0)
+
+	stats := sg.GetStats()
+	assert.Equal(t, 150.0, stats.DailyPnL)
+	assert.Equal(t, 2, stats.DailyTradeCount)
+
+	// Simulate a day change by manually setting lastDayReset to yesterday
+	sg.mu.Lock()
+	sg.lastDayReset = time.Now().Add(-25 * time.Hour).Truncate(24 * time.Hour)
+	sg.mu.Unlock()
+
+	// GetStats should now trigger a day reset and return zeroed counters
+	stats = sg.GetStats()
+	assert.Equal(t, 0.0, stats.DailyPnL, "DailyPnL should be reset after day boundary")
+	assert.Equal(t, 0, stats.DailyTradeCount, "DailyTradeCount should be reset after day boundary")
+}

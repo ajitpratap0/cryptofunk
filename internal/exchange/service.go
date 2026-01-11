@@ -118,6 +118,12 @@ func NewServicePaper(database *db.DB) *Service {
 	return service
 }
 
+// SetMarketPrice sets the current market price for a symbol (delegates to exchange)
+// This is primarily used for testing with mock exchange
+func (s *Service) SetMarketPrice(symbol string, price float64) {
+	s.exchange.SetMarketPrice(symbol, price)
+}
+
 // PlaceMarketOrder places a market order
 func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	log.Debug().Interface("args", args).Msg("PlaceMarketOrder called")
@@ -151,8 +157,13 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 		return nil, fmt.Errorf("quantity must be positive")
 	}
 
-	// Extract optional price for order value calculation (for market orders, use current market price)
+	// Extract optional price for order value calculation
+	// For market orders, use current market price if not provided
 	price, _ := extractFloat(args, "price")
+	if price <= 0 {
+		// Get current market price from exchange
+		price = s.exchange.GetMarketPrice(symbol)
+	}
 	orderValue := quantity * price
 
 	// Extract confirmation flag for large trades

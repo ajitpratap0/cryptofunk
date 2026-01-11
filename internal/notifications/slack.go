@@ -67,6 +67,7 @@ type SlackBackend struct {
 	httpClient  *http.Client
 	mock        bool
 	rateLimiter chan struct{}
+	stopRefill  chan struct{} // Channel to signal rate limiter goroutine shutdown
 }
 
 // SlackMessage represents a Slack webhook message
@@ -152,9 +153,15 @@ func NewSlackBackend(config SlackConfig) (*SlackBackend, error) {
 		config: config,
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 		mock:        false,
 		rateLimiter: make(chan struct{}, config.RateLimitPerMinute),
+		stopRefill:  make(chan struct{}),
 	}
 
 	// Fill rate limiter bucket
@@ -173,16 +180,21 @@ func (s *SlackBackend) refillRateLimiter() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		// Refill the bucket
-	refillLoop:
-		for i := 0; i < s.config.RateLimitPerMinute; i++ {
-			select {
-			case s.rateLimiter <- struct{}{}:
-			default:
-				// Bucket is full
-				break refillLoop
+	for {
+		select {
+		case <-ticker.C:
+			// Refill the bucket
+		refillLoop:
+			for i := 0; i < s.config.RateLimitPerMinute; i++ {
+				select {
+				case s.rateLimiter <- struct{}{}:
+				default:
+					// Bucket is full
+					break refillLoop
+				}
 			}
+		case <-s.stopRefill:
+			return
 		}
 	}
 }
@@ -448,6 +460,10 @@ func (s *SlackBackend) Name() string {
 
 // Close closes the Slack backend
 func (s *SlackBackend) Close() error {
+	// Stop the rate limiter goroutine if running (non-mock backends)
+	if s.stopRefill != nil {
+		close(s.stopRefill)
+	}
 	log.Debug().Str("backend", s.Name()).Msg("Closed Slack backend")
 	return nil
 }

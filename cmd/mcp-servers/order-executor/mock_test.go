@@ -13,6 +13,8 @@ import (
 func TestCallTool_PlaceMarketOrder(t *testing.T) {
 	// Use paper trading service for testing (nil database is OK for these tests)
 	service := exchange.NewServicePaper(nil)
+	// Set market price first so order value can be calculated by safety guard
+	service.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: service,
 	}
@@ -107,6 +109,8 @@ func TestCallTool_CancelOrder(t *testing.T) {
 // TestCallTool_GetOrderStatus tests calling get_order_status tool
 func TestCallTool_GetOrderStatus(t *testing.T) {
 	service := exchange.NewServicePaper(nil)
+	// Set market price first so order value can be calculated by safety guard
+	service.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: service,
 	}
@@ -211,6 +215,8 @@ func TestCallTool_UnknownTool(t *testing.T) {
 // TestHandleRequest_ToolsCall_Success tests successful tools/call handling
 func TestHandleRequest_ToolsCall_Success(t *testing.T) {
 	service := exchange.NewServicePaper(nil)
+	// Set market price first so order value can be calculated by safety guard
+	service.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: service,
 	}
@@ -269,6 +275,8 @@ func TestHandleRequest_ToolsCall_UnknownTool(t *testing.T) {
 // TestPaperTradingService tests the paper trading service directly
 func TestPaperTradingService(t *testing.T) {
 	service := exchange.NewServicePaper(nil)
+	// Set market price first so order value can be calculated by safety guard
+	service.SetMarketPrice("BTCUSDT", 50000.0)
 	ctx := context.Background()
 
 	t.Run("PlaceMarketOrder", func(t *testing.T) {

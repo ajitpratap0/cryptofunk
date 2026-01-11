@@ -42,6 +42,61 @@ func TestNewEmailBackend(t *testing.T) {
 		assert.False(t, backend.IsMock())
 		assert.Equal(t, "email", backend.Name())
 	})
+
+	t.Run("error when both UseTLS and UseStartTLS enabled", func(t *testing.T) {
+		config := EmailConfig{
+			Host:        "smtp.example.com",
+			Port:        587,
+			FromAddress: "test@example.com",
+			UseTLS:      true,
+			UseStartTLS: true,
+		}
+		backend, err := NewEmailBackend(config, nil)
+		require.Error(t, err)
+		assert.Nil(t, backend)
+		assert.Contains(t, err.Error(), "cannot enable both UseTLS and UseStartTLS")
+	})
+
+	t.Run("UseTLS only is valid", func(t *testing.T) {
+		config := EmailConfig{
+			Host:        "smtp.example.com",
+			Port:        465,
+			FromAddress: "test@example.com",
+			UseTLS:      true,
+			UseStartTLS: false,
+		}
+		backend, err := NewEmailBackend(config, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, backend)
+		assert.False(t, backend.IsMock())
+	})
+
+	t.Run("UseStartTLS only is valid", func(t *testing.T) {
+		config := EmailConfig{
+			Host:        "smtp.example.com",
+			Port:        587,
+			FromAddress: "test@example.com",
+			UseTLS:      false,
+			UseStartTLS: true,
+		}
+		backend, err := NewEmailBackend(config, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, backend)
+		assert.False(t, backend.IsMock())
+	})
+
+	t.Run("SkipVerify logs warning but does not error", func(t *testing.T) {
+		config := EmailConfig{
+			Host:        "smtp.example.com",
+			Port:        587,
+			FromAddress: "test@example.com",
+			SkipVerify:  true,
+		}
+		backend, err := NewEmailBackend(config, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, backend)
+		assert.False(t, backend.IsMock())
+	})
 }
 
 func TestEmailBackend_SendMock(t *testing.T) {

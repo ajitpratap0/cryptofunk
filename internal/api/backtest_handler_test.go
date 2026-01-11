@@ -1,3 +1,9 @@
+//go:build integration
+
+// Integration tests for backtest handler.
+// Run with: go test -tags=integration ./internal/api/...
+// Requires: DATABASE_URL environment variable or Docker for testcontainers
+
 package api
 
 import (
@@ -14,8 +20,8 @@ import (
 )
 
 func TestRunBacktest(t *testing.T) {
-	// Skip integration test if database not available
-	t.Skip("Integration test - requires database setup")
+	// TODO: Implement with testcontainers - currently a placeholder
+	t.Skip("TODO: Implement with testcontainers")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -115,8 +121,8 @@ func TestRunBacktest(t *testing.T) {
 }
 
 func TestGetBacktest(t *testing.T) {
-	// Skip integration test if database not available
-	t.Skip("Integration test - requires database setup")
+	// TODO: Implement with testcontainers - currently a placeholder
+	t.Skip("TODO: Implement with testcontainers")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -178,8 +184,8 @@ func TestGetBacktest(t *testing.T) {
 }
 
 func TestListBacktests(t *testing.T) {
-	// Skip integration test if database not available
-	t.Skip("Integration test - requires database setup")
+	// TODO: Implement with testcontainers - currently a placeholder
+	t.Skip("TODO: Implement with testcontainers")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -243,8 +249,8 @@ func TestListBacktests(t *testing.T) {
 }
 
 func TestDeleteBacktest(t *testing.T) {
-	// Skip integration test if database not available
-	t.Skip("Integration test - requires database setup")
+	// TODO: Implement with testcontainers - currently a placeholder
+	t.Skip("TODO: Implement with testcontainers")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -293,8 +299,8 @@ func TestDeleteBacktest(t *testing.T) {
 }
 
 func TestCancelBacktest(t *testing.T) {
-	// Skip integration test if database not available
-	t.Skip("Integration test - requires database setup")
+	// TODO: Implement with testcontainers - currently a placeholder
+	t.Skip("TODO: Implement with testcontainers")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

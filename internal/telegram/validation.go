@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// Capital validation limits
+const (
+	MinCapital = 10.0
+	MaxCapital = 10_000_000.0
+)
+
+// ValidCodePattern is a pre-compiled regex for validating verification codes
+var ValidCodePattern = regexp.MustCompile(`^[A-Z0-9]+$`)
+
 // ValidationError represents a validation error with a user-friendly message
 type ValidationError struct {
 	Field   string
@@ -64,17 +73,17 @@ func (v *Validator) ValidateCapital(capital float64) error {
 		}
 	}
 
-	if capital < 10 {
+	if capital < MinCapital {
 		return &ValidationError{
 			Field:   "capital",
-			Message: "Minimum capital is $10",
+			Message: fmt.Sprintf("Minimum capital is $%.0f", MinCapital),
 		}
 	}
 
-	if capital > 10000000 {
+	if capital > MaxCapital {
 		return &ValidationError{
 			Field:   "capital",
-			Message: "Maximum capital is $10,000,000",
+			Message: fmt.Sprintf("Maximum capital is $%.0f", MaxCapital),
 		}
 	}
 
@@ -114,7 +123,7 @@ func (v *Validator) ValidateVerificationCode(code string) error {
 	}
 
 	// Only alphanumeric characters allowed
-	if matched, _ := regexp.MatchString(`^[A-Z0-9]+$`, code); !matched {
+	if !ValidCodePattern.MatchString(code) {
 		return &ValidationError{
 			Field:   "code",
 			Message: "Verification code must contain only letters and numbers",

@@ -61,11 +61,22 @@ type EmailBackend struct {
 	recipients  []string // Default recipients if none specified in notification
 	mock        bool
 	rateLimiter chan struct{}
+	stopRefill  chan struct{} // Channel to signal rate limiter goroutine shutdown
 }
 
 // NewEmailBackend creates a new email notification backend
 // If config is incomplete (missing host/from_address), creates a mock backend
 func NewEmailBackend(config EmailConfig, defaultRecipients []string) (*EmailBackend, error) {
+	// Validate TLS configuration - cannot enable both UseTLS and UseStartTLS
+	if config.UseTLS && config.UseStartTLS {
+		return nil, fmt.Errorf("cannot enable both UseTLS and UseStartTLS: UseTLS uses direct TLS (port 465), UseStartTLS upgrades plain connection (port 587)")
+	}
+
+	// Warn about disabled TLS certificate verification
+	if config.SkipVerify {
+		log.Warn().Msg("TLS certificate verification disabled (SkipVerify=true) - not recommended for production")
+	}
+
 	// Validate configuration
 	if config.Host == "" || config.FromAddress == "" {
 		log.Warn().Msg("Incomplete email configuration, using mock backend")
@@ -86,6 +97,7 @@ func NewEmailBackend(config EmailConfig, defaultRecipients []string) (*EmailBack
 		recipients:  defaultRecipients,
 		mock:        false,
 		rateLimiter: make(chan struct{}, config.RateLimitPerMinute),
+		stopRefill:  make(chan struct{}),
 	}
 
 	// Fill rate limiter bucket
@@ -106,16 +118,21 @@ func (e *EmailBackend) refillRateLimiter() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		// Refill the bucket
-	refillLoop:
-		for i := 0; i < e.config.RateLimitPerMinute; i++ {
-			select {
-			case e.rateLimiter <- struct{}{}:
-			default:
-				// Bucket is full
-				break refillLoop
+	for {
+		select {
+		case <-ticker.C:
+			// Refill the bucket
+		refillLoop:
+			for i := 0; i < e.config.RateLimitPerMinute; i++ {
+				select {
+				case e.rateLimiter <- struct{}{}:
+				default:
+					// Bucket is full
+					break refillLoop
+				}
 			}
+		case <-e.stopRefill:
+			return
 		}
 	}
 }
@@ -427,6 +444,10 @@ func (e *EmailBackend) Name() string {
 
 // Close closes the email backend
 func (e *EmailBackend) Close() error {
+	// Stop the rate limiter goroutine if running (non-mock backends)
+	if e.stopRefill != nil {
+		close(e.stopRefill)
+	}
 	log.Debug().Str("backend", e.Name()).Msg("Closed email backend")
 	return nil
 }

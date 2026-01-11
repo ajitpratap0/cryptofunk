@@ -321,6 +321,23 @@ func (b *BinanceExchange) SetMarketPrice(symbol string, price float64) {
 		Msg("SetMarketPrice called on BinanceExchange (no-op)")
 }
 
+// GetMarketPrice returns the current market price for a symbol from Binance
+// Returns 0 if the price is not available or on error
+func (b *BinanceExchange) GetMarketPrice(symbol string) float64 {
+	// For Binance, we would fetch the current ticker price
+	// This is a simplified implementation - in production, you'd use a cached price feed
+	price, err := b.client.NewListPricesService().Symbol(symbol).Do(context.Background())
+	if err != nil || len(price) == 0 {
+		log.Debug().
+			Str("symbol", symbol).
+			Err(err).
+			Msg("Failed to get market price from Binance")
+		return 0
+	}
+	p, _ := strconv.ParseFloat(price[0].Price, 64)
+	return p
+}
+
 // SetSession sets the current trading session
 func (b *BinanceExchange) SetSession(sessionID *uuid.UUID) {
 	b.mu.Lock()

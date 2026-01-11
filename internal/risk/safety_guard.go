@@ -27,6 +27,7 @@ const (
 	ViolationLargeTradeUnconfirm SafetyGuardViolation = "large_trade_unconfirmed"
 	ViolationOutsideTradingHours SafetyGuardViolation = "outside_trading_hours"
 	ViolationEmergencyStop       SafetyGuardViolation = "emergency_stop"
+	ViolationInvalidOrderValue   SafetyGuardViolation = "invalid_order_value"
 )
 
 // SafetyCheckResult represents the result of a safety check
@@ -119,8 +120,15 @@ func (sg *SafetyGuard) SetMetricsCallback(callback func(SafetyGuardEvent)) {
 	sg.metricsCallback = callback
 }
 
-// SetCapital sets the current capital for percentage calculations
+// SetCapital sets the current capital for percentage calculations.
+// Capital must be positive; non-positive values are ignored with a warning.
 func (sg *SafetyGuard) SetCapital(capital float64) {
+	if capital <= 0 {
+		log.Warn().
+			Float64("capital", capital).
+			Msg("SetCapital called with non-positive value, ignoring")
+		return
+	}
 	sg.mu.Lock()
 	defer sg.mu.Unlock()
 	sg.dailyStartCapital = capital
@@ -191,6 +199,16 @@ func (sg *SafetyGuard) RecordTrade(pnl float64) {
 
 // ValidateOrder checks if an order is allowed based on safety guards
 func (sg *SafetyGuard) ValidateOrder(ctx context.Context, req OrderRequest) SafetyCheckResult {
+	// Validate order value before acquiring lock (fast fail for invalid orders)
+	if req.OrderValue <= 0 {
+		return SafetyCheckResult{
+			Allowed:      false,
+			Violation:    ViolationInvalidOrderValue,
+			Message:      fmt.Sprintf("Order value must be positive, got %.2f", req.OrderValue),
+			CurrentValue: req.OrderValue,
+		}
+	}
+
 	sg.mu.Lock()
 	defer sg.mu.Unlock()
 
@@ -273,12 +291,20 @@ func (sg *SafetyGuard) RecordOrderPlaced() {
 	sg.lastOrderTime = time.Now()
 }
 
-// GetStats returns current trading statistics
+// GetStats returns current trading statistics.
+// Note: If called exactly at midnight boundary before any write operation,
+// daily counters may not yet be reset. The reset happens on the next write operation
+// (ValidateOrder, RecordTrade, etc.) to avoid lock contention on read-heavy paths.
 func (sg *SafetyGuard) GetStats() TradingStats {
+	// Check if day reset is needed - if so, upgrade to write lock
+	if sg.needsDayReset() {
+		sg.mu.Lock()
+		sg.checkDayReset()
+		sg.mu.Unlock()
+	}
+
 	sg.mu.RLock()
 	defer sg.mu.RUnlock()
-
-	sg.checkDayResetRLocked()
 
 	dailyPnLPercent := 0.0
 	totalExposurePercent := 0.0
@@ -348,6 +374,21 @@ func (sg *SafetyGuard) ResetDailyCounters(newCapital float64) {
 
 // === Internal helper methods ===
 
+// needsDayReset checks if the day has changed since the last reset.
+// This is a lock-free check that reads lastDayReset without holding a lock.
+// It's safe because lastDayReset is only written while holding the write lock,
+// and we only use the result to decide whether to acquire the write lock.
+// A race here is benign - worst case we acquire the write lock unnecessarily.
+func (sg *SafetyGuard) needsDayReset() bool {
+	sg.mu.RLock()
+	lastReset := sg.lastDayReset
+	sg.mu.RUnlock()
+	today := time.Now().Truncate(24 * time.Hour)
+	return today.After(lastReset)
+}
+
+// checkDayReset resets daily counters if the day has changed.
+// Must be called with write lock held.
 func (sg *SafetyGuard) checkDayReset() {
 	today := time.Now().Truncate(24 * time.Hour)
 	if today.After(sg.lastDayReset) {
@@ -356,10 +397,6 @@ func (sg *SafetyGuard) checkDayReset() {
 		sg.lastDayReset = today
 		log.Debug().Msg("Daily counters auto-reset")
 	}
-}
-
-func (sg *SafetyGuard) checkDayResetRLocked() {
-	// This is a read-only check for GetStats - actual reset happens in write-locked methods
 }
 
 func (sg *SafetyGuard) tripCircuitBreaker(reason SafetyGuardViolation) {

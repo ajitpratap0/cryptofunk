@@ -13,6 +13,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Environment name constants
+const (
+	envProduction = "production"
+	envProd       = "prod"
+)
+
 // ValidatorOptions contains options for configuration validation
 type ValidatorOptions struct {
 	VerifyConnectivity bool // Check database/Redis connectivity
@@ -92,7 +98,7 @@ func (v *Validator) ValidateStartup(ctx context.Context) error {
 func (v *Validator) validateProductionRequirements() error {
 	// Check if we're running in production
 	appEnv := strings.ToLower(os.Getenv("CRYPTOFUNK_APP_ENVIRONMENT"))
-	isProduction := appEnv == "production" || appEnv == "prod"
+	isProduction := appEnv == envProduction || appEnv == envProd
 
 	if !isProduction {
 		// Not production, skip validation

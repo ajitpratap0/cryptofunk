@@ -3,6 +3,7 @@ package testhelpers
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,51 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
+// isDockerAvailable checks if Docker daemon is accessible
+// This prevents panics when Docker is not running
+func isDockerAvailable() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+
+	// Try common Docker socket locations
+	socketPaths := []string{
+		"/var/run/docker.sock",
+		os.Getenv("HOME") + "/.docker/run/docker.sock",
+	}
+
+	// Check DOCKER_HOST environment variable
+	if dockerHost := os.Getenv("DOCKER_HOST"); dockerHost != "" {
+		// Parse Docker host URL (unix://, tcp://, etc.)
+		if strings.HasPrefix(dockerHost, "unix://") {
+			socketPaths = append([]string{strings.TrimPrefix(dockerHost, "unix://")}, socketPaths...)
+		} else if strings.HasPrefix(dockerHost, "tcp://") {
+			// For TCP connections, try to connect
+			addr := strings.TrimPrefix(dockerHost, "tcp://")
+			conn, err := dialer.DialContext(ctx, "tcp", addr)
+			if err == nil {
+				conn.Close()
+				return true
+			}
+		}
+	}
+
+	// Check if any socket path is accessible
+	for _, socketPath := range socketPaths {
+		if _, err := os.Stat(socketPath); err == nil {
+			// Socket file exists, try to connect
+			conn, err := dialer.DialContext(ctx, "unix", socketPath)
+			if err == nil {
+				conn.Close()
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // PostgresContainer holds the testcontainer instance and connection details
 type PostgresContainer struct {
 	Container     *postgres.PostgresContainer
@@ -28,22 +74,35 @@ type PostgresContainer struct {
 }
 
 // SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector.
-// If DATABASE_URL environment variable is set and SKIP_TESTCONTAINER_TESTS is set,
-// the test will be skipped. Otherwise it uses the existing database.
+// If SKIP_TESTCONTAINER_TESTS is set to "true", the test will be skipped.
+// If DATABASE_URL environment variable is set, the existing database will be used.
+// If Docker is not available, the test will be skipped.
 func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	t.Helper()
 
 	ctx := context.Background()
 
-	// Check if DATABASE_URL is set (CI environment)
-	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
-		// Skip testcontainer-based tests in CI to avoid test pollution
-		// These tests expect a fresh database per test
-		if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
-			t.Skip("Skipping testcontainer test in CI environment")
+	// Check if testcontainer tests should be skipped (CI environment without Docker)
+	// This must be checked FIRST, before any testcontainer operations
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		// If DATABASE_URL is available, use it; otherwise skip the test entirely
+		if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
+			t.Log("Using existing database from DATABASE_URL (testcontainers disabled)")
+			return setupFromExistingDatabase(t, ctx, connStr)
 		}
+		t.Skip("Skipping testcontainer test: SKIP_TESTCONTAINER_TESTS=true and no DATABASE_URL")
+	}
+
+	// Check if DATABASE_URL is set (CI environment with existing database)
+	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
 		t.Log("Using existing database from DATABASE_URL environment variable")
 		return setupFromExistingDatabase(t, ctx, connStr)
+	}
+
+	// Check if Docker is available before attempting to create containers
+	// This prevents panics when Docker daemon is not running
+	if !isDockerAvailable() {
+		t.Skip("Skipping testcontainer test: Docker daemon is not available")
 	}
 
 	// Create PostgreSQL container with TimescaleDB image (includes pgvector)

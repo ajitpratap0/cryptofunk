@@ -316,6 +316,11 @@ func (s *APIServer) setupRoutes() {
 		backtestHandler := api.NewBacktestHandler(s.db.Pool())
 		backtestHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 
+		// Dashboard routes (TC-002) with rate limiting
+		// Provides user dashboard with trading control, positions, P&L, and system status
+		dashboardHandler := api.NewDashboardHandler(s.db)
+		dashboardHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.ControlMiddleware())
+
 		// TB-006: API Key Management routes
 		// These endpoints allow users to manage their API keys (create, rotate, revoke)
 		// All key management operations require authentication
