@@ -783,6 +783,7 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 	exchange := s.config.Trading.Exchange
 	if exchange == "" {
 		exchange = "binance"
+		log.Warn().Msg("No exchange configured in config.Trading.Exchange, defaulting to binance")
 	}
 
 	// Create a new trading session

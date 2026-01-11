@@ -365,11 +365,16 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	}
 
 	// Update last used timestamp asynchronously
-	go func() {
+	// Use a detached context since this is fire-and-forget, but add safety checks
+	go func(keyID uuid.UUID) {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = km.db.Exec(updateCtx, "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1", key.ID)
-	}()
+		// Only update if key is still active to prevent race with rotation/revocation
+		_, err := km.db.Exec(updateCtx, "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND is_active = TRUE", keyID)
+		if err != nil {
+			log.Debug().Err(err).Str("key_id", keyID.String()).Msg("Failed to update last_used_at")
+		}
+	}(key.ID)
 
 	return &key, nil
 }

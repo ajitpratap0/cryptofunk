@@ -63,6 +63,11 @@ BEGIN
         RAISE EXCEPTION 'Cannot rotate an inactive key: %', p_old_key_id;
     END IF;
 
+    -- Validate new expiration date is in the future if provided
+    IF p_new_expires_at IS NOT NULL AND p_new_expires_at <= NOW() THEN
+        RAISE EXCEPTION 'New expiration date must be in the future';
+    END IF;
+
     -- Generate a secure random API key (32 bytes = 64 hex chars)
     v_new_key := encode(gen_random_bytes(32), 'hex');
 
@@ -158,7 +163,7 @@ WITH RECURSIVE key_chain AS (
         kc.depth + 1
     FROM api_keys k
     JOIN key_chain kc ON k.id = kc.rotated_from
-    WHERE kc.depth < 10  -- Prevent infinite loops
+    WHERE kc.depth < 10  -- Limit recursion depth: 10 rotations covers ~10 months of monthly rotations
 )
 SELECT
     key_chain.id, key_chain.name, key_chain.created_at, key_chain.expires_at,
