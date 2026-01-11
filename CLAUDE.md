@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key Innovation**: Instead of a monolithic trading bot, CryptoFunk orchestrates multiple AI agents - each with specialized expertise (technical analysis, order book analysis, sentiment, trend following, mean reversion, risk management) - that collaborate through MCP to make trading decisions via weighted voting and consensus.
 
-**Status**: All 10 core phases complete - Production Ready. See TASKS.md for implementation details.
+**Status**: ~75% MVP complete. Core Phases 1-9 + 11 done. January 2026 review identified 6 immediate blockers (hardcoded values, E2E tests, MCP metrics) requiring ~18h to fix before any launch. See TASKS.md "January 2026 Review" section for revamped 16-week roadmap to revenue.
 
 ## Build System
 
@@ -122,7 +122,7 @@ All services use fixed ports to avoid conflicts and enable Prometheus scraping:
 
 ## Technology Stack
 
-- **Language**: Go 1.24+ (requires generics for cinar/indicator v2)
+- **Language**: Go 1.25+ (requires generics for cinar/indicator v2)
 - **MCP**: `github.com/modelcontextprotocol/go-sdk v1.0.0`
 - **LLM Gateway**: Bifrost (unified Claude/GPT-4/Gemini with failover)
 - **Exchanges**: CCXT (100+ exchanges) + Binance SDK (`github.com/adshao/go-binance/v2`)

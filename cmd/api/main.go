@@ -37,6 +37,7 @@ type APIServer struct {
 	orchestratorClient *http.Client
 	rateLimiter        *RateLimiterMiddleware
 	apiKeyStore        *api.APIKeyStore
+	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -314,6 +315,22 @@ func (s *APIServer) setupRoutes() {
 		// Backtesting operations can be computationally expensive, so we apply stricter rate limits
 		backtestHandler := api.NewBacktestHandler(s.db.Pool())
 		backtestHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
+
+		// TB-006: API Key Management routes
+		// These endpoints allow users to manage their API keys (create, rotate, revoke)
+		// All key management operations require authentication
+		keysHandler := api.NewKeysHandler(s.db.Pool())
+		s.keyManager = keysHandler.GetKeyManager()
+
+		// Start the expired key cleanup worker (runs every hour)
+		s.keyManager.StartCleanupWorker(context.Background(), time.Hour)
+
+		keysHandler.RegisterRoutesWithRateLimiter(
+			v1,
+			api.AuthMiddleware(s.apiKeyStore, authConfig),
+			s.rateLimiter.ReadMiddleware(),
+			s.rateLimiter.OrderMiddleware(),
+		)
 	}
 
 	// Root endpoint
@@ -358,6 +375,11 @@ func (s *APIServer) start() {
 	// Stop rate limiter cleanup worker to prevent goroutine leak
 	if s.rateLimiter != nil {
 		s.rateLimiter.Stop()
+	}
+
+	// TB-006: Stop key manager cleanup worker
+	if s.keyManager != nil {
+		s.keyManager.StopCleanupWorker()
 	}
 
 	// Graceful shutdown with 5 second timeout
@@ -757,11 +779,18 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		req.Mode = "paper"
 	}
 
+	// Determine exchange from config (defaults to "binance" if not configured)
+	exchange := s.config.Trading.Exchange
+	if exchange == "" {
+		exchange = "binance"
+		log.Warn().Msg("No exchange configured in config.Trading.Exchange, defaulting to binance")
+	}
+
 	// Create a new trading session
 	session := &db.TradingSession{
 		Mode:           db.TradingMode(req.Mode),
 		Symbol:         req.Symbol,
-		Exchange:       "PAPER", // TODO: Make configurable
+		Exchange:       exchange,
 		StartedAt:      time.Now(),
 		InitialCapital: req.InitialCapital,
 	}

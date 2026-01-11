@@ -1,8 +1,8 @@
 # CryptoFunk Implementation Tasks
 
 **Project**: Crypto AI Trading Platform with MCP-Orchestrated Multi-Agent System
-**Version**: 2.0
-**Last Updated**: 2025-11-15 (Phases 13-16 added: Production Gap Closure → Revenue Generation)
+**Version**: 3.0
+**Last Updated**: 2026-01-11 (January 2026 Architecture & Product Review - Revamped Roadmap)
 
 ---
 
@@ -52,6 +52,186 @@ This document consolidates all implementation tasks from the architecture and de
 
 **Team Size**: Recommended 2-3 developers
 **Approach**: Iterative, with working system at end of each phase
+
+---
+
+## 🔴 January 2026 Review - REVAMPED ROADMAP
+
+> **Review Date**: January 11, 2026
+> **Reviewers**: Software Architect Agent, Product Manager Agent
+> **Status**: Core Phases 1-9 + 11 complete. Critical production gaps identified.
+
+### Executive Summary
+
+**Current State**: ~75% feature complete for MVP. Strong technical foundations but critical gaps blocking production launch.
+
+**Key Finding**: The system is well-architected (MCP, LLM integration, explainability) but has **immediate blockers** that must be fixed before any production deployment.
+
+### 🚨 IMMEDIATE BLOCKERS (Fix Before ANY Launch)
+
+| Task | Category | Severity | Effort | Description |
+|------|----------|----------|--------|-------------|
+| **TB-001** | Configuration | CRITICAL | 2h | Remove hardcoded version "1.0.0" in orchestrator - use build flags |
+| **TB-002** | Configuration | CRITICAL | 1h | Remove hardcoded exchange mode "PAPER" in API - use config |
+| **TB-003** | Configuration | HIGH | 2h | Remove hardcoded exchange fees in arbitrage agent - make configurable |
+| **TB-004** | Testing | CRITICAL | 6h | Fix E2E test infrastructure (T262) - currently skipped |
+| **TB-005** | Observability | HIGH | 4h | Implement MCP metrics (request count, latency, errors) |
+| **TB-006** | Security | HIGH | 3h | Add API key expiration/rotation mechanism |
+
+**Total Blocking Effort**: ~18 hours (2-3 days)
+
+### ⚠️ CRITICAL FOR BETA LAUNCH
+
+| Task | Category | Priority | Effort | Description |
+|------|----------|----------|--------|-------------|
+| **TC-001** | User Engagement | P0 | 16h | Telegram bot command handlers (/status, /positions, /start, /stop) |
+| **TC-002** | User Experience | P0 | 24h | Basic user dashboard (trading control + positions view) |
+| **TC-003** | Safety | P0 | 8h | Live trading safety guards (max daily drawdown enforcement) |
+| **TC-004** | Notifications | P1 | 12h | Email/Slack alert system for trades and errors |
+| **TC-005** | Integration | P1 | 8h | Enable all disabled integration tests |
+| **TC-006** | Reliability | P1 | 4h | Implement graceful agent shutdown with context propagation |
+
+**Total Beta Effort**: ~72 hours (2 weeks)
+
+### 📊 Architecture Review Findings
+
+**EXCELLENT (No Changes Needed)**:
+- ✅ MCP implementation (JSON-RPC 2.0, stdin/stdout separation)
+- ✅ Database handling (pgxpool, migrations, TimescaleDB)
+- ✅ Security enforcement (auth required in production, rate limiting)
+- ✅ Circuit breakers (DB, Exchange, LLM)
+- ✅ Structured logging (zerolog to stderr)
+
+**GOOD (Minor Improvements)**:
+- ⚠️ Error handling - add panic recovery in MCP servers
+- ⚠️ Context management - propagate cancellation through NATS
+- ⚠️ Configuration - single source of truth for circuit breaker settings
+
+**NEEDS WORK**:
+- ❌ E2E testing completely skipped (binary building timeout issues)
+- ❌ Integration tests disabled (memory system tests failing)
+- ❌ MCP metrics not implemented (TODO comments in all 4 servers)
+- ❌ Version management hardcoded
+
+### 📱 Product Review Findings
+
+**STRONG DIFFERENTIATORS**:
+1. **LLM-Powered Multi-Agent Reasoning** - 6 specialized agents with Claude/GPT-4
+2. **Explainability & Audit Trail** - Every decision includes reasoning (regulatory advantage)
+3. **Bifrost Integration** - 90% LLM cost reduction via semantic caching
+4. **BDI Agent Model** - Beliefs, Desires, Intentions with memory
+
+**WEAK POINTS**:
+- ❌ Single exchange (Binance only) - regulatory risk
+- ❌ No strategy marketplace - can't build community
+- ❌ Telegram bot incomplete - poor user engagement
+- ❌ No user dashboard - API-only access
+
+**RECOMMENDATION**: Launch as **B2B API-first platform** targeting quant traders before attempting B2C consumer launch.
+
+### 🗺️ REVAMPED PRIORITY ROADMAP
+
+#### Sprint 1: Blockers & Foundation (Week 1-2)
+**Goal**: Remove all production blockers
+
+```
+TB-001: Fix hardcoded version (2h)
+TB-002: Fix hardcoded exchange mode (1h)
+TB-003: Fix hardcoded exchange fees (2h)
+TB-004: Fix E2E test infrastructure (6h)
+TB-005: Implement MCP metrics (4h)
+TB-006: API key expiration/rotation (3h)
+```
+**Exit Criteria**: All tests pass, no hardcoded values, metrics exported
+
+#### Sprint 2: Beta Essentials (Week 3-4)
+**Goal**: Minimum viable user experience
+
+```
+TC-001: Telegram bot commands (16h)
+TC-002: Basic user dashboard (24h)
+TC-003: Live trading safety guards (8h)
+TC-004: Notification system (12h)
+```
+**Exit Criteria**: Users can monitor & control trading via Telegram/web
+
+#### Sprint 3: Production Hardening (Week 5-6)
+**Goal**: Production-ready reliability
+
+```
+TC-005: Enable integration tests (8h)
+TC-006: Graceful agent shutdown (4h)
+- Circuit breaker config consolidation (3h)
+- Database transaction improvements (6h)
+- Agent recovery & auto-restart (8h)
+```
+**Exit Criteria**: 75%+ test coverage, graceful degradation works
+
+#### Sprint 4: Beta Launch (Week 7-8)
+**Goal**: 10+ beta users trading
+
+```
+- Production deployment (AWS/GCP)
+- Beta user onboarding
+- Monitoring & alerting setup
+- Bug fixing & stabilization
+- Performance baseline establishment
+```
+**Exit Criteria**: 10+ beta users, zero critical bugs for 7 days
+
+#### Sprint 5-6: Differentiation (Week 9-12)
+**Goal**: Competitive moat features
+
+```
+- Strategy import/export (12h)
+- Strategy marketplace basics (24h)
+- Backtesting web UI (24h)
+- Multi-exchange support via CCXT (16h)
+- Performance analytics & reporting (16h)
+```
+**Exit Criteria**: Strategy sharing active, 3+ exchanges supported
+
+#### Sprint 7-8: Revenue (Week 13-16)
+**Goal**: First paying customers
+
+```
+- Subscription billing (Stripe) (16h)
+- Multi-tenancy support (24h)
+- Legal compliance (ToS, Privacy) (8h)
+- Performance optimization (16h)
+- Scale testing (8h)
+```
+**Exit Criteria**: $1K+ MRR, 100+ users supported
+
+### 📈 Revised Timeline
+
+| Milestone | Week | Deliverable |
+|-----------|------|-------------|
+| Blockers Fixed | 2 | All tests pass, metrics working |
+| Beta Ready | 4 | Telegram + Dashboard functional |
+| Production Hardened | 6 | 75% coverage, graceful shutdown |
+| Beta Launch | 8 | 10+ users trading |
+| Differentiated | 12 | Strategy marketplace, 3+ exchanges |
+| Revenue | 16 | $1K+ MRR, 100+ users |
+
+### 🎯 Success Metrics
+
+**Technical Health**:
+- Test coverage: 75%+ (currently ~65%)
+- E2E tests: All passing (currently skipped)
+- MCP metrics: Exported to Prometheus
+- Mean time to recovery: <5 minutes
+
+**Product Health**:
+- Beta users: 10+ by week 8
+- User retention: 50%+ weekly active
+- Decision explainability views: 80%+ of users
+- Telegram engagement: 60%+ of users
+
+**Business Health**:
+- MRR: $1K+ by week 16
+- Paying customers: 10+ by week 16
+- Support tickets: <5/week
 
 ---
 

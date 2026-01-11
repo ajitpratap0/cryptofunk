@@ -57,6 +57,7 @@ type APIKey struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	Revoked     bool       `json:"revoked"`
+	IsActive    bool       `json:"is_active"` // TB-006: Active status for rotation support
 }
 
 // AuthConfig contains authentication configuration
@@ -96,6 +97,7 @@ func HashAPIKey(key string) string {
 }
 
 // ValidateKey checks if an API key is valid and returns the associated key record
+// TB-006: Now also checks is_active status for rotation support
 func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, error) {
 	if s.db == nil {
 		return nil, nil
@@ -105,7 +107,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 
 	query := `
 		SELECT id, key_hash, name, user_id, permissions, last_used_at,
-		       created_at, expires_at, revoked
+		       created_at, expires_at, revoked, COALESCE(is_active, TRUE) as is_active
 		FROM api_keys
 		WHERE key_hash = $1
 	`
@@ -123,6 +125,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		&apiKey.CreatedAt,
 		&apiKey.ExpiresAt,
 		&apiKey.Revoked,
+		&apiKey.IsActive,
 	)
 
 	if err != nil {
@@ -138,6 +141,11 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 
 	// Check if key is revoked
 	if apiKey.Revoked {
+		return nil, nil
+	}
+
+	// TB-006: Check if key is active (may be inactive due to rotation)
+	if !apiKey.IsActive {
 		return nil, nil
 	}
 

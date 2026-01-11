@@ -146,7 +146,7 @@ func (r *DecisionRepository) ListDecisions(ctx context.Context, filter DecisionF
 	}
 
 	// Order and pagination
-	query += ` ORDER BY created_at DESC`
+	query += orderByCreatedAtDesc
 
 	if filter.Limit > 0 {
 		query += ` LIMIT $` + itoa(argPos)

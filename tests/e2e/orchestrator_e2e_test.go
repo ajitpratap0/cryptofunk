@@ -46,15 +46,19 @@ type AgentSignal struct {
 // - Requires all MCP server binaries to be pre-built
 // - Times out waiting for agent registration
 //
-// Use TestE2E_CompleteTradingFlow instead, which tests the same flow
-// with in-process mocks and is more suitable for CI/CD.
+// Use the in-process E2E tests instead, which test the same flow
+// without requiring binary builds and are more suitable for CI/CD:
+//   - TestE2E_InProcess (comprehensive in-process test with mock agents)
+//   - TestE2E_CompleteTradingFlow (trading flow with signal injection)
+//   - TestE2E_InProcess_RapidSignals (stress testing with rapid signals)
+//   - TestE2E_InProcess_OrchestratorStatus (status and monitoring endpoints)
 //
 // TODO (T262): Fix this test by:
 // 1. Making agents read NATS_URL from environment
 // 2. Building MCP servers or using mocks
 // 3. Reducing timeout issues with better synchronization
 func TestE2E_OrchestratorWithAllAgents(t *testing.T) {
-	t.Skip("Skipping binary-based E2E test - use TestE2E_CompleteTradingFlow instead (see T262)")
+	t.Skip("Skipping binary-based E2E test - use TestE2E_InProcess instead (see T262)")
 
 	if testing.Short() {
 		t.Skip("Skipping E2E test in short mode")
