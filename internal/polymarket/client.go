@@ -3,10 +3,10 @@ package polymarket
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"encoding/hex"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -27,8 +27,8 @@ const (
 	DefaultChainID   = 137
 
 	// Polymarket contract addresses on Polygon
-	CTFExchangeAddress    = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
-	NegRiskExchangeAddr   = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+	CTFExchangeAddress  = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+	NegRiskExchangeAddr = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
 
 	// Rate limiting
 	maxRequestsPerSecond = 10
@@ -36,11 +36,11 @@ const (
 
 // Header keys
 const (
-	headerPolyAddress   = "POLY_ADDRESS"
-	headerPolySignature = "POLY_SIGNATURE"
-	headerPolyTimestamp = "POLY_TIMESTAMP"
-	headerPolyNonce     = "POLY_NONCE"
-	headerPolyAPIKey    = "POLY_API_KEY"
+	headerPolyAddress    = "POLY_ADDRESS"
+	headerPolySignature  = "POLY_SIGNATURE"
+	headerPolyTimestamp  = "POLY_TIMESTAMP"
+	headerPolyNonce      = "POLY_NONCE"
+	headerPolyAPIKey     = "POLY_API_KEY"
 	headerPolyPassphrase = "POLY_PASSPHRASE"
 )
 

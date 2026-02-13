@@ -4,14 +4,14 @@ import "time"
 
 // MarketInfo represents a Polymarket market for analysis.
 type MarketInfo struct {
-	ID                 string  `json:"id"`
-	Question           string  `json:"question"`
-	ResolutionCriteria string  `json:"resolution_criteria"`
-	YesPrice           float64 `json:"yes_price"` // 0-1
-	NoPrice            float64 `json:"no_price"`  // 0-1
-	Volume             float64 `json:"volume"`
-	Liquidity          float64 `json:"liquidity"`
-	Category           string  `json:"category"`
+	ID                 string    `json:"id"`
+	Question           string    `json:"question"`
+	ResolutionCriteria string    `json:"resolution_criteria"`
+	YesPrice           float64   `json:"yes_price"` // 0-1
+	NoPrice            float64   `json:"no_price"`  // 0-1
+	Volume             float64   `json:"volume"`
+	Liquidity          float64   `json:"liquidity"`
+	Category           string    `json:"category"`
 	EndDate            time.Time `json:"end_date"`
 }
 
@@ -38,15 +38,15 @@ type EdgeDetectionResult struct {
 
 // TradeRecommendation is the final output combining analysis and edge calculation.
 type TradeRecommendation struct {
-	Market           MarketInfo          `json:"market"`
-	Analysis         AnalysisResult      `json:"analysis"`
-	Edge             EdgeResult          `json:"edge"`
-	EdgeDetection    *EdgeDetectionResult `json:"edge_detection,omitempty"`
-	ShouldTrade      bool                `json:"should_trade"`
-	RecommendedSide  string              `json:"recommended_side"` // YES or NO
-	RecommendedSize  float64             `json:"recommended_size"` // fraction of bankroll
-	ExpectedValue    float64             `json:"expected_value"`
-	Timestamp        time.Time           `json:"timestamp"`
+	Market          MarketInfo           `json:"market"`
+	Analysis        AnalysisResult       `json:"analysis"`
+	Edge            EdgeResult           `json:"edge"`
+	EdgeDetection   *EdgeDetectionResult `json:"edge_detection,omitempty"`
+	ShouldTrade     bool                 `json:"should_trade"`
+	RecommendedSide string               `json:"recommended_side"` // YES or NO
+	RecommendedSize float64              `json:"recommended_size"` // fraction of bankroll
+	ExpectedValue   float64              `json:"expected_value"`
+	Timestamp       time.Time            `json:"timestamp"`
 }
 
 // NewsItem represents a fetched news article relevant to a market.
@@ -63,7 +63,7 @@ type NewsItem struct {
 type EdgeResult struct {
 	PredictedProb  float64 `json:"predicted_prob"`
 	MarketPrice    float64 `json:"market_price"`
-	Edge           float64 `json:"edge"`           // predicted - market
+	Edge           float64 `json:"edge"` // predicted - market
 	ExpectedValue  float64 `json:"expected_value"`
 	KellyFraction  float64 `json:"kelly_fraction"`
 	AdjustedSize   float64 `json:"adjusted_size"` // kelly * confidence adjustment
@@ -73,19 +73,19 @@ type EdgeResult struct {
 
 // Prediction tracks a prediction for performance measurement.
 type Prediction struct {
-	ID               string    `json:"id"`
-	MarketID         string    `json:"market_id"`
-	MarketQuestion   string    `json:"market_question"`
-	Category         string    `json:"category"`
-	PredictedProb    float64   `json:"predicted_prob"`
-	MarketPrice      float64   `json:"market_price"`
-	Confidence       float64   `json:"confidence"`
-	Reasoning        string    `json:"reasoning"`
-	Outcome          *float64  `json:"outcome"`       // nil if unresolved, 0 or 1
-	PnL              float64   `json:"pnl"`
-	Resolved         bool      `json:"resolved"`
-	CreatedAt        time.Time `json:"created_at"`
-	ResolvedAt       *time.Time `json:"resolved_at"`
+	ID             string     `json:"id"`
+	MarketID       string     `json:"market_id"`
+	MarketQuestion string     `json:"market_question"`
+	Category       string     `json:"category"`
+	PredictedProb  float64    `json:"predicted_prob"`
+	MarketPrice    float64    `json:"market_price"`
+	Confidence     float64    `json:"confidence"`
+	Reasoning      string     `json:"reasoning"`
+	Outcome        *float64   `json:"outcome"` // nil if unresolved, 0 or 1
+	PnL            float64    `json:"pnl"`
+	Resolved       bool       `json:"resolved"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ResolvedAt     *time.Time `json:"resolved_at"`
 }
 
 // PerformanceStats holds aggregate performance metrics.

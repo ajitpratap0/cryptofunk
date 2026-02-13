@@ -11,11 +11,11 @@ import (
 
 // Analyzer performs LLM-powered analysis of Polymarket markets.
 type Analyzer struct {
-	llmClient    llm.LLMClient
-	newsFetcher  *NewsFetcher
-	edgeCalc     *EdgeCalculator
-	tracker      *PerformanceTracker
-	categories   *CategoryManager
+	llmClient   llm.LLMClient
+	newsFetcher *NewsFetcher
+	edgeCalc    *EdgeCalculator
+	tracker     *PerformanceTracker
+	categories  *CategoryManager
 }
 
 // AnalyzerConfig holds configuration for the Analyzer.
@@ -98,14 +98,14 @@ func (a *Analyzer) AnalyzeMarket(ctx context.Context, market MarketInfo) (*Trade
 	// Step 4: Track prediction
 	if a.tracker != nil {
 		a.tracker.RecordPrediction(Prediction{
-			MarketID:      market.ID,
+			MarketID:       market.ID,
 			MarketQuestion: market.Question,
-			Category:      market.Category,
-			PredictedProb: analysis.PredictedProbability,
-			MarketPrice:   market.YesPrice,
-			Confidence:    analysis.Confidence,
-			Reasoning:     analysis.Reasoning,
-			CreatedAt:     time.Now(),
+			Category:       market.Category,
+			PredictedProb:  analysis.PredictedProbability,
+			MarketPrice:    market.YesPrice,
+			Confidence:     analysis.Confidence,
+			Reasoning:      analysis.Reasoning,
+			CreatedAt:      time.Now(),
 		})
 	}
 
@@ -168,6 +168,6 @@ func categoryConfidenceWeight(stats *CategoryStats) float64 {
 	}
 	// Good Brier score (< 0.25) → weight up to 1.0
 	// Bad Brier score (> 0.25) → weight down
-	weight := 1.0 - (stats.BrierScore - 0.15) * 2
+	weight := 1.0 - (stats.BrierScore-0.15)*2
 	return clamp(weight, 0.1, 1.5)
 }

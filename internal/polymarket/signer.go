@@ -58,7 +58,6 @@ func (s *Signer) Destroy() {
 	}
 }
 
-
 // SignClobAuthMessage signs an EIP-712 auth message for L1 authentication
 func (s *Signer) SignClobAuthMessage(timestamp int64, nonce int) (string, error) {
 	typedData := apitypes.TypedData{
