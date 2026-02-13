@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
+	"github.com/sony/gobreaker"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
@@ -27,17 +28,18 @@ const (
 
 // CoinGeckoClient wraps the CoinGecko MCP server client with rate limiting and retry logic
 type CoinGeckoClient struct {
-	mcpClient   *mcp.Client
-	session     *mcp.ClientSession
-	rateLimiter *rate.Limiter
-	timeout     time.Duration
-	maxRetries  int
-	retryDelay  time.Duration
-	mu          sync.RWMutex
-	connected   bool
-	lastError   error              // Last error encountered (protected by mu)
-	sfGroup     singleflight.Group // Prevents cache stampede
-	cache       *RedisPriceCache   // Optional Redis cache for price data
+	mcpClient      *mcp.Client
+	session        *mcp.ClientSession
+	rateLimiter    *rate.Limiter
+	timeout        time.Duration
+	maxRetries     int
+	retryDelay     time.Duration
+	mu             sync.RWMutex
+	connected      bool
+	lastError      error              // Last error encountered (protected by mu)
+	sfGroup        singleflight.Group // Prevents cache stampede
+	cache          *RedisPriceCache   // Optional Redis cache for price data
+	circuitBreaker *gobreaker.CircuitBreaker // Circuit breaker for MCP calls
 }
 
 // CoinGeckoClientOptions configures the CoinGecko client
@@ -117,14 +119,34 @@ func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClien
 			Msg("Rate limiter configured")
 	}
 
+	// Circuit breaker for CoinGecko MCP calls: trips after 5 consecutive failures,
+	// stays open for 30s, allows 2 requests in half-open state
+	cb := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "coingecko-mcp",
+		MaxRequests: 2,
+		Interval:    10 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 5
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			log.Warn().
+				Str("breaker", name).
+				Str("from", from.String()).
+				Str("to", to.String()).
+				Msg("CoinGecko circuit breaker state change")
+		},
+	})
+
 	client := &CoinGeckoClient{
-		mcpClient:   mcpClient,
-		rateLimiter: rateLimiter,
-		timeout:     opts.Timeout,
-		maxRetries:  opts.MaxRetries,
-		retryDelay:  opts.RetryDelay,
-		connected:   false,
-		cache:       opts.Cache, // Optional Redis cache
+		mcpClient:      mcpClient,
+		rateLimiter:    rateLimiter,
+		timeout:        opts.Timeout,
+		maxRetries:     opts.MaxRetries,
+		retryDelay:     opts.RetryDelay,
+		connected:      false,
+		cache:          opts.Cache, // Optional Redis cache
+		circuitBreaker: cb,
 	}
 
 	// Log cache status
@@ -488,8 +510,17 @@ func (c *CoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) (*Coin
 	return coinInfo, nil
 }
 
-// callToolWithRetry calls an MCP tool with exponential backoff retry logic
+// callToolWithRetry calls an MCP tool with exponential backoff retry logic, protected by circuit breaker
 func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string, args map[string]interface{}, result interface{}) error {
+	// Wrap the entire retry loop in a circuit breaker
+	_, cbErr := c.circuitBreaker.Execute(func() (interface{}, error) {
+		return nil, c.callToolWithRetryInner(ctx, toolName, args, result)
+	})
+	return cbErr
+}
+
+// callToolWithRetryInner is the inner implementation of callToolWithRetry without circuit breaker
+func (c *CoinGeckoClient) callToolWithRetryInner(ctx context.Context, toolName string, args map[string]interface{}, result interface{}) error {
 	c.mu.RLock()
 	session := c.session
 	c.mu.RUnlock()

@@ -64,7 +64,11 @@ func (pm *PositionManager) SetSession(sessionID *uuid.UUID) {
 
 // loadOpenPositions loads open positions from database
 func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	parentCtx := pm.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
 	defer cancel()
 	positions, err := pm.db.GetOpenPositions(ctx, sessionID)
 	if err != nil {
