@@ -31,11 +31,12 @@ func RequireDocker(t *testing.T) {
 
 // PostgresContainer holds the testcontainer instance and connection details
 type PostgresContainer struct {
-	Container     *postgres.PostgresContainer
-	ConnectionStr string
-	DB            *db.DB
-	cleanupFuncs  []func()
-	t             *testing.T
+	Container       *postgres.PostgresContainer
+	ConnectionStr   string
+	DB              *db.DB
+	UsingExistingDB bool
+	cleanupFuncs    []func()
+	t               *testing.T
 }
 
 // SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector
