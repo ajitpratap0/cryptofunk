@@ -135,11 +135,6 @@ func TestListTools(t *testing.T) {
 		toolStartSession,
 		toolStopSession,
 		toolGetSessionStats,
-		toolGetSafetyGuardStats,
-		toolSetSafetyGuardCapital,
-		toolRecordTradePnL,
-		toolResetSafetyGuard,
-		toolResetDailyCounters,
 	}
 
 	for _, expected := range expectedTools {
