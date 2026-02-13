@@ -536,6 +536,9 @@ func (km *KeyManager) StartCleanupWorker(ctx context.Context, interval time.Dura
 	}
 
 	// Create new context for the worker
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	workerCtx, cancel := context.WithCancel(ctx)
 	km.cleanupCancel = cancel
 
