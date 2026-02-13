@@ -2,8 +2,8 @@ package db_test
 
 import (
 	"context"
-	"os"
 	"encoding/json"
+	"os"
 	"sync"
 	"testing"
 	"time"
