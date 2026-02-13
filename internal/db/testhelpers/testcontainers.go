@@ -3,9 +3,7 @@ package testhelpers
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,54 +18,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-// isDockerAvailable checks if Docker daemon is accessible
-// This prevents panics when Docker is not running
-func isDockerAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	dialer := &net.Dialer{Timeout: 2 * time.Second}
-
-	// Try common Docker socket locations
-	socketPaths := []string{
-		"/var/run/docker.sock",
-		os.Getenv("HOME") + "/.docker/run/docker.sock",
-	}
-
-	// Check DOCKER_HOST environment variable
-	if dockerHost := os.Getenv("DOCKER_HOST"); dockerHost != "" {
-		// Parse Docker host URL (unix://, tcp://, etc.)
-		if strings.HasPrefix(dockerHost, "unix://") {
-			socketPaths = append([]string{strings.TrimPrefix(dockerHost, "unix://")}, socketPaths...)
-		} else if strings.HasPrefix(dockerHost, "tcp://") {
-			// For TCP connections, try to connect
-			addr := strings.TrimPrefix(dockerHost, "tcp://")
-			conn, err := dialer.DialContext(ctx, "tcp", addr)
-			if err == nil {
-				conn.Close()
-				return true
-			}
-		}
-	}
-
-	// Check if any socket path is accessible
-	for _, socketPath := range socketPaths {
-		if _, err := os.Stat(socketPath); err == nil {
-			// Socket file exists, try to connect
-			conn, err := dialer.DialContext(ctx, "unix", socketPath)
-			if err == nil {
-				conn.Close()
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// RequireDocker skips the test if Docker is not available.
-// It checks by running "docker info" which is the most reliable way to detect
-// if Docker daemon is actually running (socket can exist but daemon be stopped).
+// RequireDocker skips the test if Docker is not available
 func RequireDocker(t *testing.T) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "docker", "info")
@@ -80,46 +31,18 @@ func RequireDocker(t *testing.T) {
 
 // PostgresContainer holds the testcontainer instance and connection details
 type PostgresContainer struct {
-	Container       *postgres.PostgresContainer
-	ConnectionStr   string
-	DB              *db.DB
-	cleanupFuncs    []func()
-	t               *testing.T
-	UsingExistingDB bool // True when using DATABASE_URL instead of testcontainer
+	Container     *postgres.PostgresContainer
+	ConnectionStr string
+	DB            *db.DB
+	cleanupFuncs  []func()
+	t             *testing.T
 }
 
-// SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector.
-// If SKIP_TESTCONTAINER_TESTS is set to "true", the test will be skipped.
-// If DATABASE_URL environment variable is set, the existing database will be used.
-// If Docker is not available, the test will be skipped.
+// SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector
 func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	t.Helper()
-	RequireDocker(t)
 
 	ctx := context.Background()
-
-	// Check if testcontainer tests should be skipped (CI environment without Docker)
-	// This must be checked FIRST, before any testcontainer operations
-	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
-		// If DATABASE_URL is available, use it; otherwise skip the test entirely
-		if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
-			t.Log("Using existing database from DATABASE_URL (testcontainers disabled)")
-			return setupFromExistingDatabase(t, ctx, connStr)
-		}
-		t.Skip("Skipping testcontainer test: SKIP_TESTCONTAINER_TESTS=true and no DATABASE_URL")
-	}
-
-	// Check if DATABASE_URL is set (CI environment with existing database)
-	if connStr := os.Getenv("DATABASE_URL"); connStr != "" {
-		t.Log("Using existing database from DATABASE_URL environment variable")
-		return setupFromExistingDatabase(t, ctx, connStr)
-	}
-
-	// Check if Docker is available before attempting to create containers
-	// This prevents panics when Docker daemon is not running
-	if !isDockerAvailable() {
-		t.Skip("Skipping testcontainer test: Docker daemon is not available")
-	}
 
 	// Create PostgreSQL container with TimescaleDB image (includes pgvector)
 	container, err := postgres.Run(ctx,
@@ -190,73 +113,9 @@ func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	return tc
 }
 
-// setupFromExistingDatabase connects to an existing database using the provided connection string.
-// This is used in CI environments where the database is already running.
-func setupFromExistingDatabase(t *testing.T, ctx context.Context, connStr string) *PostgresContainer {
-	t.Helper()
-
-	// Create test database connection
-	config, err := pgxpool.ParseConfig(connStr)
-	if err != nil {
-		t.Fatalf("Failed to parse connection string: %v", err)
-	}
-
-	// Configure connection pool
-	config.MaxConns = 5
-	config.MinConns = 1
-	config.MaxConnLifetime = time.Hour
-	config.MaxConnIdleTime = 30 * time.Minute
-
-	// Create pool
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		t.Fatalf("Failed to create connection pool: %v", err)
-	}
-
-	// Test connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Fatalf("Failed to ping database: %v", err)
-	}
-
-	database := &db.DB{}
-	database.SetPool(pool)
-
-	tc := &PostgresContainer{
-		Container:       nil, // No container when using existing database
-		ConnectionStr:   connStr,
-		DB:              database,
-		cleanupFuncs:    []func(){},
-		t:               t,
-		UsingExistingDB: true, // Mark that we're using existing database
-	}
-
-	// Note: We don't truncate tables here because tests may run in parallel
-	// and truncating would cause race conditions. Tests that need a clean
-	// database should either:
-	// 1. Use unique identifiers that won't conflict with other tests
-	// 2. Call TruncateAllTables() explicitly if they need isolation
-
-	// Set up cleanup (just close the connection, don't terminate container)
-	t.Cleanup(func() {
-		tc.Cleanup()
-	})
-
-	return tc
-}
-
-// ApplyMigrations runs SQL migrations from the migrations directory.
-// If using an existing database (DATABASE_URL set), migrations are skipped
-// since they should already be applied in CI environments.
+// ApplyMigrations runs SQL migrations from the migrations directory
 func (tc *PostgresContainer) ApplyMigrations(migrationsPath string) error {
 	tc.t.Helper()
-
-	// Skip migrations if using existing database (CI environment)
-	// In CI, migrations are applied separately before tests run
-	if tc.Container == nil {
-		tc.t.Log("Skipping migrations - using existing database")
-		return nil
-	}
 
 	ctx := context.Background()
 	pool := tc.DB.Pool()

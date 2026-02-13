@@ -348,20 +348,11 @@ func TestCallOrchestratorWithRetry_Failure(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// Integration tests requiring database
-// These will be skipped if DATABASE_URL is not set
+// Integration tests requiring database (uses testcontainers)
 
 func TestListAgentsWithDatabase(t *testing.T) {
-	ctx := context.Background()
-	database, err := db.New(ctx)
-	if err != nil {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	defer database.Close()
-
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
-	server.db = database
 
 	req := httptest.NewRequest("GET", "/api/v1/agents", nil)
 	w := httptest.NewRecorder()
@@ -378,16 +369,8 @@ func TestListAgentsWithDatabase(t *testing.T) {
 }
 
 func TestListPositionsWithDatabase(t *testing.T) {
-	ctx := context.Background()
-	database, err := db.New(ctx)
-	if err != nil {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	defer database.Close()
-
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
-	server.db = database
 
 	req := httptest.NewRequest("GET", "/api/v1/positions", nil)
 	w := httptest.NewRecorder()
@@ -404,16 +387,8 @@ func TestListPositionsWithDatabase(t *testing.T) {
 }
 
 func TestListOrdersWithDatabase(t *testing.T) {
-	ctx := context.Background()
-	database, err := db.New(ctx)
-	if err != nil {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	defer database.Close()
-
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
-	server.db = database
 
 	req := httptest.NewRequest("GET", "/api/v1/orders", nil)
 	w := httptest.NewRecorder()
@@ -430,16 +405,8 @@ func TestListOrdersWithDatabase(t *testing.T) {
 }
 
 func TestGetPositionWithDatabase(t *testing.T) {
-	ctx := context.Background()
-	database, err := db.New(ctx)
-	if err != nil {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	defer database.Close()
-
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
-	server.db = database
 
 	// Query for a symbol (may not exist, but should return 200 with empty result)
 	req := httptest.NewRequest("GET", "/api/v1/positions/BTC/USDT", nil)
@@ -453,13 +420,10 @@ func TestGetPositionWithDatabase(t *testing.T) {
 }
 
 func TestPlaceOrderWithDatabase(t *testing.T) {
-	ctx := context.Background()
-	database, err := db.New(ctx)
-	if err != nil {
-		t.Skip("Skipping test: DATABASE_URL not set or database not available")
-	}
-	defer database.Close()
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
 
+	ctx := context.Background()
 	// Create a trading session first
 	session := &db.TradingSession{
 		ID:             uuid.New(),
@@ -469,12 +433,8 @@ func TestPlaceOrderWithDatabase(t *testing.T) {
 		InitialCapital: 10000.0,
 		StartedAt:      time.Now(),
 	}
-	err = database.CreateSession(ctx, session)
+	err := server.db.CreateSession(ctx, session)
 	require.NoError(t, err)
-
-	server, tc := setupTestAPIServer(t)
-	_ = tc // testcontainers handles cleanup automatically
-	server.db = database
 
 	reqBody := map[string]interface{}{
 		"session_id": session.ID.String(),

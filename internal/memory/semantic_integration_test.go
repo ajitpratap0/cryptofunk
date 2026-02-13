@@ -1,7 +1,6 @@
 //go:build integration
 
-// TODO: These integration tests from PR #17 are currently failing.
-// They need to be fixed in a separate PR. Skipping for now to unblock Phase 14 PR.
+// Integration tests for semantic memory (requires Docker for testcontainers)
 // Run with: go test -tags=integration ./internal/memory
 
 package memory_test

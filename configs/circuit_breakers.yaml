@@ -1,0 +1,32 @@
+# Circuit Breaker Configuration
+# Centralized configuration for all circuit breakers in the system.
+# These settings are loaded by internal/circuitbreaker and used across all services.
+
+circuit_breakers:
+  exchange:
+    max_failures: 5
+    failure_ratio: 0.6
+    timeout: 60s
+    half_open_requests: 2
+    count_interval: 10s
+
+  llm:
+    max_failures: 3
+    failure_ratio: 0.6
+    timeout: 30s
+    half_open_requests: 2
+    count_interval: 10s
+
+  database:
+    max_failures: 5
+    failure_ratio: 0.6
+    timeout: 15s
+    half_open_requests: 5
+    count_interval: 10s
+
+  coingecko:
+    max_failures: 5
+    failure_ratio: 0.6
+    timeout: 30s
+    half_open_requests: 2
+    count_interval: 10s
