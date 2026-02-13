@@ -108,13 +108,13 @@ type PolyMarket struct {
 	ID             string    `json:"id"`
 	Question       string    `json:"question"`
 	Category       string    `json:"category"`        // politics, crypto, tech, sports, etc.
-	OutcomeType    string    `json:"outcome_type"`    // binary, multi
-	YesPrice       float64   `json:"yes_price"`       // 0.0 - 1.0
-	NoPrice        float64   `json:"no_price"`        // 0.0 - 1.0
-	Spread         float64   `json:"spread"`          // yes_price + no_price - 1.0 (overround)
-	Volume24h      float64   `json:"volume_24h"`      // USD volume last 24h
-	Liquidity      float64   `json:"liquidity"`       // Total liquidity in the market
-	ResolutionTime time.Time `json:"resolution_time"` // When the market resolves
+	OutcomeType    string    `json:"outcome_type"`     // binary, multi
+	YesPrice       float64   `json:"yes_price"`        // 0.0 - 1.0
+	NoPrice        float64   `json:"no_price"`         // 0.0 - 1.0
+	Spread         float64   `json:"spread"`           // yes_price + no_price - 1.0 (overround)
+	Volume24h      float64   `json:"volume_24h"`       // USD volume last 24h
+	Liquidity      float64   `json:"liquidity"`        // Total liquidity in the market
+	ResolutionTime time.Time `json:"resolution_time"`  // When the market resolves
 	CreatedAt      time.Time `json:"created_at"`
 	Active         bool      `json:"active"`
 }
@@ -166,7 +166,7 @@ func (p *Position) UnrealizedPnLPct(currentPrice float64) float64 {
 // LLMAnalysis represents the LLM's analysis of a market
 type LLMAnalysis struct {
 	MarketID       string  `json:"market_id"`
-	Prediction     string  `json:"prediction"`       // "YES" or "NO"
+	Prediction     string  `json:"prediction"`      // "YES" or "NO"
 	Confidence     float64 `json:"confidence"`       // 0.0 - 1.0
 	FairPrice      float64 `json:"fair_price"`       // LLM's estimate of fair YES price
 	Reasoning      string  `json:"reasoning"`        // Why the LLM thinks this
@@ -219,10 +219,10 @@ type PolymarketAgent struct {
 	stopLoss            float64 // Stop loss percentage (e.g., 0.10 = 10%)
 
 	// Market selection
-	minLiquidity        float64  // Minimum market liquidity in USD
-	maxSpread           float64  // Maximum spread (avoid illiquid)
-	minDaysToResolution float64  // Minimum days until resolution
-	maxDaysToResolution float64  // Maximum days until resolution
+	minLiquidity        float64 // Minimum market liquidity in USD
+	maxSpread           float64 // Maximum spread (avoid illiquid)
+	minDaysToResolution float64 // Minimum days until resolution
+	maxDaysToResolution float64 // Maximum days until resolution
 	preferredCategories []string // Preferred market categories
 }
 
@@ -386,8 +386,7 @@ func (a *PolymarketAgent) Step(ctx context.Context) error {
 			continue
 		}
 
-		// Track position only after successful signal publication
-		// TODO: In production, wait for actual execution confirmation from the exchange
+		// Track position (optimistic — in production, wait for execution confirmation)
 		a.openPosition(sig)
 	}
 
