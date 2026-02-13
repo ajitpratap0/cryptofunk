@@ -150,12 +150,12 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"status":       "healthy",
-		"timestamp":    time.Now().Unix(),
-		"service":      "orchestrator",
-		"version":      config.Version,
-		"uptime_sec":   int(time.Since(h.startTime).Seconds()),
-		"nats":         natsStatus,
+		"status":        "healthy",
+		"timestamp":     time.Now().Unix(),
+		"service":       "orchestrator",
+		"version":       config.Version,
+		"uptime_sec":    int(time.Since(h.startTime).Seconds()),
+		"nats":          natsStatus,
 		"active_agents": h.orchestrator.GetActiveAgentCount(),
 	}
 

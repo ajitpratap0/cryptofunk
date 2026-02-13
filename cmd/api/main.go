@@ -38,7 +38,7 @@ type APIServer struct {
 	rateLimiter        *RateLimiterMiddleware
 	apiKeyStore        *api.APIKeyStore
 	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
-	ctx                context.Context        // Server lifecycle context for background workers
+	ctx                context.Context         // Server lifecycle context for background workers
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling

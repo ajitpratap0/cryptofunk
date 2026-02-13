@@ -48,13 +48,13 @@ func setupMinimalServer(t *testing.T) *APIServer {
 			DefaultQuantity: 0.01,
 		},
 		Risk: config.RiskConfig{
-			MaxPositionSize:    0.1,
-			MaxDailyLoss:       0.05,
-			MaxDrawdown:        0.2,
-			DefaultStopLoss:    0.02,
-			DefaultTakeProfit:  0.05,
+			MaxPositionSize:     0.1,
+			MaxDailyLoss:        0.05,
+			MaxDrawdown:         0.2,
+			DefaultStopLoss:     0.02,
+			DefaultTakeProfit:   0.05,
 			LLMApprovalRequired: false,
-			MinConfidence:      0.6,
+			MinConfidence:       0.6,
 		},
 	}
 
@@ -649,8 +649,8 @@ func TestDetermineEventType(t *testing.T) {
 		{"DELETE", "/api/v1/orders/123", "ORDER_CANCELED"},
 		{"PATCH", "/api/v1/config", "CONFIG_UPDATED"},
 		{"GET", "/api/v1/config", "CONFIG_VIEWED"},
-		{"GET", "/api/v1/health", ""},    // Non-critical, empty
-		{"GET", "/api/v1/agents", ""},     // Non-critical, empty
+		{"GET", "/api/v1/health", ""}, // Non-critical, empty
+		{"GET", "/api/v1/agents", ""}, // Non-critical, empty
 	}
 
 	for _, tt := range tests {
