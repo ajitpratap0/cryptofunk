@@ -59,6 +59,10 @@ func TestSemanticMemory_FindSimilar(t *testing.T) {
 	ctx := context.Background()
 	sm := memory.NewSemanticMemory(tc.DB.Pool())
 
+	// Clear any seed data from migrations
+	_, err = tc.DB.Pool().Exec(ctx, "TRUNCATE semantic_memory CASCADE")
+	require.NoError(t, err)
+
 	// Store multiple knowledge items
 	items := []*memory.KnowledgeItem{
 		{
