@@ -37,8 +37,14 @@ type Config struct {
 // CommandHandler is a function that handles a bot command
 type CommandHandler func(ctx context.Context, bot *Bot, message *tgbotapi.Message) error
 
-// NewBot creates a new Telegram bot instance
+// NewBot creates a new Telegram bot instance.
+// Deprecated: Use NewBotWithContext for proper context propagation and graceful shutdown.
 func NewBot(config *Config, db *pgxpool.Pool) (*Bot, error) {
+	return NewBotWithContext(context.Background(), config, db)
+}
+
+// NewBotWithContext creates a new Telegram bot instance with a parent context for lifecycle management.
+func NewBotWithContext(parentCtx context.Context, config *Config, db *pgxpool.Pool) (*Bot, error) {
 	if config.BotToken == "" {
 		return nil, fmt.Errorf("bot token is required")
 	}
@@ -54,7 +60,7 @@ func NewBot(config *Config, db *pgxpool.Pool) (*Bot, error) {
 		Str("username", api.Self.UserName).
 		Msg("Telegram bot authorized")
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	bot := &Bot{
 		api:      api,
@@ -302,7 +308,7 @@ func (b *Bot) logMessage(message *tgbotapi.Message) {
 		command = message.Command()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
 	defer cancel()
 
 	_, err := b.db.Exec(ctx, query,
@@ -330,7 +336,7 @@ func (b *Bot) logMessageWithError(message *tgbotapi.Message, command string, cmd
 		WHERE telegram_id = $7
 	`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
 	defer cancel()
 
 	_, err := b.db.Exec(ctx, query,
@@ -362,7 +368,7 @@ func (b *Bot) updateLastInteraction(telegramID int64, chatID int64) error {
 			chat_id = EXCLUDED.chat_id
 	`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
 	defer cancel()
 
 	_, err := b.db.Exec(ctx, query, telegramID, chatID)

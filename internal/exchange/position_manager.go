@@ -18,13 +18,24 @@ type PositionManager struct {
 	mu               sync.RWMutex
 	openPositions    map[string]*db.Position // symbol -> position
 	currentSessionID *uuid.UUID
-	feeRate          float64 // Average fee rate for calculations
+	feeRate          float64         // Average fee rate for calculations
+	ctx              context.Context // Parent context for background DB operations
 }
 
-// NewPositionManager creates a new position manager with default fee rate
+// NewPositionManager creates a new position manager with default fee rate.
+// Uses context.Background() for DB operations. Prefer NewPositionManagerWithContext.
 func NewPositionManager(database *db.DB) *PositionManager {
-	// Default to 0.1% fee (average of maker/taker)
 	return NewPositionManagerWithFees(database, 0.001)
+}
+
+// NewPositionManagerWithContext creates a new position manager with a parent context for DB operations.
+func NewPositionManagerWithContext(ctx context.Context, database *db.DB) *PositionManager {
+	return &PositionManager{
+		db:            database,
+		openPositions: make(map[string]*db.Position),
+		feeRate:       0.001,
+		ctx:           ctx,
+	}
 }
 
 // NewPositionManagerWithFees creates a new position manager with custom fee configuration

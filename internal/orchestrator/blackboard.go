@@ -59,8 +59,14 @@ func DefaultBlackboardConfig() BlackboardConfig {
 	}
 }
 
-// NewBlackboard creates a new blackboard instance
+// NewBlackboard creates a new blackboard instance.
+// Deprecated: Use NewBlackboardWithContext for proper context propagation.
 func NewBlackboard(config BlackboardConfig) (*Blackboard, error) {
+	return NewBlackboardWithContext(context.Background(), config)
+}
+
+// NewBlackboardWithContext creates a new blackboard instance with a parent context for the initial connection check.
+func NewBlackboardWithContext(parentCtx context.Context, config BlackboardConfig) (*Blackboard, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     config.RedisURL,
 		Password: config.RedisPassword,
@@ -68,7 +74,7 @@ func NewBlackboard(config BlackboardConfig) (*Blackboard, error) {
 	})
 
 	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
