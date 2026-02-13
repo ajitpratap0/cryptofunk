@@ -30,6 +30,7 @@ type WSClient struct {
 
 	subscriptions []wsSubscription
 	mu            sync.Mutex
+	writeMu       sync.Mutex
 	done          chan struct{}
 	reconnects    int
 }
@@ -94,8 +95,10 @@ func (ws *WSClient) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}
+	ws.mu.Lock()
 	ws.conn = conn
 	ws.reconnects = 0
+	ws.mu.Unlock()
 
 	// Re-subscribe existing channels
 	ws.mu.Lock()
@@ -141,7 +144,10 @@ func (ws *WSClient) SubscribeUser(market string, creds *APICreds) error {
 			Passphrase: creds.Passphrase,
 		},
 	}
-	return ws.conn.WriteJSON(cmd)
+	ws.writeMu.Lock()
+	err := ws.conn.WriteJSON(cmd)
+	ws.writeMu.Unlock()
+	return err
 }
 
 func (ws *WSClient) sendSubscribe(sub wsSubscription) error {
@@ -154,7 +160,10 @@ func (ws *WSClient) sendSubscribe(sub wsSubscription) error {
 		Assets:  sub.Assets,
 		Market:  sub.Market,
 	}
-	return ws.conn.WriteJSON(cmd)
+	ws.writeMu.Lock()
+	err := ws.conn.WriteJSON(cmd)
+	ws.writeMu.Unlock()
+	return err
 }
 
 // Close closes the WebSocket connection
@@ -209,7 +218,10 @@ func (ws *WSClient) pingLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if ws.conn != nil {
-				if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				ws.writeMu.Lock()
+				err := ws.conn.WriteMessage(websocket.PingMessage, nil)
+				ws.writeMu.Unlock()
+				if err != nil {
 					ws.logger.Error().Err(err).Msg("ws ping failed")
 				}
 			}
