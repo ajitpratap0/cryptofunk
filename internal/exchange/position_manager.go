@@ -18,9 +18,9 @@ type PositionManager struct {
 	mu               sync.RWMutex
 	openPositions    map[string]*db.Position // symbol -> position
 	currentSessionID *uuid.UUID
-	feeRate      float64         // Average fee rate for calculations
-	exchangeName string          // Exchange name for records (default: "PAPER")
-	ctx          context.Context // Parent context for background DB operations
+	feeRate          float64         // Average fee rate for calculations
+	exchangeName     string          // Exchange name for records (default: "PAPER")
+	ctx              context.Context // Parent context for background DB operations
 }
 
 // NewPositionManager creates a new position manager with default fee rate.
