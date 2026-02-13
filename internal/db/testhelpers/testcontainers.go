@@ -70,7 +70,7 @@ func isDockerAvailable() bool {
 // if Docker daemon is actually running (socket can exist but daemon be stopped).
 func RequireDocker(t *testing.T) {
 	t.Helper()
-	cmd := exec.Command("docker", "info")
+	cmd := exec.CommandContext(context.Background(), "docker", "info")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Run(); err != nil {

@@ -117,6 +117,12 @@ func (b *Bot) registerDefaultHandlers() {
 	b.RegisterHandler("balance", handleBalance)
 	b.RegisterHandler("stop", handleStop)
 	b.RegisterHandler("startsession", handleStartSession)
+
+	// Inline keyboard callback handlers
+	b.RegisterCallbackHandler("confirm_starttrade", handleConfirmStartTrade)
+	b.RegisterCallbackHandler("cancel_starttrade", handleCancelStartTrade)
+	b.RegisterCallbackHandler("confirm_stoptrade", handleConfirmStopTrade)
+	b.RegisterCallbackHandler("cancel_stoptrade", handleCancelStopTrade)
 }
 
 // RegisterHandler registers a command handler
