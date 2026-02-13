@@ -307,6 +307,44 @@ strategy_agents:
           taker_fee: 0.0026    # 0.26% taker fee
           withdraw_fee: 0.0009 # 0.09% withdrawal fee
 
+  polymarket:
+    enabled: true
+    name: "polymarket-agent"
+    type: "strategy"
+    version: "1.0.0"
+    metrics_port: 9108
+
+    mcp_servers:
+      - name: "polymarket"
+        type: "external"
+        url: "http://localhost:8090/sse"
+        tools:
+          - "list_markets"
+          - "get_market"
+          - "place_order"
+      - name: "bifrost"
+        type: "external"
+        url: "http://localhost:8091/sse"
+        tools:
+          - "chat"
+
+    step_interval: "5m"
+
+    config:
+      poll_interval: "5m"
+      max_position_size: 10.0      # $10 max per position (micro-capital)
+      max_total_exposure: 50.0     # $50 max total across all positions
+      confidence_threshold: 0.70   # 70% minimum LLM confidence
+      profit_target: 0.15          # 15% take-profit
+      stop_loss: 0.10              # 10% stop-loss
+      min_liquidity: 1000.0        # $1000 minimum market liquidity
+      preferred_categories:
+        - "politics"
+        - "crypto"
+        - "tech"
+        - "news"
+      vote_weight: 0.3
+
 # ================================================================================
 # RISK MANAGEMENT AGENT
 # Oversees all trades with veto power
@@ -442,6 +480,7 @@ communication:
       # Strategy decisions
       trend_signals: "agents.strategy.trend"
       strategy_decisions: "agents.strategy.decisions"
+      polymarket_signals: "agents.strategy.polymarket"
       trade_proposals: "agents.strategy.proposals"
 
       # Risk management
