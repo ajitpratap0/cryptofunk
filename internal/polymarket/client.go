@@ -6,16 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"encoding/hex"
 	"math/big"
-	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	crand "crypto/rand"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -52,7 +55,7 @@ type Client struct {
 
 	httpClient  *http.Client
 	logger      zerolog.Logger
-	rateLimiter *time.Ticker
+	rateLimiter *rate.Limiter
 	mu          sync.Mutex
 }
 
@@ -96,7 +99,7 @@ func NewClient(privateKey string, opts ...ClientOption) (*Client, error) {
 		gammaHost:   DefaultGammaHost,
 		chainID:     DefaultChainID,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
-		rateLimiter: time.NewTicker(time.Second / maxRequestsPerSecond),
+		rateLimiter: rate.NewLimiter(rate.Limit(maxRequestsPerSecond), maxRequestsPerSecond),
 		logger:      zerolog.Nop(),
 	}
 
@@ -117,7 +120,9 @@ func NewClient(privateKey string, opts ...ClientOption) (*Client, error) {
 
 // Close cleans up resources
 func (c *Client) Close() {
-	c.rateLimiter.Stop()
+	if c.signer != nil {
+		c.signer.Destroy()
+	}
 }
 
 // GetAddress returns the signer's address
@@ -169,12 +174,14 @@ func (c *Client) l2Headers(method, path, body string) (map[string]string, error)
 
 // --- HTTP helpers ---
 
-func (c *Client) rateLimit() {
-	<-c.rateLimiter.C
+func (c *Client) rateLimit(ctx context.Context) error {
+	return c.rateLimiter.Wait(ctx)
 }
 
 func (c *Client) doRequest(ctx context.Context, method, url string, body io.Reader, headers map[string]string) ([]byte, error) {
-	c.rateLimit()
+	if err := c.rateLimit(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
@@ -426,7 +433,11 @@ func (c *Client) buildOrder(tokenID string, side Side, price, size float64) (*Si
 		maker = c.funder
 	}
 
-	salt := strconv.FormatInt(rand.Int63(), 10)
+	var saltBytes [32]byte
+	if _, err := crand.Read(saltBytes[:]); err != nil {
+		return nil, fmt.Errorf("generate salt: %w", err)
+	}
+	salt := hex.EncodeToString(saltBytes[:])
 
 	order := &SignedOrder{
 		Salt:          salt,
