@@ -73,15 +73,6 @@ jobs:
 
             console.log(`PR has ${additions} additions and ${deletions} deletions (total: ${totalChanges} changes)`);
 
-            // Fetch current labels from API (not from stale context payload)
-            const { data: prData } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number
-            });
-            const currentLabels = prData.labels.map(l => l.name);
-            console.log(`Current PR labels: ${currentLabels.join(', ')}`);
-
             // Get list of changed files to check for lock files
             // Use pagination to handle PRs with more than 100 changed files
             let allFiles = [];
@@ -143,7 +134,7 @@ jobs:
             const isExempt = pr.title.includes('infrastructure') ||
                             pr.title.includes('docs') ||
                             pr.title.includes('new app') ||
-                            currentLabels.includes('new-feature');
+                            pr.labels.some(l => l.name === 'new-feature');
 
             if (effectiveChanges > 5000 && !isExempt) {
               core.setFailed(`❌ This PR is too large (${effectiveChanges} lines excluding lock files). Please break it into smaller, focused PRs.`);
@@ -194,7 +185,6 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
-          deny-licenses: ""
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, LGPL-3.0-only, LGPL-3.0-or-later, Unlicense, 0BSD, CC0-1.0, Artistic-2.0, Zlib, BSL-1.0, PostgreSQL, BlueOak-1.0.0
 
   # Check for TODO comments
@@ -339,7 +329,6 @@ jobs:
           DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
           REDIS_URL: "localhost:6379"
           NATS_URL: "nats://localhost:4222"
-          SKIP_TESTCONTAINER_TESTS: "true"
         run: |
           go test -coverprofile=coverage-new.out -covermode=atomic ./...
           # Extract coverage percentage BEFORE switching branches (files must exist)

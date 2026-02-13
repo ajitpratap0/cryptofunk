@@ -20,10 +20,18 @@ import (
 )
 
 // applyMigrationsRaw applies SQL migration files using a db.DB pool directly.
+// It skips migrations if the schema already exists (idempotent for shared CI databases).
 func applyMigrationsRaw(t *testing.T, database *db.DB, migrationsPath string) {
 	t.Helper()
 	ctx := context.Background()
 	pool := database.Pool()
+
+	// Check if schema already exists (e.g., from a prior test run in the same CI database)
+	var exists bool
+	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_type WHERE typname = 'order_side')").Scan(&exists)
+	if err == nil && exists {
+		return // Schema already applied
+	}
 
 	allFiles, err := filepath.Glob(filepath.Join(migrationsPath, "*.sql"))
 	if err != nil {
