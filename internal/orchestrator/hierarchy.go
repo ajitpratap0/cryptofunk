@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
-	appconfig "github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	appconfig "github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 // HierarchyManager manages hierarchical agent structures

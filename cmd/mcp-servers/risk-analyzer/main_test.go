@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 func TestRiskAnalyzerServer_Initialize(t *testing.T) {

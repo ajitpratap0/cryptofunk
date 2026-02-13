@@ -9,11 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 const (

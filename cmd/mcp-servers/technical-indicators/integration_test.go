@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/indicators"
 )
 
 // TestIntegration_CalculateRSI tests RSI calculation with real service
