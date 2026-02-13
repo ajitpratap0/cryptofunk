@@ -386,7 +386,8 @@ func (a *PolymarketAgent) Step(ctx context.Context) error {
 			continue
 		}
 
-		// Track position (optimistic — in production, wait for execution confirmation)
+		// Track position only after successful signal publication
+		// TODO: In production, wait for actual execution confirmation from the exchange
 		a.openPosition(sig)
 	}
 

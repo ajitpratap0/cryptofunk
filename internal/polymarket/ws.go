@@ -215,15 +215,30 @@ func (ws *WSClient) pingLoop(ctx context.Context) {
 }
 
 func (ws *WSClient) tryReconnect(ctx context.Context) {
-	if ws.reconnects >= maxReconnects {
-		ws.logger.Error().Msg("max reconnects reached")
-		return
+	for attempt := 1; attempt <= maxReconnects; attempt++ {
+		select {
+		case <-ws.done:
+			return
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		backoff := reconnectDelay * time.Duration(1<<uint(attempt-1))
+		if backoff > 2*time.Minute {
+			backoff = 2 * time.Minute
+		}
+
+		ws.logger.Info().Int("attempt", attempt).Dur("backoff", backoff).Msg("reconnecting ws")
+		time.Sleep(backoff)
+
+		ws.reconnects = attempt
+		if err := ws.Connect(ctx); err != nil {
+			ws.logger.Error().Err(err).Int("attempt", attempt).Msg("reconnect failed")
+			continue
+		}
+		return // success
 	}
-	ws.reconnects++
-	ws.logger.Info().Int("attempt", ws.reconnects).Msg("reconnecting ws")
-	time.Sleep(reconnectDelay)
-	if err := ws.Connect(ctx); err != nil {
-		ws.logger.Error().Err(err).Msg("reconnect failed")
-		ws.tryReconnect(ctx)
-	}
+	ws.logger.Error().Msg("max reconnects reached, giving up")
+	ws.Close()
 }
