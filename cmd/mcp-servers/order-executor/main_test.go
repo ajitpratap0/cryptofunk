@@ -238,6 +238,7 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 	defer cleanup()
 
 	exchangeService := exchange.NewServicePaper(database)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -477,6 +478,7 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 	defer cleanup()
 
 	exchangeService := exchange.NewServicePaper(database)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: exchangeService,
 	}
@@ -920,6 +922,7 @@ func TestCompleteSessionLifecycle(t *testing.T) {
 	defer cleanup()
 
 	exchangeService := exchange.NewServicePaper(database)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: exchangeService,
 	}
