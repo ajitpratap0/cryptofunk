@@ -11,9 +11,9 @@ import (
 
 // mockService implements Service for testing helpers
 type mockService struct {
-	lastUserID       string
+	lastUserID      string
 	lastNotification Notification
-	err              error
+	err             error
 }
 
 func (m *mockService) SendToUser(ctx context.Context, userID string, n Notification) error {
@@ -21,22 +21,12 @@ func (m *mockService) SendToUser(ctx context.Context, userID string, n Notificat
 	m.lastNotification = n
 	return m.err
 }
-func (m *mockService) SendToDevice(ctx context.Context, token string, n Notification) error {
-	return m.err
-}
-func (m *mockService) RegisterDevice(ctx context.Context, userID, token string, p Platform) error {
-	return m.err
-}
+func (m *mockService) SendToDevice(ctx context.Context, token string, n Notification) error { return m.err }
+func (m *mockService) RegisterDevice(ctx context.Context, userID, token string, p Platform) error { return m.err }
 func (m *mockService) UnregisterDevice(ctx context.Context, token string) error { return m.err }
-func (m *mockService) GetUserDevices(ctx context.Context, userID string) ([]Device, error) {
-	return nil, m.err
-}
-func (m *mockService) UpdatePreferences(ctx context.Context, userID string, p Preferences) error {
-	return m.err
-}
-func (m *mockService) GetPreferences(ctx context.Context, userID string) (Preferences, error) {
-	return Preferences{}, m.err
-}
+func (m *mockService) GetUserDevices(ctx context.Context, userID string) ([]Device, error) { return nil, m.err }
+func (m *mockService) UpdatePreferences(ctx context.Context, userID string, p Preferences) error { return m.err }
+func (m *mockService) GetPreferences(ctx context.Context, userID string) (Preferences, error) { return Preferences{}, m.err }
 func (m *mockService) UpdateDeviceLastUsed(ctx context.Context, token string) error { return m.err }
 
 func TestHelper_SendTradeExecution(t *testing.T) {

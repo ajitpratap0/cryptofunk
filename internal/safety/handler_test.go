@@ -2,7 +2,6 @@ package safety
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +26,7 @@ func setupRouter() (*gin.Engine, *Guard) {
 func TestHandleStatus(t *testing.T) {
 	r, _ := setupRouter()
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/safety/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/safety/status", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
@@ -39,7 +38,7 @@ func TestHandleStatus(t *testing.T) {
 func TestHandleEnableKillSwitch(t *testing.T) {
 	r, g := setupRouter()
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/safety/killswitch", nil)
+	req, _ := http.NewRequest(http.MethodPost, "/api/safety/killswitch", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, g.KillSwitchEnabled())
@@ -49,7 +48,7 @@ func TestHandleDisableKillSwitch(t *testing.T) {
 	r, g := setupRouter()
 	g.EnableKillSwitch()
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/safety/killswitch", nil)
+	req, _ := http.NewRequest(http.MethodDelete, "/api/safety/killswitch", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.False(t, g.KillSwitchEnabled())
@@ -58,7 +57,7 @@ func TestHandleDisableKillSwitch(t *testing.T) {
 func TestHandleResume(t *testing.T) {
 	r, _ := setupRouter()
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/safety/resume", nil)
+	req, _ := http.NewRequest(http.MethodPost, "/api/safety/resume", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
@@ -76,7 +75,7 @@ func TestHandleUpdateLimits(t *testing.T) {
 	body, _ := json.Marshal(lim)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/api/safety/limits", bytes.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPut, "/api/safety/limits", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -86,7 +85,7 @@ func TestHandleUpdateLimits(t *testing.T) {
 func TestHandleUpdateLimits_BadJSON(t *testing.T) {
 	r, _ := setupRouter()
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPut, "/api/safety/limits", bytes.NewReader([]byte("not json")))
+	req, _ := http.NewRequest(http.MethodPut, "/api/safety/limits", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
