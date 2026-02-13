@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/config"
-	"github.com/ajitpratap0/cryptofunk/internal/db"
-	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 )
 
 // setupTestAPIServer creates a test server with testcontainers database

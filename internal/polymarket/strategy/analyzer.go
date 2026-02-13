@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/llm"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/llm"
 )
 
 // Analyzer performs LLM-powered analysis of Polymarket markets.
