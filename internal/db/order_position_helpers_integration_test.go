@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -252,6 +256,9 @@ func TestOrderHelperMethodsWithTestcontainers(t *testing.T) {
 func TestPositionHelperMethodsWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)

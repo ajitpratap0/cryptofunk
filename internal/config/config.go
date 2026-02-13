@@ -422,22 +422,23 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("risk.llm_approval_required", true)
 	v.SetDefault("risk.min_confidence", 0.7)
 
-	// Circuit Breaker defaults - Exchange
+	// Circuit Breaker defaults - aligned with configs/circuit_breakers.yaml
+	// Exchange
 	v.SetDefault("risk.circuit_breaker.exchange.min_requests", 5)
 	v.SetDefault("risk.circuit_breaker.exchange.failure_ratio", 0.6)
-	v.SetDefault("risk.circuit_breaker.exchange.open_timeout", "30s")
-	v.SetDefault("risk.circuit_breaker.exchange.half_open_max_reqs", 3)
+	v.SetDefault("risk.circuit_breaker.exchange.open_timeout", "60s")
+	v.SetDefault("risk.circuit_breaker.exchange.half_open_max_reqs", 2)
 	v.SetDefault("risk.circuit_breaker.exchange.count_interval", "10s")
 
-	// Circuit Breaker defaults - LLM (longer timeouts for AI calls)
+	// LLM
 	v.SetDefault("risk.circuit_breaker.llm.min_requests", 3)
 	v.SetDefault("risk.circuit_breaker.llm.failure_ratio", 0.6)
-	v.SetDefault("risk.circuit_breaker.llm.open_timeout", "60s")
+	v.SetDefault("risk.circuit_breaker.llm.open_timeout", "30s")
 	v.SetDefault("risk.circuit_breaker.llm.half_open_max_reqs", 2)
 	v.SetDefault("risk.circuit_breaker.llm.count_interval", "10s")
 
-	// Circuit Breaker defaults - Database (faster recovery)
-	v.SetDefault("risk.circuit_breaker.database.min_requests", 10)
+	// Database
+	v.SetDefault("risk.circuit_breaker.database.min_requests", 5)
 	v.SetDefault("risk.circuit_breaker.database.failure_ratio", 0.6)
 	v.SetDefault("risk.circuit_breaker.database.open_timeout", "15s")
 	v.SetDefault("risk.circuit_breaker.database.half_open_max_reqs", 5)

@@ -21,6 +21,9 @@ func TestAgentStatusCRUDWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
+	}
 
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
@@ -303,6 +306,9 @@ func TestAgentStatusMetadataWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
+	}
 
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
@@ -473,6 +479,9 @@ func TestAgentStatusMetadataWithTestcontainers(t *testing.T) {
 func TestAgentStatusConcurrencyWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -708,6 +717,9 @@ func TestAgentStatusConcurrencyWithTestcontainers(t *testing.T) {
 func TestAgentStatusEdgeCases(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)

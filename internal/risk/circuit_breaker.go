@@ -20,24 +20,27 @@ const (
 	ResultFailure = "failure"
 )
 
-// Circuit breaker thresholds - configurable per service type
+// Circuit breaker thresholds - defaults used when no config is provided.
+// Canonical configuration lives in configs/circuit_breakers.yaml and is loaded
+// by the internal/circuitbreaker package. These constants remain for backward
+// compatibility with code that creates a CircuitBreakerManager without config.
 const (
 	// Exchange circuit breaker settings
 	ExchangeMinRequests     = 5                // Minimum requests before tripping
 	ExchangeFailureRatio    = 0.6              // Failure ratio threshold (60%)
-	ExchangeOpenTimeout     = 30 * time.Second // How long circuit stays open
-	ExchangeHalfOpenMaxReqs = 3                // Max requests in half-open state
+	ExchangeOpenTimeout     = 60 * time.Second // How long circuit stays open
+	ExchangeHalfOpenMaxReqs = 2                // Max requests in half-open state
 	ExchangeCountInterval   = 10 * time.Second // Window for counting failures
 
 	// LLM circuit breaker settings (longer timeouts for AI calls)
 	LLMMinRequests     = 3                // Minimum requests before tripping
 	LLMFailureRatio    = 0.6              // Failure ratio threshold (60%)
-	LLMOpenTimeout     = 60 * time.Second // How long circuit stays open (longer for LLM recovery)
+	LLMOpenTimeout     = 30 * time.Second // How long circuit stays open
 	LLMHalfOpenMaxReqs = 2                // Max requests in half-open state
 	LLMCountInterval   = 10 * time.Second // Window for counting failures
 
 	// Database circuit breaker settings (faster recovery)
-	DBMinRequests     = 10               // Minimum requests before tripping
+	DBMinRequests     = 5                // Minimum requests before tripping
 	DBFailureRatio    = 0.6              // Failure ratio threshold (60%)
 	DBOpenTimeout     = 15 * time.Second // How long circuit stays open (quick recovery)
 	DBHalfOpenMaxReqs = 5                // Max requests in half-open state

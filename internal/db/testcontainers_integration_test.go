@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 func TestDatabaseConnectionWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -42,6 +46,9 @@ func TestDatabaseConnectionWithTestcontainers(t *testing.T) {
 func TestTradingSessionCRUDWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -168,6 +175,9 @@ func TestTradingSessionCRUDWithTestcontainers(t *testing.T) {
 func TestOrdersCRUDWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -308,6 +318,9 @@ func TestTradesCRUDWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
+	}
 
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
@@ -400,6 +413,9 @@ func TestTradesCRUDWithTestcontainers(t *testing.T) {
 func TestPositionsCRUDWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -527,6 +543,9 @@ func TestConcurrentOperationsWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
+	}
 
 	tc := testhelpers.SetupTestDatabase(t)
 	err := tc.ApplyMigrations("../../migrations")
@@ -593,6 +612,9 @@ func TestConcurrentOperationsWithTestcontainers(t *testing.T) {
 func TestListActiveSessionsWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -702,6 +724,9 @@ func TestListActiveSessionsWithTestcontainers(t *testing.T) {
 func TestGetSessionsBySymbolWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
