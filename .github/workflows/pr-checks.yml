@@ -194,7 +194,8 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
-          deny-licenses: GPL-2.0, LGPL-2.0
+          deny-licenses: ""
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, LGPL-3.0-only, LGPL-3.0-or-later, Unlicense, 0BSD, CC0-1.0, Artistic-2.0, Zlib, BSL-1.0, PostgreSQL, BlueOak-1.0.0
 
   # Check for TODO comments
   todo-check:
@@ -342,7 +343,7 @@ jobs:
         run: |
           go test -coverprofile=coverage-new.out -covermode=atomic ./...
           # Extract coverage percentage BEFORE switching branches (files must exist)
-          NEW_COVERAGE=$(go tool cover -func=coverage-new.out | grep total | awk '{print $3}' | sed 's/%//')
+          NEW_COVERAGE=$(go tool cover -func=coverage-new.out | grep '^total:' | awk '{print $NF}' | sed 's/%//' | tr -d '[:space:]')
           echo "NEW_COVERAGE=${NEW_COVERAGE}" >> $GITHUB_ENV
           echo "PR branch coverage: ${NEW_COVERAGE}%"
 
@@ -352,7 +353,7 @@ jobs:
           git checkout origin/${{ github.base_ref }}
           go test -coverprofile=coverage-base.out -covermode=atomic ./... || echo "Base coverage not available"
           if [ -f coverage-base.out ]; then
-            BASE_COVERAGE=$(go tool cover -func=coverage-base.out | grep total | awk '{print $3}' | sed 's/%//')
+            BASE_COVERAGE=$(go tool cover -func=coverage-base.out | grep '^total:' | awk '{print $NF}' | sed 's/%//' | tr -d '[:space:]')
             echo "BASE_COVERAGE=${BASE_COVERAGE}" >> $GITHUB_ENV
             echo "Base branch coverage: ${BASE_COVERAGE}%"
           fi
