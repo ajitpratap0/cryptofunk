@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"os"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -25,6 +26,9 @@ const (
 func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -233,6 +237,9 @@ func TestLLMDecisionBasicCRUDWithTestcontainers(t *testing.T) {
 func TestLLMDecisionQueryMethodsWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -478,6 +485,9 @@ func TestLLMDecisionQueryMethodsWithTestcontainers(t *testing.T) {
 func TestLLMDecisionConcurrencyWithTestcontainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
@@ -727,6 +737,9 @@ func TestLLMDecisionConcurrencyWithTestcontainers(t *testing.T) {
 func TestLLMDecisionEdgeCases(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
 	}
 
 	tc := testhelpers.SetupTestDatabase(t)
