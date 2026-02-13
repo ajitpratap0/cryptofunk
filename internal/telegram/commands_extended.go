@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ const (
 	emojiGreen = "🟢"
 	emojiRed   = "🔴"
 )
+
 
 // Trade represents a completed trade
 type Trade struct {
@@ -581,4 +583,32 @@ func getLatestSignals(ctx context.Context, bot *Bot, limit int) ([]Signal, error
 		signals = append(signals, s)
 	}
 	return signals, rows.Err()
+}
+
+// queryOrchestratorAgents queries the orchestrator API for agent list
+func queryOrchestratorAgents(ctx context.Context, bot *Bot) ([]AgentInfo, error) {
+	url := fmt.Sprintf("%s/api/v1/agents", bot.config.OrchestratorURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("orchestrator returned %d: %s", resp.StatusCode, body)
+	}
+
+	var agents []AgentInfo
+	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
+		return nil, err
+	}
+	return agents, nil
 }
