@@ -43,6 +43,7 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 	go hub.Run()
 
 	server := &APIServer{
+		ctx:                context.Background(),
 		router:             gin.New(),
 		db:                 tc.DB,
 		config:             cfg,
