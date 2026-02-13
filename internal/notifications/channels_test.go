@@ -61,20 +61,6 @@ func TestTelegramChannelError(t *testing.T) {
 	}
 }
 
-type slackPayload struct {
-	Text        string `json:"text"`
-	Channel     string `json:"channel"`
-	Attachments []struct {
-		Color  string `json:"color"`
-		Title  string `json:"title"`
-		Text   string `json:"text"`
-		Fields []struct {
-			Title string `json:"title"`
-			Value string `json:"value"`
-		} `json:"fields"`
-	} `json:"attachments"`
-}
-
 func TestSlackChannelSend(t *testing.T) {
 	var received slackPayload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
