@@ -22,6 +22,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
 const (
@@ -39,6 +40,7 @@ type APIServer struct {
 	apiKeyStore        *api.APIKeyStore
 	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
 	ctx                context.Context         // Server lifecycle context for background workers
+	safetyGuard        *safety.Guard           // TC-003: Safety guard
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -96,6 +98,17 @@ func main() {
 	hub := NewHub()
 	go hub.Run()
 
+	// TC-003: Initialize safety guard
+	safetyLimits := safety.NewLimitsConfig()
+	if cfgPath := os.Getenv("SAFETY_CONFIG_PATH"); cfgPath != "" {
+		if err := safetyLimits.LoadFromFile(cfgPath); err != nil {
+			log.Warn().Err(err).Msg("Failed to load safety config file, using defaults")
+		}
+	}
+	safetyLimits.LoadFromEnv()
+	safetyMonitor := safety.NewMonitor(0) // portfolio value updated at runtime
+	safetyGuard := safety.NewGuard(safetyLimits, safetyMonitor)
+
 	// Create API server
 	server := &APIServer{
 		router:             gin.Default(),
@@ -105,6 +118,7 @@ func main() {
 		port:               getPort(),
 		orchestratorClient: defaultOrchestratorClient,
 		ctx:                ctx,
+		safetyGuard:        safetyGuard,
 	}
 
 	// Setup middleware
@@ -339,6 +353,9 @@ func (s *APIServer) setupRoutes() {
 			s.rateLimiter.ReadMiddleware(),
 			s.rateLimiter.OrderMiddleware(),
 		)
+
+		// TC-003: Safety guard routes
+		safety.RegisterRoutes(v1, s.safetyGuard)
 	}
 
 	// Root endpoint

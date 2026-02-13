@@ -59,7 +59,7 @@ func TestIntegration_EmitTradeExecuted(t *testing.T) {
 		Enabled: true,
 		Events: map[NotificationType]EventConfig{
 			NotificationTypeTradeExecution: {
-				Channels: []Channel{ChannelSlack},
+				Channels: []ChannelType{ChannelSlack},
 				Enabled:  true,
 			},
 		},

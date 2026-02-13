@@ -15,15 +15,20 @@ const (
 	ParseModeMarkdown = "Markdown"
 )
 
+// CallbackHandler is a function that handles an inline keyboard callback
+type CallbackHandler func(ctx context.Context, bot *Bot, callback *tgbotapi.CallbackQuery) error
+
 // Bot represents the Telegram bot
 type Bot struct {
-	api         *tgbotapi.BotAPI
-	db          DBPool
-	config      *Config
-	handlers    map[string]CommandHandler
-	ctx         context.Context
-	cancel      context.CancelFunc
-	rateLimiter *RateLimiter
+	api              *tgbotapi.BotAPI
+	db               DBPool
+	config           *Config
+	handlers         map[string]CommandHandler
+	callbackHandlers map[string]CallbackHandler
+	ctx              context.Context
+	cancel           context.CancelFunc
+	rateLimiter      *RateLimiter
+	startTime        time.Time
 }
 
 // Config holds the bot configuration
@@ -64,13 +69,15 @@ func NewBotWithContext(parentCtx context.Context, config *Config, db *pgxpool.Po
 	ctx, cancel := context.WithCancel(parentCtx)
 
 	bot := &Bot{
-		api:         api,
-		db:          db,
-		config:      config,
-		handlers:    make(map[string]CommandHandler),
-		ctx:         ctx,
-		cancel:      cancel,
-		rateLimiter: NewRateLimiter(nil), // Use default rate limiter config
+		api:              api,
+		db:               db,
+		config:           config,
+		handlers:         make(map[string]CommandHandler),
+		callbackHandlers: make(map[string]CallbackHandler),
+		ctx:              ctx,
+		cancel:           cancel,
+		rateLimiter:      NewRateLimiter(nil), // Use default rate limiter config
+		startTime:        time.Now(),
 	}
 
 	// Register default command handlers
@@ -81,10 +88,25 @@ func NewBotWithContext(parentCtx context.Context, config *Config, db *pgxpool.Po
 
 // registerDefaultHandlers registers all the default bot command handlers
 func (b *Bot) registerDefaultHandlers() {
+	// Core commands
 	b.RegisterHandler("start", handleStart)
 	b.RegisterHandler("help", handleHelp)
 	b.RegisterHandler("status", handleStatus)
 	b.RegisterHandler("positions", handlePositions)
+	b.RegisterHandler("trades", handleTrades)
+	b.RegisterHandler("balance", handleBalance)
+
+	// Trading control
+	b.RegisterHandler("starttrade", handleStartTrade)
+	b.RegisterHandler("stoptrade", handleStopTrade)
+	b.RegisterHandler("agents", handleAgents)
+
+	// Market info
+	b.RegisterHandler("price", handlePrice)
+	b.RegisterHandler("signals", handleSignals)
+
+	// Settings & legacy
+	b.RegisterHandler("settings", handleSettings)
 	b.RegisterHandler("pl", handlePL)
 	b.RegisterHandler("pause", handlePause)
 	b.RegisterHandler("resume", handleResume)
@@ -95,11 +117,22 @@ func (b *Bot) registerDefaultHandlers() {
 	b.RegisterHandler("balance", handleBalance)
 	b.RegisterHandler("stop", handleStop)
 	b.RegisterHandler("startsession", handleStartSession)
+
+	// Inline keyboard callback handlers
+	b.RegisterCallbackHandler("confirm_starttrade", handleConfirmStartTrade)
+	b.RegisterCallbackHandler("cancel_starttrade", handleCancelStartTrade)
+	b.RegisterCallbackHandler("confirm_stoptrade", handleConfirmStopTrade)
+	b.RegisterCallbackHandler("cancel_stoptrade", handleCancelStopTrade)
 }
 
 // RegisterHandler registers a command handler
 func (b *Bot) RegisterHandler(command string, handler CommandHandler) {
 	b.handlers[command] = handler
+}
+
+// RegisterCallbackHandler registers a callback query handler
+func (b *Bot) RegisterCallbackHandler(data string, handler CallbackHandler) {
+	b.callbackHandlers[data] = handler
 }
 
 // Start starts the bot in polling or webhook mode
@@ -125,11 +158,11 @@ func (b *Bot) startPolling() error {
 			log.Info().Msg("Telegram bot shutting down")
 			return nil
 		case update := <-updates:
-			if update.Message == nil {
+			if update.Message == nil && update.CallbackQuery == nil {
 				continue
 			}
 
-			// Handle the message in a goroutine
+			// Handle the update in a goroutine
 			go b.handleUpdate(update)
 		}
 	}
@@ -174,6 +207,12 @@ func (b *Bot) startWebhook() error {
 
 // handleUpdate processes a single update from Telegram
 func (b *Bot) handleUpdate(update tgbotapi.Update) {
+	// Handle callback queries from inline keyboards
+	if update.CallbackQuery != nil {
+		b.handleCallbackQuery(update.CallbackQuery)
+		return
+	}
+
 	if update.Message == nil {
 		return
 	}
@@ -193,12 +232,19 @@ func (b *Bot) handleUpdate(update tgbotapi.Update) {
 
 	// Handle commands
 	if message.IsCommand() {
+		// Rate limiting
+		if !b.rateLimiter.Allow(message.From.ID) {
+			msg := tgbotapi.NewMessage(message.Chat.ID, "⚠️ Rate limit exceeded. Please wait a moment before sending more commands.")
+			if _, err := b.api.Send(msg); err != nil {
+				log.Error().Err(err).Msg("Failed to send rate limit message")
+			}
+			return
+		}
 		b.handleCommand(message)
 		return
 	}
 
 	// Handle regular messages (if needed)
-	// For now, we'll just acknowledge non-command messages
 	msg := tgbotapi.NewMessage(message.Chat.ID, "Please use /help to see available commands.")
 	if _, err := b.api.Send(msg); err != nil {
 		log.Error().Err(err).Msg("Failed to send message")
@@ -260,6 +306,43 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 		// Log to database
 		b.logMessageWithError(message, command, err)
 	}
+}
+
+// handleCallbackQuery processes inline keyboard callback queries
+func (b *Bot) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
+	data := callback.Data
+
+	log.Info().
+		Str("data", data).
+		Int64("telegram_id", callback.From.ID).
+		Msg("Received callback query")
+
+	handler, exists := b.callbackHandlers[data]
+	if !exists {
+		answer := tgbotapi.NewCallback(callback.ID, "Unknown action")
+		if _, err := b.api.Request(answer); err != nil {
+			log.Error().Err(err).Msg("Failed to answer callback query")
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+	defer cancel()
+
+	// Answer the callback to remove loading state
+	answer := tgbotapi.NewCallback(callback.ID, "")
+	if _, err := b.api.Request(answer); err != nil {
+		log.Error().Err(err).Msg("Failed to answer callback query")
+	}
+
+	if err := handler(ctx, b, callback); err != nil {
+		log.Error().Err(err).Str("data", data).Msg("Callback handler failed")
+	}
+}
+
+// GetStartTime returns when the bot was started
+func (b *Bot) GetStartTime() time.Time {
+	return b.startTime
 }
 
 // SendMessage sends a text message to a chat

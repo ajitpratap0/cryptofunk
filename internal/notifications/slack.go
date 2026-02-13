@@ -455,7 +455,7 @@ func (s *SlackBackend) Name() string {
 	if s.mock {
 		return "slack_mock"
 	}
-	return "slack"
+	return string(ChannelSlack)
 }
 
 // Close closes the Slack backend

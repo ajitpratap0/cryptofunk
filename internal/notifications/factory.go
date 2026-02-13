@@ -101,7 +101,7 @@ func buildManagerConfig(notifCfg config.NotificationsConfig) ManagerConfig {
 	managerConfig := ManagerConfig{
 		Enabled:         notifCfg.Enabled,
 		Events:          make(map[NotificationType]EventConfig),
-		DefaultChannels: []Channel{ChannelSlack}, // Default to Slack if not configured
+		DefaultChannels: []ChannelType{ChannelSlack}, // Default to Slack if not configured
 	}
 
 	// Map config event names to NotificationTypes
@@ -126,8 +126,8 @@ func buildManagerConfig(notifCfg config.NotificationsConfig) ManagerConfig {
 			continue
 		}
 
-		// Convert channel strings to Channel type
-		var channels []Channel
+		// Convert channel strings to ChannelType
+		var channels []ChannelType
 		for _, ch := range eventCfg.Channels {
 			switch ch {
 			case "email":

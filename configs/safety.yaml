@@ -1,0 +1,21 @@
+# Safety Guard Configuration
+safety:
+  # Maximum daily drawdown as fraction of portfolio (0.05 = 5%)
+  max_daily_drawdown: 0.05
+  # Maximum position size as fraction of portfolio (0.10 = 10%)
+  max_position_size: 0.10
+  # Maximum total exposure as fraction of portfolio (0.50 = 50%)
+  max_total_exposure: 0.50
+  # Maximum consecutive losses before pausing
+  max_consecutive_losses: 5
+  # Maximum trades per day
+  max_daily_trades: 50
+  # Kill switch default state
+  kill_switch_enabled: false
+
+  # Per-agent overrides (agent name -> limits)
+  # agent_limits:
+  #   conservative-agent:
+  #     max_daily_drawdown: 0.02
+  #     max_position_size: 0.05
+  #     max_daily_trades: 20
