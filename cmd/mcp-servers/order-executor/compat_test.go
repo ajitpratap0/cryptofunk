@@ -89,5 +89,46 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	resp := &MCPResponse{}
 	_ = json.Unmarshal(data, resp)
 	resp.ID = req.ID
+
+	// For tools/call responses, unwrap MCP CallToolResult format back to
+	// the legacy format expected by tests.
+	if resp.Error == nil && req.Method == "tools/call" {
+		if result, ok := resp.Result.(map[string]interface{}); ok {
+			// Check for tool-level errors (IsError flag)
+			if isErr, _ := result["isError"].(bool); isErr {
+				errMsg := "tool error"
+				if text := extractMCPContentText(result); text != "" {
+					errMsg = text
+				}
+				resp.Error = &MCPError{Code: -32603, Message: errMsg}
+				resp.Result = nil
+				return resp
+			}
+
+			// Unwrap successful content: parse the JSON text back into a map/value
+			if text := extractMCPContentText(result); text != "" {
+				var parsed interface{}
+				if err := json.Unmarshal([]byte(text), &parsed); err == nil {
+					resp.Result = parsed
+				}
+			}
+		}
+	}
+
 	return resp
+}
+
+// extractMCPContentText extracts the text from MCP content array format:
+// {"content": [{"text": "...", "type": "text"}]}
+func extractMCPContentText(result map[string]interface{}) string {
+	content, ok := result["content"].([]interface{})
+	if !ok || len(content) == 0 {
+		return ""
+	}
+	first, ok := content[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	text, _ := first["text"].(string)
+	return text
 }
