@@ -46,6 +46,7 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 	var mu sync.Mutex
 	var received []string
 
+	done := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -60,8 +61,8 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 		}
 		conn.WriteJSON(msg)
 
-		// Keep connection alive briefly
-		time.Sleep(200 * time.Millisecond)
+		// Keep connection alive until test signals done
+		<-done
 	}))
 	defer server.Close()
 
@@ -92,11 +93,14 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 
 	err = ws.Close()
 	assert.NoError(t, err)
+	close(done)
 }
 
 func TestWSClient_SubscribeMarket(t *testing.T) {
-	cmdCh := make(chan wsCommand, 1)
+	var mu sync.Mutex
+	var receivedCmd wsCommand
 
+	done := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -104,11 +108,13 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 		}
 		defer conn.Close()
 
-		// Read subscribe message into a local variable to avoid data race
+		// Read subscribe message
 		var cmd wsCommand
 		conn.ReadJSON(&cmd)
-		cmdCh <- cmd
-		time.Sleep(200 * time.Millisecond)
+		mu.Lock()
+		receivedCmd = cmd
+		mu.Unlock()
+		<-done
 	}))
 	defer server.Close()
 
@@ -120,24 +126,26 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 
 	err := ws.Connect(ctx)
 	require.NoError(t, err)
-
-	time.Sleep(50 * time.Millisecond) // let readLoop start
 
 	err = ws.SubscribeMarket([]string{"asset1", "asset2"})
 	require.NoError(t, err)
 
-	receivedCmd := <-cmdCh
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
 	assert.Equal(t, "subscribe", receivedCmd.Type)
 	assert.Equal(t, "market", receivedCmd.Channel)
 	assert.Equal(t, []string{"asset1", "asset2"}, receivedCmd.Assets)
+	mu.Unlock()
 
-	cancel()
 	ws.Close()
+	close(done)
 }
 
 func TestWSClient_SubscribeUser(t *testing.T) {
-	cmdCh := make(chan wsCommand, 1)
+	var mu sync.Mutex
+	var receivedCmd wsCommand
 
+	done := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -146,8 +154,10 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 		defer conn.Close()
 		var cmd wsCommand
 		conn.ReadJSON(&cmd)
-		cmdCh <- cmd
-		time.Sleep(200 * time.Millisecond)
+		mu.Lock()
+		receivedCmd = cmd
+		mu.Unlock()
+		<-done
 	}))
 	defer server.Close()
 
@@ -159,21 +169,21 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 
 	err := ws.Connect(ctx)
 	require.NoError(t, err)
-
-	time.Sleep(50 * time.Millisecond) // let readLoop start
 
 	creds := &APICreds{APIKey: "key", Secret: "secret", Passphrase: "pass"}
 	err = ws.SubscribeUser("market1", creds)
 	require.NoError(t, err)
 
-	receivedCmd := <-cmdCh
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
 	assert.Equal(t, "subscribe", receivedCmd.Type)
 	assert.Equal(t, "user", receivedCmd.Channel)
 	assert.NotNil(t, receivedCmd.Auth)
 	assert.Equal(t, "key", receivedCmd.Auth.APIKey)
+	mu.Unlock()
 
-	cancel()
 	ws.Close()
+	close(done)
 }
 
 func TestWSClient_SubscribeMarket_NotConnected(t *testing.T) {
