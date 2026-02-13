@@ -19,9 +19,9 @@ const (
 	GTD OrderType = "GTD"
 )
 
-// ApiCreds holds CLOB API credentials (Level 2 auth)
-type ApiCreds struct {
-	ApiKey     string `json:"apiKey"`
+// APICreds holds CLOB API credentials (Level 2 auth)
+type APICreds struct {
+	APIKey     string `json:"apiKey"`
 	Secret     string `json:"secret"`
 	Passphrase string `json:"passphrase"`
 }

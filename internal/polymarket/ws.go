@@ -87,7 +87,10 @@ func WithWSHandler(h WSHandler) WSClientOption {
 
 // Connect establishes the WebSocket connection
 func (ws *WSClient) Connect(ctx context.Context) error {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, ws.url, nil)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, ws.url, nil)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}
@@ -122,7 +125,7 @@ func (ws *WSClient) SubscribeMarket(assets []string) error {
 }
 
 // SubscribeUser subscribes to user order/trade updates (requires auth)
-func (ws *WSClient) SubscribeUser(market string, creds *ApiCreds) error {
+func (ws *WSClient) SubscribeUser(market string, creds *APICreds) error {
 	sub := wsSubscription{Channel: "user", Market: market}
 	ws.mu.Lock()
 	ws.subscriptions = append(ws.subscriptions, sub)
@@ -133,7 +136,7 @@ func (ws *WSClient) SubscribeUser(market string, creds *ApiCreds) error {
 		Channel: "user",
 		Market:  market,
 		Auth: &wsAuth{
-			APIKey:     creds.ApiKey,
+			APIKey:     creds.APIKey,
 			Secret:     creds.Secret,
 			Passphrase: creds.Passphrase,
 		},
@@ -224,7 +227,11 @@ func (ws *WSClient) tryReconnect(ctx context.Context) {
 		default:
 		}
 
-		backoff := reconnectDelay * time.Duration(1<<uint(attempt-1))
+		shift := attempt - 1
+		if shift < 0 {
+			shift = 0
+		}
+		backoff := reconnectDelay * time.Duration(1<<uint(shift)) //nolint:gosec // G115 - shift is bounded [0, maxReconnects]
 		if backoff > 2*time.Minute {
 			backoff = 2 * time.Minute
 		}
