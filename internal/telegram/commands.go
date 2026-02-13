@@ -16,7 +16,7 @@ import (
 func handleStart(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
 	welcomeText := `Welcome to *CryptoFunk Trading Bot*!
 
-I'm your AI-powered trading assistant. I can help you monitor your trading sessions, positions, and performance.
+I'm your AI-powered trading assistant. Monitor positions, control trading, and track performance — all from Telegram.
 
 *Available Commands:*
 
@@ -38,11 +38,20 @@ I'm your AI-powered trading assistant. I can help you monitor your trading sessi
 /verify <code> - Verify your account
 /help - Show detailed help
 
-*First Time Setup:*
-To receive alerts and notifications, please verify your account using:
-/verify <code>
+*🎮 Trading Control:*
+/starttrade — Enable live trading
+/stoptrade — Emergency stop all trading
+/agents — List all agents & status
 
-Get your verification code from the CryptoFunk dashboard.
+*📈 Market Info:*
+/price <symbol> — Current price (e.g. /price BTCUSDT)
+/signals — Latest trading signals
+
+*⚙️ Settings:*
+/settings — Current configuration
+/help — All commands
+
+*First Time?* Verify with /verify <code> from your dashboard.
 
 Happy trading!`
 
@@ -55,7 +64,7 @@ Happy trading!`
 
 // handleHelp handles the /help command
 func handleHelp(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
-	helpText := `*CryptoFunk Trading Bot - Command Reference*
+	helpText := `*CryptoFunk Trading Bot — Command Reference* 📖
 
 *Monitoring Commands:*
 /status - Show active trading sessions and current positions
@@ -71,13 +80,14 @@ func handleHelp(ctx context.Context, bot *Bot, message *tgbotapi.Message) error 
 /pause - Emergency pause all trading (positions remain open)
 /resume - Resume trading after pause
 
-*Settings Commands:*
-/settings - View and manage notification preferences
-/verify <code> - Verify your account to receive alerts
+*📈 Market Info:*
+/price <symbol> — Current price (e.g. /price BTCUSDT)
+/signals — Latest trading signals from agents
 
-*Getting Help:*
-/help - Show this help message
-/start - Show welcome message
+*⚙️ Settings & Account:*
+/settings — Current config (risk limits, max position)
+/verify <code> — Link your Telegram account
+/help — This help message
 
 *Examples:*
 - Start paper trading: /startsession BTCUSDT 1000
@@ -117,6 +127,9 @@ func handleStatus(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 		return fmt.Errorf("failed to get active sessions: %w", err)
 	}
 
+	// Get last trade time
+	lastTrade, _ := getLastTradeTime(ctx, bot)
+
 	// Build status message
 	var sb strings.Builder
 	sb.WriteString("*Trading System Status* 📊\n\n")
@@ -129,6 +142,15 @@ func handleStatus(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 		sb.WriteString("▶️ *Status:* RUNNING\n")
 	}
 	sb.WriteString(fmt.Sprintf("*Active Agents:* %d\n", status.ActiveAgents))
+
+	// Uptime
+	uptime := time.Since(bot.GetStartTime())
+	sb.WriteString(fmt.Sprintf("*Bot Uptime:* %s\n", formatDuration(uptime)))
+
+	// Last trade
+	if lastTrade != nil {
+		sb.WriteString(fmt.Sprintf("*Last Trade:* %s\n", lastTrade.Format("2006-01-02 15:04:05")))
+	}
 	sb.WriteString("\n")
 
 	// Active sessions
@@ -365,12 +387,26 @@ func handleSettings(ctx context.Context, bot *Bot, message *tgbotapi.Message) er
 		return fmt.Errorf("failed to get user settings: %w", err)
 	}
 
-	var sb strings.Builder
-	sb.WriteString("*Notification Settings* ⚙️\n\n")
+	// Try to get system config from orchestrator
+	sysConfig, _ := getSystemConfig(ctx, bot)
 
-	sb.WriteString(fmt.Sprintf("Alerts: %s\n", boolToEmoji(settings.ReceiveAlerts)))
-	sb.WriteString(fmt.Sprintf("Trade Notifications: %s\n", boolToEmoji(settings.ReceiveTradeNotifications)))
-	sb.WriteString(fmt.Sprintf("Daily Summary: %s\n", boolToEmoji(settings.ReceiveDailySummary)))
+	var sb strings.Builder
+	sb.WriteString("*Settings & Configuration* ⚙️\n\n")
+
+	// System config
+	if sysConfig != nil {
+		sb.WriteString("*Risk Limits:*\n")
+		sb.WriteString(fmt.Sprintf("  Max Position Size: $%.2f\n", sysConfig.MaxPositionSize))
+		sb.WriteString(fmt.Sprintf("  Max Daily Loss: $%.2f\n", sysConfig.MaxDailyLoss))
+		sb.WriteString(fmt.Sprintf("  Max Open Positions: %d\n", sysConfig.MaxOpenPositions))
+		sb.WriteString(fmt.Sprintf("  Stop Loss %%: %.1f%%\n\n", sysConfig.StopLossPercent))
+	}
+
+	// Notification settings
+	sb.WriteString("*Notifications:*\n")
+	sb.WriteString(fmt.Sprintf("  Alerts: %s\n", boolToEmoji(settings.ReceiveAlerts)))
+	sb.WriteString(fmt.Sprintf("  Trade Notifications: %s\n", boolToEmoji(settings.ReceiveTradeNotifications)))
+	sb.WriteString(fmt.Sprintf("  Daily Summary: %s\n", boolToEmoji(settings.ReceiveDailySummary)))
 
 	sb.WriteString("\nTo change settings, use the CryptoFunk dashboard.")
 
@@ -379,6 +415,40 @@ func handleSettings(ctx context.Context, bot *Bot, message *tgbotapi.Message) er
 
 	_, err = bot.api.Send(msg)
 	return err
+}
+
+// SystemConfig holds system-wide configuration
+type SystemConfig struct {
+	MaxPositionSize  float64 `json:"max_position_size"`
+	MaxDailyLoss     float64 `json:"max_daily_loss"`
+	MaxOpenPositions int     `json:"max_open_positions"`
+	StopLossPercent  float64 `json:"stop_loss_percent"`
+}
+
+func getSystemConfig(ctx context.Context, bot *Bot) (*SystemConfig, error) {
+	url := fmt.Sprintf("%s/api/v1/config", bot.config.OrchestratorURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("config endpoint returned %d", resp.StatusCode)
+	}
+
+	var config SystemConfig
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 // handleVerify handles the /verify command
@@ -463,6 +533,29 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
+func getLastTradeTime(ctx context.Context, bot *Bot) (*time.Time, error) {
+	query := `SELECT closed_at FROM trades WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1`
+	var t time.Time
+	err := bot.db.QueryRow(ctx, query).Scan(&t)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // API response structures
