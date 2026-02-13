@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	crand "crypto/rand"
@@ -34,9 +33,9 @@ const (
 	maxRequestsPerSecond = 10
 )
 
-//nolint:gosec // G101 false positive - these are HTTP header key constants, not credentials
-
 // Header keys
+//
+//nolint:gosec // G101 false positive - these are HTTP header key constants, not credentials
 const (
 	headerPolyAddress    = "POLY_ADDRESS"
 	headerPolySignature  = "POLY_SIGNATURE"
@@ -58,7 +57,6 @@ type Client struct {
 	httpClient  *http.Client
 	logger      zerolog.Logger
 	rateLimiter *rate.Limiter
-	mu          sync.Mutex
 }
 
 // ClientOption configures the client
