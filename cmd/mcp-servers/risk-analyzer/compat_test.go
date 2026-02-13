@@ -41,17 +41,6 @@ type MCPServer struct {
 	srv *mcpserver.Server
 }
 
-func newTestCompatServer() *MCPServer {
-	logger := zerolog.New(io.Discard)
-	srv := mcpserver.New(mcpserver.Config{
-		Name:    serverName,
-		Version: serverVersion,
-		Logger:  logger,
-	})
-	registerTools(srv)
-	return &MCPServer{srv: srv}
-}
-
 func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	if s.srv == nil {
 		// Auto-init for tests that use &MCPServer{}

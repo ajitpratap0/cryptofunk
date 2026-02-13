@@ -157,7 +157,8 @@ func TestHTTPHandler(t *testing.T) {
 	ts := httptest.NewServer(httpSrv.Handler)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/health")
+	healthReq, _ := http.NewRequestWithContext(context.Background(), "GET", ts.URL+"/health", nil)
+	resp, err := http.DefaultClient.Do(healthReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 
 	// Test CORS headers
-	req, _ := http.NewRequest("OPTIONS", ts.URL+"/mcp", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "OPTIONS", ts.URL+"/mcp", nil)
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

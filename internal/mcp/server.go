@@ -137,7 +137,15 @@ func (s *Server) Run() error {
 			mux.Handle("/metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{}))
 			addr := fmt.Sprintf(":%d", *metricsPort)
 			s.logger.Info().Str("addr", addr).Msg("Starting metrics server")
-			if err := http.ListenAndServe(addr, mux); err != nil {
+			metricsSrv := &http.Server{
+				Addr:              addr,
+				Handler:           mux,
+				ReadTimeout:       5 * time.Second,
+				ReadHeaderTimeout: 5 * time.Second,
+				WriteTimeout:      10 * time.Second,
+				IdleTimeout:       120 * time.Second,
+			}
+			if err := metricsSrv.ListenAndServe(); err != nil {
 				s.logger.Error().Err(err).Msg("Metrics server failed")
 			}
 		}()
