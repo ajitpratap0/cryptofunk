@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -168,16 +169,16 @@ func TestWebSocketUpgraderProd(t *testing.T) {
 	assert.NotNil(t, upgrader)
 
 	// Test origin check
-	req, _ := http.NewRequest("GET", "/ws", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/ws", nil)
 	req.Header.Set("Origin", "https://app.cryptofunk.io")
 	assert.True(t, upgrader.CheckOrigin(req))
 
-	req2, _ := http.NewRequest("GET", "/ws", nil)
+	req2, _ := http.NewRequestWithContext(context.Background(), "GET", "/ws", nil)
 	req2.Header.Set("Origin", "https://evil.com")
 	assert.False(t, upgrader.CheckOrigin(req2))
 
 	// No origin in production should be rejected
-	req3, _ := http.NewRequest("GET", "/ws", nil)
+	req3, _ := http.NewRequestWithContext(context.Background(), "GET", "/ws", nil)
 	assert.False(t, upgrader.CheckOrigin(req3))
 }
 
