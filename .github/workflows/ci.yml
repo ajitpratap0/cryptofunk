@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
   schedule:
     # Run nightly at 2 AM UTC for thorough race detection
     - cron: '0 2 * * *'
