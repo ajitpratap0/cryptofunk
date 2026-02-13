@@ -179,13 +179,13 @@ func parseDuration(s string, def time.Duration) time.Duration {
 func newBreaker(name string, s BreakerSettings) *gobreaker.CircuitBreaker {
 	timeout := parseDuration(s.Timeout, 30*time.Second)
 	interval := parseDuration(s.CountInterval, 10*time.Second)
-	minReqs := uint32(s.MaxFailures)
-	if minReqs == 0 {
-		minReqs = 5
+	minReqs := uint32(5)
+	if s.MaxFailures > 0 && s.MaxFailures <= int(^uint32(0)) {
+		minReqs = uint32(s.MaxFailures) //nolint:gosec // G115 - bounds checked above
 	}
-	halfOpen := uint32(s.HalfOpenRequests)
-	if halfOpen == 0 {
-		halfOpen = 2
+	halfOpen := uint32(2)
+	if s.HalfOpenRequests > 0 && s.HalfOpenRequests <= int(^uint32(0)) {
+		halfOpen = uint32(s.HalfOpenRequests) //nolint:gosec // G115 - bounds checked above
 	}
 	ratio := s.FailureRatio
 	if ratio <= 0 {
