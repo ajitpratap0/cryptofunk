@@ -692,49 +692,6 @@ func sendOrchestratorCommand(ctx context.Context, bot *Bot, command string) erro
 	return nil
 }
 
-// handleBalance handles the /balance command
-func handleBalance(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
-	// Check if user is verified
-	verified, err := isUserVerified(ctx, bot, message.From.ID)
-	if err != nil {
-		return err
-	}
-	if !verified {
-		return sendVerificationRequired(bot, message.Chat.ID)
-	}
-
-	balance, err := getAccountBalance(ctx, bot)
-	if err != nil {
-		return fmt.Errorf("failed to get account balance: %w", err)
-	}
-
-	var sb strings.Builder
-	sb.WriteString("*Account Balance*\n\n")
-
-	sb.WriteString(fmt.Sprintf("*Total Balance:* $%.2f %s\n", balance.TotalBalance, balance.Currency))
-	sb.WriteString(fmt.Sprintf("*Available:* $%.2f\n", balance.AvailableBalance))
-	sb.WriteString(fmt.Sprintf("*In Positions:* $%.2f\n\n", balance.InPositions))
-
-	// P&L section
-	pnlEmoji := ""
-	if balance.TotalPnL >= 0 {
-		pnlEmoji = "+"
-	}
-	sb.WriteString(fmt.Sprintf("*Total P&L:* %s$%.2f\n", pnlEmoji, balance.TotalPnL))
-
-	todayEmoji := ""
-	if balance.TodayPnL >= 0 {
-		todayEmoji = "+"
-	}
-	sb.WriteString(fmt.Sprintf("*Today's P&L:* %s$%.2f\n", todayEmoji, balance.TodayPnL))
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
-	msg.ParseMode = ParseModeMarkdown
-
-	_, err = bot.api.Send(msg)
-	return err
-}
-
 // handleStop handles the /stop command
 func handleStop(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
 	// Check if user is verified

@@ -10,11 +10,11 @@ import (
 )
 
 // Channel represents a notification channel
-type Channel string
+type ChannelType string
 
 const (
-	ChannelEmail Channel = "email"
-	ChannelSlack Channel = "slack"
+	ChannelEmail ChannelType = "email"
+	ChannelSlack ChannelType = "slack"
 )
 
 // Outcome and priority constants
@@ -28,9 +28,9 @@ const (
 
 // EventConfig maps event types to channels and priority settings
 type EventConfig struct {
-	Channels []Channel `mapstructure:"channels" json:"channels"`
-	Priority string    `mapstructure:"priority" json:"priority"` // "high" or "normal"
-	Enabled  bool      `mapstructure:"enabled" json:"enabled"`
+	Channels []ChannelType `mapstructure:"channels" json:"channels"`
+	Priority string        `mapstructure:"priority" json:"priority"` // "high" or "normal"
+	Enabled  bool          `mapstructure:"enabled" json:"enabled"`
 }
 
 // ManagerConfig holds configuration for the notification manager
@@ -41,7 +41,7 @@ type ManagerConfig struct {
 	Events map[NotificationType]EventConfig `mapstructure:"events" json:"events"`
 
 	// Default channels if event is not explicitly configured
-	DefaultChannels []Channel `mapstructure:"default_channels" json:"default_channels"`
+	DefaultChannels []ChannelType `mapstructure:"default_channels" json:"default_channels"`
 }
 
 // DefaultManagerConfig returns sensible defaults for notification routing
@@ -50,47 +50,47 @@ func DefaultManagerConfig() ManagerConfig {
 		Enabled: true,
 		Events: map[NotificationType]EventConfig{
 			NotificationTypeTradeExecution: {
-				Channels: []Channel{ChannelEmail, ChannelSlack},
+				Channels: []ChannelType{ChannelEmail, ChannelSlack},
 				Priority: priorityHigh,
 				Enabled:  true,
 			},
 			NotificationTypePositionClosed: {
-				Channels: []Channel{ChannelSlack},
+				Channels: []ChannelType{ChannelSlack},
 				Priority: "normal",
 				Enabled:  true,
 			},
 			NotificationTypeSafetyGuard: {
-				Channels: []Channel{ChannelEmail, ChannelSlack},
+				Channels: []ChannelType{ChannelEmail, ChannelSlack},
 				Priority: priorityHigh,
 				Enabled:  true,
 			},
 			NotificationTypeSystemError: {
-				Channels: []Channel{ChannelEmail, ChannelSlack},
+				Channels: []ChannelType{ChannelEmail, ChannelSlack},
 				Priority: priorityHigh,
 				Enabled:  true,
 			},
 			NotificationTypeDailySummary: {
-				Channels: []Channel{ChannelEmail},
+				Channels: []ChannelType{ChannelEmail},
 				Priority: "normal",
 				Enabled:  true,
 			},
 			NotificationTypePnLAlert: {
-				Channels: []Channel{ChannelSlack},
+				Channels: []ChannelType{ChannelSlack},
 				Priority: priorityHigh,
 				Enabled:  true,
 			},
 			NotificationTypeCircuitBreaker: {
-				Channels: []Channel{ChannelEmail, ChannelSlack},
+				Channels: []ChannelType{ChannelEmail, ChannelSlack},
 				Priority: priorityHigh,
 				Enabled:  true,
 			},
 			NotificationTypeConsensusFailure: {
-				Channels: []Channel{ChannelSlack},
+				Channels: []ChannelType{ChannelSlack},
 				Priority: "normal",
 				Enabled:  true,
 			},
 		},
-		DefaultChannels: []Channel{ChannelSlack},
+		DefaultChannels: []ChannelType{ChannelSlack},
 	}
 }
 
@@ -313,7 +313,7 @@ func (m *Manager) IsEventEnabled(notifType NotificationType) bool {
 }
 
 // GetChannelsForEvent returns the channels configured for a specific event type
-func (m *Manager) GetChannelsForEvent(notifType NotificationType) []Channel {
+func (m *Manager) GetChannelsForEvent(notifType NotificationType) []ChannelType {
 	eventConfig, exists := m.config.Events[notifType]
 	if !exists {
 		return m.config.DefaultChannels

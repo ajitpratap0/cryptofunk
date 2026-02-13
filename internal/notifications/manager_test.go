@@ -50,7 +50,7 @@ func TestManager_Send(t *testing.T) {
 			Enabled: true,
 			Events: map[NotificationType]EventConfig{
 				NotificationTypeTradeExecution: {
-					Channels: []Channel{ChannelSlack},
+					Channels: []ChannelType{ChannelSlack},
 					Priority: "high",
 					Enabled:  true,
 				},
@@ -94,7 +94,7 @@ func TestManager_Send(t *testing.T) {
 			Enabled: true,
 			Events: map[NotificationType]EventConfig{
 				NotificationTypeTradeExecution: {
-					Channels: []Channel{ChannelSlack},
+					Channels: []ChannelType{ChannelSlack},
 					Priority: "high",
 					Enabled:  false,
 				},
@@ -133,7 +133,7 @@ func TestManager_Send(t *testing.T) {
 		config := ManagerConfig{
 			Enabled:         true,
 			Events:          map[NotificationType]EventConfig{},
-			DefaultChannels: []Channel{ChannelSlack},
+			DefaultChannels: []ChannelType{ChannelSlack},
 		}
 
 		manager := NewManager(config, nil, slackBackend)
@@ -295,13 +295,13 @@ func TestManager_GetChannelsForEvent(t *testing.T) {
 		Enabled: true,
 		Events: map[NotificationType]EventConfig{
 			NotificationTypeTradeExecution: {
-				Channels: []Channel{ChannelEmail, ChannelSlack},
+				Channels: []ChannelType{ChannelEmail, ChannelSlack},
 			},
 			NotificationTypeDailySummary: {
-				Channels: []Channel{ChannelEmail},
+				Channels: []ChannelType{ChannelEmail},
 			},
 		},
-		DefaultChannels: []Channel{ChannelSlack},
+		DefaultChannels: []ChannelType{ChannelSlack},
 	}
 
 	manager := NewManager(config, nil, nil)

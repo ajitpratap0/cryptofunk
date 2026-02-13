@@ -20,13 +20,15 @@ type CallbackHandler func(ctx context.Context, bot *Bot, callback *tgbotapi.Call
 
 // Bot represents the Telegram bot
 type Bot struct {
-	api         *tgbotapi.BotAPI
-	db          DBPool
-	config      *Config
-	handlers    map[string]CommandHandler
-	ctx         context.Context
-	cancel      context.CancelFunc
-	rateLimiter *RateLimiter
+	api              *tgbotapi.BotAPI
+	db               DBPool
+	config           *Config
+	handlers         map[string]CommandHandler
+	callbackHandlers map[string]CallbackHandler
+	ctx              context.Context
+	cancel           context.CancelFunc
+	rateLimiter      *RateLimiter
+	startTime        time.Time
 }
 
 // Config holds the bot configuration
@@ -67,13 +69,15 @@ func NewBotWithContext(parentCtx context.Context, config *Config, db *pgxpool.Po
 	ctx, cancel := context.WithCancel(parentCtx)
 
 	bot := &Bot{
-		api:         api,
-		db:          db,
-		config:      config,
-		handlers:    make(map[string]CommandHandler),
-		ctx:         ctx,
-		cancel:      cancel,
-		rateLimiter: NewRateLimiter(nil), // Use default rate limiter config
+		api:              api,
+		db:               db,
+		config:           config,
+		handlers:         make(map[string]CommandHandler),
+		callbackHandlers: make(map[string]CallbackHandler),
+		ctx:              ctx,
+		cancel:           cancel,
+		rateLimiter:      NewRateLimiter(nil), // Use default rate limiter config
+		startTime:        time.Now(),
 	}
 
 	// Register default command handlers
