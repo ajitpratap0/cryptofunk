@@ -319,7 +319,8 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	// Load secrets from Vault if enabled (with fallback to env vars)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	vaultCfg := GetVaultConfigFromEnv()
 	if vaultCfg.Enabled {
 		log.Info().Msg("Vault integration enabled - loading secrets from Vault")

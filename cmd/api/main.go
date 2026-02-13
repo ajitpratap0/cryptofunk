@@ -77,8 +77,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize database
-	ctx := context.Background()
+	// Initialize database with signal-derived context
+	ctx, ctxCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer ctxCancel()
 	database, err := db.New(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
@@ -328,7 +329,7 @@ func (s *APIServer) setupRoutes() {
 		s.keyManager = keysHandler.GetKeyManager()
 
 		// Start the expired key cleanup worker (runs every hour)
-		s.keyManager.StartCleanupWorker(context.Background(), time.Hour)
+		s.keyManager.StartCleanupWorker(ctx, time.Hour)
 
 		keysHandler.RegisterRoutesWithRateLimiter(
 			v1,
@@ -1582,7 +1583,9 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		req, err := http.NewRequestWithContext(context.Background(), "POST", url, nil)
+		reqCtx, reqCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer reqCancel()
+		req, err := http.NewRequestWithContext(reqCtx, "POST", url, nil)
 		if err != nil {
 			lastErr = err
 			continue
