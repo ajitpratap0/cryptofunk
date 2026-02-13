@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/rs/zerolog/log"
+)
+
+const (
+	emojiGreen = "🟢"
+	emojiRed   = "🔴"
 )
 
 // Trade represents a completed trade
@@ -79,9 +83,9 @@ func handleTrades(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 	} else {
 		totalPnL := 0.0
 		for i, t := range trades {
-			emoji := "🟢"
+			emoji := emojiGreen
 			if t.PnL < 0 {
-				emoji = "🔴"
+				emoji = emojiRed
 			}
 			sb.WriteString(fmt.Sprintf("%s *%d. %s %s*\n", emoji, i+1, t.Side, t.Symbol))
 			sb.WriteString(fmt.Sprintf("   Entry: $%.2f → Exit: $%.2f\n", t.Entry, t.Exit))
@@ -210,9 +214,9 @@ func handleAgents(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 			statusEmoji := "⏹️"
 			switch a.Status {
 			case "running":
-				statusEmoji = "🟢"
+				statusEmoji = emojiGreen
 			case "stopped":
-				statusEmoji = "🔴"
+				statusEmoji = emojiRed
 			case "error":
 				statusEmoji = "⚠️"
 			case "paused":
@@ -292,7 +296,7 @@ func handleSignals(ctx context.Context, bot *Bot, message *tgbotapi.Message) err
 			case "BUY":
 				emoji = "🟢"
 			case "SELL":
-				emoji = "🔴"
+				emoji = emojiRed
 			case "HOLD":
 				emoji = "🟡"
 			}
@@ -577,32 +581,4 @@ func getLatestSignals(ctx context.Context, bot *Bot, limit int) ([]Signal, error
 		signals = append(signals, s)
 	}
 	return signals, rows.Err()
-}
-
-// queryOrchestratorAgents queries the orchestrator API for agent list
-func queryOrchestratorAgents(ctx context.Context, bot *Bot) ([]AgentInfo, error) {
-	url := fmt.Sprintf("%s/api/v1/agents", bot.config.OrchestratorURL)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("orchestrator returned %d: %s", resp.StatusCode, body)
-	}
-
-	var agents []AgentInfo
-	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
-		return nil, err
-	}
-	return agents, nil
 }
