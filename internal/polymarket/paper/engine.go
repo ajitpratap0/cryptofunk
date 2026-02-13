@@ -25,11 +25,11 @@ type Trade struct {
 	MarketID  string    `json:"market_id"`
 	Question  string    `json:"question"`
 	Side      Side      `json:"side"`
-	Amount    float64   `json:"amount"`     // USD spent
-	Price     float64   `json:"price"`      // price per share at time of trade
-	Shares    float64   `json:"shares"`     // shares acquired
+	Amount    float64   `json:"amount"` // USD spent
+	Price     float64   `json:"price"`  // price per share at time of trade
+	Shares    float64   `json:"shares"` // shares acquired
 	Timestamp time.Time `json:"timestamp"`
-	Action    string    `json:"action"`     // BUY or SELL
+	Action    string    `json:"action"` // BUY or SELL
 }
 
 // Position represents an open position.
