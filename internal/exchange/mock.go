@@ -231,6 +231,19 @@ func (m *MockExchange) SetMarketPrice(symbol string, price float64) {
 	m.marketPrices[symbol] = price
 }
 
+// GetMarketPrice returns the current market price for a symbol
+// Returns 0 if the price is not available
+func (m *MockExchange) GetMarketPrice(symbol string) float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	price, exists := m.marketPrices[symbol]
+	if !exists {
+		return 0
+	}
+	return price
+}
+
 // validateOrder validates order parameters
 func (m *MockExchange) validateOrder(req PlaceOrderRequest) error {
 	if req.Symbol == "" {

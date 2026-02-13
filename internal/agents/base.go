@@ -19,13 +19,32 @@ import (
 )
 
 const (
-	// agentShutdownTimeout is the timeout for graceful agent shutdown operations
-	agentShutdownTimeout = 5 * time.Second
+	// DefaultShutdownTimeout is the default timeout for graceful agent shutdown operations
+	DefaultShutdownTimeout = 10 * time.Second
+
+	// DefaultNATSDrainTimeout is the timeout for draining NATS subscriptions during shutdown
+	DefaultNATSDrainTimeout = 5 * time.Second
 
 	// mcpToolCallTimeout is the default timeout for MCP tool calls
 	// This is set to 60 seconds to accommodate LLM calls and external API requests
 	mcpToolCallTimeout = 60 * time.Second
 )
+
+// ShutdownConfig holds configuration for graceful shutdown behavior
+type ShutdownConfig struct {
+	// Timeout is the maximum time to wait for graceful shutdown (default: 10 seconds)
+	Timeout time.Duration
+	// NATSDrainTimeout is the timeout for draining NATS subscriptions (default: 5 seconds)
+	NATSDrainTimeout time.Duration
+}
+
+// DefaultShutdownConfig returns the default shutdown configuration
+func DefaultShutdownConfig() ShutdownConfig {
+	return ShutdownConfig{
+		Timeout:          DefaultShutdownTimeout,
+		NATSDrainTimeout: DefaultNATSDrainTimeout,
+	}
+}
 
 // MCPServerConfig holds configuration for a single MCP server
 type MCPServerConfig struct {
@@ -78,6 +97,9 @@ type BaseAgent struct {
 	natsConn         *nats.Conn
 	controlSub       *nats.Subscription
 	controlTopicName string
+
+	// Shutdown configuration
+	shutdownConfig ShutdownConfig
 
 	// Logger
 	log zerolog.Logger
@@ -145,16 +167,27 @@ func NewBaseAgent(config *AgentConfig, log zerolog.Logger, metricsPort int) *Bas
 	)
 
 	return &BaseAgent{
-		name:          config.Name,
-		agentType:     config.Type,
-		version:       config.Version,
-		mcpClient:     mcpClient,                           // Single client for creating connections
-		mcpSessions:   make(map[string]*mcp.ClientSession), // Initialize sessions map
-		config:        config,
-		log:           agentLog,
-		metrics:       agentMetrics,
-		metricsServer: metricsServer,
+		name:           config.Name,
+		agentType:      config.Type,
+		version:        config.Version,
+		mcpClient:      mcpClient,                           // Single client for creating connections
+		mcpSessions:    make(map[string]*mcp.ClientSession), // Initialize sessions map
+		config:         config,
+		shutdownConfig: DefaultShutdownConfig(),
+		log:            agentLog,
+		metrics:        agentMetrics,
+		metricsServer:  metricsServer,
 	}
+}
+
+// SetShutdownConfig allows customizing the shutdown configuration
+func (a *BaseAgent) SetShutdownConfig(config ShutdownConfig) {
+	a.shutdownConfig = config
+}
+
+// GetShutdownConfig returns the current shutdown configuration
+func (a *BaseAgent) GetShutdownConfig() ShutdownConfig {
+	return a.shutdownConfig
 }
 
 // Initialize sets up the agent and connects to MCP servers
@@ -330,51 +363,98 @@ func (a *BaseAgent) Step(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown gracefully stops the agent
+// Shutdown gracefully stops the agent with proper cleanup and logging
+// The shutdown process follows this order:
+// 1. Cancel internal context to stop agent operations
+// 2. Drain NATS subscriptions (allows in-flight messages to complete)
+// 3. Close NATS connection
+// 4. Close MCP sessions
+// 5. Shutdown metrics server
+// 6. Wait for all goroutines to complete
 func (a *BaseAgent) Shutdown(ctx context.Context) error {
-	a.log.Info().Msg("Shutting down agent")
+	shutdownStart := time.Now()
+	a.log.Info().
+		Str("agent", a.name).
+		Dur("timeout", a.shutdownConfig.Timeout).
+		Msg("Starting graceful agent shutdown")
 
-	// Cancel internal context
+	// Step 1: Cancel internal context to signal all operations to stop
 	if a.cancel != nil {
 		a.cancel()
+		a.log.Debug().Msg("Shutdown: Internal context cancelled")
 	}
 
-	// Unsubscribe from NATS control topic
+	// Step 2: Drain NATS subscriptions (allows in-flight messages to complete)
 	if a.controlSub != nil {
-		if err := a.controlSub.Unsubscribe(); err != nil {
-			a.log.Error().Err(err).Msg("Error unsubscribing from control topic")
+		a.log.Debug().Str("topic", a.controlTopicName).Msg("Shutdown: Draining NATS subscription")
+		if err := a.controlSub.Drain(); err != nil {
+			a.log.Warn().Err(err).Str("topic", a.controlTopicName).Msg("Shutdown: Error draining subscription, falling back to unsubscribe")
+			// Fall back to unsubscribe if drain fails
+			if err := a.controlSub.Unsubscribe(); err != nil {
+				a.log.Error().Err(err).Str("topic", a.controlTopicName).Msg("Shutdown: Error unsubscribing from control topic")
+			}
 		} else {
-			a.log.Debug().Str("topic", a.controlTopicName).Msg("Unsubscribed from control topic")
+			a.log.Debug().Str("topic", a.controlTopicName).Msg("Shutdown: NATS subscription drained")
 		}
 	}
 
-	// Close NATS connection
+	// Step 3: Drain and close NATS connection
 	if a.natsConn != nil {
-		a.natsConn.Close()
-		a.log.Debug().Msg("NATS connection closed")
-	}
+		a.log.Debug().Msg("Shutdown: Draining NATS connection")
 
-	// Close all MCP sessions
-	for name, session := range a.mcpSessions {
-		if err := session.Close(); err != nil {
-			a.log.Error().Err(err).Str("server", name).Msg("Error closing MCP session")
-		} else {
-			a.log.Debug().Str("server", name).Msg("MCP session closed successfully")
+		// Create a context with timeout for NATS drain
+		drainCtx, drainCancel := context.WithTimeout(ctx, a.shutdownConfig.NATSDrainTimeout)
+		defer drainCancel()
+
+		// Drain allows in-flight messages to be processed before closing
+		drainDone := make(chan error, 1)
+		go func() {
+			drainDone <- a.natsConn.Drain()
+		}()
+
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				a.log.Warn().Err(err).Msg("Shutdown: Error draining NATS connection, closing directly")
+				a.natsConn.Close()
+			} else {
+				a.log.Debug().Msg("Shutdown: NATS connection drained successfully")
+			}
+		case <-drainCtx.Done():
+			a.log.Warn().Dur("timeout", a.shutdownConfig.NATSDrainTimeout).Msg("Shutdown: NATS drain timeout, closing directly")
+			a.natsConn.Close()
 		}
+		a.log.Info().Msg("Shutdown: NATS connection closed")
 	}
 
-	// Shutdown metrics server
+	// Step 4: Close all MCP sessions
+	mcpSessionCount := len(a.mcpSessions)
+	if mcpSessionCount > 0 {
+		a.log.Debug().Int("session_count", mcpSessionCount).Msg("Shutdown: Closing MCP sessions")
+		for name, session := range a.mcpSessions {
+			if err := session.Close(); err != nil {
+				a.log.Error().Err(err).Str("server", name).Msg("Shutdown: Error closing MCP session")
+			} else {
+				a.log.Debug().Str("server", name).Msg("Shutdown: MCP session closed")
+			}
+		}
+		a.log.Info().Int("session_count", mcpSessionCount).Msg("Shutdown: All MCP sessions closed")
+	}
+
+	// Step 5: Shutdown metrics server
 	if a.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), agentShutdownTimeout)
-		defer cancel()
-		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
-			a.log.Error().Err(err).Msg("Error shutting down metrics server")
+		a.log.Debug().Msg("Shutdown: Stopping metrics server")
+		metricsCtx, metricsCancel := context.WithTimeout(context.Background(), a.shutdownConfig.NATSDrainTimeout)
+		defer metricsCancel()
+		if err := a.metricsServer.Shutdown(metricsCtx); err != nil {
+			a.log.Error().Err(err).Msg("Shutdown: Error shutting down metrics server")
 		} else {
-			a.log.Info().Msg("Metrics server shutdown successfully")
+			a.log.Info().Msg("Shutdown: Metrics server stopped")
 		}
 	}
 
-	// Wait for goroutines
+	// Step 6: Wait for goroutines to complete
+	a.log.Debug().Msg("Shutdown: Waiting for in-flight operations to complete")
 	done := make(chan struct{})
 	go func() {
 		a.wg.Wait()
@@ -383,14 +463,39 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 
 	select {
 	case <-done:
-		a.log.Info().Msg("Agent shutdown complete")
+		shutdownDuration := time.Since(shutdownStart)
+		a.log.Info().
+			Str("agent", a.name).
+			Dur("duration", shutdownDuration).
+			Msg("Shutdown: Agent shutdown complete")
 	case <-ctx.Done():
-		a.log.Warn().Msg("Agent shutdown timeout")
+		shutdownDuration := time.Since(shutdownStart)
+		a.log.Warn().
+			Str("agent", a.name).
+			Dur("duration", shutdownDuration).
+			Msg("Shutdown: Agent shutdown timeout - some operations may not have completed")
 		return ctx.Err()
 	}
 
 	a.metrics.AgentStatus.Set(0)
 	return nil
+}
+
+// AddInFlightOperation increments the WaitGroup counter for tracking in-flight operations
+// Call this before starting an async operation that should be tracked for shutdown
+func (a *BaseAgent) AddInFlightOperation() {
+	a.wg.Add(1)
+}
+
+// DoneInFlightOperation decrements the WaitGroup counter
+// Call this when an async operation completes (typically in a defer statement)
+func (a *BaseAgent) DoneInFlightOperation() {
+	a.wg.Done()
+}
+
+// GetNATSConnection returns the NATS connection for direct access if needed
+func (a *BaseAgent) GetNATSConnection() *nats.Conn {
+	return a.natsConn
 }
 
 // CallMCPTool calls a tool on a specific MCP server with a 60-second timeout

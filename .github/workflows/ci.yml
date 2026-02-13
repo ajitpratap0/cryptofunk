@@ -99,6 +99,7 @@ jobs:
           DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
           REDIS_URL: "localhost:6379"
           NATS_URL: "nats://localhost:4222"
+          SKIP_TESTCONTAINER_TESTS: "true"
         run: |
           go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 

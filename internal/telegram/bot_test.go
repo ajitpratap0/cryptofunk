@@ -329,3 +329,210 @@ func TestBotConfig(t *testing.T) {
 	assert.True(t, config.Debug)
 	assert.Equal(t, "http://localhost:8081", config.OrchestratorURL)
 }
+
+// TC-001: Tests for new Telegram bot commands
+
+func TestGetAccountBalance(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	bot := &Bot{db: mock}
+
+	// Setup mock expectations for session query
+	sessionRows := pgxmock.NewRows([]string{"total_capital", "total_pnl"}).
+		AddRow(10000.0, 500.0)
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(sessionRows)
+
+	// Setup mock expectations for position query
+	positionRows := pgxmock.NewRows([]string{"unrealized_pnl", "in_positions"}).
+		AddRow(150.0, 2000.0)
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(positionRows)
+
+	// Setup mock expectations for today's P&L query
+	todayRows := pgxmock.NewRows([]string{"sum"}).
+		AddRow(75.0)
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(todayRows)
+
+	ctx := context.Background()
+	balance, err := getAccountBalance(ctx, bot)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, balance)
+	assert.Equal(t, 10650.0, balance.TotalBalance)    // 10000 + 500 + 150
+	assert.Equal(t, 8650.0, balance.AvailableBalance) // 10650 - 2000
+	assert.Equal(t, 2000.0, balance.InPositions)
+	assert.Equal(t, 650.0, balance.TotalPnL) // 500 + 150
+	assert.Equal(t, 75.0, balance.TodayPnL)
+	assert.Equal(t, "USD", balance.Currency)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetAccountBalance_NoActiveSessions(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	bot := &Bot{db: mock}
+
+	// Setup mock expectations for session query - no active sessions
+	sessionRows := pgxmock.NewRows([]string{"total_capital", "total_pnl"}).
+		AddRow(0.0, 0.0)
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(sessionRows)
+
+	// Setup mock expectations for position query - no positions
+	positionRows := pgxmock.NewRows([]string{"unrealized_pnl", "in_positions"}).
+		AddRow(0.0, 0.0)
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(positionRows)
+
+	// Setup mock expectations for today's P&L query
+	todayRows := pgxmock.NewRows([]string{"sum"}).
+		AddRow(0.0)
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(todayRows)
+
+	ctx := context.Background()
+	balance, err := getAccountBalance(ctx, bot)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, balance)
+	assert.Equal(t, 0.0, balance.TotalBalance)
+	assert.Equal(t, 0.0, balance.AvailableBalance)
+	assert.Equal(t, 0.0, balance.InPositions)
+	assert.Equal(t, 0.0, balance.TotalPnL)
+	assert.Equal(t, 0.0, balance.TodayPnL)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestAccountBalanceStruct(t *testing.T) {
+	balance := AccountBalance{
+		TotalBalance:     10000.0,
+		AvailableBalance: 8000.0,
+		InPositions:      2000.0,
+		TotalPnL:         500.0,
+		TodayPnL:         100.0,
+		Currency:         "USD",
+	}
+
+	assert.Equal(t, 10000.0, balance.TotalBalance)
+	assert.Equal(t, 8000.0, balance.AvailableBalance)
+	assert.Equal(t, 2000.0, balance.InPositions)
+	assert.Equal(t, 500.0, balance.TotalPnL)
+	assert.Equal(t, 100.0, balance.TodayPnL)
+	assert.Equal(t, "USD", balance.Currency)
+}
+
+func TestSessionStartRequestStruct(t *testing.T) {
+	req := SessionStartRequest{
+		Symbol:         "BTCUSDT",
+		InitialCapital: 10000.0,
+		Mode:           "PAPER",
+	}
+
+	assert.Equal(t, "BTCUSDT", req.Symbol)
+	assert.Equal(t, 10000.0, req.InitialCapital)
+	assert.Equal(t, "PAPER", req.Mode)
+}
+
+func TestSessionStopRequestStruct(t *testing.T) {
+	req := SessionStopRequest{
+		SessionID:    "abc123",
+		FinalCapital: 10500.0,
+	}
+
+	assert.Equal(t, "abc123", req.SessionID)
+	assert.Equal(t, 10500.0, req.FinalCapital)
+}
+
+func TestCommandHandlerRegistration(t *testing.T) {
+	// Test that all new handlers are registered
+	handlers := make(map[string]CommandHandler)
+
+	// Simulate what registerDefaultHandlers does
+	handlers["balance"] = handleBalance
+	handlers["stop"] = handleStop
+	handlers["startsession"] = handleStartSession
+
+	// Verify handlers are registered
+	assert.NotNil(t, handlers["balance"])
+	assert.NotNil(t, handlers["stop"])
+	assert.NotNil(t, handlers["startsession"])
+}
+
+func TestGetActiveSessionsForStop(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	bot := &Bot{db: mock}
+
+	// Setup mock expectation for multiple active sessions
+	now := time.Now()
+	rows := pgxmock.NewRows([]string{
+		"symbol", "mode", "started_at", "total_trades", "pnl_percent",
+	}).
+		AddRow("BTCUSDT", "PAPER", now, 15, 3.5).
+		AddRow("ETHUSDT", "PAPER", now.Add(-2*time.Hour), 8, -1.2).
+		AddRow("SOLUSDT", "LIVE", now.Add(-1*time.Hour), 20, 7.8)
+
+	mock.ExpectQuery("SELECT symbol, mode").
+		WillReturnRows(rows)
+
+	ctx := context.Background()
+	sessions, err := getActiveSessions(ctx, bot)
+
+	assert.NoError(t, err)
+	assert.Len(t, sessions, 3)
+
+	// Verify first session
+	assert.Equal(t, "BTCUSDT", sessions[0].Symbol)
+	assert.Equal(t, "PAPER", sessions[0].Mode)
+	assert.Equal(t, 15, sessions[0].TotalTrades)
+	assert.Equal(t, 3.5, sessions[0].PnLPercent)
+
+	// Verify second session
+	assert.Equal(t, "ETHUSDT", sessions[1].Symbol)
+	assert.Equal(t, -1.2, sessions[1].PnLPercent)
+
+	// Verify third session (LIVE mode)
+	assert.Equal(t, "SOLUSDT", sessions[2].Symbol)
+	assert.Equal(t, "LIVE", sessions[2].Mode)
+	assert.Equal(t, 7.8, sessions[2].PnLPercent)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}
+
+func TestGetActiveSessionsEmpty(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	bot := &Bot{db: mock}
+
+	// Setup mock expectation for no active sessions
+	rows := pgxmock.NewRows([]string{
+		"symbol", "mode", "started_at", "total_trades", "pnl_percent",
+	})
+
+	mock.ExpectQuery("SELECT symbol, mode").
+		WillReturnRows(rows)
+
+	ctx := context.Background()
+	sessions, err := getActiveSessions(ctx, bot)
+
+	assert.NoError(t, err)
+	assert.Len(t, sessions, 0)
+
+	err = mock.ExpectationsWereMet()
+	assert.NoError(t, err)
+}

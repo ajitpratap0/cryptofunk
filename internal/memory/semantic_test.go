@@ -228,55 +228,9 @@ func TestKnowledgeItem_RelevanceScore(t *testing.T) {
 	}
 }
 
-// TestSemanticMemory_Store tests storing knowledge (requires database)
-func TestSemanticMemory_Store(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup with semantic_memory table")
-
-	// Example of how this test would work with a database:
-	/*
-		ctx := context.Background()
-		pool := setupTestDB(t)
-		defer pool.Close()
-
-		sm := NewSemanticMemory(pool)
-
-		item := &KnowledgeItem{
-			Type:       KnowledgePattern,
-			Content:    "Test pattern",
-			Embedding:  make([]float32, 1536),
-			Confidence: 0.8,
-			Importance: 0.7,
-			Source:     "test",
-			AgentName:  "test-agent",
-		}
-
-		err := sm.Store(ctx, item)
-		require.NoError(t, err)
-		assert.NotEqual(t, uuid.Nil, item.ID)
-	*/
-}
-
-// TestSemanticMemory_FindSimilar tests similarity search (requires database)
-func TestSemanticMemory_FindSimilar(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup with semantic_memory table")
-}
-
-// TestSemanticMemory_RecordValidation tests validation recording (requires database)
-func TestSemanticMemory_RecordValidation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup with semantic_memory table")
-}
+// NOTE: Integration tests for SemanticMemory (Store, FindSimilar, RecordValidation)
+// are in semantic_integration_test.go and use testcontainers.
+// Run with: go test -tags=integration ./internal/memory/...
 
 // TestFilters tests query filter construction
 func TestTypeFilter(t *testing.T) {

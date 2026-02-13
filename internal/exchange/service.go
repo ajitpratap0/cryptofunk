@@ -28,6 +28,7 @@ type Service struct {
 	mode            TradingMode
 	positionManager *PositionManager
 	circuitBreaker  *risk.CircuitBreakerManager
+	safetyGuard     *risk.SafetyGuard // Live trading safety guards
 }
 
 // ServiceConfig contains configuration for the exchange service
@@ -36,7 +37,8 @@ type ServiceConfig struct {
 	BinanceAPIKey  string
 	BinanceSecret  string
 	BinanceTestnet bool
-	Fees           config.FeeConfig // Exchange fee configuration
+	Fees           config.FeeConfig         // Exchange fee configuration
+	SafetyGuard    config.SafetyGuardConfig // Safety guard configuration
 }
 
 // NewService creates a new exchange service with specified trading mode
@@ -73,12 +75,29 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	// Create circuit breaker manager
 	circuitBreaker := risk.NewCircuitBreakerManager()
 
+	// Create safety guard with metrics callback
+	safetyGuard := risk.NewSafetyGuard(config.SafetyGuard)
+	risk.SetupMetricsCallback(safetyGuard)
+
+	// Log safety guard status
+	if config.SafetyGuard.Enabled {
+		log.Info().
+			Float64("max_daily_drawdown", config.SafetyGuard.MaxDailyDrawdown).
+			Float64("max_position_size", config.SafetyGuard.MaxPositionSize).
+			Int("max_daily_trades", config.SafetyGuard.MaxDailyTrades).
+			Int("max_consecutive_losses", config.SafetyGuard.MaxConsecutiveLosses).
+			Msg("Safety guards enabled")
+	} else {
+		log.Warn().Msg("Safety guards disabled - trading without safety limits")
+	}
+
 	return &Service{
 		exchange:        exchange,
 		db:              database,
 		mode:            config.Mode,
 		positionManager: positionManager,
 		circuitBreaker:  circuitBreaker,
+		safetyGuard:     safetyGuard,
 	}, nil
 }
 
@@ -97,6 +116,12 @@ func NewServicePaper(database *db.DB) *Service {
 		Fees: defaultFees,
 	})
 	return service
+}
+
+// SetMarketPrice sets the current market price for a symbol (delegates to exchange)
+// This is primarily used for testing with mock exchange
+func (s *Service) SetMarketPrice(symbol string, price float64) {
+	s.exchange.SetMarketPrice(symbol, price)
 }
 
 // PlaceMarketOrder places a market order
@@ -130,6 +155,39 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 	}
 	if quantity <= 0 {
 		return nil, fmt.Errorf("quantity must be positive")
+	}
+
+	// Extract optional price for order value calculation
+	// For market orders, use current market price if not provided
+	price, _ := extractFloat(args, "price")
+	if price <= 0 {
+		// Get current market price from exchange
+		price = s.exchange.GetMarketPrice(symbol)
+	}
+	orderValue := quantity * price
+
+	// Extract confirmation flag for large trades
+	isConfirmed, _ := args["confirmed"].(bool)
+
+	// Safety guard check (especially important for live trading)
+	if s.safetyGuard != nil {
+		safetyReq := risk.OrderRequest{
+			Symbol:      symbol,
+			Side:        sideStr,
+			OrderType:   "market",
+			Quantity:    quantity,
+			OrderValue:  orderValue,
+			IsConfirmed: isConfirmed,
+		}
+		result := s.safetyGuard.ValidateOrder(ctx, safetyReq)
+		if !result.Allowed {
+			log.Warn().
+				Str("symbol", symbol).
+				Str("violation", string(result.Violation)).
+				Str("message", result.Message).
+				Msg("Order rejected by safety guard")
+			return nil, fmt.Errorf("order rejected by safety guard: %s", result.Message)
+		}
 	}
 
 	// Create request
@@ -180,6 +238,11 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
 	order = orderResult.(*Order)
 
+	// Record order placement in safety guard for rate limiting
+	if s.safetyGuard != nil {
+		s.safetyGuard.RecordOrderPlaced()
+	}
+
 	// Update positions if order was filled
 	if order.Status == OrderStatusFilled {
 		// Get order fills through circuit breaker
@@ -202,6 +265,12 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 			if len(fills) > 0 {
 				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
 					log.Error().Err(err).Msg("Failed to update positions after order fill")
+				}
+
+				// Update safety guard position tracking
+				if s.safetyGuard != nil {
+					positionValue := order.FilledQty * order.AvgFillPrice
+					s.safetyGuard.UpdatePosition(order.Symbol, positionValue)
 				}
 			}
 		}
@@ -250,6 +319,34 @@ func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface
 	}
 	if price <= 0 {
 		return nil, fmt.Errorf("price must be positive")
+	}
+
+	// Calculate order value
+	orderValue := quantity * price
+
+	// Extract confirmation flag for large trades
+	isConfirmed, _ := args["confirmed"].(bool)
+
+	// Safety guard check (especially important for live trading)
+	if s.safetyGuard != nil {
+		safetyReq := risk.OrderRequest{
+			Symbol:      symbol,
+			Side:        sideStr,
+			OrderType:   "limit",
+			Quantity:    quantity,
+			Price:       price,
+			OrderValue:  orderValue,
+			IsConfirmed: isConfirmed,
+		}
+		result := s.safetyGuard.ValidateOrder(ctx, safetyReq)
+		if !result.Allowed {
+			log.Warn().
+				Str("symbol", symbol).
+				Str("violation", string(result.Violation)).
+				Str("message", result.Message).
+				Msg("Order rejected by safety guard")
+			return nil, fmt.Errorf("order rejected by safety guard: %s", result.Message)
+		}
 	}
 
 	// Create request
@@ -301,6 +398,11 @@ func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface
 	s.circuitBreaker.Metrics().RecordRequest("exchange", true)
 	order = orderResult.(*Order)
 
+	// Record order placement in safety guard for rate limiting
+	if s.safetyGuard != nil {
+		s.safetyGuard.RecordOrderPlaced()
+	}
+
 	// Update positions if order was filled (limit orders may fill immediately in some cases)
 	if order.Status == OrderStatusFilled {
 		// Get order fills through circuit breaker
@@ -323,6 +425,12 @@ func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface
 			if len(fills) > 0 {
 				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
 					log.Error().Err(err).Msg("Failed to update positions after order fill")
+				}
+
+				// Update safety guard position tracking
+				if s.safetyGuard != nil {
+					positionValue := order.FilledQty * order.AvgFillPrice
+					s.safetyGuard.UpdatePosition(order.Symbol, positionValue)
 				}
 			}
 		}
@@ -747,6 +855,204 @@ func (s *Service) StopWebSocketUpdates(ctx context.Context) error {
 
 	log.Info().Msg("WebSocket position updates stopped")
 	return nil
+}
+
+// === Safety Guard Methods ===
+
+// GetSafetyGuardStats returns current safety guard statistics
+func (s *Service) GetSafetyGuardStats(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return map[string]interface{}{
+			"enabled": false,
+			"message": "Safety guards not configured",
+		}, nil
+	}
+
+	stats := s.safetyGuard.GetStats()
+	isTripped := s.safetyGuard.IsCircuitBreakerTripped()
+
+	return map[string]interface{}{
+		"enabled":                 true,
+		"daily_pnl":               stats.DailyPnL,
+		"daily_pnl_percent":       stats.DailyPnLPercent * 100,
+		"daily_trade_count":       stats.DailyTradeCount,
+		"consecutive_losses":      stats.ConsecutiveLosses,
+		"total_exposure":          stats.TotalExposure,
+		"total_exposure_percent":  stats.TotalExposurePercent * 100,
+		"capital":                 stats.Capital,
+		"circuit_breaker_tripped": isTripped,
+	}, nil
+}
+
+// SetSafetyGuardCapital sets the capital for safety guard calculations
+func (s *Service) SetSafetyGuardCapital(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return nil, fmt.Errorf("safety guards not configured")
+	}
+
+	capital, err := extractFloat(args, "capital")
+	if err != nil {
+		return nil, fmt.Errorf("capital error: %w", err)
+	}
+	if capital <= 0 {
+		return nil, fmt.Errorf("capital must be positive")
+	}
+
+	s.safetyGuard.SetCapital(capital)
+
+	return map[string]interface{}{
+		"success": true,
+		"capital": capital,
+	}, nil
+}
+
+// RecordTradePnL records a trade's P&L for safety guard tracking
+func (s *Service) RecordTradePnL(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return nil, fmt.Errorf("safety guards not configured")
+	}
+
+	pnl, err := extractFloat(args, "pnl")
+	if err != nil {
+		return nil, fmt.Errorf("pnl error: %w", err)
+	}
+
+	s.safetyGuard.RecordTrade(pnl)
+
+	stats := s.safetyGuard.GetStats()
+	isTripped := s.safetyGuard.IsCircuitBreakerTripped()
+
+	return map[string]interface{}{
+		"success":                 true,
+		"pnl_recorded":            pnl,
+		"daily_pnl":               stats.DailyPnL,
+		"consecutive_losses":      stats.ConsecutiveLosses,
+		"circuit_breaker_tripped": isTripped,
+	}, nil
+}
+
+// ResetSafetyGuardCircuitBreaker manually resets the safety guard circuit breaker
+func (s *Service) ResetSafetyGuardCircuitBreaker(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return nil, fmt.Errorf("safety guards not configured")
+	}
+
+	s.safetyGuard.ResetCircuitBreaker()
+
+	return map[string]interface{}{
+		"success": true,
+		"message": "Circuit breaker reset successfully",
+	}, nil
+}
+
+// ResetDailyCounters resets the daily counters (usually called at market open)
+func (s *Service) ResetDailyCounters(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return nil, fmt.Errorf("safety guards not configured")
+	}
+
+	capital, err := extractFloat(args, "capital")
+	if err != nil {
+		return nil, fmt.Errorf("capital error: %w", err)
+	}
+	if capital <= 0 {
+		return nil, fmt.Errorf("capital must be positive")
+	}
+
+	s.safetyGuard.ResetDailyCounters(capital)
+
+	return map[string]interface{}{
+		"success":     true,
+		"new_capital": capital,
+		"message":     "Daily counters reset successfully",
+	}, nil
+}
+
+// === Emergency Stop Methods ===
+
+// EmergencyStop immediately halts all trading with a given reason
+func (s *Service) EmergencyStop(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return nil, fmt.Errorf("safety guards not configured")
+	}
+
+	reason, ok := args["reason"].(string)
+	if !ok || reason == "" {
+		reason = "Manual emergency stop"
+	}
+
+	s.safetyGuard.EmergencyStop(reason)
+
+	return map[string]interface{}{
+		"success":   true,
+		"message":   "Emergency stop activated",
+		"reason":    reason,
+		"timestamp": time.Now(),
+	}, nil
+}
+
+// ClearEmergencyStop clears the emergency stop state
+func (s *Service) ClearEmergencyStop(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return nil, fmt.Errorf("safety guards not configured")
+	}
+
+	wasActive := s.safetyGuard.IsEmergencyStopActive()
+	s.safetyGuard.ClearEmergencyStop()
+
+	return map[string]interface{}{
+		"success":    true,
+		"was_active": wasActive,
+		"message":    "Emergency stop cleared",
+	}, nil
+}
+
+// GetEmergencyStopStatus returns the current emergency stop status
+func (s *Service) GetEmergencyStopStatus(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return map[string]interface{}{
+			"active":  false,
+			"message": "Safety guards not configured",
+		}, nil
+	}
+
+	active, reason, since := s.safetyGuard.GetEmergencyStopInfo()
+
+	result := map[string]interface{}{
+		"active": active,
+	}
+
+	if active {
+		result["reason"] = reason
+		result["since"] = since
+		result["duration"] = time.Since(since).String()
+	}
+
+	return result, nil
+}
+
+// === Trading Hours Methods ===
+
+// GetTradingHoursStatus returns the current trading hours status
+func (s *Service) GetTradingHoursStatus(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.safetyGuard == nil {
+		return map[string]interface{}{
+			"enabled":      false,
+			"within_hours": true,
+			"message":      "Safety guards not configured",
+		}, nil
+	}
+
+	enabled, start, end, timezone, withinHours := s.safetyGuard.GetTradingHoursInfo()
+
+	return map[string]interface{}{
+		"enabled":      enabled,
+		"within_hours": withinHours,
+		"start":        start,
+		"end":          end,
+		"timezone":     timezone,
+		"current_time": time.Now().Format(time.RFC3339),
+	}, nil
 }
 
 // extractFloat extracts a float64 from the args map

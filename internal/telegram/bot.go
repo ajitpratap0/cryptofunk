@@ -17,12 +17,13 @@ const (
 
 // Bot represents the Telegram bot
 type Bot struct {
-	api      *tgbotapi.BotAPI
-	db       DBPool
-	config   *Config
-	handlers map[string]CommandHandler
-	ctx      context.Context
-	cancel   context.CancelFunc
+	api         *tgbotapi.BotAPI
+	db          DBPool
+	config      *Config
+	handlers    map[string]CommandHandler
+	ctx         context.Context
+	cancel      context.CancelFunc
+	rateLimiter *RateLimiter
 }
 
 // Config holds the bot configuration
@@ -57,12 +58,13 @@ func NewBot(config *Config, db *pgxpool.Pool) (*Bot, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	bot := &Bot{
-		api:      api,
-		db:       db,
-		config:   config,
-		handlers: make(map[string]CommandHandler),
-		ctx:      ctx,
-		cancel:   cancel,
+		api:         api,
+		db:          db,
+		config:      config,
+		handlers:    make(map[string]CommandHandler),
+		ctx:         ctx,
+		cancel:      cancel,
+		rateLimiter: NewRateLimiter(nil), // Use default rate limiter config
 	}
 
 	// Register default command handlers
@@ -83,6 +85,10 @@ func (b *Bot) registerDefaultHandlers() {
 	b.RegisterHandler("decisions", handleDecisions)
 	b.RegisterHandler("verify", handleVerify)
 	b.RegisterHandler("settings", handleSettings)
+	// New TC-001 commands
+	b.RegisterHandler("balance", handleBalance)
+	b.RegisterHandler("stop", handleStop)
+	b.RegisterHandler("startsession", handleStartSession)
 }
 
 // RegisterHandler registers a command handler
@@ -203,6 +209,22 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 		Str("username", message.From.UserName).
 		Msg("Received command")
 
+	// Check rate limit (skip for help command to always allow users to get help)
+	if command != "help" && b.rateLimiter != nil && !b.rateLimiter.Allow(message.From.ID) {
+		waitTime := b.rateLimiter.GetWaitTime(message.From.ID)
+		rateLimitMsg := fmt.Sprintf("You're sending commands too quickly. Please wait %v before trying again.", waitTime.Round(time.Second))
+		msg := tgbotapi.NewMessage(message.Chat.ID, rateLimitMsg)
+		if _, err := b.api.Send(msg); err != nil {
+			log.Error().Err(err).Msg("Failed to send rate limit message")
+		}
+		log.Warn().
+			Int64("telegram_id", message.From.ID).
+			Str("command", command).
+			Dur("wait_time", waitTime).
+			Msg("Rate limited user")
+		return
+	}
+
 	handler, exists := b.handlers[command]
 	if !exists {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Unknown command. Use /help to see available commands.")
@@ -271,6 +293,9 @@ func (b *Bot) Stop() {
 	log.Info().Msg("Stopping Telegram bot")
 	b.cancel()
 	b.api.StopReceivingUpdates()
+	if b.rateLimiter != nil {
+		b.rateLimiter.Stop()
+	}
 }
 
 // GetDB returns the database connection pool

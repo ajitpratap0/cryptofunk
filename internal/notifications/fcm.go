@@ -72,9 +72,9 @@ func (f *FCMBackend) Send(ctx context.Context, deviceToken string, notification 
 	}
 
 	// Set priority if specified
-	if notification.Priority == "high" {
+	if notification.Priority == priorityHigh {
 		msg.Android = &messaging.AndroidConfig{
-			Priority: "high",
+			Priority: priorityHigh,
 		}
 		msg.APNS = &messaging.APNSConfig{
 			Headers: map[string]string{
@@ -139,9 +139,9 @@ func (f *FCMBackend) SendMulticast(ctx context.Context, deviceTokens []string, n
 	}
 
 	// Set priority if specified
-	if notification.Priority == "high" {
+	if notification.Priority == priorityHigh {
 		msg.Android = &messaging.AndroidConfig{
-			Priority: "high",
+			Priority: priorityHigh,
 		}
 		msg.APNS = &messaging.APNSConfig{
 			Headers: map[string]string{

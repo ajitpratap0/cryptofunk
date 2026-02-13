@@ -1,9 +1,13 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jackc/pgx/v5"
@@ -409,6 +413,180 @@ func QueueAlert(ctx context.Context, db DBPool, chatID int64, title, message, se
 	_, err = db.Exec(ctx, query, chatID, title, message, severity, metadataJSON)
 	if err != nil {
 		return fmt.Errorf("failed to queue alert: %w", err)
+	}
+
+	return nil
+}
+
+// getAccountBalance retrieves the account balance from active sessions
+func getAccountBalance(ctx context.Context, bot *Bot) (*AccountBalance, error) {
+	// Get active sessions total capital
+	sessionQuery := `
+		SELECT
+			COALESCE(SUM(initial_capital), 0) as total_capital,
+			COALESCE(SUM(total_pnl), 0) as total_pnl
+		FROM trading_sessions
+		WHERE stopped_at IS NULL
+	`
+
+	var totalCapital, totalPnL float64
+	err := bot.db.QueryRow(ctx, sessionQuery).Scan(&totalCapital, &totalPnL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query session capital: %w", err)
+	}
+
+	// Get unrealized P&L from open positions
+	positionQuery := `
+		SELECT
+			COALESCE(SUM(
+				CASE
+					WHEN p.side = 'LONG' THEN (COALESCE(c.close, p.entry_price) - p.entry_price) * p.quantity
+					WHEN p.side = 'SHORT' THEN (p.entry_price - COALESCE(c.close, p.entry_price)) * p.quantity
+					ELSE 0
+				END
+			), 0) as unrealized_pnl,
+			COALESCE(SUM(p.entry_price * p.quantity), 0) as in_positions
+		FROM positions p
+		LEFT JOIN LATERAL (
+			SELECT close
+			FROM candlesticks
+			WHERE symbol = p.symbol
+			AND interval = '1m'
+			ORDER BY open_time DESC
+			LIMIT 1
+		) c ON true
+		WHERE p.closed_at IS NULL
+	`
+
+	var unrealizedPnL, inPositions float64
+	err = bot.db.QueryRow(ctx, positionQuery).Scan(&unrealizedPnL, &inPositions)
+	if err != nil {
+		// Non-critical error, continue with zeros
+		unrealizedPnL = 0
+		inPositions = 0
+	}
+
+	// Get today's realized P&L
+	todayQuery := `
+		SELECT COALESCE(SUM(pnl), 0)
+		FROM trades
+		WHERE executed_at >= CURRENT_DATE
+	`
+
+	var todayPnL float64
+	err = bot.db.QueryRow(ctx, todayQuery).Scan(&todayPnL)
+	if err != nil {
+		// Non-critical error, continue with zero
+		todayPnL = 0
+	}
+
+	totalBalance := totalCapital + totalPnL + unrealizedPnL
+	availableBalance := totalBalance - inPositions
+
+	return &AccountBalance{
+		TotalBalance:     totalBalance,
+		AvailableBalance: availableBalance,
+		InPositions:      inPositions,
+		TotalPnL:         totalPnL + unrealizedPnL,
+		TodayPnL:         todayPnL,
+		Currency:         "USD",
+	}, nil
+}
+
+// startTradingSession starts a new trading session via the API
+func startTradingSession(ctx context.Context, bot *Bot, symbol string, capital float64, mode string) (string, error) {
+	url := fmt.Sprintf("%s/api/v1/trade/start", bot.config.OrchestratorURL)
+
+	reqBody := map[string]interface{}{
+		"symbol":          symbol,
+		"initial_capital": capital,
+		"mode":            mode,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.SessionID, nil
+}
+
+// stopTradingSession stops a trading session via the API
+func stopTradingSession(ctx context.Context, bot *Bot, symbol string) error {
+	// First get the session ID for the symbol
+	sessionQuery := `
+		SELECT id, initial_capital, total_pnl
+		FROM trading_sessions
+		WHERE symbol = $1 AND stopped_at IS NULL
+		ORDER BY started_at DESC
+		LIMIT 1
+	`
+
+	var sessionID string
+	var initialCapital, totalPnL float64
+	err := bot.db.QueryRow(ctx, sessionQuery, symbol).Scan(&sessionID, &initialCapital, &totalPnL)
+	if err != nil {
+		return fmt.Errorf("no active session found for %s: %w", symbol, err)
+	}
+
+	// Calculate final capital
+	finalCapital := initialCapital + totalPnL
+
+	url := fmt.Sprintf("%s/api/v1/trade/stop", bot.config.OrchestratorURL)
+
+	reqBody := map[string]interface{}{
+		"session_id":    sessionID,
+		"final_capital": finalCapital,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, body)
 	}
 
 	return nil

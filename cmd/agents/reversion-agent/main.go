@@ -1498,20 +1498,25 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	<-sigChan
-	log.Info().Msg("Shutdown signal received, gracefully stopping...")
+	log.Info().Msg("Shutdown signal received - initiating graceful shutdown")
 
-	// Stop heartbeat publishing
+	// Stop heartbeat publishing first (before NATS drains)
+	log.Debug().Msg("Stopping heartbeat publisher")
 	agent.heartbeat.Stop()
 
-	// Cancel run context
+	// Cancel run context to stop agent operations
+	log.Debug().Msg("Cancelling run context to stop agent operations")
 	runCancel()
 
-	// Shutdown agent
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Graceful shutdown with configurable timeout from base agent
+	shutdownConfig := agent.GetShutdownConfig()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownConfig.Timeout)
 	defer shutdownCancel()
 
+	log.Debug().Dur("timeout", shutdownConfig.Timeout).Msg("Starting graceful shutdown with timeout")
 	if err := agent.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Error during agent shutdown")
+		log.Error().Err(err).Msg("Error during graceful shutdown")
+		os.Exit(1)
 	}
 
 	log.Info().Msg("Mean Reversion Agent stopped")

@@ -14,19 +14,29 @@ import (
 
 // handleStart handles the /start command
 func handleStart(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
-	welcomeText := `Welcome to *CryptoFunk Trading Bot*! 🚀
+	welcomeText := `Welcome to *CryptoFunk Trading Bot*!
 
 I'm your AI-powered trading assistant. I can help you monitor your trading sessions, positions, and performance.
 
 *Available Commands:*
+
+*Monitoring:*
 /status - Show active sessions and current positions
 /positions - List all open positions with P&L
+/balance - Show current account balance
 /pl - Show session P&L (realized + unrealized)
 /decisions - Show recent agent decisions (last 5)
+
+*Trading Control:*
+/startsession - Start a new trading session
+/stop - Stop current trading session
 /pause - Emergency pause trading
 /resume - Resume trading after pause
+
+*Settings:*
 /settings - Manage notification preferences
-/help - Show this help message
+/verify <code> - Verify your account
+/help - Show detailed help
 
 *First Time Setup:*
 To receive alerts and notifications, please verify your account using:
@@ -34,7 +44,7 @@ To receive alerts and notifications, please verify your account using:
 
 Get your verification code from the CryptoFunk dashboard.
 
-Happy trading! 📈`
+Happy trading!`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, welcomeText)
 	msg.ParseMode = ParseModeMarkdown
@@ -50,10 +60,14 @@ func handleHelp(ctx context.Context, bot *Bot, message *tgbotapi.Message) error 
 *Monitoring Commands:*
 /status - Show active trading sessions and current positions
 /positions - List all open positions with detailed P&L
+/balance - Show current account balance and P&L summary
 /pl - Show session profit/loss (realized + unrealized)
 /decisions - Show the last 5 agent decisions with reasoning
 
-*Control Commands:*
+*Trading Control Commands:*
+/startsession <symbol> <capital> [mode] - Start a new trading session
+  Example: /startsession BTCUSDT 1000 PAPER
+/stop - Stop all active trading sessions (requires confirmation)
 /pause - Emergency pause all trading (positions remain open)
 /resume - Resume trading after pause
 
@@ -64,6 +78,12 @@ func handleHelp(ctx context.Context, bot *Bot, message *tgbotapi.Message) error 
 *Getting Help:*
 /help - Show this help message
 /start - Show welcome message
+
+*Examples:*
+- Start paper trading: /startsession BTCUSDT 1000
+- Start live trading: /startsession ETHUSDT 5000 LIVE
+- Stop trading: /stop CONFIRM
+- Check balance: /balance
 
 For more information, visit the CryptoFunk dashboard.`
 
@@ -363,7 +383,7 @@ func handleSettings(ctx context.Context, bot *Bot, message *tgbotapi.Message) er
 
 // handleVerify handles the /verify command
 func handleVerify(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
-	args := strings.Fields(message.Text)
+	args := strings.Fields(SanitizeInput(message.Text))
 	if len(args) < 2 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Please provide a verification code: /verify <code>")
 		_, err := bot.api.Send(msg)
@@ -371,6 +391,14 @@ func handleVerify(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 	}
 
 	code := strings.ToUpper(args[1])
+
+	// Validate the verification code format
+	validator := NewValidator()
+	if err := validator.ValidateVerificationCode(code); err != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Invalid verification code format: %s", err.(*ValidationError).Message))
+		_, sendErr := bot.api.Send(msg)
+		return sendErr
+	}
 
 	// Verify the code
 	verified, err := verifyUser(ctx, bot, message.From.ID, message.Chat.ID, code, message.From)
@@ -495,6 +523,29 @@ type UserSettings struct {
 	ReceiveDailySummary       bool `json:"receive_daily_summary"`
 }
 
+// AccountBalance represents account balance information
+type AccountBalance struct {
+	TotalBalance     float64 `json:"total_balance"`
+	AvailableBalance float64 `json:"available_balance"`
+	InPositions      float64 `json:"in_positions"`
+	TotalPnL         float64 `json:"total_pnl"`
+	TodayPnL         float64 `json:"today_pnl"`
+	Currency         string  `json:"currency"`
+}
+
+// SessionStartRequest represents a request to start a trading session
+type SessionStartRequest struct {
+	Symbol         string  `json:"symbol"`
+	InitialCapital float64 `json:"initial_capital"`
+	Mode           string  `json:"mode"` // PAPER or LIVE
+}
+
+// SessionStopRequest represents a request to stop a trading session
+type SessionStopRequest struct {
+	SessionID    string  `json:"session_id"`
+	FinalCapital float64 `json:"final_capital"`
+}
+
 // queryOrchestratorStatus queries the orchestrator for its current status
 func queryOrchestratorStatus(ctx context.Context, bot *Bot) (*OrchestratorStatus, error) {
 	url := fmt.Sprintf("%s/api/v1/orchestrator/status", bot.config.OrchestratorURL)
@@ -546,4 +597,251 @@ func sendOrchestratorCommand(ctx context.Context, bot *Bot, command string) erro
 	}
 
 	return nil
+}
+
+// handleBalance handles the /balance command
+func handleBalance(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
+	// Check if user is verified
+	verified, err := isUserVerified(ctx, bot, message.From.ID)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return sendVerificationRequired(bot, message.Chat.ID)
+	}
+
+	balance, err := getAccountBalance(ctx, bot)
+	if err != nil {
+		return fmt.Errorf("failed to get account balance: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("*Account Balance*\n\n")
+
+	sb.WriteString(fmt.Sprintf("*Total Balance:* $%.2f %s\n", balance.TotalBalance, balance.Currency))
+	sb.WriteString(fmt.Sprintf("*Available:* $%.2f\n", balance.AvailableBalance))
+	sb.WriteString(fmt.Sprintf("*In Positions:* $%.2f\n\n", balance.InPositions))
+
+	// P&L section
+	pnlEmoji := ""
+	if balance.TotalPnL >= 0 {
+		pnlEmoji = "+"
+	}
+	sb.WriteString(fmt.Sprintf("*Total P&L:* %s$%.2f\n", pnlEmoji, balance.TotalPnL))
+
+	todayEmoji := ""
+	if balance.TodayPnL >= 0 {
+		todayEmoji = "+"
+	}
+	sb.WriteString(fmt.Sprintf("*Today's P&L:* %s$%.2f\n", todayEmoji, balance.TodayPnL))
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
+	msg.ParseMode = ParseModeMarkdown
+
+	_, err = bot.api.Send(msg)
+	return err
+}
+
+// handleStop handles the /stop command
+func handleStop(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
+	// Check if user is verified
+	verified, err := isUserVerified(ctx, bot, message.From.ID)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return sendVerificationRequired(bot, message.Chat.ID)
+	}
+
+	// Check for confirmation argument
+	args := strings.Fields(message.Text)
+	hasConfirmation := len(args) > 1 && strings.ToUpper(args[1]) == "CONFIRM"
+
+	// Get active sessions
+	sessions, err := getActiveSessions(ctx, bot)
+	if err != nil {
+		return fmt.Errorf("failed to get active sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "No active trading sessions to stop.")
+		_, err = bot.api.Send(msg)
+		return err
+	}
+
+	if !hasConfirmation {
+		// Show confirmation prompt
+		var sb strings.Builder
+		sb.WriteString("*Stop Trading Session*\n\n")
+		sb.WriteString("Are you sure you want to stop all active trading sessions?\n\n")
+
+		sb.WriteString("*Active Sessions:*\n")
+		for i, session := range sessions {
+			sb.WriteString(fmt.Sprintf("%d. %s (%s) - P&L: %.2f%%\n", i+1, session.Symbol, session.Mode, session.PnLPercent))
+		}
+
+		sb.WriteString("\nTo confirm, type: `/stop CONFIRM`\n")
+		sb.WriteString("\n*Warning:* This will stop all trading. Open positions will remain but no new trades will be executed.")
+
+		msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
+		msg.ParseMode = ParseModeMarkdown
+
+		_, err = bot.api.Send(msg)
+		return err
+	}
+
+	// User confirmed, stop all sessions
+	stoppedCount := 0
+	var stopErrors []string
+
+	for _, session := range sessions {
+		if err := stopTradingSession(ctx, bot, session.Symbol); err != nil {
+			stopErrors = append(stopErrors, fmt.Sprintf("%s: %v", session.Symbol, err))
+		} else {
+			stoppedCount++
+		}
+	}
+
+	var sb strings.Builder
+	if stoppedCount > 0 {
+		sb.WriteString(fmt.Sprintf("*Trading Stopped*\n\nStopped %d session(s).\n", stoppedCount))
+	}
+
+	if len(stopErrors) > 0 {
+		sb.WriteString("\n*Errors:*\n")
+		for _, e := range stopErrors {
+			sb.WriteString(fmt.Sprintf("- %s\n", e))
+		}
+	}
+
+	sb.WriteString("\nUse /status to check system status.\nUse /positions to check remaining open positions.")
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
+	msg.ParseMode = ParseModeMarkdown
+
+	_, err = bot.api.Send(msg)
+	return err
+}
+
+// handleStartSession handles the /startsession command to start a new trading session
+func handleStartSession(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
+	// Check if user is verified
+	verified, err := isUserVerified(ctx, bot, message.From.ID)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return sendVerificationRequired(bot, message.Chat.ID)
+	}
+
+	// Parse arguments: /startsession [symbol] [capital] [mode]
+	args := strings.Fields(SanitizeInput(message.Text))
+
+	if len(args) < 3 {
+		helpText := `*Start Trading Session*
+
+Usage: /startsession <symbol> <capital> [mode]
+
+Parameters:
+- *symbol*: Trading pair (e.g., BTCUSDT, ETHUSDT)
+- *capital*: Initial capital in USD (min: $10, max: $10,000,000)
+- *mode*: Optional, PAPER (default) or LIVE
+
+Examples:
+/startsession BTCUSDT 1000
+/startsession ETHUSDT 500 PAPER
+/startsession BTCUSDT 10000 LIVE
+
+*Warning:* LIVE mode uses real money. Use PAPER mode for testing.`
+
+		msg := tgbotapi.NewMessage(message.Chat.ID, helpText)
+		msg.ParseMode = ParseModeMarkdown
+
+		_, err = bot.api.Send(msg)
+		return err
+	}
+
+	symbol := strings.ToUpper(args[1])
+	capitalStr := args[2]
+	mode := "PAPER"
+	if len(args) > 3 {
+		mode = strings.ToUpper(args[3])
+	}
+
+	// Validate inputs using the validator
+	validator := NewValidator()
+
+	// Validate symbol
+	if err := validator.ValidateSymbol(symbol); err != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Invalid symbol: %s\n\nSupported formats: BTCUSDT, ETHUSDT, SOLUSDT, etc.", err.(*ValidationError).Message))
+		_, sendErr := bot.api.Send(msg)
+		return sendErr
+	}
+
+	// Validate mode
+	if err := validator.ValidateTradingMode(mode); err != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Invalid mode. Use PAPER or LIVE.")
+		_, sendErr := bot.api.Send(msg)
+		return sendErr
+	}
+
+	// Parse and validate capital
+	capital, parseErr := ParseCapital(capitalStr)
+	if parseErr != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Invalid capital: %s", parseErr.Error()))
+		_, sendErr := bot.api.Send(msg)
+		return sendErr
+	}
+
+	if err := validator.ValidateCapital(capital); err != nil {
+		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Invalid capital: %s", err.(*ValidationError).Message))
+		_, sendErr := bot.api.Send(msg)
+		return sendErr
+	}
+
+	// Confirmation for LIVE mode
+	hasConfirmation := len(args) > 4 && validator.ValidateConfirmation(args[4])
+	if mode == "LIVE" && !hasConfirmation {
+		confirmText := fmt.Sprintf(`*LIVE Trading Confirmation Required*
+
+You are about to start LIVE trading with real money!
+
+*Symbol:* %s
+*Capital:* %s
+*Mode:* LIVE
+
+To confirm, type:
+/startsession %s %.2f LIVE CONFIRM
+
+*Warning:* LIVE trading involves real financial risk.`, symbol, FormatCurrency(capital), symbol, capital)
+
+		msg := tgbotapi.NewMessage(message.Chat.ID, confirmText)
+		msg.ParseMode = ParseModeMarkdown
+
+		_, err = bot.api.Send(msg)
+		return err
+	}
+
+	// Start the session
+	sessionID, err := startTradingSession(ctx, bot, symbol, capital, mode)
+	if err != nil {
+		return fmt.Errorf("failed to start trading session: %w", err)
+	}
+
+	successText := fmt.Sprintf(`*Trading Session Started*
+
+*Session ID:* %s
+*Symbol:* %s
+*Capital:* %s
+*Mode:* %s
+
+Use /status to monitor your session.
+Use /positions to view open positions.
+Use /stop to stop trading.`, sessionID, symbol, FormatCurrency(capital), mode)
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, successText)
+	msg.ParseMode = ParseModeMarkdown
+
+	_, err = bot.api.Send(msg)
+	return err
 }

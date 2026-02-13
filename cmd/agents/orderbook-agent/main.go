@@ -1089,22 +1089,25 @@ func main() {
 	// Wait for shutdown signal or error
 	select {
 	case sig := <-sigChan:
-		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal")
+		log.Info().Str("signal", sig.String()).Msg("Received shutdown signal - initiating graceful shutdown")
 	case err := <-errChan:
 		if err != nil {
 			log.Error().Err(err).Msg("Agent run error")
 		}
 	}
 
-	// Stop heartbeat publishing
+	// Stop heartbeat publishing first (before NATS drains)
+	log.Debug().Msg("Stopping heartbeat publisher")
 	agent.heartbeat.Stop()
 
-	// Graceful shutdown
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Graceful shutdown with configurable timeout from base agent
+	shutdownConfig := agent.GetShutdownConfig()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownConfig.Timeout)
+	defer shutdownCancel()
 
+	log.Debug().Dur("timeout", shutdownConfig.Timeout).Msg("Starting graceful shutdown with timeout")
 	if err := agent.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Error during shutdown")
+		log.Error().Err(err).Msg("Error during graceful shutdown")
 		os.Exit(1)
 	}
 

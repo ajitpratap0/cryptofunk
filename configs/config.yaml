@@ -153,6 +153,30 @@ risk:
   llm_approval_required: true  # Require LLM approval for trades
   min_confidence: 0.7          # Minimum confidence for signals
 
+  # Safety Guard Configuration
+  # Live trading protection mechanisms to prevent excessive losses
+  # These guards are enforced at the order execution level
+  safety_guard:
+    enabled: true                      # Enable/disable safety guards (always enable for live trading!)
+    max_daily_drawdown: 0.05           # Stop trading if daily loss exceeds 5%
+    max_position_size: 0.1             # Maximum single position as 10% of capital
+    max_total_exposure: 0.5            # Maximum total exposure as 50% of capital
+    max_daily_trades: 50               # Maximum trades per day (0 = unlimited)
+    max_consecutive_losses: 3          # Halt after 3 consecutive losses
+    cooldown_period: "1h"              # Wait 1 hour after circuit breaker trips
+    max_order_value: 10000.0           # Maximum single order value ($10,000)
+    min_order_interval: "5s"           # Minimum 5 seconds between orders
+    require_confirmation: true         # Require explicit confirmation for large trades
+    large_trade_threshold: 0.05        # Orders > 5% of capital are "large trades"
+
+    # Trading Hours Configuration
+    # Restrict trading to specific hours of the day
+    trading_hours:
+      enabled: false                   # Set to true to restrict trading to specific hours
+      start: "09:00"                   # Trading window start time (HH:MM format)
+      end: "16:00"                     # Trading window end time (HH:MM format)
+      timezone: "America/New_York"     # Timezone for trading hours (IANA timezone name)
+
   # Circuit Breaker Configuration
   # Automatically halt operations when failure thresholds are exceeded
   # Each service type (exchange, llm, database) has independent settings
@@ -250,3 +274,80 @@ telegram:
     receive_alerts: true
     receive_trade_notifications: true
     receive_daily_summary: true
+
+# Notification Configuration (Email and Slack)
+# Multi-channel notifications for trading events, alerts, and summaries
+notifications:
+  enabled: true  # Master switch for notifications
+
+  # Email Notification Settings
+  # Configure SMTP server to send email alerts
+  email:
+    enabled: false                            # Enable email notifications (set to true and configure SMTP)
+    host: "${SMTP_HOST}"                      # SMTP server host (e.g., smtp.gmail.com, smtp.sendgrid.net)
+    port: 587                                 # SMTP port (587 for STARTTLS, 465 for TLS, 25 for plain)
+    username: "${SMTP_USERNAME}"              # SMTP username (often your email address)
+    password: "${SMTP_PASSWORD}"              # SMTP password or app-specific password
+    from_address: "${SMTP_FROM_ADDRESS}"      # Sender email address
+    from_name: "CryptoFunk Trading"           # Sender display name
+    recipients:                               # Default recipients for alerts
+      - "${ALERT_EMAIL_1}"
+      - "${ALERT_EMAIL_2}"
+    use_tls: false                            # Use TLS from start (port 465)
+    use_starttls: true                        # Use STARTTLS upgrade (port 587) - recommended
+    skip_verify: false                        # Skip TLS cert verification (dev only - NOT for production)
+    auth_required: true                       # Whether SMTP requires authentication
+    rate_limit_per_minute: 30                 # Max emails per minute to prevent spam
+    retry_attempts: 3                         # Number of retry attempts on failure
+    retry_delay_seconds: 5                    # Delay between retries
+
+  # Slack Notification Settings
+  # Configure Slack webhook to send alerts to a channel
+  slack:
+    enabled: false                            # Enable Slack notifications (set to true and configure webhook)
+    webhook_url: "${SLACK_WEBHOOK_URL}"       # Slack incoming webhook URL
+    channel: ""                               # Optional: Override webhook default channel (e.g., "#trading-alerts")
+    username: "CryptoFunk Bot"                # Bot username displayed in Slack
+    icon_emoji: ":chart_with_upwards_trend:"  # Bot icon emoji (or use icon_url)
+    icon_url: ""                              # Bot icon URL (overrides icon_emoji if set)
+    rate_limit_per_minute: 30                 # Max messages per minute
+    retry_attempts: 3                         # Number of retry attempts on failure
+    retry_delay_seconds: 2                    # Delay between retries
+    timeout_seconds: 30                       # HTTP request timeout
+
+  # Event Routing Configuration
+  # Configure which events go to which notification channels
+  # Channels: "email", "slack" | Priority: "high", "normal"
+  events:
+    trade_executed:
+      enabled: true
+      channels: ["email", "slack"]
+      priority: "high"
+    position_closed:
+      enabled: true
+      channels: ["slack"]
+      priority: "normal"
+    safety_guard:
+      enabled: true
+      channels: ["email", "slack"]
+      priority: "high"
+    system_error:
+      enabled: true
+      channels: ["email", "slack"]
+      priority: "high"
+    daily_summary:
+      enabled: true
+      channels: ["email"]
+      priority: "normal"
+    pnl_alert:
+      enabled: true
+      channels: ["slack"]
+      priority: "high"
+    circuit_breaker:
+      enabled: true
+      channels: ["email", "slack"]
+      priority: "high"
+    consensus_failure:
+      enabled: true
+      channels: ["slack"]
+      priority: "normal"

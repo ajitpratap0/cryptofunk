@@ -341,6 +341,81 @@ var (
 	}, []string{"breaker_type", "reason"})
 )
 
+// Safety Guard Metrics
+var (
+	// Safety guard status (1 = enabled, 0 = disabled)
+	SafetyGuardStatus = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_status",
+		Help: "Safety guard enabled status (1 = enabled, 0 = disabled)",
+	})
+
+	// Safety guard circuit breaker status (1 = tripped/open, 0 = closed)
+	SafetyGuardCircuitBreakerStatus = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_circuit_breaker_status",
+		Help: "Safety guard circuit breaker status (1 = tripped/open, 0 = closed)",
+	})
+
+	// Safety guard violations counter
+	SafetyGuardViolations = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_safety_guard_violations_total",
+		Help: "Total number of safety guard violations by type",
+	}, []string{"violation_type"})
+
+	// Safety guard orders rejected
+	SafetyGuardOrdersRejected = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cryptofunk_safety_guard_orders_rejected_total",
+		Help: "Total number of orders rejected by safety guards by reason",
+	}, []string{"reason", "symbol"})
+
+	// Safety guard orders allowed
+	SafetyGuardOrdersAllowed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cryptofunk_safety_guard_orders_allowed_total",
+		Help: "Total number of orders allowed by safety guards",
+	})
+
+	// Daily drawdown gauge
+	SafetyGuardDailyDrawdown = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_daily_drawdown",
+		Help: "Current daily drawdown as a ratio (0.0 to 1.0)",
+	})
+
+	// Daily trade count gauge
+	SafetyGuardDailyTradeCount = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_daily_trade_count",
+		Help: "Number of trades executed today",
+	})
+
+	// Consecutive losses gauge
+	SafetyGuardConsecutiveLosses = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_consecutive_losses",
+		Help: "Current number of consecutive losing trades",
+	})
+
+	// Total exposure gauge
+	SafetyGuardTotalExposure = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_total_exposure",
+		Help: "Total position exposure as a ratio of capital (0.0 to 1.0)",
+	})
+
+	// Circuit breaker cooldown remaining (seconds)
+	SafetyGuardCooldownRemaining = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_cooldown_remaining_seconds",
+		Help: "Seconds remaining in circuit breaker cooldown (0 if not in cooldown)",
+	})
+
+	// Emergency stop status (1 = active, 0 = inactive)
+	SafetyGuardEmergencyStopStatus = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_emergency_stop_status",
+		Help: "Emergency stop status (1 = active, 0 = inactive)",
+	})
+
+	// Trading hours status (1 = within hours, 0 = outside hours)
+	SafetyGuardTradingHoursStatus = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "cryptofunk_safety_guard_trading_hours_status",
+		Help: "Trading hours status (1 = within hours, 0 = outside hours or disabled)",
+	})
+)
+
 // Audit Metrics
 var (
 	// Audit log operations
@@ -512,6 +587,83 @@ func UpdateCircuitBreaker(breakerType string, active bool) {
 func RecordCircuitBreakerTrip(breakerType, reason string) {
 	normalizedReason := NormalizeCircuitBreakerReason(reason)
 	CircuitBreakerTrips.WithLabelValues(breakerType, normalizedReason).Inc()
+}
+
+// Safety Guard metric helper constants
+const (
+	SafetyGuardViolationMaxDailyDrawdown    = "max_daily_drawdown"
+	SafetyGuardViolationMaxPositionSize     = "max_position_size"
+	SafetyGuardViolationMaxTotalExposure    = "max_total_exposure"
+	SafetyGuardViolationMaxDailyTrades      = "max_daily_trades"
+	SafetyGuardViolationConsecutiveLosses   = "consecutive_losses"
+	SafetyGuardViolationMaxOrderValue       = "max_order_value"
+	SafetyGuardViolationMinOrderInterval    = "min_order_interval"
+	SafetyGuardViolationCircuitBreakerOpen  = "circuit_breaker_open"
+	SafetyGuardViolationLargeTradeUnconfirm = "large_trade_unconfirmed"
+	SafetyGuardViolationOutsideTradingHours = "outside_trading_hours"
+	SafetyGuardViolationEmergencyStop       = "emergency_stop"
+)
+
+// UpdateSafetyGuardStatus updates the safety guard enabled status
+func UpdateSafetyGuardStatus(enabled bool) {
+	if enabled {
+		SafetyGuardStatus.Set(1)
+	} else {
+		SafetyGuardStatus.Set(0)
+	}
+}
+
+// UpdateSafetyGuardCircuitBreaker updates the safety guard circuit breaker status
+func UpdateSafetyGuardCircuitBreaker(tripped bool, cooldownSeconds float64) {
+	if tripped {
+		SafetyGuardCircuitBreakerStatus.Set(1)
+		SafetyGuardCooldownRemaining.Set(cooldownSeconds)
+	} else {
+		SafetyGuardCircuitBreakerStatus.Set(0)
+		SafetyGuardCooldownRemaining.Set(0)
+	}
+}
+
+// RecordSafetyGuardViolation records a safety guard violation
+func RecordSafetyGuardViolation(violationType string) {
+	SafetyGuardViolations.WithLabelValues(violationType).Inc()
+}
+
+// RecordSafetyGuardOrderRejected records a rejected order
+func RecordSafetyGuardOrderRejected(reason, symbol string) {
+	SafetyGuardOrdersRejected.WithLabelValues(reason, symbol).Inc()
+	RecordSafetyGuardViolation(reason)
+}
+
+// RecordSafetyGuardOrderAllowed records an allowed order
+func RecordSafetyGuardOrderAllowed() {
+	SafetyGuardOrdersAllowed.Inc()
+}
+
+// UpdateSafetyGuardStats updates the safety guard statistics gauges
+func UpdateSafetyGuardStats(dailyDrawdown float64, tradeCount int, consecutiveLosses int, totalExposure float64) {
+	SafetyGuardDailyDrawdown.Set(dailyDrawdown)
+	SafetyGuardDailyTradeCount.Set(float64(tradeCount))
+	SafetyGuardConsecutiveLosses.Set(float64(consecutiveLosses))
+	SafetyGuardTotalExposure.Set(totalExposure)
+}
+
+// UpdateSafetyGuardEmergencyStop updates the emergency stop status metric
+func UpdateSafetyGuardEmergencyStop(active bool) {
+	if active {
+		SafetyGuardEmergencyStopStatus.Set(1)
+	} else {
+		SafetyGuardEmergencyStopStatus.Set(0)
+	}
+}
+
+// UpdateSafetyGuardTradingHours updates the trading hours status metric
+func UpdateSafetyGuardTradingHours(withinHours bool) {
+	if withinHours {
+		SafetyGuardTradingHoursStatus.Set(1)
+	} else {
+		SafetyGuardTradingHoursStatus.Set(0)
+	}
 }
 
 // RecordExchangeAPICall records an exchange API call with normalized error category

@@ -128,6 +128,8 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Quantity as integer", func(t *testing.T) {
+		// Set market price first so order value can be calculated
+		service.exchange.SetMarketPrice("BTCUSDT", 50000.0)
 		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
@@ -138,6 +140,8 @@ func TestPlaceMarketOrder_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Quantity as int64", func(t *testing.T) {
+		// Set market price first so order value can be calculated
+		service.exchange.SetMarketPrice("BTCUSDT", 50000.0)
 		result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",
 			"side":     "buy",
@@ -397,6 +401,8 @@ func TestClosePositionBySymbol_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Optional exit_reason", func(t *testing.T) {
+		// Set market price first so order value can be calculated
+		service.exchange.SetMarketPrice("BTCUSDT", 50000.0)
 		// Create a position first
 		_, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
 			"symbol":   "BTCUSDT",

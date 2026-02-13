@@ -364,32 +364,9 @@ func TestKnowledgeExtractor_CreateKnowledgeFromPattern(t *testing.T) {
 	assert.Greater(t, knowledge.Confidence, 0.0)
 }
 
-// TestKnowledgeExtractor_Integration tests full extraction flow (requires database)
-func TestKnowledgeExtractor_ExtractFromLLMDecisions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup")
-
-	// Example of how this test would work:
-	/*
-		ctx := context.Background()
-		database, _ := db.New(ctx)
-		defer database.Close()
-
-		config := DefaultExtractionConfig()
-		config.EmbeddingFunc = mockEmbeddingFunc
-		extractor := NewKnowledgeExtractorFromDB(database, config)
-
-		// Extract knowledge from recent decisions
-		since := time.Now().Add(-30 * 24 * time.Hour)
-		count, err := extractor.ExtractFromLLMDecisions(ctx, "technical-agent", since)
-
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, count, 0)
-	*/
-}
+// NOTE: Integration test for ExtractFromLLMDecisions is a TODO.
+// This would require testcontainers setup with populated LLM decisions.
+// For now, use the unit tests above which test the extraction logic directly.
 
 // Mock embedding function for testing
 func mockEmbeddingFunc(ctx context.Context, text string) ([]float32, error) {

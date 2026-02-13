@@ -24,6 +24,10 @@ type Exchange interface {
 	// SetMarketPrice sets the current market price for a symbol (mock exchange only)
 	SetMarketPrice(symbol string, price float64)
 
+	// GetMarketPrice returns the current market price for a symbol
+	// Returns 0 if the price is not available
+	GetMarketPrice(symbol string) float64
+
 	// SetSession sets the current trading session
 	SetSession(sessionID *uuid.UUID)
 

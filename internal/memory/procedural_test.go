@@ -206,32 +206,9 @@ func TestSkill_IsProficient(t *testing.T) {
 	}
 }
 
-// TestProceduralMemory_StorePolicy tests policy storage (requires database)
-func TestProceduralMemory_StorePolicy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup with procedural_memory tables")
-}
-
-// TestProceduralMemory_RecordPolicyApplication tests recording policy usage (requires database)
-func TestProceduralMemory_RecordPolicyApplication(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup with procedural_memory tables")
-}
-
-// TestProceduralMemory_StoreSkill tests skill storage (requires database)
-func TestProceduralMemory_StoreSkill(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	t.Skip("Integration test - requires database setup with procedural_memory tables")
-}
+// NOTE: Integration tests for ProceduralMemory (StorePolicy, RecordPolicyApplication, StoreSkill)
+// are in procedural_integration_test.go and use testcontainers.
+// Run with: go test -tags=integration ./internal/memory/...
 
 // TestCreatePolicyConditions tests policy condition creation
 func TestCreatePolicyConditions(t *testing.T) {

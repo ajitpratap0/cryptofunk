@@ -20,6 +20,9 @@ import (
 func TestAuditLogger_PersistEvent(t *testing.T) {
 	// Setup testcontainer database
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -85,6 +88,9 @@ func TestAuditLogger_PersistEvent(t *testing.T) {
 // TestAuditLogger_PersistEventWithDefaults tests that ID and timestamp are auto-generated
 func TestAuditLogger_PersistEventWithDefaults(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -122,6 +128,9 @@ func TestAuditLogger_PersistEventWithDefaults(t *testing.T) {
 // TestAuditLogger_QueryByEventType tests filtering by event type
 func TestAuditLogger_QueryByEventType(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -183,6 +192,9 @@ func TestAuditLogger_QueryByEventType(t *testing.T) {
 // TestAuditLogger_QueryByUserID tests filtering by user ID
 func TestAuditLogger_QueryByUserID(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -220,6 +232,9 @@ func TestAuditLogger_QueryByUserID(t *testing.T) {
 // TestAuditLogger_QueryByIPAddress tests filtering by IP address
 func TestAuditLogger_QueryByIPAddress(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -256,6 +271,9 @@ func TestAuditLogger_QueryByIPAddress(t *testing.T) {
 // TestAuditLogger_QueryByTimeRange tests filtering by time range
 func TestAuditLogger_QueryByTimeRange(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -313,6 +331,9 @@ func TestAuditLogger_QueryByTimeRange(t *testing.T) {
 // TestAuditLogger_QueryBySuccess tests filtering by success/failure
 func TestAuditLogger_QueryBySuccess(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -371,6 +392,9 @@ func TestAuditLogger_QueryBySuccess(t *testing.T) {
 // TestAuditLogger_QueryWithLimit tests query result limiting
 func TestAuditLogger_QueryWithLimit(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -402,6 +426,9 @@ func TestAuditLogger_QueryWithLimit(t *testing.T) {
 // TestAuditLogger_QueryMultipleFilters tests combining multiple filters
 func TestAuditLogger_QueryMultipleFilters(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -475,6 +502,9 @@ func TestAuditLogger_QueryMultipleFilters(t *testing.T) {
 // TestAuditLogger_LogTradingAction_Integration tests the helper function with DB
 func TestAuditLogger_LogTradingAction_Integration(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -514,6 +544,9 @@ func TestAuditLogger_LogTradingAction_Integration(t *testing.T) {
 // TestAuditLogger_LogOrderAction_Integration tests order logging with DB
 func TestAuditLogger_LogOrderAction_Integration(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -555,6 +588,9 @@ func TestAuditLogger_LogOrderAction_Integration(t *testing.T) {
 // TestAuditLogger_LogSecurityEvent_Integration tests security event logging
 func TestAuditLogger_LogSecurityEvent_Integration(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -593,6 +629,9 @@ func TestAuditLogger_LogSecurityEvent_Integration(t *testing.T) {
 // TestAuditLogger_LogConfigChange_Integration tests config change logging
 func TestAuditLogger_LogConfigChange_Integration(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 
@@ -630,6 +669,9 @@ func TestAuditLogger_LogConfigChange_Integration(t *testing.T) {
 // TestAuditLogger_QueryOrdering tests that events are returned in descending timestamp order
 func TestAuditLogger_QueryOrdering(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
+	if tc.UsingExistingDB {
+		t.Skip("Skipping test: requires fresh database, but using existing DATABASE_URL")
+	}
 	err := tc.ApplyMigrations("../../migrations")
 	require.NoError(t, err)
 

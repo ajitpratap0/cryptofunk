@@ -26,11 +26,14 @@ func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 	// Use testhelpers for consistent database setup
 	tc := testhelpers.SetupTestDatabase(t)
 
-	// Apply migrations for tests that need schema
-	// Note: Migrations path is relative to the cmd/mcp-servers/order-executor directory
-	err := tc.ApplyMigrations("../../../migrations")
-	if err != nil {
-		t.Fatalf("Failed to apply migrations: %v", err)
+	// Apply migrations only if we're using a testcontainer (not CI with existing DB)
+	// In CI, migrations are applied separately before tests run
+	if tc.Container != nil {
+		// Note: Migrations path is relative to the cmd/mcp-servers/order-executor directory
+		err := tc.ApplyMigrations("../../../migrations")
+		if err != nil {
+			t.Fatalf("Failed to apply migrations: %v", err)
+		}
 	}
 
 	// Return database and cleanup function
@@ -67,13 +70,15 @@ func TestOrderExecutorServer_ListTools(t *testing.T) {
 
 	tools, ok := result["tools"].([]map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, tools, 7) // 7 tools: place_market_order, place_limit_order, cancel_order, get_order_status, start_session, stop_session, get_session_stats
+	// 12 tools: 7 trading tools + 5 safety guard tools
+	assert.Len(t, tools, 12)
 
 	// Verify tool names
 	toolNames := make([]string, len(tools))
 	for i, tool := range tools {
 		toolNames[i] = tool["name"].(string)
 	}
+	// Trading tools
 	assert.Contains(t, toolNames, "place_market_order")
 	assert.Contains(t, toolNames, "place_limit_order")
 	assert.Contains(t, toolNames, "cancel_order")
@@ -81,6 +86,12 @@ func TestOrderExecutorServer_ListTools(t *testing.T) {
 	assert.Contains(t, toolNames, "start_session")
 	assert.Contains(t, toolNames, "stop_session")
 	assert.Contains(t, toolNames, "get_session_stats")
+	// Safety guard tools
+	assert.Contains(t, toolNames, "get_safety_guard_stats")
+	assert.Contains(t, toolNames, "set_safety_guard_capital")
+	assert.Contains(t, toolNames, "record_trade_pnl")
+	assert.Contains(t, toolNames, "reset_safety_guard")
+	assert.Contains(t, toolNames, "reset_daily_counters")
 }
 
 func TestStartSession_ValidInput(t *testing.T) {
@@ -182,6 +193,9 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 	server := &MCPServer{
 		service: exchangeService,
 	}
+
+	// Set market price for BTC (required for safety guard validation)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// Start session first
 	startReq := MCPRequest{
@@ -423,6 +437,9 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 	server := &MCPServer{
 		service: exchangeService,
 	}
+
+	// Set market price for BTC (required for safety guard validation)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// Start session
 	startReq := MCPRequest{
@@ -862,6 +879,9 @@ func TestCompleteSessionLifecycle(t *testing.T) {
 	server := &MCPServer{
 		service: exchangeService,
 	}
+
+	// Set market price for BTC (required for safety guard validation)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// 1. Start session
 	startReq := MCPRequest{
