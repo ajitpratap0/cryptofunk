@@ -29,7 +29,7 @@ type ConsensusManager struct {
 	messageBus *MessageBus
 	config     *ConsensusConfig
 	sessions   map[uuid.UUID]*ConsensusSession
-	timeoutSem chan struct{} // Semaphore for limiting concurrent timeout handlers
+	timeoutSem chan struct{}   // Semaphore for limiting concurrent timeout handlers
 	ctx        context.Context // Parent context for background operations
 	mu         sync.RWMutex
 }
