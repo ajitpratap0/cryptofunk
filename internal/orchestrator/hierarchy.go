@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	appconfig "github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -192,7 +193,7 @@ func (hm *HierarchyManager) CreateMetaAgent(ctx context.Context, name, agentType
 	registration := &AgentRegistration{
 		Name:         name,
 		Type:         agentType,
-		Version:      "1.0.0",
+		Version:      appconfig.Version,
 		Status:       AgentStatusActive,
 		Capabilities: []string{"coordination", "aggregation", "delegation"},
 		State: &AgentState{

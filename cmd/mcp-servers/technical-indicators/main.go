@@ -23,6 +23,16 @@ func main() {
 
 	log.Info().Msg("Technical Indicators MCP Server starting...")
 
+	log.Info().Str("version", config.Version).Msg("Technical Indicators MCP Server version")
+
+	// Start metrics server on port 9203
+	metricsServer := metrics.NewServer(9203, log.Logger)
+	if err := metricsServer.Start(); err != nil {
+		log.Warn().Err(err).Msg("Failed to start metrics server (non-fatal)")
+	} else {
+		log.Info().Msg("Metrics server started on :9203")
+	}
+
 	// Create indicator service
 	indicatorService := indicators.NewService()
 
@@ -44,9 +54,6 @@ type MCPServer struct {
 // Run starts the MCP server
 func (s *MCPServer) Run() error {
 	log.Info().Msg("MCP server ready, listening on stdio")
-
-	// TODO: Phase 2 - Implement actual MCP SDK integration
-	// For now, this is a placeholder structure
 
 	// Read from stdin, process requests, write to stdout
 	decoder := json.NewDecoder(os.Stdin)

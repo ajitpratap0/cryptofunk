@@ -19,6 +19,7 @@ type PositionManager struct {
 	openPositions    map[string]*db.Position // symbol -> position
 	currentSessionID *uuid.UUID
 	feeRate          float64 // Average fee rate for calculations
+	exchangeName     string  // Exchange name for records (default: "PAPER")
 }
 
 // NewPositionManager creates a new position manager with default fee rate
@@ -33,7 +34,13 @@ func NewPositionManagerWithFees(database *db.DB, feeRate float64) *PositionManag
 		db:            database,
 		openPositions: make(map[string]*db.Position),
 		feeRate:       feeRate,
+		exchangeName:  ExchangeNamePaper,
 	}
+}
+
+// SetExchangeName sets the exchange name used in position records
+func (pm *PositionManager) SetExchangeName(name string) {
+	pm.exchangeName = name
 }
 
 // SetSession sets the current trading session
@@ -191,7 +198,7 @@ func (pm *PositionManager) openPosition(ctx context.Context, symbol string, side
 		ID:          uuid.New(),
 		SessionID:   pm.currentSessionID,
 		Symbol:      symbol,
-		Exchange:    "PAPER", // TODO: Use actual exchange name
+		Exchange:    pm.exchangeName,
 		Side:        side,
 		EntryPrice:  entryPrice,
 		Quantity:    quantity,

@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
@@ -122,7 +123,7 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 			},
 			"serverInfo": map[string]string{
 				"name":    serverName,
-				"version": "1.0.0",
+				"version": config.Version,
 			},
 		}
 	case "tools/list":
