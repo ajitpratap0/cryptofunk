@@ -6,11 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
 )
 
 func newTestServer(t *testing.T, handler http.HandlerFunc) *MCPServer {
