@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	DefaultWSURL   = "wss://ws-subscriptions-clob.polymarket.com/ws"
-	pingInterval   = 30 * time.Second
-	reconnectDelay = 5 * time.Second
-	maxReconnects  = 10
+	DefaultWSURL    = "wss://ws-subscriptions-clob.polymarket.com/ws"
+	pingInterval    = 30 * time.Second
+	reconnectDelay  = 5 * time.Second
+	maxReconnects   = 10
 )
 
 // WSHandler handles incoming WebSocket messages
@@ -30,7 +30,6 @@ type WSClient struct {
 
 	subscriptions []wsSubscription
 	mu            sync.Mutex
-	writeMu       sync.Mutex
 	done          chan struct{}
 	reconnects    int
 }
@@ -42,16 +41,16 @@ type wsSubscription struct {
 }
 
 type wsCommand struct {
-	Type    string   `json:"type"`
-	Channel string   `json:"channel,omitempty"`
-	Assets  []string `json:"assets_ids,omitempty"`
-	Market  string   `json:"market,omitempty"`
-	Auth    *wsAuth  `json:"auth,omitempty"`
+	Type         string   `json:"type"`
+	Channel      string   `json:"channel,omitempty"`
+	Assets       []string `json:"assets_ids,omitempty"`
+	Market       string   `json:"market,omitempty"`
+	Auth         *wsAuth  `json:"auth,omitempty"`
 }
 
 type wsAuth struct {
-	APIKey     string `json:"apiKey"`
-	Secret     string `json:"secret"`
+	APIKey    string `json:"apiKey"`
+	Secret    string `json:"secret"`
 	Passphrase string `json:"passphrase"`
 }
 
@@ -88,16 +87,11 @@ func WithWSHandler(h WSHandler) WSClientOption {
 
 // Connect establishes the WebSocket connection
 func (ws *WSClient) Connect(ctx context.Context) error {
-	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, ws.url, nil)
-	if resp != nil && resp.Body != nil {
-		resp.Body.Close()
-	}
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, ws.url, nil)
 	if err != nil {
 		return fmt.Errorf("ws dial: %w", err)
 	}
-	ws.mu.Lock()
 	ws.conn = conn
-	ws.mu.Unlock()
 	ws.reconnects = 0
 
 	// Re-subscribe existing channels
@@ -128,7 +122,7 @@ func (ws *WSClient) SubscribeMarket(assets []string) error {
 }
 
 // SubscribeUser subscribes to user order/trade updates (requires auth)
-func (ws *WSClient) SubscribeUser(market string, creds *APICreds) error {
+func (ws *WSClient) SubscribeUser(market string, creds *ApiCreds) error {
 	sub := wsSubscription{Channel: "user", Market: market}
 	ws.mu.Lock()
 	ws.subscriptions = append(ws.subscriptions, sub)
@@ -139,15 +133,12 @@ func (ws *WSClient) SubscribeUser(market string, creds *APICreds) error {
 		Channel: "user",
 		Market:  market,
 		Auth: &wsAuth{
-			APIKey:     creds.APIKey,
+			APIKey:     creds.ApiKey,
 			Secret:     creds.Secret,
 			Passphrase: creds.Passphrase,
 		},
 	}
-	ws.writeMu.Lock()
-	err := ws.conn.WriteJSON(cmd)
-	ws.writeMu.Unlock()
-	return err
+	return ws.conn.WriteJSON(cmd)
 }
 
 func (ws *WSClient) sendSubscribe(sub wsSubscription) error {
@@ -160,10 +151,7 @@ func (ws *WSClient) sendSubscribe(sub wsSubscription) error {
 		Assets:  sub.Assets,
 		Market:  sub.Market,
 	}
-	ws.writeMu.Lock()
-	err := ws.conn.WriteJSON(cmd)
-	ws.writeMu.Unlock()
-	return err
+	return ws.conn.WriteJSON(cmd)
 }
 
 // Close closes the WebSocket connection
@@ -218,10 +206,7 @@ func (ws *WSClient) pingLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if ws.conn != nil {
-				ws.writeMu.Lock()
-				err := ws.conn.WriteMessage(websocket.PingMessage, nil)
-				ws.writeMu.Unlock()
-				if err != nil {
+				if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					ws.logger.Error().Err(err).Msg("ws ping failed")
 				}
 			}
@@ -230,34 +215,15 @@ func (ws *WSClient) pingLoop(ctx context.Context) {
 }
 
 func (ws *WSClient) tryReconnect(ctx context.Context) {
-	for attempt := 1; attempt <= maxReconnects; attempt++ {
-		select {
-		case <-ws.done:
-			return
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		shift := attempt - 1
-		if shift < 0 {
-			shift = 0
-		}
-		backoff := reconnectDelay * time.Duration(1<<uint(shift)) //nolint:gosec // G115 - shift is bounded [0, maxReconnects]
-		if backoff > 2*time.Minute {
-			backoff = 2 * time.Minute
-		}
-
-		ws.logger.Info().Int("attempt", attempt).Dur("backoff", backoff).Msg("reconnecting ws")
-		time.Sleep(backoff)
-
-		ws.reconnects = attempt
-		if err := ws.Connect(ctx); err != nil {
-			ws.logger.Error().Err(err).Int("attempt", attempt).Msg("reconnect failed")
-			continue
-		}
-		return // success
+	if ws.reconnects >= maxReconnects {
+		ws.logger.Error().Msg("max reconnects reached")
+		return
 	}
-	ws.logger.Error().Msg("max reconnects reached, giving up")
-	ws.Close()
+	ws.reconnects++
+	ws.logger.Info().Int("attempt", ws.reconnects).Msg("reconnecting ws")
+	time.Sleep(reconnectDelay)
+	if err := ws.Connect(ctx); err != nil {
+		ws.logger.Error().Err(err).Msg("reconnect failed")
+		ws.tryReconnect(ctx)
+	}
 }

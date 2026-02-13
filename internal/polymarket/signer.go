@@ -49,15 +49,6 @@ func (s *Signer) Address() common.Address {
 	return s.address
 }
 
-// Destroy zeros out the private key bytes to prevent memory leaks of sensitive material
-func (s *Signer) Destroy() {
-	if s.privateKey != nil {
-		// Zero out the private key D value
-		s.privateKey.D.SetUint64(0)
-		s.privateKey = nil
-	}
-}
-
 // SignClobAuthMessage signs an EIP-712 auth message for L1 authentication
 func (s *Signer) SignClobAuthMessage(timestamp int64, nonce int) (string, error) {
 	typedData := apitypes.TypedData{

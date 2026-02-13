@@ -73,12 +73,12 @@ func main() {
 	// Auto-derive API creds if private key is set
 	if privateKey != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		creds, err := client.CreateOrDeriveAPICreds(ctx)
+		creds, err := client.CreateOrDeriveApiCreds(ctx)
 		cancel()
 		if err != nil {
 			logger.Warn().Err(err).Msg("Could not derive API creds, L2 endpoints unavailable")
 		} else {
-			client.SetAPICreds(creds)
+			client.SetApiCreds(creds)
 			logger.Info().Msg("API credentials derived successfully")
 		}
 	}

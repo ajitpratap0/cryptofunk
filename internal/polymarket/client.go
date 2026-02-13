@@ -3,21 +3,19 @@ package polymarket
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	crand "crypto/rand"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/rs/zerolog"
-	"golang.org/x/time/rate"
 )
 
 const (
@@ -26,22 +24,20 @@ const (
 	DefaultChainID   = 137
 
 	// Polymarket contract addresses on Polygon
-	CTFExchangeAddress  = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
-	NegRiskExchangeAddr = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+	CTFExchangeAddress    = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+	NegRiskExchangeAddr   = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
 
 	// Rate limiting
 	maxRequestsPerSecond = 10
 )
 
 // Header keys
-//
-//nolint:gosec // G101 false positive - these are HTTP header key constants, not credentials
 const (
-	headerPolyAddress    = "POLY_ADDRESS"
-	headerPolySignature  = "POLY_SIGNATURE"
-	headerPolyTimestamp  = "POLY_TIMESTAMP"
-	headerPolyNonce      = "POLY_NONCE"
-	headerPolyAPIKey     = "POLY_API_KEY"
+	headerPolyAddress   = "POLY_ADDRESS"
+	headerPolySignature = "POLY_SIGNATURE"
+	headerPolyTimestamp = "POLY_TIMESTAMP"
+	headerPolyNonce     = "POLY_NONCE"
+	headerPolyAPIKey    = "POLY_API_KEY"
 	headerPolyPassphrase = "POLY_PASSPHRASE"
 )
 
@@ -51,12 +47,13 @@ type Client struct {
 	gammaHost string
 	chainID   int
 	signer    *Signer
-	creds     *APICreds
+	creds     *ApiCreds
 	funder    string
 
 	httpClient  *http.Client
 	logger      zerolog.Logger
-	rateLimiter *rate.Limiter
+	rateLimiter *time.Ticker
+	mu          sync.Mutex
 }
 
 // ClientOption configures the client
@@ -78,7 +75,7 @@ func WithChainID(id int) ClientOption {
 }
 
 // WithCreds sets L2 API credentials
-func WithCreds(creds *APICreds) ClientOption {
+func WithCreds(creds *ApiCreds) ClientOption {
 	return func(c *Client) { c.creds = creds }
 }
 
@@ -99,7 +96,7 @@ func NewClient(privateKey string, opts ...ClientOption) (*Client, error) {
 		gammaHost:   DefaultGammaHost,
 		chainID:     DefaultChainID,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
-		rateLimiter: rate.NewLimiter(rate.Limit(maxRequestsPerSecond), maxRequestsPerSecond),
+		rateLimiter: time.NewTicker(time.Second / maxRequestsPerSecond),
 		logger:      zerolog.Nop(),
 	}
 
@@ -120,9 +117,7 @@ func NewClient(privateKey string, opts ...ClientOption) (*Client, error) {
 
 // Close cleans up resources
 func (c *Client) Close() {
-	if c.signer != nil {
-		c.signer.Destroy()
-	}
+	c.rateLimiter.Stop()
 }
 
 // GetAddress returns the signer's address
@@ -167,21 +162,19 @@ func (c *Client) l2Headers(method, path, body string) (map[string]string, error)
 		headerPolyAddress:    c.signer.Address().Hex(),
 		headerPolySignature:  hmacSig,
 		headerPolyTimestamp:  strconv.FormatInt(ts, 10),
-		headerPolyAPIKey:     c.creds.APIKey,
+		headerPolyAPIKey:     c.creds.ApiKey,
 		headerPolyPassphrase: c.creds.Passphrase,
 	}, nil
 }
 
 // --- HTTP helpers ---
 
-func (c *Client) rateLimit(ctx context.Context) error {
-	return c.rateLimiter.Wait(ctx)
+func (c *Client) rateLimit() {
+	<-c.rateLimiter.C
 }
 
 func (c *Client) doRequest(ctx context.Context, method, url string, body io.Reader, headers map[string]string) ([]byte, error) {
-	if err := c.rateLimit(ctx); err != nil {
-		return nil, fmt.Errorf("rate limit: %w", err)
-	}
+	c.rateLimit()
 
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
@@ -240,8 +233,8 @@ func (c *Client) delete(ctx context.Context, url string, payload interface{}, he
 
 // --- API Credentials ---
 
-// CreateAPIKey creates a new CLOB API key (L1 auth)
-func (c *Client) CreateAPIKey(ctx context.Context) (*APICreds, error) {
+// CreateApiKey creates a new CLOB API key (L1 auth)
+func (c *Client) CreateApiKey(ctx context.Context) (*ApiCreds, error) {
 	headers, err := c.l1Headers()
 	if err != nil {
 		return nil, err
@@ -250,15 +243,15 @@ func (c *Client) CreateAPIKey(ctx context.Context) (*APICreds, error) {
 	if err != nil {
 		return nil, err
 	}
-	var creds APICreds
+	var creds ApiCreds
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, err
 	}
 	return &creds, nil
 }
 
-// DeriveAPIKey derives existing API credentials (L1 auth)
-func (c *Client) DeriveAPIKey(ctx context.Context) (*APICreds, error) {
+// DeriveApiKey derives existing API credentials (L1 auth)
+func (c *Client) DeriveApiKey(ctx context.Context) (*ApiCreds, error) {
 	headers, err := c.l1Headers()
 	if err != nil {
 		return nil, err
@@ -267,24 +260,24 @@ func (c *Client) DeriveAPIKey(ctx context.Context) (*APICreds, error) {
 	if err != nil {
 		return nil, err
 	}
-	var creds APICreds
+	var creds ApiCreds
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, err
 	}
 	return &creds, nil
 }
 
-// CreateOrDeriveAPICreds creates or derives API credentials
-func (c *Client) CreateOrDeriveAPICreds(ctx context.Context) (*APICreds, error) {
-	creds, err := c.CreateAPIKey(ctx)
+// CreateOrDeriveApiCreds creates or derives API credentials
+func (c *Client) CreateOrDeriveApiCreds(ctx context.Context) (*ApiCreds, error) {
+	creds, err := c.CreateApiKey(ctx)
 	if err != nil {
-		return c.DeriveAPIKey(ctx)
+		return c.DeriveApiKey(ctx)
 	}
 	return creds, nil
 }
 
-// SetAPICreds sets the L2 credentials
-func (c *Client) SetAPICreds(creds *APICreds) {
+// SetApiCreds sets the L2 credentials
+func (c *Client) SetApiCreds(creds *ApiCreds) {
 	c.creds = creds
 }
 
@@ -433,11 +426,7 @@ func (c *Client) buildOrder(tokenID string, side Side, price, size float64) (*Si
 		maker = c.funder
 	}
 
-	var saltBytes [32]byte
-	if _, err := crand.Read(saltBytes[:]); err != nil {
-		return nil, fmt.Errorf("generate salt: %w", err)
-	}
-	salt := hex.EncodeToString(saltBytes[:])
+	salt := strconv.FormatInt(rand.Int63(), 10)
 
 	order := &SignedOrder{
 		Salt:          salt,

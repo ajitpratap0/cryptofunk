@@ -19,43 +19,43 @@ const (
 	GTD OrderType = "GTD"
 )
 
-// APICreds holds CLOB API credentials (Level 2 auth)
-type APICreds struct {
-	APIKey     string `json:"apiKey"`
+// ApiCreds holds CLOB API credentials (Level 2 auth)
+type ApiCreds struct {
+	ApiKey     string `json:"apiKey"`
 	Secret     string `json:"secret"`
 	Passphrase string `json:"passphrase"`
 }
 
 // Market from Gamma API
 type Market struct {
-	ConditionID      string   `json:"condition_id"`
-	QuestionID       string   `json:"question_id"`
-	Question         string   `json:"question"`
-	Description      string   `json:"description"`
-	MarketSlug       string   `json:"market_slug"`
-	EndDateISO       string   `json:"end_date_iso"`
-	GameStartTime    string   `json:"game_start_time"`
-	Active           bool     `json:"active"`
-	Closed           bool     `json:"closed"`
-	Funded           bool     `json:"funded"`
-	Tokens           []Token  `json:"tokens"`
-	MinimumOrderSize string   `json:"minimum_order_size"`
-	MinimumTickSize  string   `json:"minimum_tick_size"`
-	Volume           string   `json:"volume"`
-	Volume24hr       float64  `json:"volume_24hr"`
-	Liquidity        string   `json:"liquidity"`
-	Tags             []string `json:"tags"`
-	NegRisk          bool     `json:"neg_risk"`
-	NegRiskMarketID  string   `json:"neg_risk_market_id"`
-	NegRiskRequestID string   `json:"neg_risk_request_id"`
+	ConditionID       string   `json:"condition_id"`
+	QuestionID        string   `json:"question_id"`
+	Question          string   `json:"question"`
+	Description       string   `json:"description"`
+	MarketSlug        string   `json:"market_slug"`
+	EndDateISO        string   `json:"end_date_iso"`
+	GameStartTime     string   `json:"game_start_time"`
+	Active            bool     `json:"active"`
+	Closed            bool     `json:"closed"`
+	Funded            bool     `json:"funded"`
+	Tokens            []Token  `json:"tokens"`
+	MinimumOrderSize  string   `json:"minimum_order_size"`
+	MinimumTickSize   string   `json:"minimum_tick_size"`
+	Volume            string   `json:"volume"`
+	Volume24hr        float64  `json:"volume_24hr"`
+	Liquidity         string   `json:"liquidity"`
+	Tags              []string `json:"tags"`
+	NegRisk           bool     `json:"neg_risk"`
+	NegRiskMarketID   string   `json:"neg_risk_market_id"`
+	NegRiskRequestID  string   `json:"neg_risk_request_id"`
 }
 
 // Token represents a conditional token in a market
 type Token struct {
-	TokenID string  `json:"token_id"`
-	Outcome string  `json:"outcome"`
-	Price   float64 `json:"price"`
-	Winner  bool    `json:"winner"`
+	TokenID  string  `json:"token_id"`
+	Outcome  string  `json:"outcome"`
+	Price    float64 `json:"price"`
+	Winner   bool    `json:"winner"`
 }
 
 // OrderBookLevel represents a single price level
@@ -90,38 +90,38 @@ type PriceResponse struct {
 
 // Order represents an order in the CLOB
 type Order struct {
-	ID                string    `json:"id"`
-	Market            string    `json:"market"`
-	AssetID           string    `json:"asset_id"`
-	Side              string    `json:"side"`
-	OriginalSize      string    `json:"original_size"`
-	SizeMatched       string    `json:"size_matched"`
-	Price             string    `json:"price"`
-	Outcome           string    `json:"outcome"`
-	Owner             string    `json:"owner"`
-	Status            string    `json:"status"`
-	OrderType         string    `json:"type"`
-	Expiration        string    `json:"expiration"`
-	AssociateTradeIDs []string  `json:"associate_trades"`
-	CreatedAt         time.Time `json:"created_at"`
-}
-
-// Trade represents a filled trade
-type Trade struct {
 	ID              string    `json:"id"`
 	Market          string    `json:"market"`
 	AssetID         string    `json:"asset_id"`
 	Side            string    `json:"side"`
-	Size            string    `json:"size"`
+	OriginalSize    string    `json:"original_size"`
+	SizeMatched     string    `json:"size_matched"`
 	Price           string    `json:"price"`
-	Status          string    `json:"status"`
-	Owner           string    `json:"owner"`
 	Outcome         string    `json:"outcome"`
-	FeeRateBps      string    `json:"fee_rate_bps"`
-	MakerAddress    string    `json:"maker_address"`
-	TradeOwner      string    `json:"trader"`
-	TransactionHash string    `json:"transaction_hash"`
-	MatchTime       time.Time `json:"match_time"`
+	Owner           string    `json:"owner"`
+	Status          string    `json:"status"`
+	OrderType       string    `json:"type"`
+	Expiration      string    `json:"expiration"`
+	AssociateTradeIDs []string `json:"associate_trades"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// Trade represents a filled trade
+type Trade struct {
+	ID            string    `json:"id"`
+	Market        string    `json:"market"`
+	AssetID       string    `json:"asset_id"`
+	Side          string    `json:"side"`
+	Size          string    `json:"size"`
+	Price         string    `json:"price"`
+	Status        string    `json:"status"`
+	Owner         string    `json:"owner"`
+	Outcome       string    `json:"outcome"`
+	FeeRateBps    string    `json:"fee_rate_bps"`
+	MakerAddress  string    `json:"maker_address"`
+	TradeOwner    string    `json:"trader"`
+	TransactionHash string  `json:"transaction_hash"`
+	MatchTime     time.Time `json:"match_time"`
 }
 
 // Position represents a user's position
@@ -159,8 +159,8 @@ type PostOrderRequest struct {
 
 // PostOrderResponse from POST /order
 type PostOrderResponse struct {
-	Success  bool   `json:"success"`
-	OrderID  string `json:"orderID"`
+	Success bool   `json:"success"`
+	OrderID string `json:"orderID"`
 	ErrorMsg string `json:"errorMsg,omitempty"`
 }
 
