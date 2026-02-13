@@ -68,9 +68,9 @@ func New(cfg Config) *Server {
 	factory := promauto.With(reg)
 
 	s := &Server{
-		config: cfg,
-		mcpSrv: mcpSrv,
-		logger: cfg.Logger,
+		config:   cfg,
+		mcpSrv:   mcpSrv,
+		logger:   cfg.Logger,
 		registry: reg,
 		toolCall: factory.NewCounterVec(prometheus.CounterOpts{
 			Name:        "mcp_tool_calls_total",
@@ -233,10 +233,10 @@ func (s *Server) runStdioLoop(ctx context.Context) error {
 
 // JSONRPCResponse is a JSON-RPC 2.0 response.
 type JSONRPCResponse struct {
-	JSONRPC string       `json:"jsonrpc"`
-	ID      any          `json:"id"`
-	Result  interface{}  `json:"result,omitempty"`
-	Error   *JSONRPCErr  `json:"error,omitempty"`
+	JSONRPC string      `json:"jsonrpc"`
+	ID      any         `json:"id"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *JSONRPCErr `json:"error,omitempty"`
 }
 
 // JSONRPCErr is a JSON-RPC 2.0 error object.
