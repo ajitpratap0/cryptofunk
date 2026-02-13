@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"math"
 	"sync"
 	"time"
 
@@ -93,8 +94,7 @@ func (pt *PerformanceTracker) GetStats() *PerformanceStats {
 		cat.TotalPnL += p.PnL
 
 		outcome := *p.Outcome
-		diff := p.PredictedProb - outcome
-		brierContrib := diff * diff
+		brierContrib := math.Pow(p.PredictedProb-outcome, 2)
 		brierSum += brierContrib
 		cat.BrierScore += brierContrib
 
