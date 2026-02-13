@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	metricsOnce         sync.Once
-	sharedDrawdownGauge prometheus.Gauge
-	sharedTradesToday   prometheus.Gauge
-	sharedKillSwitch    prometheus.Gauge
-	sharedConsecLoss    prometheus.Gauge
+	metricsOnce          sync.Once
+	sharedDrawdownGauge  prometheus.Gauge
+	sharedTradesToday    prometheus.Gauge
+	sharedKillSwitch     prometheus.Gauge
+	sharedConsecLoss     prometheus.Gauge
 )
 
 func initMetrics() {
@@ -54,9 +54,9 @@ type Monitor struct {
 	totalExposure     float64 // sum of abs open position values
 
 	// Prometheus metrics
-	drawdownGauge        prometheus.Gauge
-	tradesTodayGauge     prometheus.Gauge
-	killSwitchGauge      prometheus.Gauge
+	drawdownGauge   prometheus.Gauge
+	tradesTodayGauge prometheus.Gauge
+	killSwitchGauge prometheus.Gauge
 	consecutiveLossGauge prometheus.Gauge
 }
 
