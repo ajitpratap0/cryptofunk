@@ -95,7 +95,7 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 }
 
 func TestWSClient_SubscribeMarket(t *testing.T) {
-	var receivedCmd wsCommand
+	cmdCh := make(chan wsCommand, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -104,8 +104,10 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 		}
 		defer conn.Close()
 
-		// Read subscribe message
-		conn.ReadJSON(&receivedCmd)
+		// Read subscribe message into a local variable to avoid data race
+		var cmd wsCommand
+		conn.ReadJSON(&cmd)
+		cmdCh <- cmd
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -122,7 +124,7 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 	err = ws.SubscribeMarket([]string{"asset1", "asset2"})
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	receivedCmd := <-cmdCh
 	assert.Equal(t, "subscribe", receivedCmd.Type)
 	assert.Equal(t, "market", receivedCmd.Channel)
 	assert.Equal(t, []string{"asset1", "asset2"}, receivedCmd.Assets)
@@ -131,7 +133,7 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 }
 
 func TestWSClient_SubscribeUser(t *testing.T) {
-	var receivedCmd wsCommand
+	cmdCh := make(chan wsCommand, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -139,7 +141,9 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		conn.ReadJSON(&receivedCmd)
+		var cmd wsCommand
+		conn.ReadJSON(&cmd)
+		cmdCh <- cmd
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -157,7 +161,7 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 	err = ws.SubscribeUser("market1", creds)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	receivedCmd := <-cmdCh
 	assert.Equal(t, "subscribe", receivedCmd.Type)
 	assert.Equal(t, "user", receivedCmd.Channel)
 	assert.NotNil(t, receivedCmd.Auth)
