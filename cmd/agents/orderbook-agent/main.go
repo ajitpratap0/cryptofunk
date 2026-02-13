@@ -1067,8 +1067,9 @@ func main() {
 		Int("metrics_port", metricsPort).
 		Msg("Starting order book analysis agent")
 
-	// Initialize agent
-	ctx := context.Background()
+	// Initialize agent with cancellable context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
@@ -1096,12 +1097,15 @@ func main() {
 		}
 	}
 
+	// Cancel main context to stop agent operations
+	cancel()
+
 	// Stop heartbeat publishing
 	agent.heartbeat.Stop()
 
-	// Graceful shutdown
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Graceful shutdown with separate timeout context
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
 	if err := agent.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")

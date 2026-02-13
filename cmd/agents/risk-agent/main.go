@@ -288,7 +288,7 @@ func main() {
 		Msg("Configuration loaded")
 
 	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Connect to database
@@ -605,11 +605,9 @@ func (a *RiskAgent) Shutdown(ctx context.Context) error {
 		log.Info().Msg("NATS connection closed")
 	}
 
-	// Shutdown metrics server
+	// Shutdown metrics server using the provided shutdown context
 	if a.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
+		if err := a.metricsServer.Shutdown(ctx); err != nil {
 			log.Error().Err(err).Msg("Error shutting down metrics server")
 		} else {
 			log.Info().Msg("Metrics server shutdown complete")

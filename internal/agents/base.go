@@ -363,11 +363,9 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// Shutdown metrics server
+	// Shutdown metrics server using the provided shutdown context
 	if a.metricsServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), agentShutdownTimeout)
-		defer cancel()
-		if err := a.metricsServer.Shutdown(shutdownCtx); err != nil {
+		if err := a.metricsServer.Shutdown(ctx); err != nil {
 			a.log.Error().Err(err).Msg("Error shutting down metrics server")
 		} else {
 			a.log.Info().Msg("Metrics server shutdown successfully")
