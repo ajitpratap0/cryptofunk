@@ -370,7 +370,8 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 		Interface("args", args).
 		Msg("Calling tool")
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	var result interface{}
 	var err error

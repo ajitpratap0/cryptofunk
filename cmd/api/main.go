@@ -38,6 +38,7 @@ type APIServer struct {
 	rateLimiter        *RateLimiterMiddleware
 	apiKeyStore        *api.APIKeyStore
 	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
+	ctx                context.Context        // Server lifecycle context for background workers
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -103,6 +104,7 @@ func main() {
 		hub:                hub,
 		port:               getPort(),
 		orchestratorClient: defaultOrchestratorClient,
+		ctx:                ctx,
 	}
 
 	// Setup middleware
@@ -329,7 +331,7 @@ func (s *APIServer) setupRoutes() {
 		s.keyManager = keysHandler.GetKeyManager()
 
 		// Start the expired key cleanup worker (runs every hour)
-		s.keyManager.StartCleanupWorker(ctx, time.Hour)
+		s.keyManager.StartCleanupWorker(s.ctx, time.Hour)
 
 		keysHandler.RegisterRoutesWithRateLimiter(
 			v1,
@@ -1583,7 +1585,7 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		reqCtx, reqCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		reqCtx, reqCancel := context.WithTimeout(s.ctx, 10*time.Second)
 		defer reqCancel()
 		req, err := http.NewRequestWithContext(reqCtx, "POST", url, nil)
 		if err != nil {

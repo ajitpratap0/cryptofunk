@@ -71,7 +71,8 @@ func (pm *PositionManager) SetSession(sessionID *uuid.UUID) {
 
 // loadOpenPositions loads open positions from database
 func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	positions, err := pm.db.GetOpenPositions(ctx, sessionID)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load open positions")

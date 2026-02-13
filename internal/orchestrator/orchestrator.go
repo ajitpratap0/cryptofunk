@@ -793,7 +793,7 @@ func (o *Orchestrator) Pause() error {
 	// Persist pause state to database BEFORE updating in-memory state
 	// This ensures database is source of truth and failures don't leave inconsistent state
 	if o.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(o.ctx, 5*time.Second)
 		defer cancel()
 
 		if err := o.db.SetOrchestratorPaused(ctx, "api", "manual_pause"); err != nil {
@@ -853,7 +853,7 @@ func (o *Orchestrator) Resume() error {
 	// Persist resume state to database BEFORE updating in-memory state
 	// This ensures database is source of truth and failures don't leave inconsistent state
 	if o.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(o.ctx, 5*time.Second)
 		defer cancel()
 
 		if err := o.db.SetOrchestratorResumed(ctx); err != nil {
