@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,9 +28,23 @@ type PostgresContainer struct {
 	t             *testing.T
 }
 
+// RequireDocker skips the test if Docker is not available.
+// It checks by running "docker info" which is the most reliable way to detect
+// if Docker daemon is actually running (socket can exist but daemon be stopped).
+func RequireDocker(t *testing.T) {
+	t.Helper()
+	cmd := exec.Command("docker", "info")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		t.Skip("Docker not available (docker info failed), skipping integration test")
+	}
+}
+
 // SetupTestDatabase creates a PostgreSQL testcontainer with TimescaleDB and pgvector
 func SetupTestDatabase(t *testing.T) *PostgresContainer {
 	t.Helper()
+	RequireDocker(t)
 
 	ctx := context.Background()
 
