@@ -13,6 +13,8 @@ import (
 )
 
 // runHTTP starts the server with Streamable HTTP transport.
+// TODO: Add authentication (e.g. bearer token via flag/env) and restrict CORS origins
+// for production use. Currently the HTTP transport has no auth and allows all origins.
 func (s *Server) runHTTP(port int) error {
 	s.logger.Info().Int("port", port).Msg("MCP server starting with Streamable HTTP transport")
 

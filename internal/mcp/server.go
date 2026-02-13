@@ -169,13 +169,6 @@ func (s *Server) RunWithArgs(transport string, port int) error {
 func (s *Server) runStdio() error {
 	s.logger.Info().Msg("MCP server starting with stdio transport")
 
-	transport := &mcp.CommandTransport{
-		Command: nil, // We are the server, not spawning a command
-	}
-	_ = transport
-
-	// Use the SDK's stdio server support
-	// The SDK's Server works with StdioTransport for the server side
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -301,7 +294,7 @@ func (s *Server) HandleJSONRPC(ctx context.Context, method string, params json.R
 			}
 		}
 		if handler == nil {
-			resp.Error = &JSONRPCErr{Code: -32602, Message: fmt.Sprintf("Unknown tool: %s", toolParams.Name)}
+			resp.Error = &JSONRPCErr{Code: -32602, Message: fmt.Sprintf("unknown tool: %s", toolParams.Name)}
 			return resp
 		}
 

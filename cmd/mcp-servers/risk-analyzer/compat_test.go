@@ -68,10 +68,45 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 	params, _ := json.Marshal(req.Params)
 	jResp := s.srv.HandleJSONRPC(ctx, req.Method, params, req.ID)
 
-	// Marshal and unmarshal to get plain map types (tests expect map[string]interface{})
-	data, _ := json.Marshal(jResp)
-	resp := &MCPResponse{}
-	_ = json.Unmarshal(data, resp)
-	resp.ID = req.ID
+	// Unwrap CallToolResult for backward compatibility with old tests.
+	return unwrapCompatResponse(jResp, req.ID)
+}
+
+// unwrapCompatResponse converts the new CallToolResult response shape back to
+// the raw map/error shape that old tests expect.
+func unwrapCompatResponse(jResp *mcpserver.JSONRPCResponse, id int) *MCPResponse {
+	resp := &MCPResponse{JSONRPC: "2.0", ID: id}
+
+	if jResp.Error != nil {
+		data, _ := json.Marshal(jResp.Error)
+		var e MCPError
+		_ = json.Unmarshal(data, &e)
+		resp.Error = &e
+		return resp
+	}
+
+	// Check if result is a CallToolResult (has "content" key)
+	data, _ := json.Marshal(jResp.Result)
+	var wrapper struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if json.Unmarshal(data, &wrapper) == nil && len(wrapper.Content) > 0 {
+		if wrapper.IsError {
+			resp.Error = &MCPError{Code: -32603, Message: wrapper.Content[0].Text}
+			return resp
+		}
+		var raw interface{}
+		if json.Unmarshal([]byte(wrapper.Content[0].Text), &raw) == nil {
+			resp.Result = raw
+			return resp
+		}
+		resp.Result = wrapper.Content[0].Text
+		return resp
+	}
+
+	resp.Result = jResp.Result
 	return resp
 }

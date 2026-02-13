@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -30,8 +31,11 @@ func WrapLegacyHandler(fn func(ctx context.Context, args map[string]interface{})
 			}, nil
 		}
 
-		// Marshal result to JSON text content
-		data, marshalErr := json.Marshal(result)
+		// Marshal result to JSON text content.
+		// Use a custom approach to handle special float values (Inf, NaN)
+		// that standard json.Marshal cannot encode.
+		sanitized := sanitizeForJSON(result)
+		data, marshalErr := json.Marshal(sanitized)
 		if marshalErr != nil {
 			return nil, fmt.Errorf("failed to marshal result: %w", marshalErr)
 		}
@@ -39,6 +43,36 @@ func WrapLegacyHandler(fn func(ctx context.Context, args map[string]interface{})
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
 		}, nil
+	}
+}
+
+// sanitizeForJSON recursively replaces Inf/NaN float values with JSON-safe
+// representations so json.Marshal won't fail.
+func sanitizeForJSON(v interface{}) interface{} {
+	switch val := v.(type) {
+	case float64:
+		if math.IsInf(val, 1) {
+			return "Infinity"
+		} else if math.IsInf(val, -1) {
+			return "-Infinity"
+		} else if math.IsNaN(val) {
+			return "NaN"
+		}
+		return val
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(val))
+		for k, v2 := range val {
+			out[k] = sanitizeForJSON(v2)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(val))
+		for i, v2 := range val {
+			out[i] = sanitizeForJSON(v2)
+		}
+		return out
+	default:
+		return v
 	}
 }
 
