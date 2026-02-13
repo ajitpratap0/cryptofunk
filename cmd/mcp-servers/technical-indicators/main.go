@@ -1,8 +1,7 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -10,340 +9,108 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/indicators"
-	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+	mcpserver "github.com/ajitpratap0/cryptofunk/internal/mcp"
 )
 
 const (
 	serverName = "technical-indicators"
 )
 
-func main() {
-	// Setup logging to stderr (stdout is reserved for MCP protocol)
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+var serverVersion = config.Version
 
+func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	log.Info().Msg("Technical Indicators MCP Server starting...")
 
-	log.Info().Str("version", config.Version).Msg("Technical Indicators MCP Server version")
-
-	// Start metrics server on port 9203
-	metricsServer := metrics.NewServer(9203, log.Logger)
-	if err := metricsServer.Start(); err != nil {
-		log.Warn().Err(err).Msg("Failed to start metrics server (non-fatal)")
-	} else {
-		log.Info().Msg("Metrics server started on :9203")
-	}
-
-	// Create indicator service
 	indicatorService := indicators.NewService()
+	logger := log.With().Str("server", serverName).Logger()
 
-	// Start MCP server with stdio transport
-	server := &MCPServer{
-		service: indicatorService,
-	}
+	srv := mcpserver.New(mcpserver.Config{
+		Name:    serverName,
+		Version: serverVersion,
+		Logger:  logger,
+	})
 
-	if err := server.Run(); err != nil {
+	registerTools(srv, indicatorService)
+
+	if err := srv.Run(); err != nil {
 		log.Fatal().Err(err).Msg("Server failed")
 	}
 }
 
-// MCPServer handles MCP protocol over stdio
-type MCPServer struct {
-	service *indicators.Service
-}
-
-// Run starts the MCP server
-func (s *MCPServer) Run() error {
-	log.Info().Msg("MCP server ready, listening on stdio")
-
-	// Read from stdin, process requests, write to stdout
-	decoder := json.NewDecoder(os.Stdin)
-	encoder := json.NewEncoder(os.Stdout)
-
-	for {
-		var request MCPRequest
-		if err := decoder.Decode(&request); err != nil {
-			if err.Error() == "EOF" {
-				log.Info().Msg("Client disconnected")
-				return nil
-			}
-			log.Error().Err(err).Msg("Failed to decode request")
-			continue
-		}
-
-		log.Debug().
-			Str("method", request.Method).
-			Msg("Received request")
-
-		// Handle request
-		response := s.handleRequest(&request)
-
-		// Send response
-		if err := encoder.Encode(response); err != nil {
-			log.Error().Err(err).Msg("Failed to encode response")
-			return err
-		}
-	}
-}
-
-// MCPRequest represents an MCP tool call request
-type MCPRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
-
-// MCPResponse represents an MCP response
-type MCPResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *MCPError   `json:"error,omitempty"`
-}
-
-// MCPError represents an MCP error
-type MCPError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// handleRequest routes the request to the appropriate handler
-func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
-	timer := metrics.NewMCPRequestTimer(serverName, req.Method)
-
-	response := &MCPResponse{
-		JSONRPC: "2.0",
-		ID:      req.ID,
-	}
-
-	defer func() {
-		success := response.Error == nil
-		timer.Record(success)
-		if response.Error != nil {
-			metrics.RecordMCPError(serverName, req.Method, response.Error.Code)
-		}
-	}()
-
-	// Handle different MCP methods
-	switch req.Method {
-	case "initialize":
-		response.Result = s.handleInitialize(req.Params)
-		return response
-
-	case "tools/list":
-		response.Result = s.listTools()
-		return response
-
-	case "tools/call":
-		var toolParams struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments"`
-		}
-		if err := json.Unmarshal(req.Params, &toolParams); err != nil {
-			response.Error = &MCPError{
-				Code:    -32602,
-				Message: fmt.Sprintf("Invalid params: %v", err),
-			}
-			return response
-		}
-
-		result, err := s.callTool(toolParams.Name, toolParams.Arguments)
-		if err != nil {
-			response.Error = &MCPError{
-				Code:    -32000,
-				Message: err.Error(),
-			}
-		} else {
-			response.Result = result
-		}
-		return response
-
-	default:
-		response.Error = &MCPError{
-			Code:    -32601,
-			Message: fmt.Sprintf("Method not found: %s", req.Method),
-		}
-		return response
-	}
-}
-
-// handleInitialize responds to MCP initialize request
-func (s *MCPServer) handleInitialize(params json.RawMessage) interface{} {
-	log.Info().Msg("Handling initialize request")
-
-	return map[string]interface{}{
-		"protocolVersion": "2024-11-05",
-		"serverInfo": map[string]interface{}{
-			"name":    "technical-indicators",
-			"version": config.Version,
-		},
-		"capabilities": map[string]interface{}{
-			"tools": map[string]interface{}{},
-		},
-	}
-}
-
-// listTools returns the list of available tools
-func (s *MCPServer) listTools() interface{} {
-	return map[string]interface{}{
-		"tools": []map[string]interface{}{
-			{
-				"name":        "calculate_rsi",
-				"description": "Calculate Relative Strength Index (RSI) for trend strength analysis",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"prices": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of closing prices",
-						},
-						"period": map[string]interface{}{
-							"type":        "number",
-							"description": "RSI period (default: 14)",
-							"default":     14,
-						},
-					},
-					"required": []string{"prices"},
-				},
+func registerTools(srv *mcpserver.Server, service *indicators.Service) {
+	srv.AddToolRaw(
+		mcpserver.NewTool("calculate_rsi", "Calculate Relative Strength Index (RSI) for trend strength analysis", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"prices": map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of closing prices"},
+				"period": map[string]interface{}{"type": "number", "description": "RSI period (default: 14)", "default": 14},
 			},
-			{
-				"name":        "calculate_macd",
-				"description": "Calculate Moving Average Convergence Divergence (MACD) for trend analysis",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"prices": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of closing prices",
-						},
-						"fast_period": map[string]interface{}{
-							"type":        "number",
-							"description": "Fast EMA period (default: 12)",
-							"default":     12,
-						},
-						"slow_period": map[string]interface{}{
-							"type":        "number",
-							"description": "Slow EMA period (default: 26)",
-							"default":     26,
-						},
-						"signal_period": map[string]interface{}{
-							"type":        "number",
-							"description": "Signal line period (default: 9)",
-							"default":     9,
-						},
-					},
-					"required": []string{"prices"},
-				},
+			"required": []string{"prices"},
+		}),
+		mcpserver.WrapLegacyHandler(func(_ context.Context, args map[string]interface{}) (interface{}, error) {
+			return service.CalculateRSI(args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("calculate_macd", "Calculate Moving Average Convergence Divergence (MACD) for trend analysis", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"prices":        map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of closing prices"},
+				"fast_period":   map[string]interface{}{"type": "number", "description": "Fast EMA period (default: 12)", "default": 12},
+				"slow_period":   map[string]interface{}{"type": "number", "description": "Slow EMA period (default: 26)", "default": 26},
+				"signal_period": map[string]interface{}{"type": "number", "description": "Signal line period (default: 9)", "default": 9},
 			},
-			{
-				"name":        "calculate_bollinger_bands",
-				"description": "Calculate Bollinger Bands for volatility analysis",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"prices": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of closing prices",
-						},
-						"period": map[string]interface{}{
-							"type":        "number",
-							"description": "Period for moving average (default: 20)",
-							"default":     20,
-						},
-						"std_dev": map[string]interface{}{
-							"type":        "number",
-							"description": "Standard deviations (default: 2)",
-							"default":     2,
-						},
-					},
-					"required": []string{"prices"},
-				},
+			"required": []string{"prices"},
+		}),
+		mcpserver.WrapLegacyHandler(func(_ context.Context, args map[string]interface{}) (interface{}, error) {
+			return service.CalculateMACD(args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("calculate_bollinger_bands", "Calculate Bollinger Bands for volatility analysis", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"prices":  map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of closing prices"},
+				"period":  map[string]interface{}{"type": "number", "description": "Period for moving average (default: 20)", "default": 20},
+				"std_dev": map[string]interface{}{"type": "number", "description": "Standard deviations (default: 2)", "default": 2},
 			},
-			{
-				"name":        "calculate_ema",
-				"description": "Calculate Exponential Moving Average (EMA)",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"prices": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of closing prices",
-						},
-						"period": map[string]interface{}{
-							"type":        "number",
-							"description": "EMA period",
-						},
-					},
-					"required": []string{"prices", "period"},
-				},
+			"required": []string{"prices"},
+		}),
+		mcpserver.WrapLegacyHandler(func(_ context.Context, args map[string]interface{}) (interface{}, error) {
+			return service.CalculateBollingerBands(args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("calculate_ema", "Calculate Exponential Moving Average (EMA)", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"prices": map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of closing prices"},
+				"period": map[string]interface{}{"type": "number", "description": "EMA period"},
 			},
-			{
-				"name":        "calculate_adx",
-				"description": "Calculate Average Directional Index (ADX) for trend strength",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"high": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of high prices",
-						},
-						"low": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of low prices",
-						},
-						"close": map[string]interface{}{
-							"type":        "array",
-							"items":       map[string]string{"type": "number"},
-							"description": "Array of closing prices",
-						},
-						"period": map[string]interface{}{
-							"type":        "number",
-							"description": "ADX period (default: 14)",
-							"default":     14,
-						},
-					},
-					"required": []string{"high", "low", "close"},
-				},
+			"required": []string{"prices", "period"},
+		}),
+		mcpserver.WrapLegacyHandler(func(_ context.Context, args map[string]interface{}) (interface{}, error) {
+			return service.CalculateEMA(args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("calculate_adx", "Calculate Average Directional Index (ADX) for trend strength", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"high":   map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of high prices"},
+				"low":    map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of low prices"},
+				"close":  map[string]interface{}{"type": "array", "items": map[string]string{"type": "number"}, "description": "Array of closing prices"},
+				"period": map[string]interface{}{"type": "number", "description": "ADX period (default: 14)", "default": 14},
 			},
-		},
-	}
-}
-
-// callTool executes the requested tool
-func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
-	timer := metrics.NewMCPToolTimer(serverName, name)
-
-	log.Debug().
-		Str("tool", name).
-		Interface("args", args).
-		Msg("Calling tool")
-
-	var result interface{}
-	var err error
-
-	switch name {
-	case "calculate_rsi":
-		result, err = s.service.CalculateRSI(args)
-	case "calculate_macd":
-		result, err = s.service.CalculateMACD(args)
-	case "calculate_bollinger_bands":
-		result, err = s.service.CalculateBollingerBands(args)
-	case "calculate_ema":
-		result, err = s.service.CalculateEMA(args)
-	case "calculate_adx":
-		result, err = s.service.CalculateADX(args)
-	default:
-		err = fmt.Errorf("unknown tool: %s", name)
-	}
-
-	// Record metrics
-	timer.Record(err == nil)
-
-	return result, err
+			"required": []string{"high", "low", "close"},
+		}),
+		mcpserver.WrapLegacyHandler(func(_ context.Context, args map[string]interface{}) (interface{}, error) {
+			return service.CalculateADX(args)
+		}),
+	)
 }
