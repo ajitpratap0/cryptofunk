@@ -46,6 +46,7 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 	var mu sync.Mutex
 	var received []string
 
+	done := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -60,8 +61,8 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 		}
 		conn.WriteJSON(msg)
 
-		// Keep connection alive briefly
-		time.Sleep(200 * time.Millisecond)
+		// Keep connection alive until test signals done
+		<-done
 	}))
 	defer server.Close()
 
@@ -92,12 +93,14 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 
 	err = ws.Close()
 	assert.NoError(t, err)
+	close(done)
 }
 
 func TestWSClient_SubscribeMarket(t *testing.T) {
 	var mu sync.Mutex
 	var receivedCmd wsCommand
 
+	done := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -111,7 +114,7 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 		mu.Lock()
 		receivedCmd = cmd
 		mu.Unlock()
-		time.Sleep(200 * time.Millisecond)
+		<-done
 	}))
 	defer server.Close()
 
@@ -135,12 +138,14 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 	mu.Unlock()
 
 	ws.Close()
+	close(done)
 }
 
 func TestWSClient_SubscribeUser(t *testing.T) {
 	var mu sync.Mutex
 	var receivedCmd wsCommand
 
+	done := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -152,7 +157,7 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 		mu.Lock()
 		receivedCmd = cmd
 		mu.Unlock()
-		time.Sleep(200 * time.Millisecond)
+		<-done
 	}))
 	defer server.Close()
 
@@ -178,6 +183,7 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 	mu.Unlock()
 
 	ws.Close()
+	close(done)
 }
 
 func TestWSClient_SubscribeMarket_NotConnected(t *testing.T) {
