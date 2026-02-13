@@ -2,6 +2,7 @@
 package news
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -40,7 +41,11 @@ func FetchNews(query string, maxResults int) ([]Article, error) {
 	u := fmt.Sprintf("https://news.google.com/rss/search?q=%s&hl=en-US&gl=US&ceid=US:en", encoded)
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(u)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch news: %w", err)
 	}

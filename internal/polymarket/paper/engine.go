@@ -193,14 +193,14 @@ func (e *Engine) Reset() error {
 // Save persists the portfolio to disk.
 func (e *Engine) Save() error {
 	dir := filepath.Dir(e.FilePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(e.Portfolio, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(e.FilePath, data, 0o644)
+	return os.WriteFile(e.FilePath, data, 0o600)
 }
 
 // Load loads the portfolio from disk.

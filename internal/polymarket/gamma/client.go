@@ -2,6 +2,7 @@
 package gamma
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -120,7 +121,11 @@ func (c *Client) FetchMarkets(limit, offset int) ([]Market, error) {
 	q.Set("closed", "false")
 	u.RawQuery = q.Encode()
 
-	resp, err := c.HTTPClient.Get(u.String())
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch markets: %w", err)
 	}
@@ -167,7 +172,11 @@ func (c *Client) FetchAllMarkets() ([]Market, error) {
 // FetchMarketByID fetches a single market by condition ID or slug.
 func (c *Client) FetchMarketByID(id string) (*Market, error) {
 	u := c.BaseURL + "/markets/" + id
-	resp, err := c.HTTPClient.Get(u)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch market: %w", err)
 	}
@@ -193,7 +202,11 @@ func (c *Client) fetchMarketByConditionID(conditionID string) (*Market, error) {
 	q.Set("limit", "1")
 	u.RawQuery = q.Encode()
 
-	resp, err := c.HTTPClient.Get(u.String())
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch by condition: %w", err)
 	}
