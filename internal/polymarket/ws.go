@@ -99,6 +99,7 @@ func (ws *WSClient) Connect(ctx context.Context) error {
 	ws.conn = conn
 	ws.mu.Unlock()
 	ws.reconnects = 0
+	ws.mu.Unlock()
 
 	// Re-subscribe existing channels
 	ws.mu.Lock()
