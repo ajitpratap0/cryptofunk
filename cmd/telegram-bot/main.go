@@ -39,8 +39,9 @@ func main() {
 		log.Fatal().Msg("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
 
-	// Initialize database connection
-	ctx := context.Background()
+	// Initialize with signal-aware context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	database, err := db.New(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
@@ -59,7 +60,7 @@ func main() {
 	}
 
 	// Create bot instance
-	bot, err := telegram.NewBot(botConfig, database.Pool())
+	bot, err := telegram.NewBotWithContext(ctx, botConfig, database.Pool())
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create bot")
 	}

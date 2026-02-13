@@ -179,6 +179,23 @@ func LoadAgentConfig(configPath string) (*AgentConfig, error) {
 		return nil, fmt.Errorf("failed to unmarshal agent config: %w", err)
 	}
 
+	// Fill in empty versions with build-time Version
+	for k, a := range cfg.AnalysisAgents {
+		if a.Version == "" {
+			a.Version = Version
+			cfg.AnalysisAgents[k] = a
+		}
+	}
+	for k, a := range cfg.StrategyAgents {
+		if a.Version == "" {
+			a.Version = Version
+			cfg.StrategyAgents[k] = a
+		}
+	}
+	if cfg.RiskAgent.Version == "" {
+		cfg.RiskAgent.Version = Version
+	}
+
 	return &cfg, nil
 }
 
@@ -194,49 +211,49 @@ func setAgentDefaults(v *viper.Viper) {
 	v.SetDefault("analysis_agents.technical.enabled", true)
 	v.SetDefault("analysis_agents.technical.name", "technical-agent")
 	v.SetDefault("analysis_agents.technical.type", "analysis")
-	v.SetDefault("analysis_agents.technical.version", "1.0.0")
+	v.SetDefault("analysis_agents.technical.version", Version)
 	v.SetDefault("analysis_agents.technical.step_interval", "30s")
 
 	// Analysis agents - Orderbook
 	v.SetDefault("analysis_agents.orderbook.enabled", false)
 	v.SetDefault("analysis_agents.orderbook.name", "orderbook-agent")
 	v.SetDefault("analysis_agents.orderbook.type", "analysis")
-	v.SetDefault("analysis_agents.orderbook.version", "1.0.0")
+	v.SetDefault("analysis_agents.orderbook.version", Version)
 	v.SetDefault("analysis_agents.orderbook.step_interval", "10s")
 
 	// Analysis agents - Sentiment
 	v.SetDefault("analysis_agents.sentiment.enabled", false)
 	v.SetDefault("analysis_agents.sentiment.name", "sentiment-agent")
 	v.SetDefault("analysis_agents.sentiment.type", "analysis")
-	v.SetDefault("analysis_agents.sentiment.version", "1.0.0")
+	v.SetDefault("analysis_agents.sentiment.version", Version)
 	v.SetDefault("analysis_agents.sentiment.step_interval", "5m")
 
 	// Strategy agents - Trend Following
 	v.SetDefault("strategy_agents.trend_following.enabled", true)
 	v.SetDefault("strategy_agents.trend_following.name", "trend-agent")
 	v.SetDefault("strategy_agents.trend_following.type", "strategy")
-	v.SetDefault("strategy_agents.trend_following.version", "1.0.0")
+	v.SetDefault("strategy_agents.trend_following.version", Version)
 	v.SetDefault("strategy_agents.trend_following.step_interval", "1m")
 
 	// Strategy agents - Mean Reversion
 	v.SetDefault("strategy_agents.mean_reversion.enabled", false)
 	v.SetDefault("strategy_agents.mean_reversion.name", "reversion-agent")
 	v.SetDefault("strategy_agents.mean_reversion.type", "strategy")
-	v.SetDefault("strategy_agents.mean_reversion.version", "1.0.0")
+	v.SetDefault("strategy_agents.mean_reversion.version", Version)
 	v.SetDefault("strategy_agents.mean_reversion.step_interval", "1m")
 
 	// Strategy agents - Arbitrage
 	v.SetDefault("strategy_agents.arbitrage.enabled", false)
 	v.SetDefault("strategy_agents.arbitrage.name", "arbitrage-agent")
 	v.SetDefault("strategy_agents.arbitrage.type", "strategy")
-	v.SetDefault("strategy_agents.arbitrage.version", "1.0.0")
+	v.SetDefault("strategy_agents.arbitrage.version", Version)
 	v.SetDefault("strategy_agents.arbitrage.step_interval", "5s")
 
 	// Risk agent
 	v.SetDefault("risk_agent.enabled", true)
 	v.SetDefault("risk_agent.name", "risk-agent")
 	v.SetDefault("risk_agent.type", "risk")
-	v.SetDefault("risk_agent.version", "1.0.0")
+	v.SetDefault("risk_agent.version", Version)
 	v.SetDefault("risk_agent.step_interval", "10s")
 
 	// Orchestration - Voting

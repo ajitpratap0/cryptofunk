@@ -29,7 +29,8 @@ type ConsensusManager struct {
 	messageBus *MessageBus
 	config     *ConsensusConfig
 	sessions   map[uuid.UUID]*ConsensusSession
-	timeoutSem chan struct{} // Semaphore for limiting concurrent timeout handlers
+	timeoutSem chan struct{}   // Semaphore for limiting concurrent timeout handlers
+	ctx        context.Context // Parent context for background operations
 	mu         sync.RWMutex
 }
 
@@ -146,7 +147,13 @@ func NewConsensusManagerWithConfig(blackboard *Blackboard, messageBus *MessageBu
 		config:     config,
 		sessions:   make(map[uuid.UUID]*ConsensusSession),
 		timeoutSem: make(chan struct{}, config.MaxConcurrentTimeouts),
+		ctx:        context.Background(), // Default; callers should use SetContext
 	}
+}
+
+// SetContext sets the parent context for background operations
+func (cm *ConsensusManager) SetContext(ctx context.Context) {
+	cm.ctx = ctx
 }
 
 // StartDelphiConsensus initiates a Delphi method consensus session
@@ -381,8 +388,8 @@ func (cm *ConsensusManager) finalizeDelphiConsensus(session *ConsensusSession, f
 	msg.WithMetadata("consensus_session_id", session.ID.String())
 	msg.WithMetadata("consensus_method", string(ConsensusDelphi))
 
-	// Use 5-second timeout for blackboard post
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Use 5-second timeout for blackboard post, derived from parent context
+	ctx, cancel := context.WithTimeout(cm.ctx, 5*time.Second)
 	defer cancel()
 
 	if err := cm.blackboard.Post(ctx, msg); err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 )
 
@@ -21,6 +22,7 @@ type HTTPServer struct {
 	server       *http.Server
 	orchestrator *orchestrator.Orchestrator
 	port         int
+	startTime    time.Time
 }
 
 // HealthCheckResult represents the result of a single health check
@@ -73,6 +75,7 @@ func NewHTTPServer(port int, orch *orchestrator.Orchestrator) *HTTPServer {
 	return &HTTPServer{
 		orchestrator: orch,
 		port:         port,
+		startTime:    time.Now(),
 	}
 }
 
@@ -136,10 +139,24 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Gather NATS and agent info for health response
+	natsStatus := "unknown"
+	if conn := h.orchestrator.GetNATSConnection(); conn != nil {
+		if conn.IsConnected() {
+			natsStatus = "connected"
+		} else {
+			natsStatus = "disconnected"
+		}
+	}
+
 	response := map[string]interface{}{
-		"status":    "healthy",
-		"timestamp": time.Now().Unix(),
-		"service":   "orchestrator",
+		"status":        "healthy",
+		"timestamp":     time.Now().Unix(),
+		"service":       "orchestrator",
+		"version":       config.Version,
+		"uptime_sec":    int(time.Since(h.startTime).Seconds()),
+		"nats":          natsStatus,
+		"active_agents": h.orchestrator.GetActiveAgentCount(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -181,7 +198,7 @@ func (h *HTTPServer) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Perform comprehensive health checks
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	checks := h.runHealthChecks(ctx)

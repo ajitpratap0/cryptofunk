@@ -68,7 +68,7 @@ func (c *CachedCoinGeckoClient) GetPrice(ctx context.Context, symbol string, vsC
 		}
 
 		// Store in cache (synchronously within singleflight to ensure it's cached before other goroutines proceed)
-		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cacheCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 
 		data, marshalErr := json.Marshal(result)
@@ -142,7 +142,7 @@ func (c *CachedCoinGeckoClient) GetMarketChart(ctx context.Context, symbol strin
 		}
 
 		// Store in cache (synchronously within singleflight)
-		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cacheCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 
 		data, marshalErr := json.Marshal(result)
@@ -220,7 +220,7 @@ func (c *CachedCoinGeckoClient) GetCoinInfo(ctx context.Context, coinID string) 
 		}
 
 		// Store in cache (synchronously within singleflight)
-		cacheCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cacheCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 
 		data, marshalErr := json.Marshal(result)

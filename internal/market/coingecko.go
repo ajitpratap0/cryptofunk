@@ -13,6 +13,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 const (
@@ -50,6 +52,7 @@ type CoinGeckoClientOptions struct {
 	RetryDelay         time.Duration    // Initial retry delay with exponential backoff (default: 1s)
 	EnableRateLimiting bool             // Enable rate limiting (recommended: true)
 	Cache              *RedisPriceCache // Optional Redis cache for price data (default: nil)
+	Ctx                context.Context  // Optional parent context for initial connection (default: context.Background())
 }
 
 // NewCoinGeckoClient creates a new CoinGecko MCP client with rate limiting and retry logic.
@@ -93,7 +96,7 @@ func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClien
 	// Create MCP client
 	impl := &mcp.Implementation{
 		Name:    "cryptofunk-coingecko-client",
-		Version: "1.0.0",
+		Version: config.Version,
 	}
 
 	mcpClient := mcp.NewClient(impl, nil)
@@ -134,7 +137,11 @@ func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClien
 	}
 
 	// Connect to CoinGecko MCP server using SSE transport
-	if err := client.connect(context.Background(), opts.MCPURL, opts.APIKey); err != nil {
+	connectCtx := opts.Ctx
+	if connectCtx == nil {
+		connectCtx = context.Background()
+	}
+	if err := client.connect(connectCtx, opts.MCPURL, opts.APIKey); err != nil {
 		return nil, fmt.Errorf("failed to connect to MCP server: %w", err)
 	}
 

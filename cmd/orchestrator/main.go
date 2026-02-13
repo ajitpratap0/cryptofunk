@@ -43,9 +43,10 @@ func main() {
 	}
 
 	// Perform startup validation (database connectivity, etc.)
-	ctx := context.Background()
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer startupCancel()
 	validator := config.NewValidator(mainCfg, config.DefaultValidatorOptions())
-	if err := validator.ValidateStartup(ctx); err != nil {
+	if err := validator.ValidateStartup(startupCtx); err != nil {
 		log.Fatal().Err(err).Msg("Startup validation failed. Please fix the errors above and try again.")
 	}
 
@@ -259,7 +260,8 @@ func verifyAPIKeys() int {
 		Timeout:            10 * time.Second, // Longer timeout for API calls
 	}
 
-	ctx := context.Background()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer ctxCancel()
 	validator := config.NewValidator(cfg, validatorOptions)
 
 	// Run validation

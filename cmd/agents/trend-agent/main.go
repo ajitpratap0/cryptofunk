@@ -1300,8 +1300,9 @@ func main() {
 		Float64("adx_threshold", agent.adxThreshold).
 		Msg("Starting trend following agent")
 
-	// Initialize agent
-	ctx := context.Background()
+	// Initialize agent with cancellable context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
 	}
@@ -1341,7 +1342,7 @@ func main() {
 
 	// Cancel main context to stop agent operations
 	log.Debug().Msg("Cancelling main context to stop agent operations")
-	// Note: ctx is background context here, agent.Shutdown will handle internal context cancellation
+	cancel()
 
 	// Stop heartbeat publishing first (before NATS drains)
 	log.Debug().Msg("Stopping heartbeat publisher")

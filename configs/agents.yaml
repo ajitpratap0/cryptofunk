@@ -28,7 +28,6 @@ analysis_agents:
     enabled: true
     name: "technical-agent"
     type: "analysis"
-    version: "1.0.0"
 
     # MCP Server Connections
     mcp_servers:
@@ -90,7 +89,6 @@ analysis_agents:
     enabled: true  # Phase 3.3 - orderbook analysis
     name: "orderbook-agent"
     type: "analysis"
-    version: "1.0.0"
 
     mcp_servers:
       - name: "coingecko"
@@ -116,7 +114,6 @@ analysis_agents:
     enabled: true  # Phase 3.4 - Sentiment Analysis Agent
     name: "sentiment-agent"
     type: "analysis"
-    version: "1.0.0"
 
     mcp_servers:
       - name: "coingecko"
@@ -176,7 +173,6 @@ strategy_agents:
     enabled: true
     name: "trend-follower"
     type: "strategy"
-    version: "1.0.0"
 
     mcp_servers:
       - name: "coingecko"
@@ -225,7 +221,6 @@ strategy_agents:
     enabled: true  # Phase 3.6 - mean reversion strategy
     name: "reversion-agent"
     type: "strategy"
-    version: "1.0.0"
 
     mcp_servers:
       - name: "coingecko"
@@ -263,7 +258,6 @@ strategy_agents:
     enabled: true  # Phase 3.7 - arbitrage strategy
     name: "arbitrage-agent"
     type: "strategy"
-    version: "1.0.0"
 
     mcp_servers:
       - name: "coingecko"
@@ -316,7 +310,6 @@ risk_agent:
   enabled: true
   name: "risk-agent"
   type: "risk"
-  version: "1.0.0"
 
   # Agent identification (required by RiskAgentConfig)
   agent_name: "risk-agent"

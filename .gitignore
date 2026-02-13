@@ -95,3 +95,5 @@ checkpoints/
 # Certificate files (generated for local development)
 certs/
 .task/
+technical-indicators
+technical-indicators

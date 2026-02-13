@@ -1850,7 +1850,7 @@ func main() {
 		Msg("Starting technical analysis agent")
 
 	// Initialize agent with cancellable context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	if err := agent.Initialize(ctx); err != nil {

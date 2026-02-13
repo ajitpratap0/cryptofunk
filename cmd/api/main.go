@@ -38,6 +38,7 @@ type APIServer struct {
 	rateLimiter        *RateLimiterMiddleware
 	apiKeyStore        *api.APIKeyStore
 	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
+	ctx                context.Context         // Server lifecycle context for background workers
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -77,8 +78,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize database
-	ctx := context.Background()
+	// Initialize database with signal-derived context
+	ctx, ctxCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer ctxCancel()
 	database, err := db.New(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
@@ -102,6 +104,7 @@ func main() {
 		hub:                hub,
 		port:               getPort(),
 		orchestratorClient: defaultOrchestratorClient,
+		ctx:                ctx,
 	}
 
 	// Setup middleware
@@ -328,7 +331,7 @@ func (s *APIServer) setupRoutes() {
 		s.keyManager = keysHandler.GetKeyManager()
 
 		// Start the expired key cleanup worker (runs every hour)
-		s.keyManager.StartCleanupWorker(context.Background(), time.Hour)
+		s.keyManager.StartCleanupWorker(s.ctx, time.Hour)
 
 		keysHandler.RegisterRoutesWithRateLimiter(
 			v1,
@@ -1582,17 +1585,25 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		req, err := http.NewRequestWithContext(context.Background(), "POST", url, nil)
+		parentCtx := s.ctx
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
+		reqCtx, reqCancel := context.WithTimeout(parentCtx, 10*time.Second)
+		req, err := http.NewRequestWithContext(reqCtx, "POST", url, nil)
 		if err != nil {
+			reqCancel()
 			lastErr = err
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := s.orchestratorClient.Do(req)
 		if err == nil {
+			reqCancel()
 			return resp, nil
 		}
 
+		reqCancel()
 		lastErr = err
 		log.Warn().
 			Err(err).

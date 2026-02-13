@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+
+	appconfig "github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 // HierarchyManager manages hierarchical agent structures
@@ -192,7 +194,7 @@ func (hm *HierarchyManager) CreateMetaAgent(ctx context.Context, name, agentType
 	registration := &AgentRegistration{
 		Name:         name,
 		Type:         agentType,
-		Version:      "1.0.0",
+		Version:      appconfig.Version,
 		Status:       AgentStatusActive,
 		Capabilities: []string{"coordination", "aggregation", "delegation"},
 		State: &AgentState{

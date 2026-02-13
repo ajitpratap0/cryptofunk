@@ -288,7 +288,7 @@ func main() {
 		Msg("Configuration loaded")
 
 	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Connect to database

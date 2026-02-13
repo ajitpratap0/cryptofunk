@@ -21,6 +21,7 @@ type BinanceExchange struct {
 	client *binance.Client
 	db     *db.DB
 	mu     sync.RWMutex
+	ctx    context.Context // Parent context for background operations (WebSocket callbacks etc.)
 
 	// Order tracking
 	orders                  map[string]*Order // Internal UUID -> Order
@@ -73,6 +74,7 @@ func NewBinanceExchange(config BinanceConfig, database *db.DB) (*BinanceExchange
 		wsStopChan:              make(chan struct{}),
 		wsErrChan:               make(chan error, 10),
 		positionMgr:             NewPositionManager(database),
+		ctx:                     context.Background(),
 	}
 
 	return exchange, nil
@@ -617,6 +619,8 @@ func (b *BinanceExchange) StartUserDataStream(ctx context.Context) error {
 		log.Info().Msg("User data stream already connected")
 		return nil
 	}
+	// Store parent context for use in WebSocket callbacks
+	b.ctx = ctx
 	// Set wsConnected immediately to prevent race
 	b.wsConnected = true
 	// Recreate stop channel for this new stream
@@ -694,7 +698,7 @@ func (b *BinanceExchange) runUserDataStream(ctx context.Context, listenKey strin
 		log.Error().Err(err).Msg("WebSocket error")
 
 		// Send alert for WebSocket errors
-		alerts.AlertConnectionError(context.Background(), "Binance WebSocket", err)
+		alerts.AlertConnectionError(b.ctx, "Binance WebSocket", err)
 
 		select {
 		case b.wsErrChan <- err:
@@ -863,7 +867,7 @@ func (b *BinanceExchange) handleOrderUpdate(event *binance.WsUserDataEvent) {
 	// Update database
 	if b.db != nil {
 		dbOrder := b.convertToDBOrder(order)
-		ctx := context.Background()
+		ctx := b.ctx
 		err := b.db.UpdateOrderStatus(
 			ctx,
 			dbOrder.ID,
@@ -901,7 +905,7 @@ func (b *BinanceExchange) handleOrderFilled(order *Order, orderUpdate *binance.W
 
 		// Update positions through PositionManager
 		if b.positionMgr != nil && b.currentSessionID != nil {
-			ctx := context.Background()
+			ctx := b.ctx
 			err := b.positionMgr.OnOrderFilled(ctx, order, []Fill{fill})
 			if err != nil {
 				log.Error().
