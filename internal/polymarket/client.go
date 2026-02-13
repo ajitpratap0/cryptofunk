@@ -34,6 +34,8 @@ const (
 	maxRequestsPerSecond = 10
 )
 
+//nolint:gosec // G101 false positive - these are HTTP header key constants, not credentials
+
 // Header keys
 const (
 	headerPolyAddress    = "POLY_ADDRESS"
@@ -50,7 +52,7 @@ type Client struct {
 	gammaHost string
 	chainID   int
 	signer    *Signer
-	creds     *ApiCreds
+	creds     *APICreds
 	funder    string
 
 	httpClient  *http.Client
@@ -78,7 +80,7 @@ func WithChainID(id int) ClientOption {
 }
 
 // WithCreds sets L2 API credentials
-func WithCreds(creds *ApiCreds) ClientOption {
+func WithCreds(creds *APICreds) ClientOption {
 	return func(c *Client) { c.creds = creds }
 }
 
@@ -167,7 +169,7 @@ func (c *Client) l2Headers(method, path, body string) (map[string]string, error)
 		headerPolyAddress:    c.signer.Address().Hex(),
 		headerPolySignature:  hmacSig,
 		headerPolyTimestamp:  strconv.FormatInt(ts, 10),
-		headerPolyAPIKey:     c.creds.ApiKey,
+		headerPolyAPIKey:     c.creds.APIKey,
 		headerPolyPassphrase: c.creds.Passphrase,
 	}, nil
 }
@@ -240,8 +242,8 @@ func (c *Client) delete(ctx context.Context, url string, payload interface{}, he
 
 // --- API Credentials ---
 
-// CreateApiKey creates a new CLOB API key (L1 auth)
-func (c *Client) CreateApiKey(ctx context.Context) (*ApiCreds, error) {
+// CreateAPIKey creates a new CLOB API key (L1 auth)
+func (c *Client) CreateAPIKey(ctx context.Context) (*APICreds, error) {
 	headers, err := c.l1Headers()
 	if err != nil {
 		return nil, err
@@ -250,15 +252,15 @@ func (c *Client) CreateApiKey(ctx context.Context) (*ApiCreds, error) {
 	if err != nil {
 		return nil, err
 	}
-	var creds ApiCreds
+	var creds APICreds
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, err
 	}
 	return &creds, nil
 }
 
-// DeriveApiKey derives existing API credentials (L1 auth)
-func (c *Client) DeriveApiKey(ctx context.Context) (*ApiCreds, error) {
+// DeriveAPIKey derives existing API credentials (L1 auth)
+func (c *Client) DeriveAPIKey(ctx context.Context) (*APICreds, error) {
 	headers, err := c.l1Headers()
 	if err != nil {
 		return nil, err
@@ -267,24 +269,24 @@ func (c *Client) DeriveApiKey(ctx context.Context) (*ApiCreds, error) {
 	if err != nil {
 		return nil, err
 	}
-	var creds ApiCreds
+	var creds APICreds
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, err
 	}
 	return &creds, nil
 }
 
-// CreateOrDeriveApiCreds creates or derives API credentials
-func (c *Client) CreateOrDeriveApiCreds(ctx context.Context) (*ApiCreds, error) {
-	creds, err := c.CreateApiKey(ctx)
+// CreateOrDeriveAPICreds creates or derives API credentials
+func (c *Client) CreateOrDeriveAPICreds(ctx context.Context) (*APICreds, error) {
+	creds, err := c.CreateAPIKey(ctx)
 	if err != nil {
-		return c.DeriveApiKey(ctx)
+		return c.DeriveAPIKey(ctx)
 	}
 	return creds, nil
 }
 
-// SetApiCreds sets the L2 credentials
-func (c *Client) SetApiCreds(creds *ApiCreds) {
+// SetAPICreds sets the L2 credentials
+func (c *Client) SetAPICreds(creds *APICreds) {
 	c.creds = creds
 }
 

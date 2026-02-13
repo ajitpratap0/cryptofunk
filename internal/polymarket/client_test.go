@@ -192,8 +192,8 @@ func TestGetOpenOrdersWithAuth(t *testing.T) {
 
 	client, err := NewClient(testPrivateKey,
 		WithClobHost(server.URL),
-		WithCreds(&ApiCreds{
-			ApiKey:     "testkey",
+		WithCreds(&APICreds{
+			APIKey:     "testkey",
 			Secret:     "dGVzdHNlY3JldA==",
 			Passphrase: "testpass",
 		}),
@@ -218,8 +218,8 @@ func TestCancelOrder(t *testing.T) {
 
 	client, err := NewClient(testPrivateKey,
 		WithClobHost(server.URL),
-		WithCreds(&ApiCreds{
-			ApiKey:     "testkey",
+		WithCreds(&APICreds{
+			APIKey:     "testkey",
 			Secret:     "dGVzdHNlY3JldA==",
 			Passphrase: "testpass",
 		}),
