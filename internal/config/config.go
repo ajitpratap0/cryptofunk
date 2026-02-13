@@ -3,6 +3,8 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -216,6 +218,7 @@ func Load(configPath string) (*Config, error) {
 	// Enable environment variable overrides
 	v.AutomaticEnv()
 	v.SetEnvPrefix("CRYPTOFUNK")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Set defaults
 	setDefaults(v)
@@ -232,6 +235,13 @@ func Load(configPath string) (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Allow EXCHANGE_MODE env var as a convenient alias for trading.mode
+	if em := os.Getenv("EXCHANGE_MODE"); em != "" {
+		mode := strings.ToLower(em)
+		log.Info().Str("exchange_mode", mode).Msg("Overriding trading mode from EXCHANGE_MODE env var")
+		cfg.Trading.Mode = mode
 	}
 
 	// Load secrets from Vault if enabled (with fallback to env vars)

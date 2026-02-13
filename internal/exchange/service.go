@@ -19,6 +19,11 @@ type TradingMode string
 const (
 	TradingModePaper TradingMode = "paper"
 	TradingModeLive  TradingMode = "live"
+
+	// ExchangeNamePaper is the default exchange name for paper trading
+	ExchangeNamePaper = "PAPER"
+	// ExchangeNameBinance is the default exchange name for Binance
+	ExchangeNameBinance = "binance"
 )
 
 // Service provides order execution functionality
@@ -26,6 +31,7 @@ type Service struct {
 	exchange        Exchange // Interface - can be MockExchange or BinanceExchange
 	db              *db.DB
 	mode            TradingMode
+	exchangeName    string // Exchange name for records (e.g., "PAPER", "binance")
 	positionManager *PositionManager
 	circuitBreaker  *risk.CircuitBreakerManager
 }
@@ -33,6 +39,7 @@ type Service struct {
 // ServiceConfig contains configuration for the exchange service
 type ServiceConfig struct {
 	Mode           TradingMode
+	ExchangeName   string // Exchange name for records (default: "PAPER" for paper, "binance" for live)
 	BinanceAPIKey  string
 	BinanceSecret  string
 	BinanceTestnet bool
@@ -66,9 +73,21 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 		log.Info().Msg("Exchange service initialized (PAPER trading)")
 	}
 
+	// Determine exchange name
+	exchangeName := config.ExchangeName
+	if exchangeName == "" {
+		switch config.Mode {
+		case TradingModeLive:
+			exchangeName = ExchangeNameBinance
+		default:
+			exchangeName = ExchangeNamePaper
+		}
+	}
+
 	// Create position manager with configured fee rate (average of maker/taker)
 	avgFeeRate := (config.Fees.Maker + config.Fees.Taker) / 2.0
 	positionManager := NewPositionManagerWithFees(database, avgFeeRate)
+	positionManager.SetExchangeName(exchangeName)
 
 	// Create circuit breaker manager
 	circuitBreaker := risk.NewCircuitBreakerManager()
@@ -77,6 +96,7 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 		exchange:        exchange,
 		db:              database,
 		mode:            config.Mode,
+		exchangeName:    exchangeName,
 		positionManager: positionManager,
 		circuitBreaker:  circuitBreaker,
 	}, nil
@@ -454,7 +474,7 @@ func (s *Service) StartSession(ctx context.Context, args map[string]interface{})
 	session := &db.TradingSession{
 		Mode:           db.TradingModePaper,
 		Symbol:         symbol,
-		Exchange:       "PAPER",
+		Exchange:       s.exchangeName,
 		StartedAt:      time.Now(),
 		InitialCapital: initialCapital,
 		Config:         config,

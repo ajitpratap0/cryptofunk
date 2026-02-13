@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
@@ -93,7 +94,7 @@ func NewCoinGeckoClientWithOptions(opts CoinGeckoClientOptions) (*CoinGeckoClien
 	// Create MCP client
 	impl := &mcp.Implementation{
 		Name:    "cryptofunk-coingecko-client",
-		Version: "1.0.0",
+		Version: config.Version,
 	}
 
 	mcpClient := mcp.NewClient(impl, nil)

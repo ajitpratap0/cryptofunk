@@ -202,7 +202,7 @@ func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
 			},
 			"serverInfo": map[string]string{
 				"name":    serverName,
-				"version": "1.0.0",
+				"version": config.Version,
 			},
 		}
 	case "tools/list":

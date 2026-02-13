@@ -418,7 +418,7 @@ func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
 		PositionID:            nil,                // Will be set by position tracking layer
 		ExchangeOrderID:       exchangeOrderID,
 		Symbol:                order.Symbol,
-		Exchange:              "PAPER", // Paper trading exchange
+		Exchange:              ExchangeNamePaper, // Paper trading exchange
 		Side:                  db.ConvertOrderSide(string(order.Side)),
 		Type:                  db.ConvertOrderType(string(order.Type)),
 		Status:                db.ConvertOrderStatus(string(order.Status)),
@@ -489,7 +489,7 @@ func (m *MockExchange) persistTradeInDB(ctx context.Context, orderID string, fil
 		OrderID:         orderUUID,
 		ExchangeTradeID: nil,
 		Symbol:          order.Symbol,
-		Exchange:        "PAPER",
+		Exchange:        ExchangeNamePaper,
 		Side:            db.ConvertOrderSide(string(order.Side)),
 		Price:           fill.Price,
 		Quantity:        fill.Quantity,

@@ -31,7 +31,7 @@ func TestAnalysisAgentConfig(t *testing.T) {
 	assert.True(t, technicalAgent.Enabled)
 	assert.Equal(t, "technical-agent", technicalAgent.Name)
 	assert.Equal(t, "analysis", technicalAgent.Type)
-	assert.Equal(t, "1.0.0", technicalAgent.Version)
+	assert.Equal(t, Version, technicalAgent.Version)
 	assert.Equal(t, "30s", technicalAgent.StepInterval)
 	assert.NotNil(t, technicalAgent.Config)
 
@@ -68,7 +68,7 @@ func TestStrategyAgentConfig(t *testing.T) {
 	assert.True(t, trendAgent.Enabled)
 	assert.Equal(t, "trend-follower", trendAgent.Name)
 	assert.Equal(t, "strategy", trendAgent.Type)
-	assert.Equal(t, "1.0.0", trendAgent.Version)
+	assert.Equal(t, Version, trendAgent.Version)
 	assert.Equal(t, "5m", trendAgent.StepInterval)
 	assert.NotNil(t, trendAgent.Config)
 
@@ -104,7 +104,7 @@ func TestRiskAgentConfig(t *testing.T) {
 	assert.True(t, riskAgent.Enabled)
 	assert.Equal(t, "risk-agent", riskAgent.Name)
 	assert.Equal(t, "risk", riskAgent.Type)
-	assert.Equal(t, "1.0.0", riskAgent.Version)
+	assert.Equal(t, Version, riskAgent.Version)
 	assert.Equal(t, "10s", riskAgent.StepInterval)
 	assert.NotNil(t, riskAgent.Config)
 
