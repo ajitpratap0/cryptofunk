@@ -22,7 +22,8 @@ func TestUpdateLastInteraction(t *testing.T) {
 
 	// Create a bot with the mock pool interface converted properly
 	bot := &Bot{
-		db: mock,
+		db:  mock,
+		ctx: context.Background(),
 	}
 
 	telegramID := int64(123456789)

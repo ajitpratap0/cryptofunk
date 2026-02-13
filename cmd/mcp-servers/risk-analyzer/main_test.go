@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +36,7 @@ func TestRiskAnalyzerServer_Initialize(t *testing.T) {
 	serverInfo, ok := result["serverInfo"].(map[string]string)
 	require.True(t, ok)
 	assert.Equal(t, "risk-analyzer", serverInfo["name"])
-	assert.Equal(t, "1.0.0", serverInfo["version"])
+	assert.Equal(t, config.Version, serverInfo["version"])
 }
 
 func TestRiskAnalyzerServer_ListTools(t *testing.T) {

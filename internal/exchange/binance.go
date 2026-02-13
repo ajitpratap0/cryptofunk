@@ -74,6 +74,7 @@ func NewBinanceExchange(config BinanceConfig, database *db.DB) (*BinanceExchange
 		wsStopChan:              make(chan struct{}),
 		wsErrChan:               make(chan error, 10),
 		positionMgr:             NewPositionManager(database),
+		ctx:                     context.Background(),
 	}
 
 	return exchange, nil

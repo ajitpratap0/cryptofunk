@@ -46,6 +46,7 @@ func NewPositionManagerWithFees(database *db.DB, feeRate float64) *PositionManag
 		openPositions: make(map[string]*db.Position),
 		feeRate:       feeRate,
 		exchangeName:  ExchangeNamePaper,
+		ctx:           context.Background(),
 	}
 }
 

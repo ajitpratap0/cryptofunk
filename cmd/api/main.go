@@ -1585,19 +1585,25 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 				Msg("Retrying orchestrator call")
 		}
 
-		reqCtx, reqCancel := context.WithTimeout(s.ctx, 10*time.Second)
-		defer reqCancel()
+		parentCtx := s.ctx
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
+		reqCtx, reqCancel := context.WithTimeout(parentCtx, 10*time.Second)
 		req, err := http.NewRequestWithContext(reqCtx, "POST", url, nil)
 		if err != nil {
+			reqCancel()
 			lastErr = err
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := s.orchestratorClient.Do(req)
 		if err == nil {
+			reqCancel()
 			return resp, nil
 		}
 
+		reqCancel()
 		lastErr = err
 		log.Warn().
 			Err(err).

@@ -179,6 +179,23 @@ func LoadAgentConfig(configPath string) (*AgentConfig, error) {
 		return nil, fmt.Errorf("failed to unmarshal agent config: %w", err)
 	}
 
+	// Fill in empty versions with build-time Version
+	for k, a := range cfg.AnalysisAgents {
+		if a.Version == "" {
+			a.Version = Version
+			cfg.AnalysisAgents[k] = a
+		}
+	}
+	for k, a := range cfg.StrategyAgents {
+		if a.Version == "" {
+			a.Version = Version
+			cfg.StrategyAgents[k] = a
+		}
+	}
+	if cfg.RiskAgent.Version == "" {
+		cfg.RiskAgent.Version = Version
+	}
+
 	return &cfg, nil
 }
 
