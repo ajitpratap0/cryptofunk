@@ -11,21 +11,21 @@ import (
 
 // Limits holds all configurable safety limits.
 type Limits struct {
-	MaxDailyDrawdown    float64 `json:"max_daily_drawdown" yaml:"max_daily_drawdown"`
-	MaxPositionSize     float64 `json:"max_position_size" yaml:"max_position_size"`
-	MaxTotalExposure    float64 `json:"max_total_exposure" yaml:"max_total_exposure"`
-	MaxConsecutiveLosses int    `json:"max_consecutive_losses" yaml:"max_consecutive_losses"`
-	MaxDailyTrades      int     `json:"max_daily_trades" yaml:"max_daily_trades"`
+	MaxDailyDrawdown     float64 `json:"max_daily_drawdown" yaml:"max_daily_drawdown"`
+	MaxPositionSize      float64 `json:"max_position_size" yaml:"max_position_size"`
+	MaxTotalExposure     float64 `json:"max_total_exposure" yaml:"max_total_exposure"`
+	MaxConsecutiveLosses int     `json:"max_consecutive_losses" yaml:"max_consecutive_losses"`
+	MaxDailyTrades       int     `json:"max_daily_trades" yaml:"max_daily_trades"`
 }
 
 // DefaultLimits returns the default safety limits.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxDailyDrawdown:    0.05,
-		MaxPositionSize:     0.10,
-		MaxTotalExposure:    0.50,
+		MaxDailyDrawdown:     0.05,
+		MaxPositionSize:      0.10,
+		MaxTotalExposure:     0.50,
 		MaxConsecutiveLosses: 5,
-		MaxDailyTrades:      50,
+		MaxDailyTrades:       50,
 	}
 }
 
@@ -78,12 +78,12 @@ func (lc *LimitsConfig) SetAgentLimits(agent string, l Limits) {
 // safetyYAML mirrors the YAML config structure.
 type safetyYAML struct {
 	Safety struct {
-		MaxDailyDrawdown    float64                    `yaml:"max_daily_drawdown"`
-		MaxPositionSize     float64                    `yaml:"max_position_size"`
-		MaxTotalExposure    float64                    `yaml:"max_total_exposure"`
-		MaxConsecutiveLosses int                       `yaml:"max_consecutive_losses"`
-		MaxDailyTrades      int                        `yaml:"max_daily_trades"`
-		AgentLimits         map[string]Limits          `yaml:"agent_limits"`
+		MaxDailyDrawdown     float64           `yaml:"max_daily_drawdown"`
+		MaxPositionSize      float64           `yaml:"max_position_size"`
+		MaxTotalExposure     float64           `yaml:"max_total_exposure"`
+		MaxConsecutiveLosses int               `yaml:"max_consecutive_losses"`
+		MaxDailyTrades       int               `yaml:"max_daily_trades"`
+		AgentLimits          map[string]Limits `yaml:"agent_limits"`
 	} `yaml:"safety"`
 }
 
