@@ -10,13 +10,15 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	mcpserver "github.com/ajitpratap0/cryptofunk/internal/mcp"
 )
 
 const (
-	serverName    = "risk-analyzer"
-	serverVersion = "1.0.0"
+	serverName = "risk-analyzer"
 )
+
+var serverVersion = config.Version
 
 func main() {
 	// Setup logging to stderr (stdout is reserved for MCP protocol)

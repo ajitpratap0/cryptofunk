@@ -75,6 +75,26 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 	if jResp.Error != nil {
 		return nil, fmt.Errorf("%s", jResp.Error.Message)
 	}
+
+	// Unwrap CallToolResult into the legacy format
+	data, _ := json.Marshal(jResp.Result)
+	var wrapper struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if json.Unmarshal(data, &wrapper) == nil && len(wrapper.Content) > 0 {
+		if wrapper.IsError {
+			return nil, fmt.Errorf("%s", wrapper.Content[0].Text)
+		}
+		var parsed interface{}
+		if json.Unmarshal([]byte(wrapper.Content[0].Text), &parsed) == nil {
+			return parsed, nil
+		}
+		return wrapper.Content[0].Text, nil
+	}
+
 	return jResp.Result, nil
 }
 

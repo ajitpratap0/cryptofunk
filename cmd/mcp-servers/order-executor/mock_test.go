@@ -28,16 +28,16 @@ func TestCallTool_PlaceMarketOrder(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// The result is an exchange.Order struct
-	order, ok := result.(*exchange.Order)
-	assert.True(t, ok, "Result should be an *exchange.Order")
-	assert.NotEmpty(t, order.ID, "Order should have an ID")
-	assert.Equal(t, "BTCUSDT", order.Symbol)
-	assert.Equal(t, exchange.OrderSideBuy, order.Side)
-	assert.Equal(t, exchange.OrderTypeMarket, order.Type)
-	assert.Equal(t, 0.1, order.Quantity)
+	// The result comes back as a JSON-deserialized map
+	order, ok := result.(map[string]interface{})
+	assert.True(t, ok, "Result should be a map[string]interface{}")
+	assert.NotEmpty(t, order["id"], "Order should have an ID")
+	assert.Equal(t, "BTCUSDT", order["symbol"])
+	assert.Equal(t, string(exchange.OrderSideBuy), order["side"])
+	assert.Equal(t, string(exchange.OrderTypeMarket), order["type"])
+	assert.Equal(t, 0.1, order["quantity"])
 	// Market orders in paper trading fill immediately
-	assert.Equal(t, exchange.OrderStatusFilled, order.Status)
+	assert.Equal(t, string(exchange.OrderStatusFilled), order["status"])
 }
 
 // TestCallTool_PlaceLimitOrder tests calling place_limit_order tool
@@ -57,21 +57,21 @@ func TestCallTool_PlaceLimitOrder(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// The result is an exchange.Order struct
-	order, ok := result.(*exchange.Order)
-	assert.True(t, ok, "Result should be an *exchange.Order")
-	assert.NotEmpty(t, order.ID, "Order should have an ID")
-	assert.Equal(t, "BTCUSDT", order.Symbol)
-	assert.Equal(t, exchange.OrderSideBuy, order.Side)
-	assert.Equal(t, exchange.OrderTypeLimit, order.Type)
-	assert.Equal(t, 0.1, order.Quantity)
-	assert.Equal(t, 50000.0, order.Price)
+	// The result comes back as a JSON-deserialized map
+	order, ok := result.(map[string]interface{})
+	assert.True(t, ok, "Result should be a map[string]interface{}")
+	assert.NotEmpty(t, order["id"], "Order should have an ID")
+	assert.Equal(t, "BTCUSDT", order["symbol"])
+	assert.Equal(t, string(exchange.OrderSideBuy), order["side"])
+	assert.Equal(t, string(exchange.OrderTypeLimit), order["type"])
+	assert.Equal(t, 0.1, order["quantity"])
+	assert.Equal(t, 50000.0, order["price"])
 	// Limit orders in paper trading may or may not fill immediately
-	assert.Contains(t, []exchange.OrderStatus{
-		exchange.OrderStatusPending,
-		exchange.OrderStatusOpen,
-		exchange.OrderStatusFilled,
-	}, order.Status)
+	assert.Contains(t, []string{
+		string(exchange.OrderStatusPending),
+		string(exchange.OrderStatusOpen),
+		string(exchange.OrderStatusFilled),
+	}, order["status"])
 }
 
 // TestCallTool_CancelOrder tests calling cancel_order tool
@@ -89,21 +89,21 @@ func TestCallTool_CancelOrder(t *testing.T) {
 		"price":    40000.0, // Below market to ensure it doesn't fill
 	})
 	assert.NoError(t, err)
-	placedOrder := placeResult.(*exchange.Order)
+	placedOrder := placeResult.(map[string]interface{})
 
 	// Now cancel it
 	result, err := server.callTool("cancel_order", map[string]interface{}{
-		"order_id": placedOrder.ID,
+		"order_id": placedOrder["id"],
 	})
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// The result is an exchange.Order struct
-	order, ok := result.(*exchange.Order)
-	assert.True(t, ok, "Result should be an *exchange.Order")
-	assert.Equal(t, placedOrder.ID, order.ID)
-	assert.Equal(t, exchange.OrderStatusCancelled, order.Status)
+	// The result comes back as a JSON-deserialized map
+	order, ok := result.(map[string]interface{})
+	assert.True(t, ok, "Result should be a map[string]interface{}")
+	assert.Equal(t, placedOrder["id"], order["id"])
+	assert.Equal(t, string(exchange.OrderStatusCancelled), order["status"])
 }
 
 // TestCallTool_GetOrderStatus tests calling get_order_status tool
@@ -122,11 +122,11 @@ func TestCallTool_GetOrderStatus(t *testing.T) {
 		"quantity": 0.1,
 	})
 	assert.NoError(t, err)
-	placedOrder := placeResult.(*exchange.Order)
+	placedOrder := placeResult.(map[string]interface{})
 
 	// Now get its status
 	result, err := server.callTool("get_order_status", map[string]interface{}{
-		"order_id": placedOrder.ID,
+		"order_id": placedOrder["id"],
 	})
 
 	assert.NoError(t, err)
@@ -138,10 +138,10 @@ func TestCallTool_GetOrderStatus(t *testing.T) {
 	assert.NotNil(t, resultMap["order"], "Result should contain 'order' field")
 
 	// Verify the order data
-	order, ok := resultMap["order"].(*exchange.Order)
-	assert.True(t, ok, "Order should be an *exchange.Order")
-	assert.Equal(t, placedOrder.ID, order.ID)
-	assert.Equal(t, "BTCUSDT", order.Symbol)
+	orderMap, ok := resultMap["order"].(map[string]interface{})
+	assert.True(t, ok, "Order should be a map[string]interface{}")
+	assert.Equal(t, placedOrder["id"], orderMap["id"])
+	assert.Equal(t, "BTCUSDT", orderMap["symbol"])
 }
 
 // TestCallTool_StartSession tests calling start_session tool
@@ -240,11 +240,11 @@ func TestHandleRequest_ToolsCall_Success(t *testing.T) {
 	assert.Nil(t, resp.Error)
 	assert.NotNil(t, resp.Result)
 
-	// Result should be an Order struct
-	order, ok := resp.Result.(*exchange.Order)
-	assert.True(t, ok, "Result should be an *exchange.Order")
-	assert.NotEmpty(t, order.ID, "Order should have an ID")
-	assert.Equal(t, "BTCUSDT", order.Symbol)
+	// Result should be a JSON-deserialized map
+	order, ok := resp.Result.(map[string]interface{})
+	assert.True(t, ok, "Result should be a map[string]interface{}")
+	assert.NotEmpty(t, order["id"], "Order should have an ID")
+	assert.Equal(t, "BTCUSDT", order["symbol"])
 }
 
 // TestHandleRequest_ToolsCall_UnknownTool tests tools/call with unknown tool
@@ -268,7 +268,7 @@ func TestHandleRequest_ToolsCall_UnknownTool(t *testing.T) {
 	assert.Equal(t, 1, resp.ID)
 	assert.NotNil(t, resp.Error)
 	assert.Nil(t, resp.Result)
-	assert.Equal(t, -32603, resp.Error.Code)
+	assert.Equal(t, -32602, resp.Error.Code)
 	assert.Contains(t, resp.Error.Message, "unknown tool")
 }
 
