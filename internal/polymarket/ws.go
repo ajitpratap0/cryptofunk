@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	DefaultWSURL    = "wss://ws-subscriptions-clob.polymarket.com/ws"
-	pingInterval    = 30 * time.Second
-	reconnectDelay  = 5 * time.Second
-	maxReconnects   = 10
+	DefaultWSURL   = "wss://ws-subscriptions-clob.polymarket.com/ws"
+	pingInterval   = 30 * time.Second
+	reconnectDelay = 5 * time.Second
+	maxReconnects  = 10
 )
 
 // WSHandler handles incoming WebSocket messages
@@ -41,16 +41,16 @@ type wsSubscription struct {
 }
 
 type wsCommand struct {
-	Type         string   `json:"type"`
-	Channel      string   `json:"channel,omitempty"`
-	Assets       []string `json:"assets_ids,omitempty"`
-	Market       string   `json:"market,omitempty"`
-	Auth         *wsAuth  `json:"auth,omitempty"`
+	Type    string   `json:"type"`
+	Channel string   `json:"channel,omitempty"`
+	Assets  []string `json:"assets_ids,omitempty"`
+	Market  string   `json:"market,omitempty"`
+	Auth    *wsAuth  `json:"auth,omitempty"`
 }
 
 type wsAuth struct {
-	APIKey    string `json:"apiKey"`
-	Secret    string `json:"secret"`
+	APIKey     string `json:"apiKey"`
+	Secret     string `json:"secret"`
 	Passphrase string `json:"passphrase"`
 }
 
