@@ -527,6 +527,10 @@ func (km *KeyManager) CleanupExpiredKeys(ctx context.Context) (int64, error) {
 
 // StartCleanupWorker starts a background worker that periodically cleans up expired keys
 func (km *KeyManager) StartCleanupWorker(ctx context.Context, interval time.Duration) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
