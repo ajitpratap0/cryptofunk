@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils'
 
-type Status = 'connected' | 'disconnected' | 'connecting' | 'error' | 'active' | 'idle' | 'warning' | 'healthy' | 'degraded' | 'down' | 'disabled'
+type Status = 'connected' | 'disconnected' | 'connecting' | 'error' | 'active' | 'idle' | 'warning' | 'healthy' | 'degraded' | 'down' | 'disabled' | 'stopped' | 'running'
 
 interface StatusDotProps {
   status: Status
@@ -24,6 +24,8 @@ const statusConfig: Record<Status, { color: string; label: string }> = {
   degraded: { color: 'bg-warning', label: 'Degraded' },
   down: { color: 'bg-loss', label: 'Down' },
   disabled: { color: 'bg-muted-foreground', label: 'Disabled' },
+  stopped: { color: 'bg-muted-foreground', label: 'Stopped' },
+  running: { color: 'bg-profit', label: 'Running' },
 }
 
 const sizeConfig = {
@@ -39,7 +41,8 @@ export function StatusDot({
   animated = false, 
   className 
 }: StatusDotProps) {
-  const config = statusConfig[status]
+  const normalizedStatus = (status?.toLowerCase?.() || 'disconnected') as Status
+  const config = statusConfig[normalizedStatus] || statusConfig['disconnected']
   const displayLabel = label || config.label
 
   return (
@@ -48,9 +51,9 @@ export function StatusDot({
         className={cn(
           "rounded-full",
           sizeConfig[size],
-          config.color,
-          animated && status === 'connecting' && "animate-pulse",
-          animated && status === 'connected' && "animate-pulse"
+          config?.color || 'bg-muted-foreground',
+          animated && normalizedStatus === 'connecting' && "animate-pulse",
+          animated && normalizedStatus === 'connected' && "animate-pulse"
         )}
         title={displayLabel}
         aria-label={label === null ? displayLabel : undefined}
