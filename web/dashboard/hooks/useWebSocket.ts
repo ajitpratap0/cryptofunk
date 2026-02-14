@@ -1,0 +1,248 @@
+'use client'
+
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { WebSocketMessage } from '@/lib/types'
+import { WS_URL, WS_RECONNECT_ATTEMPTS, WS_RECONNECT_INTERVAL } from '@/lib/constants'
+
+export interface WebSocketState {
+  isConnected: boolean
+  lastMessage: WebSocketMessage | null
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
+  error: string | null
+  reconnectAttempts: number
+}
+
+export interface UseWebSocketOptions {
+  url?: string
+  protocols?: string | string[]
+  reconnect?: boolean
+  maxReconnectAttempts?: number
+  reconnectInterval?: number
+  onOpen?: () => void
+  onClose?: () => void
+  onError?: (error: Event) => void
+  onMessage?: (message: WebSocketMessage) => void
+}
+
+export function useWebSocket(options: UseWebSocketOptions = {}) {
+  const {
+    url = WS_URL,
+    protocols,
+    reconnect = true,
+    maxReconnectAttempts = WS_RECONNECT_ATTEMPTS,
+    reconnectInterval = WS_RECONNECT_INTERVAL,
+    onOpen,
+    onClose,
+    onError,
+    onMessage,
+  } = options
+
+  const [state, setState] = useState<WebSocketState>({
+    isConnected: false,
+    lastMessage: null,
+    connectionStatus: 'disconnected',
+    error: null,
+    reconnectAttempts: 0,
+  })
+
+  const ws = useRef<WebSocket | null>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const shouldReconnectRef = useRef(true)
+
+  const updateState = useCallback((updates: Partial<WebSocketState>) => {
+    setState(prev => ({ ...prev, ...updates }))
+  }, [])
+
+  const connect = useCallback(() => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      return
+    }
+
+    updateState({ 
+      connectionStatus: 'connecting',
+      error: null 
+    })
+
+    try {
+      ws.current = new WebSocket(url, protocols)
+
+      ws.current.onopen = () => {
+        updateState({
+          isConnected: true,
+          connectionStatus: 'connected',
+          error: null,
+          reconnectAttempts: 0,
+        })
+        onOpen?.()
+      }
+
+      ws.current.onclose = () => {
+        updateState({
+          isConnected: false,
+          connectionStatus: 'disconnected',
+        })
+        onClose?.()
+
+        // Attempt to reconnect if enabled and we haven't exceeded max attempts
+        if (
+          reconnect && 
+          shouldReconnectRef.current && 
+          state.reconnectAttempts < maxReconnectAttempts
+        ) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            updateState({ 
+              reconnectAttempts: state.reconnectAttempts + 1 
+            })
+            connect()
+          }, reconnectInterval)
+        }
+      }
+
+      ws.current.onerror = (error) => {
+        updateState({
+          isConnected: false,
+          connectionStatus: 'error',
+          error: 'WebSocket connection error',
+        })
+        onError?.(error)
+      }
+
+      ws.current.onmessage = (event) => {
+        try {
+          const message: WebSocketMessage = JSON.parse(event.data)
+          updateState({ lastMessage: message })
+          onMessage?.(message)
+        } catch (error) {
+          console.error('Failed to parse WebSocket message:', error)
+          updateState({ 
+            error: 'Failed to parse message' 
+          })
+        }
+      }
+    } catch (error) {
+      updateState({
+        isConnected: false,
+        connectionStatus: 'error',
+        error: error instanceof Error ? error.message : 'Connection failed',
+      })
+    }
+  }, [url, protocols, onOpen, onClose, onError, onMessage, reconnect, maxReconnectAttempts, reconnectInterval, state.reconnectAttempts, updateState])
+
+  const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false
+    
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+
+    if (ws.current) {
+      ws.current.close()
+      ws.current = null
+    }
+
+    updateState({
+      isConnected: false,
+      connectionStatus: 'disconnected',
+    })
+  }, [updateState])
+
+  const sendMessage = useCallback((message: any) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(message))
+      return true
+    }
+    return false
+  }, [])
+
+  // Auto-connect on mount
+  useEffect(() => {
+    shouldReconnectRef.current = true
+    connect()
+
+    return () => {
+      shouldReconnectRef.current = false
+      disconnect()
+    }
+  }, [connect, disconnect])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  return {
+    ...state,
+    connect,
+    disconnect,
+    sendMessage,
+  }
+}
+
+// Specialized hook for trading data
+export function useTradingWebSocket() {
+  const [trades, setTrades] = useState<Record<string, any>[]>([])
+  const [positions, setPositions] = useState<Record<string, any>[]>([])
+  const [orders, setOrders] = useState<Record<string, any>[]>([])
+  const [agents, setAgents] = useState<Record<string, any>[]>([])
+  const [marketData, setMarketData] = useState<Record<string, any>>({})
+
+  const handleMessage = useCallback((message: WebSocketMessage) => {
+    switch (message.type) {
+      case 'trade':
+        setTrades(prev => {
+          const newTrades = [message.data, ...prev]
+          return newTrades.slice(0, 100) // Keep last 100 trades
+        })
+        break
+      
+      case 'position':
+        setPositions(prev => {
+          const filtered = prev.filter(p => p.symbol !== message.data.symbol)
+          return [...filtered, message.data]
+        })
+        break
+      
+      case 'order':
+        setOrders(prev => {
+          const filtered = prev.filter(o => o.id !== message.data.id)
+          if (message.data.status !== 'cancelled' && message.data.status !== 'filled') {
+            return [...filtered, message.data]
+          }
+          return filtered
+        })
+        break
+      
+      case 'agent':
+        setAgents(prev => {
+          const filtered = prev.filter(a => a.name !== message.data.name)
+          return [...filtered, message.data]
+        })
+        break
+      
+      case 'market':
+        setMarketData(prev => ({
+          ...prev,
+          [message.data.symbol]: message.data
+        }))
+        break
+    }
+  }, [])
+
+  const wsState = useWebSocket({
+    onMessage: handleMessage,
+  })
+
+  return {
+    ...wsState,
+    trades,
+    positions,
+    orders,
+    agents,
+    marketData,
+  }
+}
