@@ -34,7 +34,7 @@ func TestRiskAnalyzerServer_Initialize(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "2024-11-05", result["protocolVersion"])
 
-	serverInfo, ok := result["serverInfo"].(map[string]string)
+	serverInfo, ok := result["serverInfo"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "risk-analyzer", serverInfo["name"])
 	assert.Equal(t, config.Version, serverInfo["version"])
@@ -776,9 +776,9 @@ func TestCheckPortfolioLimits_ConcentrationViolation(t *testing.T) {
 	result, ok := resp.Result.(map[string]interface{})
 	require.True(t, ok)
 	assert.False(t, result["approved"].(bool))
-	violations := result["violations"].([]string)
-	assert.NotEmpty(t, violations)
-	assert.Contains(t, violations[0], "concentration")
+	violationsRaw := result["violations"].([]interface{})
+	assert.NotEmpty(t, violationsRaw)
+	assert.Contains(t, violationsRaw[0].(string), "concentration")
 }
 
 func TestCalculateSharpe_NegativeInfinity(t *testing.T) {
@@ -807,8 +807,16 @@ func TestCalculateSharpe_NegativeInfinity(t *testing.T) {
 
 	result, ok := resp.Result.(map[string]interface{})
 	require.True(t, ok)
-	sharpe := result["sharpe_ratio"].(float64)
-	assert.True(t, math.IsInf(sharpe, -1), "Expected -Inf sharpe ratio")
+	// After JSON round-trip, Inf values are sanitized to strings
+	sharpeVal := result["sharpe_ratio"]
+	switch v := sharpeVal.(type) {
+	case float64:
+		assert.True(t, math.IsInf(v, -1), "Expected -Inf sharpe ratio")
+	case string:
+		assert.Equal(t, "-Infinity", v, "Expected -Infinity string for sharpe ratio")
+	default:
+		t.Fatalf("Unexpected type for sharpe_ratio: %T", sharpeVal)
+	}
 }
 
 func TestCalculateSharpe_ZeroSharpe(t *testing.T) {
@@ -1003,9 +1011,9 @@ func TestCheckPortfolioLimits_EmptyPositions(t *testing.T) {
 	// When starting with empty positions, a single new position will have 100% concentration
 	// This violates the 50% max concentration limit, so trade should be rejected
 	assert.False(t, result["approved"].(bool), "Trade should be rejected - single position = 100% concentration")
-	violations := result["violations"].([]string)
-	assert.Equal(t, 1, len(violations), "Should have 1 concentration violation")
-	assert.Contains(t, violations[0], "concentration")
+	violationsRaw := result["violations"].([]interface{})
+	assert.Equal(t, 1, len(violationsRaw), "Should have 1 concentration violation")
+	assert.Contains(t, violationsRaw[0].(string), "concentration")
 
 	// Verify concentration check details
 	checks := result["checks"].(map[string]interface{})

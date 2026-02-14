@@ -19,13 +19,13 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ENUMS
 -- =============================================================================
 
-CREATE TYPE order_side AS ENUM ('BUY', 'SELL');
-CREATE TYPE order_type AS ENUM ('MARKET', 'LIMIT', 'STOP_LOSS', 'STOP_LOSS_LIMIT', 'TAKE_PROFIT', 'TAKE_PROFIT_LIMIT');
-CREATE TYPE order_status AS ENUM ('NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED');
-CREATE TYPE position_side AS ENUM ('LONG', 'SHORT', 'FLAT');
-CREATE TYPE signal_type AS ENUM ('BUY', 'SELL', 'HOLD');
-CREATE TYPE trading_mode AS ENUM ('PAPER', 'LIVE');
-CREATE TYPE agent_state_type AS ENUM ('STARTING', 'RUNNING', 'STOPPED', 'ERROR');
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_side') THEN CREATE TYPE order_side AS ENUM ('BUY', 'SELL'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_type') THEN CREATE TYPE order_type AS ENUM ('MARKET', 'LIMIT', 'STOP_LOSS', 'STOP_LOSS_LIMIT', 'TAKE_PROFIT', 'TAKE_PROFIT_LIMIT'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_status') THEN CREATE TYPE order_status AS ENUM ('NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'position_side') THEN CREATE TYPE position_side AS ENUM ('LONG', 'SHORT', 'FLAT'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'signal_type') THEN CREATE TYPE signal_type AS ENUM ('BUY', 'SELL', 'HOLD'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trading_mode') THEN CREATE TYPE trading_mode AS ENUM ('PAPER', 'LIVE'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'agent_state_type') THEN CREATE TYPE agent_state_type AS ENUM ('STARTING', 'RUNNING', 'STOPPED', 'ERROR'); END IF; END $$;
 
 -- =============================================================================
 -- CANDLESTICK DATA (TimescaleDB Hypertable)
