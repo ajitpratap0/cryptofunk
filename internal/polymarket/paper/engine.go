@@ -175,6 +175,11 @@ func (e *Engine) Sell(marketID string, side Side, shares, price float64) (*Trade
 	return &trade, e.Save()
 }
 
+// GetBalance returns the current cash balance.
+func (e *Engine) GetBalance() float64 {
+	return e.Portfolio.Balance
+}
+
 // GetPortfolio returns a summary of the portfolio.
 func (e *Engine) GetPortfolio() *Portfolio {
 	return e.Portfolio
