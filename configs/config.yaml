@@ -256,6 +256,7 @@ api:
 
     # Development/Testing (automatically blocked in production)
     - "http://localhost:3000"    # Create React App default
+    - "http://localhost:3333"    # Next.js dashboard dev port
     - "http://localhost:5173"    # Vite default
     - "http://localhost:8080"    # API docs/testing
 
