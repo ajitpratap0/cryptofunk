@@ -432,4 +432,21 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient()
+
+// Decision Analytics API
+export async function fetchDecisionAnalytics(since = '30d'): Promise<ApiResponse<import('./types').DecisionAnalytics>> {
+  const res = await fetch(buildApiUrl(`/api/v1/decisions/analytics?since=${since}`))
+  return res.json()
+}
+
+export async function fetchDecisionOutcomes(limit = 50): Promise<ApiResponse<import('./types').DecisionWithOutcome[]>> {
+  const res = await fetch(buildApiUrl(`/api/v1/decisions/outcomes?limit=${limit}`))
+  return res.json()
+}
+
+export async function triggerOutcomeResolution(): Promise<{ success: boolean; polymarket_resolved: number; binance_resolved: number }> {
+  const res = await fetch(buildApiUrl('/api/v1/admin/resolve-outcomes'), { method: 'POST' })
+  return res.json()
+}
+
 export default ApiClient

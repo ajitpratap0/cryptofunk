@@ -362,6 +362,10 @@ func (s *APIServer) setupRoutes() {
 		polymarketHandler := api.NewPolymarketHandler(s.db)
 		polymarketHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 
+		// Decision analytics and outcome resolution routes
+		decisionAnalyticsHandler := api.NewDecisionAnalyticsHandler(s.db)
+		decisionAnalyticsHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+
 		// TC-003: Safety guard routes
 		safety.RegisterRoutes(v1, s.safetyGuard)
 	}

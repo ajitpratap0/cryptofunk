@@ -101,6 +101,40 @@ func (dt *DecisionTracker) UpdateDecisionOutcome(
 	return nil
 }
 
+// LinkDecisionToOrder links a tracked decision to an order for outcome tracking.
+func (dt *DecisionTracker) LinkDecisionToOrder(ctx context.Context, decisionID uuid.UUID, orderID uuid.UUID) error {
+	err := dt.database.LinkDecisionToOrder(ctx, decisionID, orderID)
+	if err != nil {
+		log.Error().Err(err).
+			Str("decision_id", decisionID.String()).
+			Str("order_id", orderID.String()).
+			Msg("Failed to link decision to order")
+		return err
+	}
+	log.Debug().
+		Str("decision_id", decisionID.String()).
+		Str("order_id", orderID.String()).
+		Msg("Decision linked to order")
+	return nil
+}
+
+// LinkDecisionToPosition links a tracked decision to a position for outcome tracking.
+func (dt *DecisionTracker) LinkDecisionToPosition(ctx context.Context, decisionID uuid.UUID, positionID uuid.UUID) error {
+	err := dt.database.LinkDecisionToPosition(ctx, decisionID, positionID)
+	if err != nil {
+		log.Error().Err(err).
+			Str("decision_id", decisionID.String()).
+			Str("position_id", positionID.String()).
+			Msg("Failed to link decision to position")
+		return err
+	}
+	log.Debug().
+		Str("decision_id", decisionID.String()).
+		Str("position_id", positionID.String()).
+		Msg("Decision linked to position")
+	return nil
+}
+
 // GetRecentDecisions retrieves recent decisions for an agent
 func (dt *DecisionTracker) GetRecentDecisions(ctx context.Context, agentName string, limit int) ([]*db.LLMDecision, error) {
 	return dt.database.GetLLMDecisionsByAgent(ctx, agentName, limit)

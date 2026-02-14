@@ -339,6 +339,58 @@ export interface UnifiedPortfolio {
   by_platform: Record<UnifiedPlatform, PlatformSummary>
 }
 
+// Decision Outcome Types
+export interface DecisionWithOutcome {
+  id: string
+  session_id?: string
+  decision_type: string
+  symbol: string
+  prompt: string
+  response: string
+  model: string
+  tokens_used: number
+  latency_ms: number
+  outcome?: string
+  pnl?: number
+  agent_name: string
+  confidence: number
+  created_at: string
+  order_id?: string
+  order_side?: string
+  order_price?: number
+  position_id?: string
+  position_pnl?: number
+}
+
+export interface AgentAnalytics {
+  agent_name: string
+  total_decisions: number
+  wins: number
+  losses: number
+  pending: number
+  win_rate: number
+  avg_confidence: number
+  avg_pnl: number
+  total_pnl: number
+}
+
+export interface ConfidenceBucket {
+  bucket_low: number
+  bucket_high: number
+  count: number
+  win_rate: number
+  avg_pnl: number
+}
+
+export interface DecisionAnalytics {
+  total_decisions: number
+  resolved_decisions: number
+  overall_win_rate: number
+  overall_avg_pnl: number
+  by_agent: AgentAnalytics[]
+  confidence_calibration: ConfidenceBucket[]
+}
+
 // Utility Types
 export type TimeRange = '1h' | '4h' | '1d' | '1w' | '1m' | '3m' | '1y';
 export type ChartType = 'candlestick' | 'line' | 'area' | 'bar';
