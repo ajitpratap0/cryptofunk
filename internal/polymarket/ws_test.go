@@ -121,6 +121,8 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 	err := ws.Connect(ctx)
 	require.NoError(t, err)
 
+	time.Sleep(50 * time.Millisecond) // let readLoop start
+
 	err = ws.SubscribeMarket([]string{"asset1", "asset2"})
 	require.NoError(t, err)
 
@@ -129,6 +131,7 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 	assert.Equal(t, "market", receivedCmd.Channel)
 	assert.Equal(t, []string{"asset1", "asset2"}, receivedCmd.Assets)
 
+	cancel()
 	ws.Close()
 }
 
@@ -157,6 +160,8 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 	err := ws.Connect(ctx)
 	require.NoError(t, err)
 
+	time.Sleep(50 * time.Millisecond) // let readLoop start
+
 	creds := &APICreds{APIKey: "key", Secret: "secret", Passphrase: "pass"}
 	err = ws.SubscribeUser("market1", creds)
 	require.NoError(t, err)
@@ -167,6 +172,7 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 	assert.NotNil(t, receivedCmd.Auth)
 	assert.Equal(t, "key", receivedCmd.Auth.APIKey)
 
+	cancel()
 	ws.Close()
 }
 

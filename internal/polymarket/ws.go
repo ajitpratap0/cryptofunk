@@ -32,6 +32,7 @@ type WSClient struct {
 	mu            sync.Mutex
 	writeMu       sync.Mutex
 	done          chan struct{}
+	closeOnce     sync.Once
 	reconnects    int
 }
 
@@ -134,6 +135,13 @@ func (ws *WSClient) SubscribeUser(market string, creds *APICreds) error {
 	ws.subscriptions = append(ws.subscriptions, sub)
 	ws.mu.Unlock()
 
+	ws.mu.Lock()
+	conn := ws.conn
+	ws.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+
 	cmd := wsCommand{
 		Type:    "subscribe",
 		Channel: "user",
@@ -145,13 +153,16 @@ func (ws *WSClient) SubscribeUser(market string, creds *APICreds) error {
 		},
 	}
 	ws.writeMu.Lock()
-	err := ws.conn.WriteJSON(cmd)
+	err := conn.WriteJSON(cmd)
 	ws.writeMu.Unlock()
 	return err
 }
 
 func (ws *WSClient) sendSubscribe(sub wsSubscription) error {
-	if ws.conn == nil {
+	ws.mu.Lock()
+	conn := ws.conn
+	ws.mu.Unlock()
+	if conn == nil {
 		return fmt.Errorf("not connected")
 	}
 	cmd := wsCommand{
@@ -161,18 +172,24 @@ func (ws *WSClient) sendSubscribe(sub wsSubscription) error {
 		Market:  sub.Market,
 	}
 	ws.writeMu.Lock()
-	err := ws.conn.WriteJSON(cmd)
+	err := conn.WriteJSON(cmd)
 	ws.writeMu.Unlock()
 	return err
 }
 
 // Close closes the WebSocket connection
 func (ws *WSClient) Close() error {
-	close(ws.done)
-	if ws.conn != nil {
-		return ws.conn.Close()
-	}
-	return nil
+	var err error
+	ws.closeOnce.Do(func() {
+		close(ws.done)
+		ws.mu.Lock()
+		conn := ws.conn
+		ws.mu.Unlock()
+		if conn != nil {
+			err = conn.Close()
+		}
+	})
+	return err
 }
 
 func (ws *WSClient) readLoop(ctx context.Context) {
@@ -185,7 +202,13 @@ func (ws *WSClient) readLoop(ctx context.Context) {
 		default:
 		}
 
-		_, message, err := ws.conn.ReadMessage()
+		ws.mu.Lock()
+		conn := ws.conn
+		ws.mu.Unlock()
+		if conn == nil {
+			return
+		}
+		_, message, err := conn.ReadMessage()
 		if err != nil {
 			ws.logger.Error().Err(err).Msg("ws read error")
 			ws.tryReconnect(ctx)
@@ -217,9 +240,12 @@ func (ws *WSClient) pingLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if ws.conn != nil {
+			ws.mu.Lock()
+			conn := ws.conn
+			ws.mu.Unlock()
+			if conn != nil {
 				ws.writeMu.Lock()
-				err := ws.conn.WriteMessage(websocket.PingMessage, nil)
+				err := conn.WriteMessage(websocket.PingMessage, nil)
 				ws.writeMu.Unlock()
 				if err != nil {
 					ws.logger.Error().Err(err).Msg("ws ping failed")
