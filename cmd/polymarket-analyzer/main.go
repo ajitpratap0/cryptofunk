@@ -98,9 +98,9 @@ func writePredictionToDB(market *gamma.Market, analysis *analyzer.Analysis) erro
 		ID:       market.ConditionID,
 		Question: market.Question,
 		Category: &cat,
-		YesPrice: market.OutcomeYesPrice,
-		NoPrice:  market.OutcomeNoPrice,
-		Volume:   market.Volume,
+		YesPrice: &market.OutcomeYesPrice,
+		NoPrice:  &market.OutcomeNoPrice,
+		Volume:   &market.Volume,
 		EndDate:  endDatePtr,
 		Active:   market.Active && !market.Closed,
 	}); err != nil {

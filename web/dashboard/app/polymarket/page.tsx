@@ -149,7 +149,7 @@ export default function PolymarketPage() {
                 setTradeForm(f => ({
                   ...f,
                   market_id: e.target.value,
-                  price: m ? (f.side === 'YES' ? m.yes_price.toFixed(2) : m.no_price.toFixed(2)) : f.price,
+                  price: m ? (f.side === 'YES' ? (m.yes_price ?? 0).toFixed(2) : (m.no_price ?? 0).toFixed(2)) : f.price,
                 }))
               }}
             >
@@ -177,7 +177,7 @@ export default function PolymarketPage() {
                     setTradeForm(f => ({
                       ...f,
                       side: s,
-                      price: m ? (s === 'YES' ? m.yes_price.toFixed(2) : m.no_price.toFixed(2)) : f.price,
+                      price: m ? (s === 'YES' ? (m.yes_price ?? 0).toFixed(2) : (m.no_price ?? 0).toFixed(2)) : f.price,
                     }))
                   }}
                 >

@@ -123,9 +123,9 @@ func writeMarketsToDB(markets []gamma.Market) error {
 			ID:       m.ConditionID,
 			Question: m.Question,
 			Category: &cat,
-			YesPrice: m.OutcomeYesPrice,
-			NoPrice:  m.OutcomeNoPrice,
-			Volume:   m.Volume,
+			YesPrice: &m.OutcomeYesPrice,
+			NoPrice:  &m.OutcomeNoPrice,
+			Volume:   &m.Volume,
 			EndDate:  endDatePtr,
 			Active:   m.Active && !m.Closed,
 		}

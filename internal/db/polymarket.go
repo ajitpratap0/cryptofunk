@@ -11,46 +11,46 @@ import (
 
 // PolymarketMarket represents a tracked Polymarket market.
 type PolymarketMarket struct {
-	ID        string     `db:"id"`
-	Question  string     `db:"question"`
-	Category  *string    `db:"category"`
-	YesPrice  float64    `db:"yes_price"`
-	NoPrice   float64    `db:"no_price"`
-	Volume    float64    `db:"volume"`
-	EndDate   *time.Time `db:"end_date"`
-	Active    bool       `db:"active"`
-	UpdatedAt time.Time  `db:"updated_at"`
+	ID        string     `db:"id" json:"id"`
+	Question  string     `db:"question" json:"question"`
+	Category  *string    `db:"category" json:"category"`
+	YesPrice  *float64   `db:"yes_price" json:"yes_price"`
+	NoPrice   *float64   `db:"no_price" json:"no_price"`
+	Volume    *float64   `db:"volume" json:"volume"`
+	EndDate   *time.Time `db:"end_date" json:"end_date"`
+	Active    bool       `db:"active" json:"active"`
+	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
 }
 
 // PolymarketPosition represents a paper trading position.
 type PolymarketPosition struct {
-	ID          uuid.UUID   `db:"id"`
-	SessionID   uuid.UUID   `db:"session_id"`
-	MarketID    string      `db:"market_id"`
-	Side        string      `db:"side"`
-	Shares      float64     `db:"shares"`
-	AvgPrice    float64     `db:"avg_price"`
-	CostBasis   float64     `db:"cost_basis"`
-	Status      string      `db:"status"`
-	OpenedAt    time.Time   `db:"opened_at"`
-	ClosedAt    *time.Time  `db:"closed_at"`
-	RealizedPnl *float64    `db:"realized_pnl"`
-	Metadata    interface{} `db:"metadata"`
-	CreatedAt   time.Time   `db:"created_at"`
-	UpdatedAt   time.Time   `db:"updated_at"`
+	ID          uuid.UUID   `db:"id" json:"id"`
+	SessionID   uuid.UUID   `db:"session_id" json:"session_id"`
+	MarketID    string      `db:"market_id" json:"market_id"`
+	Side        string      `db:"side" json:"side"`
+	Shares      float64     `db:"shares" json:"shares"`
+	AvgPrice    float64     `db:"avg_price" json:"avg_price"`
+	CostBasis   float64     `db:"cost_basis" json:"cost_basis"`
+	Status      string      `db:"status" json:"status"`
+	OpenedAt    time.Time   `db:"opened_at" json:"opened_at"`
+	ClosedAt    *time.Time  `db:"closed_at" json:"closed_at"`
+	RealizedPnl *float64    `db:"realized_pnl" json:"realized_pnl"`
+	Metadata    interface{} `db:"metadata" json:"metadata"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 // PolymarketTrade represents a paper trade.
 type PolymarketTrade struct {
-	ID         uuid.UUID `db:"id"`
-	PositionID uuid.UUID `db:"position_id"`
-	MarketID   string    `db:"market_id"`
-	Action     string    `db:"action"`
-	Side       string    `db:"side"`
-	Amount     float64   `db:"amount"`
-	Price      float64   `db:"price"`
-	Shares     float64   `db:"shares"`
-	Timestamp  time.Time `db:"timestamp"`
+	ID         uuid.UUID `db:"id" json:"id"`
+	PositionID uuid.UUID `db:"position_id" json:"position_id"`
+	MarketID   string    `db:"market_id" json:"market_id"`
+	Action     string    `db:"action" json:"action"`
+	Side       string    `db:"side" json:"side"`
+	Amount     float64   `db:"amount" json:"amount"`
+	Price      float64   `db:"price" json:"price"`
+	Shares     float64   `db:"shares" json:"shares"`
+	Timestamp  time.Time `db:"timestamp" json:"timestamp"`
 }
 
 // PolymarketPrediction represents a prediction record.

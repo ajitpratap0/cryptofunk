@@ -118,10 +118,10 @@ func (h *PolymarketHandler) ListPositions(c *gin.Context) {
 
 			// Use DB prices as baseline
 			var currentPrice float64
-			if p.Side == "YES" {
-				currentPrice = market.YesPrice
-			} else {
-				currentPrice = market.NoPrice
+			if p.Side == "YES" && market.YesPrice != nil {
+				currentPrice = *market.YesPrice
+			} else if market.NoPrice != nil {
+				currentPrice = *market.NoPrice
 			}
 			ep.CurrentPrice = &currentPrice
 			unrealized := p.Shares*currentPrice - p.CostBasis
@@ -261,10 +261,10 @@ func (h *PolymarketHandler) GetPortfolio(c *gin.Context) {
 	for _, p := range summary.OpenPositions {
 		if market, err := h.db.GetPolymarketMarket(ctx, p.MarketID); err == nil {
 			var price float64
-			if p.Side == "YES" {
-				price = market.YesPrice
-			} else {
-				price = market.NoPrice
+			if p.Side == "YES" && market.YesPrice != nil {
+				price = *market.YesPrice
+			} else if market.NoPrice != nil {
+				price = *market.NoPrice
 			}
 			totalValue += p.Shares * price
 		}
