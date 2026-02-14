@@ -8,6 +8,7 @@ import {
   Activity,
   Bot,
   Shield,
+  BarChart3,
   Settings,
   ChevronLeft,
   ChevronRight
@@ -50,6 +51,12 @@ const navigationItems = [
     href: '/risk',
     icon: Shield,
     description: 'Risk management'
+  },
+  {
+    name: 'Polymarket',
+    href: '/polymarket',
+    icon: BarChart3,
+    description: 'Prediction markets'
   }
 ]
 

@@ -18,12 +18,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // ============================================================================
@@ -206,6 +208,10 @@ type PolymarketAgent struct {
 	// BDI belief system
 	beliefs *BeliefBase
 
+	// Database persistence (optional, nil if DATABASE_URL not set)
+	database  *db.DB
+	sessionID uuid.UUID
+
 	// Position management
 	positions    map[string]*Position // marketID -> Position
 	positionsMtx sync.RWMutex
@@ -240,6 +246,46 @@ func (a *PolymarketAgent) Initialize(ctx context.Context) error {
 
 	a.beliefs = NewBeliefBase()
 	a.positions = make(map[string]*Position)
+
+	// Initialize database if DATABASE_URL is set
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		database, err := db.New(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to connect to database, running without persistence")
+		} else {
+			a.database = database
+
+			// Create a paper trading session for the agent
+			session := &db.TradingSession{
+				ID:             uuid.New(),
+				Mode:           db.TradingModePaper,
+				Symbol:         "POLYMARKET",
+				Exchange:       "polymarket",
+				StartedAt:      time.Now(),
+				InitialCapital: a.maxTotalExposure,
+			}
+			if err := database.CreateSession(ctx, session); err != nil {
+				log.Warn().Err(err).Msg("Failed to create agent session")
+			} else {
+				a.sessionID = session.ID
+			}
+
+			// Load existing positions from DB
+			dbPositions, err := database.GetOpenPolymarketPositions(ctx)
+			if err == nil {
+				for _, p := range dbPositions {
+					a.positions[p.MarketID] = &Position{
+						MarketID:   p.MarketID,
+						Side:       p.Side,
+						EntryPrice: p.AvgPrice,
+						Size:       p.CostBasis,
+						OpenedAt:   p.OpenedAt,
+					}
+				}
+				log.Info().Int("loaded", len(dbPositions)).Msg("Loaded existing positions from DB")
+			}
+		}
+	}
 
 	// Connect to NATS
 	natsURL := viper.GetString("nats.url")
@@ -744,6 +790,58 @@ func (a *PolymarketAgent) openPosition(signal *TradeSignal) {
 		Float64("entry_price", signal.Price).
 		Float64("size", signal.Size).
 		Msg("Position opened")
+
+	// Persist to DB
+	if a.database != nil {
+		ctx := context.Background()
+		shares := signal.Size / signal.Price
+
+		// Upsert market
+		_ = a.database.UpsertPolymarketMarket(ctx, &db.PolymarketMarket{
+			ID:       signal.MarketID,
+			Question: signal.Question,
+			Active:   true,
+		})
+
+		// Insert position
+		dbPos := &db.PolymarketPosition{
+			ID:        uuid.New(),
+			SessionID: a.sessionID,
+			MarketID:  signal.MarketID,
+			Side:      signal.Side,
+			Shares:    shares,
+			AvgPrice:  signal.Price,
+			CostBasis: signal.Size,
+			Status:    "OPEN",
+		}
+		if err := a.database.InsertPolymarketPosition(ctx, dbPos); err != nil {
+			log.Warn().Err(err).Str("market", signal.MarketID).Msg("Failed to persist position to DB")
+		}
+
+		// Insert trade record
+		_ = a.database.InsertPolymarketTrade(ctx, &db.PolymarketTrade{
+			ID:         uuid.New(),
+			PositionID: dbPos.ID,
+			MarketID:   signal.MarketID,
+			Action:     "BUY",
+			Side:       signal.Side,
+			Amount:     signal.Size,
+			Price:      signal.Price,
+			Shares:     shares,
+			Timestamp:  time.Now(),
+		})
+
+		// Insert prediction
+		_ = a.database.InsertPolymarketPrediction(ctx, &db.PolymarketPrediction{
+			MarketID:      signal.MarketID,
+			PredictedProb: signal.FairPrice,
+			MarketPrice:   signal.Price,
+			Edge:          signal.Edge,
+			Confidence:    signal.Confidence,
+			Reasoning:     &signal.Reasoning,
+		})
+
+	}
 
 	a.beliefs.UpdateBelief("total_exposure", a.totalExposureUnsafe(), 1.0, "position_manager")
 	a.beliefs.UpdateBelief(

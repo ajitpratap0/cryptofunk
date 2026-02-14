@@ -186,6 +186,98 @@ export interface AgentFilters {
   type?: string;
 }
 
+// Polymarket Types
+export interface PolymarketMarket {
+  id: string;
+  question: string;
+  category: string | null;
+  yes_price: number;
+  no_price: number;
+  volume: number;
+  end_date: string | null;
+  active: boolean;
+  updated_at: string;
+}
+
+export interface PolymarketPosition {
+  id: string;
+  session_id: string;
+  market_id: string;
+  side: 'YES' | 'NO';
+  shares: number;
+  avg_price: number;
+  cost_basis: number;
+  status: 'OPEN' | 'CLOSED';
+  opened_at: string;
+  closed_at: string | null;
+  realized_pnl: number | null;
+  current_price?: number;
+  unrealized_pnl?: number;
+  market_question?: string;
+}
+
+export interface PolymarketTrade {
+  id: string;
+  position_id: string;
+  market_id: string;
+  action: 'BUY' | 'SELL';
+  side: 'YES' | 'NO';
+  amount: number;
+  price: number;
+  shares: number;
+  timestamp: string;
+}
+
+export interface PolymarketPrediction {
+  id: string;
+  market_id: string;
+  predicted_prob: number;
+  market_price: number;
+  edge: number;
+  confidence: number;
+  category: string | null;
+  reasoning: string | null;
+  outcome: number | null;
+  resolved: boolean;
+  pnl: number | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface PolymarketPortfolio {
+  balance: number;
+  total_value: number;
+  cost_basis: number;
+  unrealized_pnl: number;
+  position_count: number;
+}
+
+export interface PolymarketPerformance {
+  total_predictions: number;
+  resolved: number;
+  correct: number;
+  win_rate: number;
+  brier_score: number;
+  total_pnl: number;
+  by_category: Record<string, {
+    total: number;
+    correct: number;
+    win_rate: number;
+    total_pnl: number;
+  }>;
+}
+
+export interface PaperTradeRequest {
+  action: 'BUY' | 'SELL';
+  market_id: string;
+  question?: string;
+  side: 'YES' | 'NO';
+  amount: number;
+  price: number;
+  shares?: number;
+  session_id?: string;
+}
+
 // Utility Types
 export type TimeRange = '1h' | '4h' | '1d' | '1w' | '1m' | '3m' | '1y';
 export type ChartType = 'candlestick' | 'line' | 'area' | 'bar';

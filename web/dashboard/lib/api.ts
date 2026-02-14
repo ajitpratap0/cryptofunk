@@ -15,7 +15,14 @@ import {
   TradeFilters,
   AgentFilters,
   CandlestickData,
-  TimeRange
+  TimeRange,
+  PolymarketMarket,
+  PolymarketPosition,
+  PolymarketTrade,
+  PolymarketPrediction,
+  PolymarketPortfolio,
+  PolymarketPerformance,
+  PaperTradeRequest,
 } from './types'
 import { buildApiUrl } from './utils'
 
@@ -229,6 +236,46 @@ class ApiClient {
   // Config
   async getConfig(): Promise<ApiResponse<any>> {
     return this.request('/config')
+  }
+
+  // Polymarket
+  async getPolymarketMarkets(active?: boolean): Promise<ApiResponse<{ markets: PolymarketMarket[]; count: number }>> {
+    return this.request(`/polymarket/markets?active=${active !== false}`)
+  }
+
+  async getPolymarketMarket(id: string): Promise<ApiResponse<{ market: PolymarketMarket }>> {
+    return this.request(`/polymarket/markets/${encodeURIComponent(id)}`)
+  }
+
+  async getPolymarketPositions(live?: boolean): Promise<ApiResponse<{ positions: PolymarketPosition[]; count: number }>> {
+    return this.request(`/polymarket/positions?live=${live || false}`)
+  }
+
+  async getPolymarketPosition(id: string): Promise<ApiResponse<{ position: PolymarketPosition }>> {
+    return this.request(`/polymarket/positions/${id}`)
+  }
+
+  async getPolymarketPortfolio(): Promise<ApiResponse<PolymarketPortfolio>> {
+    return this.request('/polymarket/portfolio')
+  }
+
+  async getPolymarketTrades(limit?: number): Promise<ApiResponse<{ trades: PolymarketTrade[]; count: number }>> {
+    return this.request(`/polymarket/trades?limit=${limit || 100}`)
+  }
+
+  async getPolymarketPredictions(resolved?: boolean): Promise<ApiResponse<{ predictions: PolymarketPrediction[]; count: number }>> {
+    return this.request(`/polymarket/predictions?resolved=${resolved || false}`)
+  }
+
+  async getPolymarketPerformance(): Promise<ApiResponse<PolymarketPerformance>> {
+    return this.request('/polymarket/performance')
+  }
+
+  async executePaperTrade(trade: PaperTradeRequest): Promise<ApiResponse<{ trade: any; balance: number; message: string }>> {
+    return this.request('/polymarket/trade', {
+      method: 'POST',
+      body: JSON.stringify(trade),
+    })
   }
 
   // Mock Data Methods (for fallback when API is unreachable)
