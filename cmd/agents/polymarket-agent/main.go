@@ -26,6 +26,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
 
 // ============================================================================
@@ -230,6 +231,10 @@ type PolymarketAgent struct {
 	minDaysToResolution float64  // Minimum days until resolution
 	maxDaysToResolution float64  // Maximum days until resolution
 	preferredCategories []string // Preferred market categories
+
+	// Direct execution mode
+	executeMode  bool
+	polyExchange *exchange.PolymarketExchange
 }
 
 // ============================================================================
@@ -432,8 +437,13 @@ func (a *PolymarketAgent) Step(ctx context.Context) error {
 			continue
 		}
 
-		// Track position only after successful signal publication
-		// TODO: In production, wait for actual execution confirmation from the exchange
+		// Execute directly if in execute mode, otherwise just track
+		if a.executeMode && a.polyExchange != nil {
+			if err := a.executeSignal(ctx, sig); err != nil {
+				log.Error().Err(err).Str("market", sig.MarketID).Msg("Failed to execute signal directly")
+				continue
+			}
+		}
 		a.openPosition(sig)
 	}
 
@@ -1061,6 +1071,44 @@ func (a *PolymarketAgent) publishSignal(signal *TradeSignal) error {
 }
 
 // ============================================================================
+// DIRECT EXECUTION
+// ============================================================================
+
+// executeSignal directly executes a trade signal via the PolymarketExchange adapter.
+func (a *PolymarketAgent) executeSignal(ctx context.Context, signal *TradeSignal) error {
+	var side exchange.OrderSide
+	if signal.Side == "YES" {
+		side = exchange.OrderSideBuy
+	} else {
+		side = exchange.OrderSideSell
+	}
+
+	req := exchange.PlaceOrderRequest{
+		Symbol:   signal.MarketID,
+		Side:     side,
+		Type:     exchange.OrderTypeLimit,
+		Quantity: signal.Size / signal.Price, // Convert USD size to shares
+		Price:    signal.Price,
+	}
+
+	resp, err := a.polyExchange.PlaceOrder(ctx, req)
+	if err != nil {
+		return fmt.Errorf("place order: %w", err)
+	}
+
+	log.Info().
+		Str("order_id", resp.OrderID).
+		Str("status", string(resp.Status)).
+		Str("market", signal.MarketID).
+		Str("side", signal.Side).
+		Float64("price", signal.Price).
+		Float64("size", signal.Size).
+		Msg("Signal executed directly via PolymarketExchange")
+
+	return nil
+}
+
+// ============================================================================
 // MAIN ENTRY POINT
 // ============================================================================
 
@@ -1196,8 +1244,46 @@ func main() {
 		preferredCategories = []string{"politics", "crypto", "tech", "news"}
 	}
 
+	// Check --execute flag
+	executeMode := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--execute" {
+			executeMode = true
+		}
+	}
+
+	// Initialize PolymarketExchange if in execute mode
+	var polyExchange *exchange.PolymarketExchange
+	if executeMode {
+		polyPrivateKey := os.Getenv("POLYMARKET_PRIVATE_KEY")
+		polyMode := os.Getenv("POLYMARKET_MODE")
+		if polyMode == "" {
+			polyMode = "paper" // Default to paper for safety
+		}
+
+		var database *db.DB
+		if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+			execCtx := context.Background()
+			d, err := db.New(execCtx)
+			if err != nil {
+				log.Warn().Err(err).Msg("Failed to connect to DB for execute mode")
+			} else {
+				database = d
+			}
+		}
+
+		pe, err := exchange.NewPolymarketExchange(polyPrivateKey, polyMode == "paper", database)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to initialize PolymarketExchange for execute mode")
+		}
+		polyExchange = pe
+		log.Info().Str("mode", polyMode).Msg("Execute mode enabled with PolymarketExchange")
+	}
+
 	agent := &PolymarketAgent{
 		BaseAgent:           baseAgent,
+		executeMode:         executeMode,
+		polyExchange:        polyExchange,
 		pollInterval:        pollInterval,
 		maxPositionSize:     maxPositionSize,
 		maxTotalExposure:    maxTotalExposure,

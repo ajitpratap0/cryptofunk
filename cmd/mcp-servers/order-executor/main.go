@@ -14,6 +14,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
+	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
 )
 
 const (
@@ -34,6 +35,13 @@ const (
 	toolRecordTradePnL        = "record_trade_pnl"
 	toolResetSafetyGuard      = "reset_safety_guard"
 	toolResetDailyCounters    = "reset_daily_counters"
+
+	// Polymarket tools
+	toolPolymarketPlaceOrder  = "polymarket_place_order"
+	toolPolymarketCancelOrder = "polymarket_cancel_order"
+	toolPolymarketGetOrders   = "polymarket_get_orders"
+	toolPolymarketGetPositions = "polymarket_get_positions"
+	toolPolymarketGetOrderbook = "polymarket_get_orderbook"
 )
 
 func main() {
@@ -105,9 +113,41 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to create exchange service")
 	}
 
+	// Initialize Polymarket exchange
+	polyPrivateKey := os.Getenv("POLYMARKET_PRIVATE_KEY")
+	if polyPrivateKey == "" {
+		polyPrivateKey = cfg.Polymarket.PrivateKey
+	}
+	polyMode := os.Getenv("POLYMARKET_MODE")
+	if polyMode == "" {
+		polyMode = cfg.Polymarket.Mode
+	}
+	if polyMode == "" {
+		polyMode = "paper"
+	}
+
+	var polyExchange *exchange.PolymarketExchange
+	if polyPrivateKey != "" || polyMode == "paper" {
+		var opts []polymarket.ClientOption
+		if cfg.Polymarket.FunderAddr != "" {
+			opts = append(opts, polymarket.WithFunder(cfg.Polymarket.FunderAddr))
+		}
+		pe, err := exchange.NewPolymarketExchange(polyPrivateKey, polyMode == "paper", database, opts...)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to initialize Polymarket exchange, Polymarket tools will be unavailable")
+		} else {
+			polyExchange = pe
+			log.Info().Str("mode", polyMode).Msg("Polymarket exchange initialized")
+		}
+	} else {
+		log.Info().Msg("Polymarket not configured (no private key), skipping")
+	}
+
 	// Start MCP server with stdio transport
 	server := &MCPServer{
-		service: exchangeService,
+		service:      exchangeService,
+		polyExchange: polyExchange,
+		db:           database,
 	}
 
 	if err := server.Run(); err != nil {
@@ -117,7 +157,9 @@ func main() {
 
 // MCPServer handles MCP protocol over stdio
 type MCPServer struct {
-	service *exchange.Service
+	service      *exchange.Service
+	polyExchange *exchange.PolymarketExchange
+	db           *db.DB
 }
 
 // Run starts the MCP server
@@ -421,6 +463,80 @@ func (s *MCPServer) listTools() interface{} {
 					"required": []string{"capital"},
 				},
 			},
+			// Polymarket tools
+			{
+				"name":        toolPolymarketPlaceOrder,
+				"description": "Place a limit order on Polymarket prediction market",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"market_id": map[string]interface{}{
+							"type":        "string",
+							"description": "Polymarket token ID (asset ID)",
+						},
+						"side": map[string]interface{}{
+							"type":        "string",
+							"description": "Order side: 'YES' or 'NO' (maps to BUY/SELL)",
+							"enum":        []string{"YES", "NO"},
+						},
+						"price": map[string]interface{}{
+							"type":        "number",
+							"description": "Limit price (0.01 to 0.99, probability)",
+						},
+						"size": map[string]interface{}{
+							"type":        "number",
+							"description": "Order size (number of shares)",
+						},
+					},
+					"required": []string{"market_id", "side", "price", "size"},
+				},
+			},
+			{
+				"name":        toolPolymarketCancelOrder,
+				"description": "Cancel an open Polymarket order",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"order_id": map[string]interface{}{
+							"type":        "string",
+							"description": "Internal order ID to cancel",
+						},
+					},
+					"required": []string{"order_id"},
+				},
+			},
+			{
+				"name":        toolPolymarketGetOrders,
+				"description": "List open Polymarket orders",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+					"required":   []string{},
+				},
+			},
+			{
+				"name":        toolPolymarketGetPositions,
+				"description": "List Polymarket positions from the database",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+					"required":   []string{},
+				},
+			},
+			{
+				"name":        toolPolymarketGetOrderbook,
+				"description": "Get the order book for a Polymarket token",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"token_id": map[string]interface{}{
+							"type":        "string",
+							"description": "Polymarket token ID",
+						},
+					},
+					"required": []string{"token_id"},
+				},
+			},
 		},
 	}
 }
@@ -463,6 +579,17 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 		result, err = s.service.ResetSafetyGuardCircuitBreaker(ctx, args)
 	case toolResetDailyCounters:
 		result, err = s.service.ResetDailyCounters(ctx, args)
+	// Polymarket tools
+	case toolPolymarketPlaceOrder:
+		result, err = s.polymarketPlaceOrder(ctx, args)
+	case toolPolymarketCancelOrder:
+		result, err = s.polymarketCancelOrder(ctx, args)
+	case toolPolymarketGetOrders:
+		result, err = s.polymarketGetOrders(ctx, args)
+	case toolPolymarketGetPositions:
+		result, err = s.polymarketGetPositions(ctx, args)
+	case toolPolymarketGetOrderbook:
+		result, err = s.polymarketGetOrderbook(ctx, args)
 	default:
 		err = fmt.Errorf("unknown tool: %s", name)
 	}
@@ -471,4 +598,123 @@ func (s *MCPServer) callTool(name string, args map[string]interface{}) (interfac
 	timer.Record(err == nil)
 
 	return result, err
+}
+
+// === Polymarket Tool Handlers ===
+
+func (s *MCPServer) polymarketPlaceOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.polyExchange == nil {
+		return nil, fmt.Errorf("polymarket exchange not configured")
+	}
+
+	marketID, ok := args["market_id"].(string)
+	if !ok || marketID == "" {
+		return nil, fmt.Errorf("market_id is required")
+	}
+
+	sideStr, ok := args["side"].(string)
+	if !ok || sideStr == "" {
+		return nil, fmt.Errorf("side is required (YES or NO)")
+	}
+
+	price, ok := args["price"].(float64)
+	if !ok || price <= 0 || price >= 1 {
+		return nil, fmt.Errorf("price must be between 0 and 1 (exclusive)")
+	}
+
+	size, ok := args["size"].(float64)
+	if !ok || size <= 0 {
+		return nil, fmt.Errorf("size must be positive")
+	}
+
+	// Map YES/NO to buy/sell
+	var side exchange.OrderSide
+	if sideStr == "YES" {
+		side = exchange.OrderSideBuy
+	} else {
+		side = exchange.OrderSideSell
+	}
+
+	req := exchange.PlaceOrderRequest{
+		Symbol:   marketID,
+		Side:     side,
+		Type:     exchange.OrderTypeLimit,
+		Quantity: size,
+		Price:    price,
+	}
+
+	resp, err := s.polyExchange.PlaceOrder(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+func (s *MCPServer) polymarketCancelOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.polyExchange == nil {
+		return nil, fmt.Errorf("polymarket exchange not configured")
+	}
+
+	orderID, ok := args["order_id"].(string)
+	if !ok || orderID == "" {
+		return nil, fmt.Errorf("order_id is required")
+	}
+
+	order, err := s.polyExchange.CancelOrder(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+
+	return order, nil
+}
+
+func (s *MCPServer) polymarketGetOrders(ctx context.Context, _ map[string]interface{}) (interface{}, error) {
+	if s.polyExchange == nil {
+		return nil, fmt.Errorf("polymarket exchange not configured")
+	}
+
+	orders, err := s.polyExchange.GetOpenOrders(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"orders": orders,
+		"count":  len(orders),
+	}, nil
+}
+
+func (s *MCPServer) polymarketGetPositions(ctx context.Context, _ map[string]interface{}) (interface{}, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("database not available")
+	}
+
+	positions, err := s.db.GetOpenPolymarketPositions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get positions: %w", err)
+	}
+
+	return map[string]interface{}{
+		"positions": positions,
+		"count":     len(positions),
+	}, nil
+}
+
+func (s *MCPServer) polymarketGetOrderbook(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	if s.polyExchange == nil {
+		return nil, fmt.Errorf("polymarket exchange not configured")
+	}
+
+	tokenID, ok := args["token_id"].(string)
+	if !ok || tokenID == "" {
+		return nil, fmt.Errorf("token_id is required")
+	}
+
+	book, err := s.polyExchange.GetOrderBook(ctx, tokenID)
+	if err != nil {
+		return nil, err
+	}
+
+	return book, nil
 }
