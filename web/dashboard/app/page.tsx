@@ -5,7 +5,7 @@ import { EquityCurve } from '@/components/charts/EquityCurve'
 import { AgentPerformanceBar } from '@/components/charts/AgentPerformanceBar'
 import { TradesTable } from '@/components/trades/TradesTable'
 import { SystemStatusIndicator } from '@/components/ui/StatusDot'
-import { useDashboard, useDashboardPnl, useTrades } from '@/hooks/useTradeData'
+import { useDashboard, useDashboardPnl, useTrades, useUnifiedPortfolio } from '@/hooks/useTradeData'
 import { useAgents } from '@/hooks/useAgents'
 import { formatCurrency, formatPercentage } from '@/lib/utils'
 import { 
@@ -22,6 +22,7 @@ export default function DashboardPage() {
   const { data: pnlData, isLoading: pnlLoading } = useDashboardPnl()
   const { data: tradesData, isLoading: tradesLoading } = useTrades()
   const { data: agentsData, isLoading: agentsLoading } = useAgents()
+  const { data: unifiedData } = useUnifiedPortfolio()
 
   const stats = dashboardData?.data
   const pnl = pnlData?.data
@@ -239,6 +240,77 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Platform Breakdown */}
+      {unifiedData?.data && (
+        <div className="bg-card border border-border rounded-lg p-6">
+          <h2 className="text-xl font-semibold mb-4">Platform Breakdown</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {Object.entries(unifiedData.data.by_platform).map(([platform, summary]) => (
+              <div key={platform} className="border border-border rounded-lg p-4">
+                <h3 className="font-semibold capitalize mb-3">{platform}</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Positions</span>
+                    <span className="font-mono">{summary.position_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Trades</span>
+                    <span className="font-mono">{summary.trade_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Value</span>
+                    <span className="font-mono">{formatCurrency(summary.total_value)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">P&L</span>
+                    <span className={`font-mono ${summary.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                      {summary.pnl >= 0 ? '+' : ''}{formatCurrency(summary.pnl)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Unified positions list */}
+          {unifiedData.data.positions.length > 0 && (
+            <div className="mt-6">
+              <h3 className="font-semibold mb-3">All Open Positions</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="text-left py-2">Platform</th>
+                      <th className="text-left py-2">Symbol</th>
+                      <th className="text-left py-2">Side</th>
+                      <th className="text-right py-2">Qty</th>
+                      <th className="text-right py-2">Entry</th>
+                      <th className="text-right py-2">Current</th>
+                      <th className="text-right py-2">P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unifiedData.data.positions.map((pos) => (
+                      <tr key={pos.id} className="border-b border-border/50">
+                        <td className="py-2 capitalize">{pos.platform}</td>
+                        <td className="py-2 max-w-[200px] truncate" title={pos.symbol}>{pos.symbol}</td>
+                        <td className="py-2">{pos.side}</td>
+                        <td className="py-2 text-right font-mono">{pos.quantity.toFixed(4)}</td>
+                        <td className="py-2 text-right font-mono">{formatCurrency(pos.entry_price)}</td>
+                        <td className="py-2 text-right font-mono">{formatCurrency(pos.current_price)}</td>
+                        <td className={`py-2 text-right font-mono ${pos.unrealized_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                          {pos.unrealized_pnl >= 0 ? '+' : ''}{formatCurrency(pos.unrealized_pnl)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Recent Trades */}
       <div>

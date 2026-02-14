@@ -278,6 +278,67 @@ export interface PaperTradeRequest {
   session_id?: string;
 }
 
+// Unified Cross-Platform Types
+export type UnifiedPlatform = 'binance' | 'polymarket'
+
+export interface UnifiedPosition {
+  id: string
+  platform: UnifiedPlatform
+  session_id: string
+  symbol: string
+  market_id: string
+  side: string
+  entry_price: number
+  current_price: number
+  quantity: number
+  cost_basis: number
+  unrealized_pnl: number
+  realized_pnl: number
+  status: 'OPEN' | 'CLOSED'
+  opened_at: string
+  closed_at: string | null
+  agent: string
+  confidence: number
+  metadata?: Record<string, unknown>
+}
+
+export interface UnifiedTrade {
+  id: string
+  platform: UnifiedPlatform
+  position_id: string
+  symbol: string
+  side: string
+  action: 'BUY' | 'SELL'
+  price: number
+  quantity: number
+  amount: number
+  agent: string
+  confidence: number
+  reasoning?: string
+  timestamp: string
+}
+
+export interface PlatformSummary {
+  platform: UnifiedPlatform
+  total_value: number
+  pnl: number
+  position_count: number
+  trade_count: number
+}
+
+export interface UnifiedPortfolio {
+  total_value: number
+  cash_balance: number
+  unrealized_pnl: number
+  realized_pnl: number
+  total_pnl: number
+  win_rate: number
+  total_trades: number
+  open_positions: number
+  positions: UnifiedPosition[]
+  by_platform: Record<UnifiedPlatform, PlatformSummary>
+}
+
 // Utility Types
 export type TimeRange = '1h' | '4h' | '1d' | '1w' | '1m' | '3m' | '1y';
 export type ChartType = 'candlestick' | 'line' | 'area' | 'bar';

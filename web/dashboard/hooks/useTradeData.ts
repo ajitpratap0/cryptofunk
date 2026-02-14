@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { REFRESH_INTERVALS } from '@/lib/constants'
-import type { Trade, Position, Order, TradeFilters } from '@/lib/types'
+import type { Trade, Position, Order, TradeFilters, UnifiedPortfolio } from '@/lib/types'
 
 // Query Keys
 export const QUERY_KEYS = {
@@ -227,6 +227,46 @@ export function useDashboardPnl() {
       }
       
       return response
+    },
+    staleTime: REFRESH_INTERVALS.dashboard,
+    refetchInterval: REFRESH_INTERVALS.dashboard,
+  })
+}
+
+// Unified Portfolio
+export function useUnifiedPortfolio() {
+  return useQuery({
+    queryKey: ['unified-portfolio'],
+    queryFn: async () => {
+      try {
+        const response = await apiClient.getUnifiedPortfolio()
+        if (response.success) {
+          return response
+        }
+      } catch {
+        // Fall through to mock
+      }
+      // Mock fallback
+      const mockPortfolio: UnifiedPortfolio = {
+        total_value: 0,
+        cash_balance: 10000,
+        unrealized_pnl: 0,
+        realized_pnl: 0,
+        total_pnl: 0,
+        win_rate: 0,
+        total_trades: 0,
+        open_positions: 0,
+        positions: [],
+        by_platform: {
+          binance: { platform: 'binance', total_value: 0, pnl: 0, position_count: 0, trade_count: 0 },
+          polymarket: { platform: 'polymarket', total_value: 0, pnl: 0, position_count: 0, trade_count: 0 },
+        },
+      }
+      return {
+        success: true as const,
+        data: mockPortfolio,
+        timestamp: new Date().toISOString(),
+      }
     },
     staleTime: REFRESH_INTERVALS.dashboard,
     refetchInterval: REFRESH_INTERVALS.dashboard,

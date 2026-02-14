@@ -354,6 +354,10 @@ func (s *APIServer) setupRoutes() {
 			s.rateLimiter.OrderMiddleware(),
 		)
 
+		// Unified cross-platform portfolio routes
+		unifiedHandler := api.NewUnifiedHandler(s.db)
+		unifiedHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+
 		// Polymarket paper trading routes
 		polymarketHandler := api.NewPolymarketHandler(s.db)
 		polymarketHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())

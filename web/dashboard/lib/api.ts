@@ -23,6 +23,7 @@ import {
   PolymarketPortfolio,
   PolymarketPerformance,
   PaperTradeRequest,
+  UnifiedPortfolio,
 } from './types'
 import { buildApiUrl } from './utils'
 
@@ -115,6 +116,11 @@ class ApiClient {
 
   async resumeTrading(): Promise<ApiResponse<{ message: string }>> {
     return this.request('/dashboard/trading/resume', { method: 'POST' })
+  }
+
+  // Unified Portfolio
+  async getUnifiedPortfolio(): Promise<ApiResponse<UnifiedPortfolio>> {
+    return this.request('/dashboard/unified')
   }
 
   // Positions
