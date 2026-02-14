@@ -535,6 +535,29 @@ services:
       - cryptofunk
     restart: unless-stopped
 
+  # Outcome Resolver (runs once and exits; schedule via cron or restart policy)
+  # To run periodically: use `docker compose run --rm outcome-resolver` in a cron job
+  # Example crontab: */30 * * * * cd /path/to/cryptofunk && docker compose run --rm outcome-resolver
+  outcome-resolver:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.migrate
+    container_name: cryptofunk-outcome-resolver
+    entrypoint: ["/app/outcome-resolver"]
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cryptofunk
+    restart: "no"
+    profiles:
+      - tools
+
   # REST/WebSocket API Server
   api:
     build:
@@ -548,7 +571,7 @@ services:
       ORCHESTRATOR_URL: http://orchestrator:8080
       API_PORT: 8080
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET environment variable is required}
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,*}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "8082:8080"

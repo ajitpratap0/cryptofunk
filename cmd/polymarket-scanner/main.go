@@ -2,12 +2,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket/gamma"
 )
 
@@ -30,6 +33,7 @@ func main() {
 	daysToRes := flag.Int("days-to-resolution", 0, "Max days to resolution (0=no filter)")
 	jsonOutput := flag.Bool("json", true, "Output as JSON")
 	limit := flag.Int("limit", 50, "Max markets to display")
+	useDB := flag.Bool("db", false, "Write discovered markets to the database (requires DATABASE_URL)")
 	flag.Parse()
 
 	client := gamma.NewClient()
@@ -60,6 +64,15 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "Found %d tradeable markets\n\n", len(filtered))
 
+	// Optionally write to database
+	if *useDB {
+		if err := writeMarketsToDB(filtered); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write to DB: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "Wrote %d markets to database\n", len(filtered))
+		}
+	}
+
 	var output []marketOutput
 	for _, m := range filtered {
 		output = append(output, marketOutput{
@@ -86,6 +99,41 @@ func main() {
 				truncate(m.Question, 60), m.YesPrice, m.NoPrice, m.Volume, m.DaysLeft)
 		}
 	}
+}
+
+func writeMarketsToDB(markets []gamma.Market) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	database, err := db.New(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer database.Close()
+
+	for _, m := range markets {
+		endDate, _ := m.ParsedEndDate()
+		var endDatePtr *time.Time
+		if !endDate.IsZero() {
+			endDatePtr = &endDate
+		}
+		cat := m.Category
+
+		dbMarket := &db.PolymarketMarket{
+			ID:       m.ConditionID,
+			Question: m.Question,
+			Category: &cat,
+			YesPrice: m.OutcomeYesPrice,
+			NoPrice:  m.OutcomeNoPrice,
+			Volume:   m.Volume,
+			EndDate:  endDatePtr,
+			Active:   m.Active && !m.Closed,
+		}
+		if err := database.UpsertPolymarketMarket(ctx, dbMarket); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to upsert market %s: %v\n", m.ID, err)
+		}
+	}
+	return nil
 }
 
 func truncate(s string, n int) string {
