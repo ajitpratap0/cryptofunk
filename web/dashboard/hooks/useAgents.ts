@@ -42,7 +42,39 @@ export function useAgents(filters?: AgentFilters) {
         }
       }
       
-      return response
+      // API returns {agents: [...], count: N} - extract and transform the array
+      const rawData = response.data as any
+      const agentsArray = Array.isArray(rawData) ? rawData : (rawData?.agents || [])
+      
+      // Transform API agent shape to frontend Agent type
+      const transformedAgents: Agent[] = agentsArray.map((a: any) => ({
+        name: a.agent_name || a.name || '',
+        type: a.agent_type || a.type || '',
+        status: (a.status || 'idle').toLowerCase() as Agent['status'],
+        winRate: a.win_rate ?? a.winRate ?? 0,
+        totalPnl: a.total_pnl ?? a.totalPnl ?? 0,
+        avgReturn: a.avg_return ?? a.avgReturn ?? 0,
+        totalTrades: a.total_trades ?? a.totalTrades ?? a.total_signals ?? 0,
+        activePositions: a.active_positions ?? a.activePositions ?? 0,
+        lastAction: a.last_action ?? a.lastAction ?? '',
+        timestamp: a.updated_at ?? a.timestamp ?? new Date().toISOString(),
+        version: a.version ?? '',
+      }))
+      
+      // Apply filters
+      let filtered = transformedAgents
+      if (filters?.status) {
+        filtered = filtered.filter(agent => agent.status === filters.status)
+      }
+      if (filters?.type) {
+        filtered = filtered.filter(agent => agent.type === filters.type)
+      }
+      
+      return {
+        success: true,
+        data: filtered,
+        timestamp: response.timestamp,
+      }
     },
     staleTime: REFRESH_INTERVALS.agents,
     refetchInterval: REFRESH_INTERVALS.agents,

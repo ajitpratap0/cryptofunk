@@ -72,7 +72,7 @@ export function usePositions() {
             markPrice: trade.currentPrice,
             unrealizedPnl: trade.pnl,
             unrealizedPnlPercent: trade.pnlPercent,
-            marginUsed: trade.entryPrice * trade.quantity * 0.1, // Assume 10x leverage
+            marginUsed: trade.entryPrice * trade.quantity * 0.1,
             timestamp: trade.timestamp,
           }))
         
@@ -80,6 +80,17 @@ export function usePositions() {
           success: true,
           data: mockPositions,
           timestamp: new Date().toISOString(),
+        }
+      }
+      
+      // API returns {positions: [...], count: N} - extract the array
+      const rawData = response.data as any
+      if (rawData && !Array.isArray(rawData) && rawData.positions !== undefined) {
+        const positions = Array.isArray(rawData.positions) ? rawData.positions : []
+        return {
+          success: true,
+          data: positions,
+          timestamp: response.timestamp,
         }
       }
       
@@ -140,6 +151,17 @@ export function useOrders() {
         }
       }
       
+      // API returns {orders: [...], count: N} - extract the array
+      const rawData = response.data as any
+      if (rawData && !Array.isArray(rawData) && rawData.orders !== undefined) {
+        const orders = Array.isArray(rawData.orders) ? rawData.orders : []
+        return {
+          success: true,
+          data: orders,
+          timestamp: response.timestamp,
+        }
+      }
+      
       return response
     },
     staleTime: REFRESH_INTERVALS.trades,
@@ -160,6 +182,32 @@ export function useDashboard() {
           success: true,
           data: apiClient.getMockDashboard(),
           timestamp: new Date().toISOString(),
+        }
+      }
+      
+      // Transform API response shape to DashboardStats
+      const raw = response.data as any
+      if (raw && (raw.trading_status || raw.pnl_summary || raw.position_summary)) {
+        const pnl = raw.pnl_summary || {}
+        const pos = raw.position_summary || {}
+        const trading = raw.trading_status || {}
+        
+        const transformed: import('@/lib/types').DashboardStats = {
+          totalPnl: pnl.total_pnl ?? 0,
+          totalPnlPercent: pnl.return_percent ?? 0,
+          winRate: pnl.win_rate ?? 0,
+          activePositions: pos.open_positions ?? 0,
+          totalTrades: pnl.total_trades ?? 0,
+          equity: pnl.current_capital ?? 0,
+          availableBalance: (pnl.current_capital ?? 0) - (pos.total_exposure ?? 0),
+          marginUsed: pos.total_exposure ?? 0,
+          marginAvailable: (pnl.current_capital ?? 0) - (pos.total_exposure ?? 0),
+        }
+        
+        return {
+          success: true,
+          data: transformed,
+          timestamp: response.timestamp,
         }
       }
       
@@ -200,6 +248,17 @@ export function useDashboardPositions() {
         }
       }
       
+      // API returns {positions: [...], count: N, summary: {...}} - extract the array
+      const rawData = response.data as any
+      if (rawData && !Array.isArray(rawData) && rawData.positions !== undefined) {
+        const positions = Array.isArray(rawData.positions) ? rawData.positions : []
+        return {
+          success: true,
+          data: positions,
+          timestamp: response.timestamp,
+        }
+      }
+      
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -223,6 +282,21 @@ export function useDashboardPnl() {
             equity: apiClient.getMockEquityPoints(),
           },
           timestamp: new Date().toISOString(),
+        }
+      }
+      
+      // Transform API response: API returns flat {total_pnl, realized_pnl, ...}
+      // Frontend expects {daily, total, equity: EquityPoint[]}
+      const raw = response.data as any
+      if (raw && raw.total_pnl !== undefined && !raw.equity) {
+        return {
+          success: true,
+          data: {
+            daily: raw.realized_pnl ?? 0,
+            total: raw.total_pnl ?? 0,
+            equity: apiClient.getMockEquityPoints(), // No equity curve from API yet
+          },
+          timestamp: response.timestamp,
         }
       }
       
