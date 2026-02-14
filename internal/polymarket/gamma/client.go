@@ -25,8 +25,10 @@ type Market struct {
 	AcceptingOrders bool    `json:"acceptingOrders"`
 	Category        string  `json:"category"`
 	EndDate         string  `json:"endDate"`
-	Volume          float64 `json:"volume"`
-	Liquidity       float64 `json:"liquidity"`
+	VolumeRaw       json.Number `json:"volume"`
+	LiquidityRaw    json.Number `json:"liquidity"`
+	Volume          float64     `json:"-"`
+	Liquidity       float64     `json:"-"`
 	OutcomeYesPrice float64 `json:"-"`
 	OutcomeNoPrice  float64 `json:"-"`
 	OutcomePrices   string  `json:"outcomePrices"`
@@ -61,6 +63,16 @@ func (m *Market) DaysToResolution() int {
 		return 0
 	}
 	return int(d)
+}
+
+// parseNumericFields converts string-encoded numeric fields to float64.
+func (m *Market) parseNumericFields() {
+	if v, err := m.VolumeRaw.Float64(); err == nil {
+		m.Volume = v
+	}
+	if v, err := m.LiquidityRaw.Float64(); err == nil {
+		m.Liquidity = v
+	}
 }
 
 // ParseOutcomePrices parses the outcome prices JSON string.
@@ -142,6 +154,7 @@ func (c *Client) FetchMarkets(limit, offset int) ([]Market, error) {
 	}
 
 	for i := range markets {
+		markets[i].parseNumericFields()
 		markets[i].ParseOutcomePrices()
 	}
 	return markets, nil
@@ -191,6 +204,7 @@ func (c *Client) FetchMarketByID(id string) (*Market, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
 		return nil, fmt.Errorf("decode market: %w", err)
 	}
+	m.parseNumericFields()
 	m.ParseOutcomePrices()
 	return &m, nil
 }
@@ -219,6 +233,7 @@ func (c *Client) fetchMarketByConditionID(conditionID string) (*Market, error) {
 	if len(markets) == 0 {
 		return nil, fmt.Errorf("market not found: %s", conditionID)
 	}
+	markets[0].parseNumericFields()
 	markets[0].ParseOutcomePrices()
 	return &markets[0], nil
 }
