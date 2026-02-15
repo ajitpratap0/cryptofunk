@@ -2,6 +2,7 @@ package gamma
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,13 +28,13 @@ func mockMarkets() []Market {
 		{
 			ID: "3", Question: "Multi outcome market", ConditionID: "cond3",
 			Active: true, Closed: false, Category: "politics",
-			Volume: 80000, Liquidity: 20000, EndDate: "2026-12-01T00:00:00Z",
+			VolumeRaw: json.Number("80000"), LiquidityRaw: json.Number("20000"), EndDate: "2026-12-01T00:00:00Z",
 			OutcomePrices: `["0.33","0.33","0.34"]`, Outcomes: `["A","B","C"]`,
 		},
 		{
 			ID: "4", Question: "Closed market", ConditionID: "cond4",
 			Active: false, Closed: true, Category: "crypto",
-			Volume: 1000, Liquidity: 0,
+			VolumeRaw: json.Number("1000"), LiquidityRaw: json.Number("0"),
 			OutcomePrices: `["1.00","0.00"]`, Outcomes: `["Yes","No"]`,
 		},
 	}
@@ -42,6 +43,7 @@ func mockMarkets() []Market {
 func TestFilterMarkets(t *testing.T) {
 	markets := mockMarkets()
 	for i := range markets {
+		markets[i].parseNumericFields()
 		markets[i].ParseOutcomePrices()
 	}
 
@@ -94,4 +96,30 @@ func TestFetchMarkets(t *testing.T) {
 	result, err := client.FetchMarkets(100, 0)
 	require.NoError(t, err)
 	assert.Len(t, result, 4)
+}
+
+func TestParseNumericFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		volRaw  json.Number
+		liqRaw  json.Number
+		wantVol float64
+		wantLiq float64
+	}{
+		{"normal", json.Number("50000"), json.Number("10000"), 50000, 10000},
+		{"zero", json.Number("0"), json.Number("0"), 0, 0},
+		{"empty string", json.Number(""), json.Number(""), 0, 0},
+		{"negative", json.Number("-100"), json.Number("-50"), -100, -50},
+		{"decimal", json.Number("1234.56"), json.Number("789.01"), 1234.56, 789.01},
+		{"invalid", json.Number("abc"), json.Number("N/A"), 0, 0},
+		{"large number", json.Number("999999999999"), json.Number("888888888888"), 999999999999, 888888888888},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Market{VolumeRaw: tt.volRaw, LiquidityRaw: tt.liqRaw}
+			m.parseNumericFields()
+			assert.Equal(t, tt.wantVol, m.Volume, fmt.Sprintf("Volume mismatch for %s", tt.name))
+			assert.Equal(t, tt.wantLiq, m.Liquidity, fmt.Sprintf("Liquidity mismatch for %s", tt.name))
+		})
+	}
 }

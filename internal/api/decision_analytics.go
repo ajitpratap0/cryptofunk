@@ -28,7 +28,7 @@ func NewDecisionAnalyticsHandler(database *db.DB) *DecisionAnalyticsHandler {
 }
 
 // RegisterRoutes registers the decision analytics routes.
-func (h *DecisionAnalyticsHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.HandlerFunc) {
+func (h *DecisionAnalyticsHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.HandlerFunc, authMiddleware gin.HandlerFunc) {
 	decisions := rg.Group("/decisions")
 	{
 		decisions.GET("/analytics", readMiddleware, h.handleGetAnalytics)
@@ -36,6 +36,7 @@ func (h *DecisionAnalyticsHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddl
 	}
 
 	admin := rg.Group("/admin")
+	admin.Use(authMiddleware)
 	{
 		admin.POST("/resolve-outcomes", h.handleResolveOutcomes)
 	}

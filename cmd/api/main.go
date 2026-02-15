@@ -367,7 +367,7 @@ func (s *APIServer) setupRoutes() {
 
 		// Decision analytics and outcome resolution routes
 		decisionAnalyticsHandler := api.NewDecisionAnalyticsHandler(s.db)
-		decisionAnalyticsHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+		decisionAnalyticsHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig))
 
 		// TC-003: Safety guard routes
 		safety.RegisterRoutes(v1, s.safetyGuard)
