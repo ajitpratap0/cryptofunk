@@ -1,0 +1,85 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 3 * * 1' # Weekly Monday 3 AM UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gosec:
+    name: Go Security Scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec
+        run: gosec -no-fail -fmt json -out gosec-results.json ./...
+        continue-on-error: true
+
+      - name: Display findings
+        if: always()
+        run: |
+          if [ -f gosec-results.json ]; then
+            echo "### gosec findings:"
+            cat gosec-results.json | jq '.Issues | length' 2>/dev/null || echo "No issues found"
+          fi
+
+  govulncheck:
+    name: Dependency Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+        continue-on-error: true
+
+  trivy:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - api
+          - agent
+          - orchestrator
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -f deployments/docker/Dockerfile.${{ matrix.image }} -t cryptofunk-${{ matrix.image }}:scan .
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'cryptofunk-${{ matrix.image }}:scan'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.image }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.image }}.sarif'
