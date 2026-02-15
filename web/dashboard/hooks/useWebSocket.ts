@@ -48,6 +48,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const ws = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const shouldReconnectRef = useRef(true)
+  const reconnectAttemptsRef = useRef(0)
 
   const updateState = useCallback((updates: Partial<WebSocketState>) => {
     setState(prev => ({ ...prev, ...updates }))
@@ -73,6 +74,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
           error: null,
           reconnectAttempts: 0,
         })
+        reconnectAttemptsRef.current = 0
         onOpen?.()
       }
 
@@ -87,11 +89,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         if (
           reconnect && 
           shouldReconnectRef.current && 
-          state.reconnectAttempts < maxReconnectAttempts
+          reconnectAttemptsRef.current < maxReconnectAttempts
         ) {
           reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current += 1
             updateState({ 
-              reconnectAttempts: state.reconnectAttempts + 1 
+              reconnectAttempts: reconnectAttemptsRef.current 
             })
             connect()
           }, reconnectInterval)
@@ -126,7 +129,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         error: error instanceof Error ? error.message : 'Connection failed',
       })
     }
-  }, [url, protocols, onOpen, onClose, onError, onMessage, reconnect, maxReconnectAttempts, reconnectInterval, state.reconnectAttempts, updateState])
+  }, [url, protocols, onOpen, onClose, onError, onMessage, reconnect, maxReconnectAttempts, reconnectInterval, updateState])
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false

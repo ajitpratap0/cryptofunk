@@ -3,7 +3,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { REFRESH_INTERVALS } from '@/lib/constants'
-import type { Trade, Position, Order, TradeFilters, UnifiedPortfolio } from '@/lib/types'
+import {
+  USE_MOCK_DATA,
+  getMockTrades,
+  getMockDashboard,
+  getMockEquityPoints,
+  getMockOrders,
+  getMockPositionsFromTrades,
+  getMockUnifiedPortfolio,
+} from '@/lib/mock-data'
+import {
+  isWrappedResponse,
+  isWrappedOrders,
+  isRawDashboardResponse,
+  isRawDashboardPnlResponse,
+} from '@/types/api-responses'
+import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats } from '@/lib/types'
 
 // Query Keys
 export const QUERY_KEYS = {
@@ -18,14 +33,13 @@ export const QUERY_KEYS = {
 } as const
 
 // Trades
-export function useTrades(filters?: TradeFilters) {
+export function useTrades() {
   return useQuery({
-    queryKey: [...QUERY_KEYS.trades, filters],
+    queryKey: [...QUERY_KEYS.trades],
     queryFn: async () => {
-      // For now, use mock data as the API doesn't have a trades endpoint yet
-      const mockTrades = apiClient.getMockTrades()
+      const mockTrades = getMockTrades()
       return {
-        success: true,
+        success: true as const,
         data: mockTrades,
         timestamp: new Date().toISOString(),
       }
@@ -39,11 +53,10 @@ export function useTrade(id: string) {
   return useQuery({
     queryKey: [...QUERY_KEYS.trades, id],
     queryFn: async () => {
-      // Mock single trade data
-      const trades = apiClient.getMockTrades()
+      const trades = getMockTrades()
       const trade = trades.find(t => t.id === id)
       return {
-        success: true,
+        success: true as const,
         data: trade || null,
         timestamp: new Date().toISOString(),
       }
@@ -57,44 +70,26 @@ export function usePositions() {
   return useQuery({
     queryKey: QUERY_KEYS.positions,
     queryFn: async () => {
-      let response
-      try {
-        response = await apiClient.getPositions()
-      } catch {
-        // API unreachable - fall through to mock
-      }
-      
-      // Fallback to mock data if API fails
-      if (!response?.success) {
-        const mockTrades = apiClient.getMockTrades()
-        const mockPositions = mockTrades
-          .filter(trade => trade.status === 'open')
-          .map(trade => ({
-            symbol: trade.symbol,
-            side: trade.side,
-            size: trade.quantity,
-            entryPrice: trade.entryPrice,
-            markPrice: trade.currentPrice,
-            unrealizedPnl: trade.pnl,
-            unrealizedPnlPercent: trade.pnlPercent,
-            marginUsed: trade.entryPrice * trade.quantity * 0.1,
-            timestamp: trade.timestamp,
-          }))
-        
+      if (USE_MOCK_DATA) {
         return {
-          success: true,
-          data: mockPositions,
+          success: true as const,
+          data: getMockPositionsFromTrades(),
           timestamp: new Date().toISOString(),
         }
       }
+
+      const response = await apiClient.getPositions()
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch positions')
+      }
       
       // API returns {positions: [...], count: N} - extract the array
-      const rawData = response.data as any
-      if (rawData && !Array.isArray(rawData) && rawData.positions !== undefined) {
-        const positions = Array.isArray(rawData.positions) ? rawData.positions : []
+      const rawData: unknown = response.data
+      if (isWrappedResponse(rawData)) {
         return {
-          success: true,
-          data: positions,
+          success: true as const,
+          data: rawData.positions as Position[],
           timestamp: response.timestamp,
         }
       }
@@ -120,54 +115,26 @@ export function useOrders() {
   return useQuery({
     queryKey: QUERY_KEYS.orders,
     queryFn: async () => {
-      let response
-      try {
-        response = await apiClient.getOrders()
-      } catch {
-        // API unreachable - fall through to mock
-      }
-      
-      // Fallback to mock data if API fails
-      if (!response?.success) {
-        const mockOrders: Order[] = [
-          {
-            id: '1',
-            symbol: 'BTC/USDT',
-            side: 'buy',
-            type: 'limit',
-            quantity: 0.1,
-            price: 45000,
-            status: 'pending',
-            timestamp: new Date().toISOString(),
-            agent: 'momentum_agent',
-          },
-          {
-            id: '2',
-            symbol: 'ETH/USDT',
-            side: 'sell',
-            type: 'stop',
-            quantity: 1.0,
-            stopPrice: 2800,
-            status: 'pending',
-            timestamp: new Date().toISOString(),
-            agent: 'risk_manager',
-          },
-        ]
-        
+      if (USE_MOCK_DATA) {
         return {
-          success: true,
-          data: mockOrders,
+          success: true as const,
+          data: getMockOrders(),
           timestamp: new Date().toISOString(),
         }
       }
+
+      const response = await apiClient.getOrders()
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch orders')
+      }
       
       // API returns {orders: [...], count: N} - extract the array
-      const rawData = response.data as any
-      if (rawData && !Array.isArray(rawData) && rawData.orders !== undefined) {
-        const orders = Array.isArray(rawData.orders) ? rawData.orders : []
+      const rawData: unknown = response.data
+      if (isWrappedOrders(rawData)) {
         return {
-          success: true,
-          data: orders,
+          success: true as const,
+          data: rawData.orders as Order[],
           timestamp: response.timestamp,
         }
       }
@@ -184,30 +151,27 @@ export function useDashboard() {
   return useQuery({
     queryKey: QUERY_KEYS.dashboardStats,
     queryFn: async () => {
-      let response
-      try {
-        response = await apiClient.getDashboard()
-      } catch {
-        // API unreachable - fall through to mock
-      }
-      
-      // Fallback to mock data if API fails
-      if (!response?.success) {
+      if (USE_MOCK_DATA) {
         return {
-          success: true,
-          data: apiClient.getMockDashboard(),
+          success: true as const,
+          data: getMockDashboard(),
           timestamp: new Date().toISOString(),
         }
       }
+
+      const response = await apiClient.getDashboard()
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch dashboard')
+      }
       
       // Transform API response shape to DashboardStats
-      const raw = response.data as any
-      if (raw && (raw.trading_status || raw.pnl_summary || raw.position_summary)) {
+      const raw: unknown = response.data
+      if (isRawDashboardResponse(raw)) {
         const pnl = raw.pnl_summary || {}
         const pos = raw.position_summary || {}
-        const trading = raw.trading_status || {}
         
-        const transformed: import('@/lib/types').DashboardStats = {
+        const transformed: DashboardStats = {
           totalPnl: pnl.total_pnl ?? 0,
           totalPnlPercent: pnl.return_percent ?? 0,
           winRate: pnl.win_rate ?? 0,
@@ -220,7 +184,7 @@ export function useDashboard() {
         }
         
         return {
-          success: true,
+          success: true as const,
           data: transformed,
           timestamp: response.timestamp,
         }
@@ -237,44 +201,26 @@ export function useDashboardPositions() {
   return useQuery({
     queryKey: QUERY_KEYS.dashboardPositions,
     queryFn: async () => {
-      let response
-      try {
-        response = await apiClient.getDashboardPositions()
-      } catch {
-        // API unreachable - fall through to mock
-      }
-      
-      // Fallback to mock data if API fails
-      if (!response?.success) {
-        const mockTrades = apiClient.getMockTrades()
-        const mockPositions = mockTrades
-          .filter(trade => trade.status === 'open')
-          .map(trade => ({
-            symbol: trade.symbol,
-            side: trade.side,
-            size: trade.quantity,
-            entryPrice: trade.entryPrice,
-            markPrice: trade.currentPrice,
-            unrealizedPnl: trade.pnl,
-            unrealizedPnlPercent: trade.pnlPercent,
-            marginUsed: trade.entryPrice * trade.quantity * 0.1,
-            timestamp: trade.timestamp,
-          }))
-        
+      if (USE_MOCK_DATA) {
         return {
-          success: true,
-          data: mockPositions,
+          success: true as const,
+          data: getMockPositionsFromTrades(),
           timestamp: new Date().toISOString(),
         }
       }
+
+      const response = await apiClient.getDashboardPositions()
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch dashboard positions')
+      }
       
       // API returns {positions: [...], count: N, summary: {...}} - extract the array
-      const rawData = response.data as any
-      if (rawData && !Array.isArray(rawData) && rawData.positions !== undefined) {
-        const positions = Array.isArray(rawData.positions) ? rawData.positions : []
+      const rawData: unknown = response.data
+      if (isWrappedResponse(rawData)) {
         return {
-          success: true,
-          data: positions,
+          success: true as const,
+          data: rawData.positions as Position[],
           timestamp: response.timestamp,
         }
       }
@@ -290,36 +236,33 @@ export function useDashboardPnl() {
   return useQuery({
     queryKey: QUERY_KEYS.dashboardPnl,
     queryFn: async () => {
-      let response
-      try {
-        response = await apiClient.getDashboardPnl()
-      } catch {
-        // API unreachable - fall through to mock
-      }
-      
-      // Fallback to mock data if API fails
-      if (!response?.success) {
+      if (USE_MOCK_DATA) {
         return {
-          success: true,
+          success: true as const,
           data: {
             daily: 234.56,
             total: 12547.89,
-            equity: apiClient.getMockEquityPoints(),
+            equity: getMockEquityPoints(),
           },
           timestamp: new Date().toISOString(),
         }
       }
+
+      const response = await apiClient.getDashboardPnl()
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch dashboard PnL')
+      }
       
       // Transform API response: API returns flat {total_pnl, realized_pnl, ...}
-      // Frontend expects {daily, total, equity: EquityPoint[]}
-      const raw = response.data as any
-      if (raw && raw.total_pnl !== undefined && !raw.equity) {
+      const raw: unknown = response.data
+      if (isRawDashboardPnlResponse(raw)) {
         return {
-          success: true,
+          success: true as const,
           data: {
             daily: raw.realized_pnl ?? 0,
             total: raw.total_pnl ?? 0,
-            equity: apiClient.getMockEquityPoints(), // No equity curve from API yet
+            equity: getMockEquityPoints(), // No equity curve from API yet
           },
           timestamp: response.timestamp,
         }
@@ -337,35 +280,19 @@ export function useUnifiedPortfolio() {
   return useQuery({
     queryKey: ['unified-portfolio'],
     queryFn: async () => {
-      try {
-        const response = await apiClient.getUnifiedPortfolio()
-        if (response.success) {
-          return response
+      if (USE_MOCK_DATA) {
+        return {
+          success: true as const,
+          data: getMockUnifiedPortfolio(),
+          timestamp: new Date().toISOString(),
         }
-      } catch {
-        // Fall through to mock
       }
-      // Mock fallback
-      const mockPortfolio: UnifiedPortfolio = {
-        total_value: 0,
-        cash_balance: 10000,
-        unrealized_pnl: 0,
-        realized_pnl: 0,
-        total_pnl: 0,
-        win_rate: 0,
-        total_trades: 0,
-        open_positions: 0,
-        positions: [],
-        by_platform: {
-          binance: { platform: 'binance', total_value: 0, pnl: 0, position_count: 0, trade_count: 0 },
-          polymarket: { platform: 'polymarket', total_value: 0, pnl: 0, position_count: 0, trade_count: 0 },
-        },
+
+      const response = await apiClient.getUnifiedPortfolio()
+      if (response.success) {
+        return response
       }
-      return {
-        success: true as const,
-        data: mockPortfolio,
-        timestamp: new Date().toISOString(),
-      }
+      throw new Error(response.error || 'Failed to fetch unified portfolio')
     },
     staleTime: REFRESH_INTERVALS.dashboard,
     refetchInterval: REFRESH_INTERVALS.dashboard,

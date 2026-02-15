@@ -7,15 +7,8 @@ import {
   AgentDecision,
   DashboardStats,
   EquityPoint,
-  PerformanceMetrics,
   Strategy,
   SystemStatus,
-  RiskMetrics,
-  CircuitBreaker,
-  TradeFilters,
-  AgentFilters,
-  CandlestickData,
-  TimeRange,
   PolymarketMarket,
   PolymarketPosition,
   PolymarketTrade,
@@ -52,15 +45,15 @@ class ApiClient {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      const data = await response.json()
+      const data: unknown = await response.json()
       
       // Handle cases where the API doesn't wrap responses
-      if (data.success !== undefined) {
-        return data
+      if (typeof data === 'object' && data !== null && 'success' in data) {
+        return data as ApiResponse<T>
       } else {
         return {
           success: true,
-          data,
+          data: data as T,
           timestamp: new Date().toISOString(),
         }
       }
@@ -68,7 +61,7 @@ class ApiClient {
       console.error(`API request failed: ${endpoint}`, error)
       return {
         success: false,
-        data: null as any,
+        data: null as unknown as T,
         error: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString(),
       }
@@ -227,7 +220,7 @@ class ApiClient {
     return this.request('/strategies/current')
   }
 
-  async exportStrategy(): Promise<ApiResponse<{ config: any }>> {
+  async exportStrategy(): Promise<ApiResponse<{ config: Record<string, unknown> }>> {
     return this.request('/strategies/export')
   }
 
@@ -235,12 +228,12 @@ class ApiClient {
     return this.request('/strategies/version')
   }
 
-  async getStrategySchema(): Promise<ApiResponse<{ schema: any }>> {
+  async getStrategySchema(): Promise<ApiResponse<{ schema: Record<string, unknown> }>> {
     return this.request('/strategies/schema')
   }
 
   // Config
-  async getConfig(): Promise<ApiResponse<any>> {
+  async getConfig(): Promise<ApiResponse<Record<string, unknown>>> {
     return this.request('/config')
   }
 
@@ -277,157 +270,11 @@ class ApiClient {
     return this.request('/polymarket/performance')
   }
 
-  async executePaperTrade(trade: PaperTradeRequest): Promise<ApiResponse<{ trade: any; balance: number; message: string }>> {
+  async executePaperTrade(trade: PaperTradeRequest): Promise<ApiResponse<{ trade: Record<string, unknown>; balance: number; message: string }>> {
     return this.request('/polymarket/trade', {
       method: 'POST',
       body: JSON.stringify(trade),
     })
-  }
-
-  // Mock Data Methods (for fallback when API is unreachable)
-  getMockDashboard(): DashboardStats {
-    return {
-      totalPnl: 12547.89,
-      totalPnlPercent: 15.67,
-      winRate: 68.4,
-      activePositions: 7,
-      totalTrades: 234,
-      equity: 92547.89,
-      availableBalance: 45230.12,
-      marginUsed: 12500.00,
-      marginAvailable: 32730.12,
-    }
-  }
-
-  getMockTrades(): Trade[] {
-    const now = Date.now()
-    return [
-      {
-        id: '1',
-        symbol: 'BTC/USDT',
-        side: 'long',
-        entryPrice: 45230.50,
-        currentPrice: 46100.25,
-        quantity: 0.5,
-        pnl: 434.88,
-        pnlPercent: 1.92,
-        agent: 'momentum_agent',
-        confidence: 85,
-        timestamp: new Date(now - 75 * 60 * 1000).toISOString(), // 1h 15m ago
-        status: 'open',
-        reasoning: 'Strong bullish momentum detected with volume confirmation and break above resistance'
-      },
-      {
-        id: '2',
-        symbol: 'ETH/USDT',
-        side: 'long',
-        entryPrice: 2845.30,
-        currentPrice: 2920.15,
-        quantity: 3.2,
-        pnl: 239.52,
-        pnlPercent: 2.63,
-        agent: 'ml_prediction',
-        confidence: 92,
-        timestamp: new Date(now - 135 * 60 * 1000).toISOString(), // 2h 15m ago
-        status: 'open',
-        reasoning: 'ML model predicts upward price movement with 92% confidence based on pattern recognition'
-      },
-      {
-        id: '3',
-        symbol: 'BNB/USDT',
-        side: 'short',
-        entryPrice: 320.45,
-        currentPrice: 315.80,
-        quantity: 5.0,
-        pnl: 23.25,
-        pnlPercent: 1.45,
-        agent: 'mean_reversion',
-        confidence: 78,
-        timestamp: new Date(now - 165 * 60 * 1000).toISOString(), // 2h 45m ago
-        status: 'open',
-        reasoning: 'Price overextended from mean, expecting reversion to support level'
-      }
-    ]
-  }
-
-  getMockAgents(): Agent[] {
-    const now = Date.now()
-    return [
-      {
-        name: 'momentum_agent',
-        type: 'momentum',
-        status: 'active',
-        winRate: 72.5,
-        totalPnl: 4520.30,
-        avgReturn: 2.8,
-        totalTrades: 87,
-        activePositions: 3,
-        lastAction: 'Buy BTC/USDT',
-        timestamp: new Date(now - 75 * 60 * 1000).toISOString(), // 1h 15m ago
-        version: '1.2.3'
-      },
-      {
-        name: 'ml_prediction',
-        type: 'ml_prediction',
-        status: 'active',
-        winRate: 69.8,
-        totalPnl: 6230.15,
-        avgReturn: 3.2,
-        totalTrades: 124,
-        activePositions: 2,
-        lastAction: 'Buy ETH/USDT',
-        timestamp: new Date(now - 135 * 60 * 1000).toISOString(), // 2h 15m ago
-        version: '2.1.0'
-      },
-      {
-        name: 'mean_reversion',
-        type: 'mean_reversion',
-        status: 'active',
-        winRate: 65.2,
-        totalPnl: 1797.44,
-        avgReturn: 1.9,
-        totalTrades: 156,
-        activePositions: 1,
-        lastAction: 'Sell BNB/USDT',
-        timestamp: new Date(now - 165 * 60 * 1000).toISOString(), // 2h 45m ago
-        version: '1.5.2'
-      },
-      {
-        name: 'scalper',
-        type: 'scalper',
-        status: 'idle',
-        winRate: 58.3,
-        totalPnl: -234.56,
-        avgReturn: 0.5,
-        totalTrades: 432,
-        activePositions: 0,
-        lastAction: 'No trades',
-        timestamp: new Date(now - 250 * 60 * 1000).toISOString(), // 4h 10m ago
-        version: '1.0.8'
-      }
-    ]
-  }
-
-  getMockEquityPoints(): EquityPoint[] {
-    const points: EquityPoint[] = []
-    const baseEquity = 80000
-    let currentEquity = baseEquity
-    const now = Date.now()
-    
-    for (let i = 30; i >= 0; i--) {
-      const timestamp = new Date(now - i * 24 * 60 * 60 * 1000).toISOString() // i days ago
-      
-      const change = (Math.random() - 0.5) * 2000
-      currentEquity += change
-      
-      points.push({
-        timestamp,
-        equity: Math.max(currentEquity, baseEquity * 0.7), // Don't go below 70% of initial
-        pnl: change
-      })
-    }
-    
-    return points
   }
 }
 

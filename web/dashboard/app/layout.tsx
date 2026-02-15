@@ -10,16 +10,29 @@ import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
 
-// Create a client
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 0,
-      staleTime: 30000,
-      refetchOnWindowFocus: false,
+function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: 0,
+        staleTime: 30000,
+        refetchOnWindowFocus: false,
+      },
     },
-  },
-})
+  })
+}
+
+let browserQueryClient: QueryClient | undefined
+
+function getQueryClient() {
+  if (typeof window === 'undefined') {
+    // Server: always make a new query client
+    return makeQueryClient()
+  }
+  // Browser: reuse the same query client
+  if (!browserQueryClient) browserQueryClient = makeQueryClient()
+  return browserQueryClient
+}
 
 export default function RootLayout({
   children,
@@ -27,6 +40,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const queryClient = getQueryClient()
 
   // Auto-expand sidebar on desktop, keep collapsed on mobile
   useEffect(() => {
