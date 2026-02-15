@@ -19,6 +19,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
+	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
 // setupTestServer creates a test API server with mocked dependencies and testcontainers database
@@ -45,6 +46,9 @@ func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) (*APIServe
 	hub := NewHub()
 	go hub.Run()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	// Create server
 	server := &APIServer{
 		router:             gin.New(),
@@ -53,6 +57,8 @@ func setupTestServer(t *testing.T, mockOrchestrator *httptest.Server) (*APIServe
 		hub:                hub,
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
+		ctx:                ctx,
+		safetyGuard:        safety.NewGuard(safety.NewLimitsConfig(), safety.NewMonitor(0)),
 	}
 
 	// Setup routes
