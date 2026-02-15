@@ -51,7 +51,26 @@ spec:
   #   secretName: cryptofunk-tls
 
   rules:
-  # API Server
+  # Dashboard + API (single domain)
+  - host: cryptofunk.example.com  # Change to your domain
+    http:
+      paths:
+      - path: /api/
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-service
+            port:
+              number: 80
+
+  # API Server (dedicated subdomain)
   - host: api.cryptofunk.example.com  # Change to your domain
     http:
       paths:

@@ -590,6 +590,25 @@ services:
       - cryptofunk
     restart: unless-stopped
 
+  # Next.js Dashboard
+  dashboard:
+    build:
+      context: web/dashboard
+      dockerfile: ../../deployments/docker/Dockerfile.dashboard
+      args:
+        NEXT_PUBLIC_API_URL: http://api:8080
+    container_name: cryptofunk-dashboard
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:8080
+    ports:
+      - "3001:3000"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - cryptofunk
+    restart: unless-stopped
+
 networks:
   cryptofunk:
     driver: bridge

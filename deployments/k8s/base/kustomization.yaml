@@ -31,6 +31,7 @@ resources:
   - deployment-mcp-servers.yaml
   - deployment-agents.yaml
   - deployment-api.yaml
+  - deployment-dashboard.yaml
 
   # Services
   - services.yaml
@@ -86,4 +87,7 @@ images:
     newTag: latest
   - name: cryptofunk/api
     newName: your-registry.io/cryptofunk/api
+    newTag: latest
+  - name: cryptofunk/dashboard
+    newName: your-registry.io/cryptofunk/dashboard
     newTag: latest
