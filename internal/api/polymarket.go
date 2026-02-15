@@ -103,9 +103,9 @@ func (h *PolymarketHandler) ListPositions(c *gin.Context) {
 
 	type enrichedPosition struct {
 		*db.PolymarketPosition
-		CurrentPrice  *float64 `json:"current_price,omitempty"`
-		UnrealizedPnl *float64 `json:"unrealized_pnl,omitempty"`
-		MarketQuestion string  `json:"market_question,omitempty"`
+		CurrentPrice   *float64 `json:"current_price,omitempty"`
+		UnrealizedPnl  *float64 `json:"unrealized_pnl,omitempty"`
+		MarketQuestion string   `json:"market_question,omitempty"`
 	}
 
 	result := make([]enrichedPosition, 0, len(positions))

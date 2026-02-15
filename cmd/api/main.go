@@ -1455,18 +1455,18 @@ func (s *APIServer) BroadcastDecisionStats(stats map[string]interface{}) error {
 // BroadcastPolymarketPositionUpdate broadcasts a Polymarket paper position update
 func (s *APIServer) BroadcastPolymarketPositionUpdate(position *db.PolymarketPosition) error {
 	data := map[string]interface{}{
-		"id":          position.ID.String(),
-		"session_id":  position.SessionID.String(),
-		"market_id":   position.MarketID,
-		"side":        position.Side,
-		"shares":      position.Shares,
-		"avg_price":   position.AvgPrice,
-		"cost_basis":  position.CostBasis,
-		"status":      position.Status,
-		"opened_at":   position.OpenedAt,
-		"closed_at":   position.ClosedAt,
+		"id":           position.ID.String(),
+		"session_id":   position.SessionID.String(),
+		"market_id":    position.MarketID,
+		"side":         position.Side,
+		"shares":       position.Shares,
+		"avg_price":    position.AvgPrice,
+		"cost_basis":   position.CostBasis,
+		"status":       position.Status,
+		"opened_at":    position.OpenedAt,
+		"closed_at":    position.ClosedAt,
 		"realized_pnl": position.RealizedPnl,
-		"timestamp":   time.Now(),
+		"timestamp":    time.Now(),
 	}
 	return s.hub.Broadcast(MessageTypePolymarketPosition, data)
 }

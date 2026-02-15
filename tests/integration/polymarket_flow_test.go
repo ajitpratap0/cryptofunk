@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func ptrF(f float64) *float64 { return &f }
+
 // TestPolymarketFullFlow validates the complete Polymarket paper trading flow:
 // insert market → buy → verify position & trade → sell → verify close & P&L.
 func TestPolymarketFullFlow(t *testing.T) {
@@ -27,9 +29,9 @@ func TestPolymarketFullFlow(t *testing.T) {
 		ID:       "test-condition-id-123",
 		Question: "Will BTC exceed $100k by March 2026?",
 		Active:   true,
-		YesPrice: 0.65,
-		NoPrice:  0.35,
-		Volume:   500000,
+		YesPrice: ptrF(0.65),
+		NoPrice:  ptrF(0.35),
+		Volume:   ptrF(500000),
 	}
 	err := database.UpsertPolymarketMarket(ctx, market)
 	require.NoError(t, err, "should insert market")
@@ -38,7 +40,7 @@ func TestPolymarketFullFlow(t *testing.T) {
 	fetched, err := database.GetPolymarketMarket(ctx, market.ID)
 	require.NoError(t, err)
 	assert.Equal(t, market.Question, fetched.Question)
-	assert.Equal(t, 0.65, fetched.YesPrice)
+	assert.Equal(t, ptrF(0.65), fetched.YesPrice)
 
 	// Step 2: Create a DBPaperEngine and execute a paper buy
 	engine, err := paper.NewDBPaperEngine(database)

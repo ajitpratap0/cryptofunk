@@ -84,9 +84,9 @@ func (h *DecisionAnalyticsHandler) handleResolveOutcomes(c *gin.Context) {
 	polyResolved, binanceResolved, err := h.resolver.ResolveAll(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":              err.Error(),
+			"error":               err.Error(),
 			"polymarket_resolved": polyResolved,
-			"binance_resolved":   binanceResolved,
+			"binance_resolved":    binanceResolved,
 		})
 		return
 	}

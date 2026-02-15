@@ -131,4 +131,3 @@ func (r *Resolver) ResolveAll(ctx context.Context) (polyResolved int, binanceRes
 
 	return polyResolved, binanceResolved, nil
 }
-

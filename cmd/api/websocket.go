@@ -24,18 +24,18 @@ const (
 type MessageType string
 
 const (
-	MessageTypePositionUpdate MessageType = "position_update"
-	MessageTypeTrade          MessageType = "trade"
-	MessageTypeOrderUpdate    MessageType = "order_update"
-	MessageTypeAgentStatus    MessageType = "agent_status"
-	MessageTypeSystemStatus   MessageType = "system_status"
-	MessageTypeDecision       MessageType = "decision"       // LLM decision updates
-	MessageTypeDecisionStats  MessageType = "decision_stats" // Decision statistics updates
+	MessageTypePositionUpdate     MessageType = "position_update"
+	MessageTypeTrade              MessageType = "trade"
+	MessageTypeOrderUpdate        MessageType = "order_update"
+	MessageTypeAgentStatus        MessageType = "agent_status"
+	MessageTypeSystemStatus       MessageType = "system_status"
+	MessageTypeDecision           MessageType = "decision"            // LLM decision updates
+	MessageTypeDecisionStats      MessageType = "decision_stats"      // Decision statistics updates
 	MessageTypePolymarketPosition MessageType = "polymarket_position" // Polymarket position updates
 	MessageTypePolymarketMarket   MessageType = "polymarket_market"   // Polymarket market price updates
 	MessageTypeError              MessageType = "error"
-	MessageTypePing           MessageType = "ping"
-	MessageTypePong           MessageType = "pong"
+	MessageTypePing               MessageType = "ping"
+	MessageTypePong               MessageType = "pong"
 )
 
 // Message represents a WebSocket message

@@ -16,26 +16,26 @@ const BaseURL = "https://gamma-api.polymarket.com"
 
 // Market represents a Polymarket market from the Gamma API.
 type Market struct {
-	ID              string  `json:"id"`
-	Question        string  `json:"question"`
-	ConditionID     string  `json:"conditionId"`
-	Slug            string  `json:"slug"`
-	Active          bool    `json:"active"`
-	Closed          bool    `json:"closed"`
-	AcceptingOrders bool    `json:"acceptingOrders"`
-	Category        string  `json:"category"`
-	EndDate         string  `json:"endDate"`
+	ID              string      `json:"id"`
+	Question        string      `json:"question"`
+	ConditionID     string      `json:"conditionId"`
+	Slug            string      `json:"slug"`
+	Active          bool        `json:"active"`
+	Closed          bool        `json:"closed"`
+	AcceptingOrders bool        `json:"acceptingOrders"`
+	Category        string      `json:"category"`
+	EndDate         string      `json:"endDate"`
 	VolumeRaw       json.Number `json:"volume"`
 	LiquidityRaw    json.Number `json:"liquidity"`
 	Volume          float64     `json:"-"`
 	Liquidity       float64     `json:"-"`
-	OutcomeYesPrice float64 `json:"-"`
-	OutcomeNoPrice  float64 `json:"-"`
-	OutcomePrices   string  `json:"outcomePrices"`
-	Outcomes        string  `json:"outcomes"`
-	Description     string  `json:"description"`
-	Resolution      string  `json:"resolution"`
-	ResolvedAt      string  `json:"resolvedAt"`
+	OutcomeYesPrice float64     `json:"-"`
+	OutcomeNoPrice  float64     `json:"-"`
+	OutcomePrices   string      `json:"outcomePrices"`
+	Outcomes        string      `json:"outcomes"`
+	Description     string      `json:"description"`
+	Resolution      string      `json:"resolution"`
+	ResolvedAt      string      `json:"resolvedAt"`
 }
 
 // ParsedEndDate returns the parsed end date.

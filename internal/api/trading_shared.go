@@ -2,8 +2,9 @@
 // trading control route groups and provides shared validation helpers.
 //
 // Route groups:
-//   /api/v1/trade/*              (cmd/api/main.go) — calls orchestrator via HTTP
-//   /api/v1/dashboard/trading/*  (internal/api/dashboard.go) — uses direct Go interface
+//
+//	/api/v1/trade/*              (cmd/api/main.go) — calls orchestrator via HTTP
+//	/api/v1/dashboard/trading/*  (internal/api/dashboard.go) — uses direct Go interface
 //
 // Both are kept for backward compatibility. They differ in orchestrator integration
 // (HTTP vs direct), but share the same DB operations. New clients should prefer

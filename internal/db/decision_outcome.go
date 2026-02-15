@@ -20,15 +20,15 @@ type DecisionWithOutcome struct {
 
 // AgentAnalytics holds per-agent decision statistics.
 type AgentAnalytics struct {
-	AgentName     string  `json:"agent_name"`
-	TotalDecisions int    `json:"total_decisions"`
-	Wins          int     `json:"wins"`
-	Losses        int     `json:"losses"`
-	Pending       int     `json:"pending"`
-	WinRate       float64 `json:"win_rate"`
-	AvgConfidence float64 `json:"avg_confidence"`
-	AvgPnl        float64 `json:"avg_pnl"`
-	TotalPnl      float64 `json:"total_pnl"`
+	AgentName      string  `json:"agent_name"`
+	TotalDecisions int     `json:"total_decisions"`
+	Wins           int     `json:"wins"`
+	Losses         int     `json:"losses"`
+	Pending        int     `json:"pending"`
+	WinRate        float64 `json:"win_rate"`
+	AvgConfidence  float64 `json:"avg_confidence"`
+	AvgPnl         float64 `json:"avg_pnl"`
+	TotalPnl       float64 `json:"total_pnl"`
 }
 
 // ConfidenceBucket holds calibration data for a confidence range.
@@ -42,11 +42,11 @@ type ConfidenceBucket struct {
 
 // DecisionAnalytics holds overall decision analytics.
 type DecisionAnalytics struct {
-	TotalDecisions       int                `json:"total_decisions"`
-	ResolvedDecisions    int                `json:"resolved_decisions"`
-	OverallWinRate       float64            `json:"overall_win_rate"`
-	OverallAvgPnl        float64            `json:"overall_avg_pnl"`
-	ByAgent              []AgentAnalytics   `json:"by_agent"`
+	TotalDecisions        int                `json:"total_decisions"`
+	ResolvedDecisions     int                `json:"resolved_decisions"`
+	OverallWinRate        float64            `json:"overall_win_rate"`
+	OverallAvgPnl         float64            `json:"overall_avg_pnl"`
+	ByAgent               []AgentAnalytics   `json:"by_agent"`
 	ConfidenceCalibration []ConfidenceBucket `json:"confidence_calibration"`
 }
 

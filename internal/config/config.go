@@ -30,8 +30,8 @@ type Config struct {
 
 // PolymarketConfig contains Polymarket-specific settings
 type PolymarketConfig struct {
-	PrivateKey string `mapstructure:"private_key"` // Ethereum private key for signing
-	Mode       string `mapstructure:"mode"`        // "paper" or "live"
+	PrivateKey string `mapstructure:"private_key"`    // Ethereum private key for signing
+	Mode       string `mapstructure:"mode"`           // "paper" or "live"
 	FunderAddr string `mapstructure:"funder_address"` // Optional funder address
 }
 
