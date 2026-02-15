@@ -18,12 +18,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
 
 // ============================================================================
@@ -206,6 +209,10 @@ type PolymarketAgent struct {
 	// BDI belief system
 	beliefs *BeliefBase
 
+	// Database persistence (optional, nil if DATABASE_URL not set)
+	database  *db.DB
+	sessionID uuid.UUID
+
 	// Position management
 	positions    map[string]*Position // marketID -> Position
 	positionsMtx sync.RWMutex
@@ -224,6 +231,10 @@ type PolymarketAgent struct {
 	minDaysToResolution float64  // Minimum days until resolution
 	maxDaysToResolution float64  // Maximum days until resolution
 	preferredCategories []string // Preferred market categories
+
+	// Direct execution mode
+	executeMode  bool
+	polyExchange *exchange.PolymarketExchange
 }
 
 // ============================================================================
@@ -240,6 +251,46 @@ func (a *PolymarketAgent) Initialize(ctx context.Context) error {
 
 	a.beliefs = NewBeliefBase()
 	a.positions = make(map[string]*Position)
+
+	// Initialize database if DATABASE_URL is set
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		database, err := db.New(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to connect to database, running without persistence")
+		} else {
+			a.database = database
+
+			// Create a paper trading session for the agent
+			session := &db.TradingSession{
+				ID:             uuid.New(),
+				Mode:           db.TradingModePaper,
+				Symbol:         "POLYMARKET",
+				Exchange:       "polymarket",
+				StartedAt:      time.Now(),
+				InitialCapital: a.maxTotalExposure,
+			}
+			if err := database.CreateSession(ctx, session); err != nil {
+				log.Warn().Err(err).Msg("Failed to create agent session")
+			} else {
+				a.sessionID = session.ID
+			}
+
+			// Load existing positions from DB
+			dbPositions, err := database.GetOpenPolymarketPositions(ctx)
+			if err == nil {
+				for _, p := range dbPositions {
+					a.positions[p.MarketID] = &Position{
+						MarketID:   p.MarketID,
+						Side:       p.Side,
+						EntryPrice: p.AvgPrice,
+						Size:       p.CostBasis,
+						OpenedAt:   p.OpenedAt,
+					}
+				}
+				log.Info().Int("loaded", len(dbPositions)).Msg("Loaded existing positions from DB")
+			}
+		}
+	}
 
 	// Connect to NATS
 	natsURL := viper.GetString("nats.url")
@@ -386,8 +437,13 @@ func (a *PolymarketAgent) Step(ctx context.Context) error {
 			continue
 		}
 
-		// Track position only after successful signal publication
-		// TODO: In production, wait for actual execution confirmation from the exchange
+		// Execute directly if in execute mode, otherwise just track
+		if a.executeMode && a.polyExchange != nil {
+			if err := a.executeSignal(ctx, sig); err != nil {
+				log.Error().Err(err).Str("market", sig.MarketID).Msg("Failed to execute signal directly")
+				continue
+			}
+		}
 		a.openPosition(sig)
 	}
 
@@ -745,6 +801,58 @@ func (a *PolymarketAgent) openPosition(signal *TradeSignal) {
 		Float64("size", signal.Size).
 		Msg("Position opened")
 
+	// Persist to DB
+	if a.database != nil {
+		ctx := context.Background()
+		shares := signal.Size / signal.Price
+
+		// Upsert market
+		_ = a.database.UpsertPolymarketMarket(ctx, &db.PolymarketMarket{
+			ID:       signal.MarketID,
+			Question: signal.Question,
+			Active:   true,
+		})
+
+		// Insert position
+		dbPos := &db.PolymarketPosition{
+			ID:        uuid.New(),
+			SessionID: a.sessionID,
+			MarketID:  signal.MarketID,
+			Side:      signal.Side,
+			Shares:    shares,
+			AvgPrice:  signal.Price,
+			CostBasis: signal.Size,
+			Status:    "OPEN",
+		}
+		if err := a.database.InsertPolymarketPosition(ctx, dbPos); err != nil {
+			log.Warn().Err(err).Str("market", signal.MarketID).Msg("Failed to persist position to DB")
+		}
+
+		// Insert trade record
+		_ = a.database.InsertPolymarketTrade(ctx, &db.PolymarketTrade{
+			ID:         uuid.New(),
+			PositionID: dbPos.ID,
+			MarketID:   signal.MarketID,
+			Action:     "BUY",
+			Side:       signal.Side,
+			Amount:     signal.Size,
+			Price:      signal.Price,
+			Shares:     shares,
+			Timestamp:  time.Now(),
+		})
+
+		// Insert prediction
+		_ = a.database.InsertPolymarketPrediction(ctx, &db.PolymarketPrediction{
+			MarketID:      signal.MarketID,
+			PredictedProb: signal.FairPrice,
+			MarketPrice:   signal.Price,
+			Edge:          signal.Edge,
+			Confidence:    signal.Confidence,
+			Reasoning:     &signal.Reasoning,
+		})
+
+	}
+
 	a.beliefs.UpdateBelief("total_exposure", a.totalExposureUnsafe(), 1.0, "position_manager")
 	a.beliefs.UpdateBelief(
 		fmt.Sprintf("position:%s", signal.MarketID),
@@ -963,6 +1071,44 @@ func (a *PolymarketAgent) publishSignal(signal *TradeSignal) error {
 }
 
 // ============================================================================
+// DIRECT EXECUTION
+// ============================================================================
+
+// executeSignal directly executes a trade signal via the PolymarketExchange adapter.
+func (a *PolymarketAgent) executeSignal(ctx context.Context, signal *TradeSignal) error {
+	var side exchange.OrderSide
+	if signal.Side == "YES" {
+		side = exchange.OrderSideBuy
+	} else {
+		side = exchange.OrderSideSell
+	}
+
+	req := exchange.PlaceOrderRequest{
+		Symbol:   signal.MarketID,
+		Side:     side,
+		Type:     exchange.OrderTypeLimit,
+		Quantity: signal.Size / signal.Price, // Convert USD size to shares
+		Price:    signal.Price,
+	}
+
+	resp, err := a.polyExchange.PlaceOrder(ctx, req)
+	if err != nil {
+		return fmt.Errorf("place order: %w", err)
+	}
+
+	log.Info().
+		Str("order_id", resp.OrderID).
+		Str("status", string(resp.Status)).
+		Str("market", signal.MarketID).
+		Str("side", signal.Side).
+		Float64("price", signal.Price).
+		Float64("size", signal.Size).
+		Msg("Signal executed directly via PolymarketExchange")
+
+	return nil
+}
+
+// ============================================================================
 // MAIN ENTRY POINT
 // ============================================================================
 
@@ -1098,8 +1244,35 @@ func main() {
 		preferredCategories = []string{"politics", "crypto", "tech", "news"}
 	}
 
+	// Check --execute flag
+	executeMode := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--execute" {
+			executeMode = true
+		}
+	}
+
+	// Initialize PolymarketExchange if in execute mode
+	var polyExchange *exchange.PolymarketExchange
+	if executeMode {
+		polyPrivateKey := os.Getenv("POLYMARKET_PRIVATE_KEY")
+		polyMode := os.Getenv("POLYMARKET_MODE")
+		if polyMode == "" {
+			polyMode = "paper" // Default to paper for safety
+		}
+
+		pe, err := exchange.NewPolymarketExchange(polyPrivateKey, polyMode == "paper", nil)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to initialize PolymarketExchange for execute mode")
+		}
+		polyExchange = pe
+		log.Info().Str("mode", polyMode).Msg("Execute mode enabled with PolymarketExchange")
+	}
+
 	agent := &PolymarketAgent{
 		BaseAgent:           baseAgent,
+		executeMode:         executeMode,
+		polyExchange:        polyExchange,
 		pollInterval:        pollInterval,
 		maxPositionSize:     maxPositionSize,
 		maxTotalExposure:    maxTotalExposure,
@@ -1122,6 +1295,11 @@ func main() {
 
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
+	}
+
+	// Share the agent's database connection with the exchange to avoid duplicate connections
+	if agent.database != nil && agent.polyExchange != nil {
+		agent.polyExchange.SetDB(agent.database)
 	}
 
 	agent.heartbeat.Start()

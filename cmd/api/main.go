@@ -146,7 +146,7 @@ func (s *APIServer) setupMiddleware() {
 			allowedOrigins = []string{} // Empty list = reject all
 		} else {
 			// Default origins for development
-			allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3333", "http://localhost:5173", "http://localhost:8080"}
 		}
 	}
 
@@ -261,18 +261,6 @@ func (s *APIServer) setupRoutes() {
 			positions.GET("/:symbol", s.handleGetPosition)
 		}
 
-		// Order routes (mixed read/write, apply appropriate limiters)
-		orders := v1.Group("/orders")
-		{
-			// Read operations (higher limit)
-			orders.GET("", s.rateLimiter.ReadMiddleware(), s.handleListOrders)
-			orders.GET("/:id", s.rateLimiter.ReadMiddleware(), s.handleGetOrder)
-
-			// Write operations (lower limit to prevent order spam)
-			orders.POST("", s.rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
-			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
-		}
-
 		// Create authentication config for protected endpoints
 		authConfig := &api.AuthConfig{
 			Enabled:      s.config.API.Auth.Enabled,
@@ -281,6 +269,21 @@ func (s *APIServer) setupRoutes() {
 		}
 		if authConfig.HeaderName == "" {
 			authConfig.HeaderName = "X-API-Key" // Default header name
+		}
+
+		// Order routes (mixed read/write, apply appropriate limiters + authentication)
+		orders := v1.Group("/orders")
+		if s.config.API.Auth.Enabled {
+			orders.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
+		{
+			// Read operations (higher limit)
+			orders.GET("", s.rateLimiter.ReadMiddleware(), s.handleListOrders)
+			orders.GET("/:id", s.rateLimiter.ReadMiddleware(), s.handleGetOrder)
+
+			// Write operations (lower limit to prevent order spam)
+			orders.POST("", s.rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
+			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
 		}
 
 		// Trading control routes (critical ops, strictest rate limiting + authentication)
@@ -353,6 +356,18 @@ func (s *APIServer) setupRoutes() {
 			s.rateLimiter.ReadMiddleware(),
 			s.rateLimiter.OrderMiddleware(),
 		)
+
+		// Unified cross-platform portfolio routes
+		unifiedHandler := api.NewUnifiedHandler(s.db)
+		unifiedHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+
+		// Polymarket paper trading routes
+		polymarketHandler := api.NewPolymarketHandler(s.db)
+		polymarketHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
+
+		// Decision analytics and outcome resolution routes
+		decisionAnalyticsHandler := api.NewDecisionAnalyticsHandler(s.db)
+		decisionAnalyticsHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig))
 
 		// TC-003: Safety guard routes
 		safety.RegisterRoutes(v1, s.safetyGuard)
@@ -1437,6 +1452,41 @@ func (s *APIServer) BroadcastDecisionStats(stats map[string]interface{}) error {
 	return s.hub.Broadcast(MessageTypeDecisionStats, data)
 }
 
+// BroadcastPolymarketPositionUpdate broadcasts a Polymarket paper position update
+func (s *APIServer) BroadcastPolymarketPositionUpdate(position *db.PolymarketPosition) error {
+	data := map[string]interface{}{
+		"id":          position.ID.String(),
+		"session_id":  position.SessionID.String(),
+		"market_id":   position.MarketID,
+		"side":        position.Side,
+		"shares":      position.Shares,
+		"avg_price":   position.AvgPrice,
+		"cost_basis":  position.CostBasis,
+		"status":      position.Status,
+		"opened_at":   position.OpenedAt,
+		"closed_at":   position.ClosedAt,
+		"realized_pnl": position.RealizedPnl,
+		"timestamp":   time.Now(),
+	}
+	return s.hub.Broadcast(MessageTypePolymarketPosition, data)
+}
+
+// BroadcastPolymarketMarketUpdate broadcasts a Polymarket market price update
+func (s *APIServer) BroadcastPolymarketMarketUpdate(market *db.PolymarketMarket) error {
+	data := map[string]interface{}{
+		"id":         market.ID,
+		"question":   market.Question,
+		"category":   market.Category,
+		"yes_price":  market.YesPrice,
+		"no_price":   market.NoPrice,
+		"volume":     market.Volume,
+		"active":     market.Active,
+		"updated_at": market.UpdatedAt,
+		"timestamp":  time.Now(),
+	}
+	return s.hub.Broadcast(MessageTypePolymarketMarket, data)
+}
+
 // truncateString truncates a string to maxLen and adds "..." if truncated.
 // For maxLen < 4, returns the first maxLen characters without "...".
 func truncateString(s string, maxLen int) string {
@@ -1464,7 +1514,7 @@ func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
 			allowedOrigins = []string{} // Empty list = reject all
 		} else {
 			// Default origins for development
-			allowedOrigins = []string{"http://localhost:3000", "http://localhost:5173", "http://localhost:8080"}
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3333", "http://localhost:5173", "http://localhost:8080"}
 		}
 	}
 

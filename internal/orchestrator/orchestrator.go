@@ -628,6 +628,12 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 }
 
 // publishDecision publishes a trading decision to NATS
+// TODO(Phase4): When the orchestrator creates orders from decisions, link them via:
+//   decisionID := tracker.TrackDecision(ctx, ...)
+//   tracker.LinkDecisionToOrder(ctx, decisionID, orderID)
+// Currently the orchestrator only publishes decisions via NATS; order creation
+// happens downstream. The downstream consumer should perform the linking.
+
 func (o *Orchestrator) publishDecision(decision *TradingDecision) error {
 	data, err := json.Marshal(decision)
 	if err != nil {

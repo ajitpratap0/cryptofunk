@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,19 +10,63 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket/analyzer"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket/gamma"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket/paper"
 )
 
+// PaperTrader abstracts the paper trading engine so both file-based and DB-backed
+// engines can be used interchangeably.
+type PaperTrader interface {
+	Buy(marketID, question string, side paper.Side, amount, price float64) (*paper.Trade, error)
+	Sell(marketID string, side paper.Side, shares, price float64) (*paper.Trade, error)
+	GetPortfolio() *paper.Portfolio
+	GetBalance() float64
+	Reset() error
+}
+
 func main() {
-	if len(os.Args) < 2 {
+	// Check for --db flag
+	useDB := false
+	args := os.Args[1:]
+	filtered := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--db" {
+			useDB = true
+		} else {
+			filtered = append(filtered, a)
+		}
+	}
+
+	if len(filtered) < 1 {
 		printUsage()
 		os.Exit(1)
 	}
 
-	engine := paper.NewEngine()
-	cmd := os.Args[1]
+	var engine PaperTrader
+	if useDB {
+		database, err := db.New(context.Background())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Set DATABASE_URL or configure Vault credentials\n")
+			os.Exit(1)
+		}
+		defer database.Close()
+
+		dbEngine, err := paper.NewDBPaperEngine(database)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create DB engine: %v\n", err)
+			os.Exit(1)
+		}
+		engine = dbEngine
+	} else {
+		engine = paper.NewEngine()
+	}
+
+	cmd := filtered[0]
+	// Replace os.Args for subcommands that read from os.Args
+	os.Args = append([]string{os.Args[0]}, filtered...)
 
 	switch cmd {
 	case "scan":
@@ -116,7 +161,7 @@ func cmdAnalyze() {
 	enc.Encode(analysis)
 }
 
-func cmdBuy(engine *paper.Engine) {
+func cmdBuy(engine PaperTrader) {
 	if len(os.Args) < 5 {
 		fmt.Fprintf(os.Stderr, "Usage: polymarket-paper buy <market_id> <YES|NO> <amount>\n")
 		os.Exit(1)
@@ -156,10 +201,10 @@ func cmdBuy(engine *paper.Engine) {
 
 	fmt.Printf("✅ Bought %.2f %s shares of \"%s\" at $%.2f ($%.2f spent)\n",
 		trade.Shares, trade.Side, market.Question, trade.Price, trade.Amount)
-	fmt.Printf("Balance: $%.2f\n", engine.Portfolio.Balance)
+	fmt.Printf("Balance: $%.2f\n", engine.GetBalance())
 }
 
-func cmdSell(engine *paper.Engine) {
+func cmdSell(engine PaperTrader) {
 	if len(os.Args) < 5 {
 		fmt.Fprintf(os.Stderr, "Usage: polymarket-paper sell <market_id> <YES|NO> <shares>\n")
 		os.Exit(1)
@@ -193,10 +238,10 @@ func cmdSell(engine *paper.Engine) {
 
 	fmt.Printf("✅ Sold %.2f %s shares at $%.2f ($%.2f received)\n",
 		trade.Shares, trade.Side, trade.Price, trade.Amount)
-	fmt.Printf("Balance: $%.2f\n", engine.Portfolio.Balance)
+	fmt.Printf("Balance: $%.2f\n", engine.GetBalance())
 }
 
-func cmdPortfolio(engine *paper.Engine) {
+func cmdPortfolio(engine PaperTrader) {
 	p := engine.GetPortfolio()
 	fmt.Printf("💰 Paper Portfolio\n")
 	fmt.Printf("==================\n")
@@ -216,7 +261,7 @@ func cmdPortfolio(engine *paper.Engine) {
 	fmt.Printf("\nTotal Trades: %d\n", len(p.Trades))
 }
 
-func cmdHistory(engine *paper.Engine) {
+func cmdHistory(engine PaperTrader) {
 	p := engine.GetPortfolio()
 	if len(p.Trades) == 0 {
 		fmt.Println("No trades yet.")
@@ -231,7 +276,7 @@ func cmdHistory(engine *paper.Engine) {
 	}
 }
 
-func cmdReset(engine *paper.Engine) {
+func cmdReset(engine PaperTrader) {
 	if err := engine.Reset(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -239,7 +284,7 @@ func cmdReset(engine *paper.Engine) {
 	fmt.Println("🔄 Portfolio reset to $100.00")
 }
 
-func cmdAuto(engine *paper.Engine) {
+func cmdAuto(engine PaperTrader) {
 	fmt.Println("🤖 Auto Mode: Scanning → Analyzing → Trading")
 	fmt.Println()
 
@@ -291,7 +336,7 @@ func cmdAuto(engine *paper.Engine) {
 				if sizePct > 0.15 {
 					sizePct = 0.15
 				}
-				amount := engine.Portfolio.Balance * sizePct
+				amount := engine.GetBalance() * sizePct
 
 				side := paper.YES
 				price := m.OutcomeYesPrice
@@ -313,5 +358,5 @@ func cmdAuto(engine *paper.Engine) {
 	}
 
 	fmt.Printf("\n💰 Balance: $%.2f | Positions: %d\n",
-		engine.Portfolio.Balance, len(engine.Portfolio.Positions))
+		engine.GetBalance(), len(engine.GetPortfolio().Positions))
 }

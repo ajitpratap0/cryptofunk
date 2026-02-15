@@ -31,7 +31,9 @@ const (
 	MessageTypeSystemStatus   MessageType = "system_status"
 	MessageTypeDecision       MessageType = "decision"       // LLM decision updates
 	MessageTypeDecisionStats  MessageType = "decision_stats" // Decision statistics updates
-	MessageTypeError          MessageType = "error"
+	MessageTypePolymarketPosition MessageType = "polymarket_position" // Polymarket position updates
+	MessageTypePolymarketMarket   MessageType = "polymarket_market"   // Polymarket market price updates
+	MessageTypeError              MessageType = "error"
 	MessageTypePing           MessageType = "ping"
 	MessageTypePong           MessageType = "pong"
 )

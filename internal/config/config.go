@@ -22,9 +22,17 @@ type Config struct {
 	Trading       TradingConfig             `mapstructure:"trading"`
 	Risk          RiskConfig                `mapstructure:"risk"`
 	Exchanges     map[string]ExchangeConfig `mapstructure:"exchanges"`
+	Polymarket    PolymarketConfig          `mapstructure:"polymarket"`
 	API           APIConfig                 `mapstructure:"api"`
 	Monitoring    MonitoringConfig          `mapstructure:"monitoring"`
 	Notifications NotificationsConfig       `mapstructure:"notifications"`
+}
+
+// PolymarketConfig contains Polymarket-specific settings
+type PolymarketConfig struct {
+	PrivateKey string `mapstructure:"private_key"` // Ethereum private key for signing
+	Mode       string `mapstructure:"mode"`        // "paper" or "live"
+	FunderAddr string `mapstructure:"funder_address"` // Optional funder address
 }
 
 // AppConfig contains application-level settings
@@ -311,6 +319,17 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Allow Polymarket env var overrides
+	if pk := os.Getenv("POLYMARKET_PRIVATE_KEY"); pk != "" {
+		cfg.Polymarket.PrivateKey = pk
+	}
+	if pm := os.Getenv("POLYMARKET_MODE"); pm != "" {
+		cfg.Polymarket.Mode = pm
+	}
+	if fa := os.Getenv("POLYMARKET_FUNDER_ADDRESS"); fa != "" {
+		cfg.Polymarket.FunderAddr = fa
+	}
+
 	// Allow EXCHANGE_MODE env var as a convenient alias for trading.mode
 	if em := os.Getenv("EXCHANGE_MODE"); em != "" {
 		mode := strings.ToLower(em)
@@ -474,6 +493,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("api.auth.enabled", false)
 	v.SetDefault("api.auth.header_name", "X-API-Key")
 	v.SetDefault("api.auth.require_https", true)
+
+	// Polymarket defaults
+	v.SetDefault("polymarket.mode", "paper")
 
 	// Monitoring defaults
 	v.SetDefault("monitoring.prometheus_port", 9100)

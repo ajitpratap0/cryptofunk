@@ -1,0 +1,25 @@
+# CryptoFunk Terraform Variables
+# Copy to terraform.tfvars and customize
+
+aws_region  = "us-east-1"
+environment = "dev"
+
+# VPC
+vpc_cidr = "10.0.0.0/16"
+
+# EKS
+eks_cluster_version     = "1.31"
+# eks_node_instance_types = ["t3.medium"]  # Auto: t3.medium (dev), m5.large (prod)
+eks_node_min_size       = 1
+eks_node_max_size       = 5
+eks_node_desired_size   = 2
+
+# RDS
+# rds_instance_class    = "db.t3.medium"  # Auto: db.t3.medium (dev), db.r6g.large (prod)
+rds_allocated_storage   = 50
+
+# ElastiCache
+# elasticache_node_type = "cache.t3.micro"  # Auto: cache.t3.micro (dev), cache.r6g.large (prod)
+
+# Domain
+domain_name = "cryptofunk.example.com"

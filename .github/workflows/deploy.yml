@@ -23,7 +23,8 @@ on:
 
 env:
   GO_VERSION: '1.21.x'
-  REGISTRY: ghcr.io
+  REGISTRY: ${{ vars.ECR_REGISTRY || 'ghcr.io' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
 jobs:
   # Determine deployment environment
@@ -101,11 +102,60 @@ jobs:
             exit 1
           fi
 
+  # Build and push Docker images
+  build-images:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    needs: [setup, pre-deploy]
+    strategy:
+      matrix:
+        service:
+          - { name: api, dockerfile: deployments/docker/Dockerfile.api, context: "." }
+          - { name: orchestrator, dockerfile: deployments/docker/Dockerfile.orchestrator, context: "." }
+          - { name: dashboard, dockerfile: deployments/docker/Dockerfile.dashboard, context: web/dashboard }
+          - { name: agents, dockerfile: deployments/docker/Dockerfile.agent, context: "." }
+          - { name: mcp-servers, dockerfile: deployments/docker/Dockerfile.mcp-server, context: "." }
+          - { name: migrate, dockerfile: deployments/docker/Dockerfile.migrate, context: "." }
+          - { name: backtest, dockerfile: deployments/docker/Dockerfile.backtest, context: "." }
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        if: env.REGISTRY != 'ghcr.io'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: env.REGISTRY != 'ghcr.io'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Login to GHCR
+        if: env.REGISTRY == 'ghcr.io'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/cryptofunk/${{ matrix.service.name }}:${{ needs.setup.outputs.version }}
+            ${{ env.REGISTRY }}/cryptofunk/${{ matrix.service.name }}:latest
+
   # Deploy to Kubernetes
   deploy:
     name: Deploy to Kubernetes
     runs-on: ubuntu-latest
-    needs: [setup, pre-deploy]
+    needs: [setup, pre-deploy, build-images]
     environment:
       name: ${{ needs.setup.outputs.environment }}
       url: ${{ steps.get-url.outputs.url }}
@@ -180,6 +230,11 @@ jobs:
         run: |
           kubectl apply -f deployments/k8s/api.yaml -n ${{ needs.setup.outputs.namespace }}
           kubectl rollout status deployment/api -n ${{ needs.setup.outputs.namespace }} --timeout=5m
+
+      - name: Deploy Dashboard
+        run: |
+          kubectl apply -f deployments/k8s/base/deployment-dashboard.yaml -n ${{ needs.setup.outputs.namespace }}
+          kubectl rollout status deployment/dashboard -n ${{ needs.setup.outputs.namespace }} --timeout=5m
 
       - name: Deploy Monitoring Stack
         if: needs.setup.outputs.environment == 'production'
