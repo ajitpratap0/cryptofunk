@@ -366,3 +366,11 @@ export function useResumeTrading() {
     },
   })
 }
+
+export function useSystemStatus() {
+  return useQuery({
+    queryKey: ['systemStatus'],
+    queryFn: () => apiClient.getStatus(),
+    refetchInterval: REFRESH_INTERVALS.dashboard,
+  })
+}

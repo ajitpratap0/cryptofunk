@@ -5,7 +5,7 @@ import { EquityCurve } from '@/components/charts/EquityCurve'
 import { AgentPerformanceBar } from '@/components/charts/AgentPerformanceBar'
 import { TradesTable } from '@/components/trades/TradesTable'
 import { SystemStatusIndicator } from '@/components/ui/StatusDot'
-import { useDashboard, useDashboardPnl, useTrades, useUnifiedPortfolio } from '@/hooks/useTradeData'
+import { useDashboard, useDashboardPnl, useTrades, useUnifiedPortfolio, useSystemStatus } from '@/hooks/useTradeData'
 import { useAgents } from '@/hooks/useAgents'
 import { formatCurrency, formatPercentage } from '@/lib/utils'
 import { 
@@ -23,6 +23,7 @@ export default function DashboardPage() {
   const { data: tradesData, isLoading: tradesLoading } = useTrades()
   const { data: agentsData, isLoading: agentsLoading } = useAgents()
   const { data: unifiedData } = useUnifiedPortfolio()
+  const { data: statusData, isLoading: statusLoading } = useSystemStatus()
 
   const stats = dashboardData?.data
   const pnl = pnlData?.data
@@ -37,15 +38,9 @@ export default function DashboardPage() {
   // Get recent trades (last 10)
   const recentTrades = trades.slice(0, 10)
 
-  // Mock system status
-  const systemStatus = {
+  const systemStatus = statusData?.data ?? {
     status: 'healthy' as const,
-    services: {
-      'Trading Engine': 'up' as const,
-      'Data Feed': 'up' as const,
-      'Risk Manager': 'up' as const,
-      'ML Models': 'up' as const,
-    }
+    services: {} as Record<string, 'up' | 'down' | 'degraded'>,
   }
 
   return (

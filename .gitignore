@@ -75,7 +75,8 @@ credentials.json
 secrets.yaml
 
 # Trading data
-trades/
+/trades/
+!web/dashboard/components/trades/
 backtest-results/
 
 # Model artifacts (future)
