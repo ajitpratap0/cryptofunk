@@ -19,6 +19,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
+	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
 // setupTestAPIServer creates a test server with testcontainers database
@@ -42,6 +43,9 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 	hub := NewHub()
 	go hub.Run()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	server := &APIServer{
 		router:             gin.New(),
 		db:                 tc.DB,
@@ -49,6 +53,8 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 		hub:                hub,
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
+		ctx:                ctx,
+		safetyGuard:        safety.NewGuard(safety.NewLimitsConfig(), safety.NewMonitor(0)),
 	}
 
 	server.setupMiddleware() // Set up middleware first (includes recovery)
