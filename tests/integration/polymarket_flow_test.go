@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/db/testhelpers"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket/paper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func ptrF(f float64) *float64 { return &f }
@@ -20,6 +21,10 @@ func TestPolymarketFullFlow(t *testing.T) {
 
 	tc := testhelpers.SetupTestDatabase(t)
 	defer tc.Cleanup()
+
+	// Apply migrations so polymarket_markets table exists
+	err := tc.ApplyMigrations("../../migrations")
+	require.NoError(t, err, "should apply migrations")
 
 	database := tc.DB
 	ctx := context.Background()
@@ -33,7 +38,7 @@ func TestPolymarketFullFlow(t *testing.T) {
 		NoPrice:  ptrF(0.35),
 		Volume:   ptrF(500000),
 	}
-	err := database.UpsertPolymarketMarket(ctx, market)
+	err = database.UpsertPolymarketMarket(ctx, market)
 	require.NoError(t, err, "should insert market")
 
 	// Verify market was stored
@@ -75,7 +80,7 @@ func TestPolymarketFullFlow(t *testing.T) {
 	assert.InDelta(t, 100.0, summary.TotalCostBasis, 0.01)
 
 	portfolio := engine.GetPortfolio()
-	assert.InDelta(t, 900.0, portfolio.Balance, 0.01) // 1000 - 100
+	assert.InDelta(t, 0.0, portfolio.Balance, 0.01) // DefaultBalance(100) - 100 cost = 0
 
 	// Step 6: Execute a sell (sell all shares at a higher price)
 	sellPrice := 0.80
@@ -100,7 +105,8 @@ func TestPolymarketFullFlow(t *testing.T) {
 	assert.InDelta(t, expectedPnl, *closedPos.RealizedPnl, 0.01)
 
 	// Verify balance updated correctly
-	expectedBalance := 900.0 + sellShares*sellPrice
+	// Balance was 0 after buy ($100 cost with $100 DefaultBalance), now add sell proceeds
+	expectedBalance := 0.0 + sellShares*sellPrice
 	assert.InDelta(t, expectedBalance, engine.GetBalance(), 0.01)
 
 	// Verify we now have 2 trades total (buy + sell)
