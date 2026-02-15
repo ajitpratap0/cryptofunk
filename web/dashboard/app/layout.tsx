@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Inter } from 'next/font/google'
 import Header from '@/components/layout/Header'
@@ -26,7 +26,16 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+
+  // Auto-expand sidebar on desktop, keep collapsed on mobile
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 1024px)')
+    setSidebarCollapsed(!mql.matches)
+    const handler = (e: MediaQueryListEvent) => setSidebarCollapsed(!e.matches)
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [])
 
   return (
     <html lang="en" className="dark">

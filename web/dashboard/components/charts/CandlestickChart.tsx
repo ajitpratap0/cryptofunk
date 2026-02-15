@@ -168,7 +168,7 @@ export function CandlestickChart({
   }
 
   return (
-    <div className={cn("chart-container", className)}>
+    <div className={cn("relative w-full overflow-hidden", className)}>
       {/* Chart Header */}
       <div className="absolute top-4 left-4 z-10 bg-card/80 backdrop-blur-sm rounded-lg p-3 border border-border">
         <div className="flex items-center gap-3">
