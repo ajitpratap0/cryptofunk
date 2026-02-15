@@ -57,10 +57,15 @@ export function usePositions() {
   return useQuery({
     queryKey: QUERY_KEYS.positions,
     queryFn: async () => {
-      const response = await apiClient.getPositions()
+      let response
+      try {
+        response = await apiClient.getPositions()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         const mockTrades = apiClient.getMockTrades()
         const mockPositions = mockTrades
           .filter(trade => trade.status === 'open')
@@ -115,10 +120,15 @@ export function useOrders() {
   return useQuery({
     queryKey: QUERY_KEYS.orders,
     queryFn: async () => {
-      const response = await apiClient.getOrders()
+      let response
+      try {
+        response = await apiClient.getOrders()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         const mockOrders: Order[] = [
           {
             id: '1',
@@ -174,10 +184,15 @@ export function useDashboard() {
   return useQuery({
     queryKey: QUERY_KEYS.dashboardStats,
     queryFn: async () => {
-      const response = await apiClient.getDashboard()
+      let response
+      try {
+        response = await apiClient.getDashboard()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         return {
           success: true,
           data: apiClient.getMockDashboard(),
@@ -222,10 +237,15 @@ export function useDashboardPositions() {
   return useQuery({
     queryKey: QUERY_KEYS.dashboardPositions,
     queryFn: async () => {
-      const response = await apiClient.getDashboardPositions()
+      let response
+      try {
+        response = await apiClient.getDashboardPositions()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         const mockTrades = apiClient.getMockTrades()
         const mockPositions = mockTrades
           .filter(trade => trade.status === 'open')
@@ -270,10 +290,15 @@ export function useDashboardPnl() {
   return useQuery({
     queryKey: QUERY_KEYS.dashboardPnl,
     queryFn: async () => {
-      const response = await apiClient.getDashboardPnl()
+      let response
+      try {
+        response = await apiClient.getDashboardPnl()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         return {
           success: true,
           data: {

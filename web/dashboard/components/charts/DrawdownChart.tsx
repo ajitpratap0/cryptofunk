@@ -68,18 +68,33 @@ export function DrawdownChart({
     )
   }
 
+  // Sanitize data - filter out entries with non-finite values
+  const safeData = data.filter(d => 
+    Number.isFinite(d.drawdown) && Number.isFinite(d.equity)
+  )
+
+  if (safeData.length === 0) {
+    return (
+      <div className={cn("chart-container flex items-center justify-center", className)} style={{ height }}>
+        <div className="text-center">
+          <div className="text-muted-foreground text-sm">No valid drawdown data available</div>
+        </div>
+      </div>
+    )
+  }
+
   // Calculate drawdown metrics
-  const maxDrawdown = Math.min(...data.map(d => d.drawdown))
-  const currentDrawdown = data[data.length - 1]?.drawdown || 0
-  const maxDrawdownDate = data.find(d => d.drawdown === maxDrawdown)?.timestamp
+  const maxDrawdown = Math.min(...safeData.map(d => d.drawdown))
+  const currentDrawdown = safeData[safeData.length - 1]?.drawdown || 0
+  const maxDrawdownDate = safeData.find(d => d.drawdown === maxDrawdown)?.timestamp
   
   // Count periods in different risk zones
-  const safeCount = data.filter(d => d.drawdown > thresholds.warning).length
-  const warningCount = data.filter(d => d.drawdown <= thresholds.warning && d.drawdown > thresholds.critical).length
-  const criticalCount = data.filter(d => d.drawdown <= thresholds.critical).length
+  const safeCount = safeData.filter(d => d.drawdown > thresholds.warning).length
+  const warningCount = safeData.filter(d => d.drawdown <= thresholds.warning && d.drawdown > thresholds.critical).length
+  const criticalCount = safeData.filter(d => d.drawdown <= thresholds.critical).length
 
   // Format data for chart
-  const chartData = data.map(point => ({
+  const chartData = safeData.map(point => ({
     ...point,
     timestamp: new Date(point.timestamp).getTime(),
     formattedTime: format(parseISO(point.timestamp), getTimeFormat(timeRange)),
@@ -285,21 +300,21 @@ export function DrawdownChart({
               <div className="w-2 h-2 rounded-full bg-profit" />
               <span>Safe</span>
             </div>
-            <span>{formatPercentage((safeCount / data.length) * 100)}</span>
+            <span>{formatPercentage((safeCount / safeData.length) * 100)}</span>
           </div>
           <div className="flex justify-between gap-4">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-warning" />
               <span>Warning</span>
             </div>
-            <span>{formatPercentage((warningCount / data.length) * 100)}</span>
+            <span>{formatPercentage((warningCount / safeData.length) * 100)}</span>
           </div>
           <div className="flex justify-between gap-4">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-loss" />
               <span>Critical</span>
             </div>
-            <span>{formatPercentage((criticalCount / data.length) * 100)}</span>
+            <span>{formatPercentage((criticalCount / safeData.length) * 100)}</span>
           </div>
         </div>
       </div>

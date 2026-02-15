@@ -108,12 +108,12 @@ export function AgentPerformanceBar({
     return CHART_COLORS[index % CHART_COLORS.length]
   }
 
-  // Prepare chart data
+  // Prepare chart data - ensure all values are finite numbers
   const chartData = agents
     .map((agent, index) => ({
       name: agent.name,
       displayName: agent.name.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      value: getMetricValue(agent),
+      value: Number.isFinite(getMetricValue(agent)) ? getMetricValue(agent) : 0,
       status: agent.status,
       color: getBarColor(getMetricValue(agent), index),
       totalTrades: agent.totalTrades,

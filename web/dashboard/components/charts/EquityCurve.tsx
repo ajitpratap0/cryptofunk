@@ -63,16 +63,31 @@ export function EquityCurve({
     )
   }
 
+  // Sanitize data - filter out entries with non-finite values
+  const safeData = data.filter(d => 
+    Number.isFinite(d.equity) && Number.isFinite(d.pnl ?? 0)
+  )
+
+  if (safeData.length === 0) {
+    return (
+      <div className={cn("chart-container flex items-center justify-center", className)} style={{ height }}>
+        <div className="text-center">
+          <div className="text-muted-foreground text-sm">No valid equity data available</div>
+        </div>
+      </div>
+    )
+  }
+
   // Calculate some metrics
-  const firstEquity = data[0]?.equity || 0
-  const lastEquity = data[data.length - 1]?.equity || 0
+  const firstEquity = safeData[0]?.equity || 0
+  const lastEquity = safeData[safeData.length - 1]?.equity || 0
   const totalReturn = lastEquity - firstEquity
   const totalReturnPercent = firstEquity > 0 ? (totalReturn / firstEquity) * 100 : 0
-  const highWaterMark = Math.max(...data.map(d => d.equity))
+  const highWaterMark = Math.max(...safeData.map(d => d.equity))
   const currentDrawdown = highWaterMark > 0 ? ((highWaterMark - lastEquity) / highWaterMark) * 100 : 0
 
   // Format data for chart
-  const chartData = data.map(point => ({
+  const chartData = safeData.map(point => ({
     ...point,
     timestamp: new Date(point.timestamp).getTime(),
     formattedTime: format(parseISO(point.timestamp), getTimeFormat(timeRange)),

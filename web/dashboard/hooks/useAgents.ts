@@ -21,10 +21,15 @@ export function useAgents(filters?: AgentFilters) {
   return useQuery({
     queryKey: [...AGENT_QUERY_KEYS.agents, filters],
     queryFn: async () => {
-      const response = await apiClient.getAgents()
+      let response
+      try {
+        response = await apiClient.getAgents()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         let agents = apiClient.getMockAgents()
         
         // Apply filters
@@ -85,10 +90,15 @@ export function useAgent(name: string) {
   return useQuery({
     queryKey: AGENT_QUERY_KEYS.agentDetails(name),
     queryFn: async () => {
-      const response = await apiClient.getAgent(name)
+      let response
+      try {
+        response = await apiClient.getAgent(name)
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         const agents = apiClient.getMockAgents()
         const agent = agents.find(a => a.name === name)
         
@@ -110,10 +120,15 @@ export function useAgentStatus(name: string) {
   return useQuery({
     queryKey: AGENT_QUERY_KEYS.agentStatus(name),
     queryFn: async () => {
-      const response = await apiClient.getAgentStatus(name)
+      let response
+      try {
+        response = await apiClient.getAgentStatus(name)
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         const agents = apiClient.getMockAgents()
         const agent = agents.find(a => a.name === name)
         
@@ -140,10 +155,15 @@ export function useDecisions(filters?: { limit?: number; agent?: string }) {
   return useQuery({
     queryKey: [...AGENT_QUERY_KEYS.decisions, filters],
     queryFn: async () => {
-      const response = await apiClient.getDecisions(filters)
+      let response
+      try {
+        response = await apiClient.getDecisions(filters)
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         const now = Date.now()
         const mockDecisions: AgentDecision[] = [
           {
@@ -230,10 +250,15 @@ export function useDecisionStats() {
   return useQuery({
     queryKey: AGENT_QUERY_KEYS.decisionStats,
     queryFn: async () => {
-      const response = await apiClient.getDecisionStats()
+      let response
+      try {
+        response = await apiClient.getDecisionStats()
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         return {
           success: true,
           data: {
@@ -262,12 +287,18 @@ export function useDecision(id: string) {
   return useQuery({
     queryKey: AGENT_QUERY_KEYS.decisionDetails(id),
     queryFn: async () => {
-      const response = await apiClient.getDecision(id)
+      let response
+      try {
+        response = await apiClient.getDecision(id)
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
-        const decisions = await apiClient.getDecisions()
-        const decision = decisions.data?.find(d => d.id === id)
+      if (!response?.success) {
+        let decisionsResp
+        try { decisionsResp = await apiClient.getDecisions() } catch { /* ignore */ }
+        const decision = decisionsResp?.data?.find((d: any) => d.id === id)
         
         return {
           success: true,
@@ -287,10 +318,15 @@ export function useSimilarDecisions(id: string) {
   return useQuery({
     queryKey: AGENT_QUERY_KEYS.similarDecisions(id),
     queryFn: async () => {
-      const response = await apiClient.getSimilarDecisions(id)
+      let response
+      try {
+        response = await apiClient.getSimilarDecisions(id)
+      } catch {
+        // API unreachable - fall through to mock
+      }
       
       // Fallback to mock data if API fails
-      if (!response.success) {
+      if (!response?.success) {
         // Return a subset of decisions as "similar"
         const now = Date.now()
         const mockDecisions: AgentDecision[] = [
