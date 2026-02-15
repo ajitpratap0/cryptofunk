@@ -14,6 +14,8 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket/paper"
 )
 
+const sideYES = "YES"
+
 // PolymarketHandler handles HTTP requests for Polymarket paper trading.
 type PolymarketHandler struct {
 	db          *db.DB
@@ -60,7 +62,7 @@ func (h *PolymarketHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGrou
 // ListMarkets returns active Polymarket markets from the DB.
 func (h *PolymarketHandler) ListMarkets(c *gin.Context) {
 	ctx := c.Request.Context()
-	activeOnly := c.DefaultQuery("active", "true") == "true"
+	activeOnly := c.DefaultQuery("active", queryParamTrue) == queryParamTrue
 
 	markets, err := h.db.ListPolymarketMarkets(ctx, activeOnly)
 	if err != nil {
@@ -92,7 +94,7 @@ func (h *PolymarketHandler) GetMarket(c *gin.Context) {
 // ListPositions returns open paper positions, optionally enriched with live prices.
 func (h *PolymarketHandler) ListPositions(c *gin.Context) {
 	ctx := c.Request.Context()
-	enrichLive := c.DefaultQuery("live", "false") == "true"
+	enrichLive := c.DefaultQuery("live", "false") == queryParamTrue
 
 	positions, err := h.db.GetOpenPolymarketPositions(ctx)
 	if err != nil {
@@ -118,7 +120,7 @@ func (h *PolymarketHandler) ListPositions(c *gin.Context) {
 
 			// Use DB prices as baseline
 			var currentPrice float64
-			if p.Side == "YES" && market.YesPrice != nil {
+			if p.Side == sideYES && market.YesPrice != nil {
 				currentPrice = *market.YesPrice
 			} else if market.NoPrice != nil {
 				currentPrice = *market.NoPrice
@@ -132,7 +134,7 @@ func (h *PolymarketHandler) ListPositions(c *gin.Context) {
 		if enrichLive && h.gammaClient != nil {
 			if liveMarket, err := h.gammaClient.FetchMarketByID(p.MarketID); err == nil {
 				var livePrice float64
-				if p.Side == "YES" {
+				if p.Side == sideYES {
 					livePrice = liveMarket.OutcomeYesPrice
 				} else {
 					livePrice = liveMarket.OutcomeNoPrice
@@ -261,7 +263,7 @@ func (h *PolymarketHandler) GetPortfolio(c *gin.Context) {
 	for _, p := range summary.OpenPositions {
 		if market, err := h.db.GetPolymarketMarket(ctx, p.MarketID); err == nil {
 			var price float64
-			if p.Side == "YES" && market.YesPrice != nil {
+			if p.Side == sideYES && market.YesPrice != nil {
 				price = *market.YesPrice
 			} else if market.NoPrice != nil {
 				price = *market.NoPrice
@@ -308,7 +310,7 @@ func (h *PolymarketHandler) ListTrades(c *gin.Context) {
 // ListPredictions returns prediction history.
 func (h *PolymarketHandler) ListPredictions(c *gin.Context) {
 	ctx := c.Request.Context()
-	resolvedOnly := c.DefaultQuery("resolved", "false") == "true"
+	resolvedOnly := c.DefaultQuery("resolved", "false") == queryParamTrue
 
 	predictions, err := h.db.GetPolymarketPredictions(ctx, resolvedOnly)
 	if err != nil {

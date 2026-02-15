@@ -37,7 +37,7 @@ func TestPolymarketFullFlow(t *testing.T) {
 		NoPrice:  ptrF(0.35),
 		Volume:   ptrF(500000),
 	}
-	err := database.UpsertPolymarketMarket(ctx, market)
+	err = database.UpsertPolymarketMarket(ctx, market)
 	require.NoError(t, err, "should insert market")
 
 	// Verify market was stored
