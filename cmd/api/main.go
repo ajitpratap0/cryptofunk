@@ -261,18 +261,6 @@ func (s *APIServer) setupRoutes() {
 			positions.GET("/:symbol", s.handleGetPosition)
 		}
 
-		// Order routes (mixed read/write, apply appropriate limiters)
-		orders := v1.Group("/orders")
-		{
-			// Read operations (higher limit)
-			orders.GET("", s.rateLimiter.ReadMiddleware(), s.handleListOrders)
-			orders.GET("/:id", s.rateLimiter.ReadMiddleware(), s.handleGetOrder)
-
-			// Write operations (lower limit to prevent order spam)
-			orders.POST("", s.rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
-			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
-		}
-
 		// Create authentication config for protected endpoints
 		authConfig := &api.AuthConfig{
 			Enabled:      s.config.API.Auth.Enabled,
@@ -281,6 +269,21 @@ func (s *APIServer) setupRoutes() {
 		}
 		if authConfig.HeaderName == "" {
 			authConfig.HeaderName = "X-API-Key" // Default header name
+		}
+
+		// Order routes (mixed read/write, apply appropriate limiters + authentication)
+		orders := v1.Group("/orders")
+		if s.config.API.Auth.Enabled {
+			orders.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
+		{
+			// Read operations (higher limit)
+			orders.GET("", s.rateLimiter.ReadMiddleware(), s.handleListOrders)
+			orders.GET("/:id", s.rateLimiter.ReadMiddleware(), s.handleGetOrder)
+
+			// Write operations (lower limit to prevent order spam)
+			orders.POST("", s.rateLimiter.OrderMiddleware(), s.handlePlaceOrder)
+			orders.DELETE("/:id", s.rateLimiter.OrderMiddleware(), s.handleCancelOrder)
 		}
 
 		// Trading control routes (critical ops, strictest rate limiting + authentication)

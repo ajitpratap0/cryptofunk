@@ -11,7 +11,12 @@ services:
       POSTGRES_DB: cryptofunk
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
@@ -30,7 +35,12 @@ services:
     image: redis:7-alpine
     container_name: cryptofunk-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
@@ -49,10 +59,17 @@ services:
     image: nats:2-alpine
     container_name: cryptofunk-nats
     ports:
-      - "4222:4222"  # Client connections
-      - "8222:8222"  # HTTP monitoring
-      - "6222:6222"  # Cluster routing
-    command: ["-js", "-m", "8222"]  # Enable JetStream and monitoring
+      - "127.0.0.1:4222:4222"  # Client connections
+      - "127.0.0.1:8222:8222"  # HTTP monitoring
+      - "127.0.0.1:6222:6222"  # Cluster routing
+    volumes:
+      - nats-data:/data
+    command: ["-js", "-sd", "/data", "-m", "8222"]  # Enable JetStream with persistent storage and monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
       interval: 10s
@@ -76,6 +93,11 @@ services:
       - "http://nats:8222"
     ports:
       - "7777:7777"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
     depends_on:
       nats:
         condition: service_healthy
@@ -88,7 +110,12 @@ services:
     image: hashicorp/vault:latest
     container_name: cryptofunk-vault
     ports:
-      - "8200:8200"
+      - "127.0.0.1:8200:8200"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN:-cryptofunk-dev-token}
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
@@ -122,6 +149,11 @@ services:
       - "8080:8080"
     volumes:
       - ./configs/bifrost.yaml:/etc/bifrost/config.yaml:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
     depends_on:
       redis:
         condition: service_healthy
@@ -151,6 +183,11 @@ services:
       - '--storage.tsdb.retention.time=30d'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
     # Allow Prometheus container to scrape metrics from host-bound agent services via host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -183,6 +220,11 @@ services:
       # Alert recipients
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-team@example.com}
       CRITICAL_ALERT_EMAIL_TO: ${CRITICAL_ALERT_EMAIL_TO:-oncall@example.com}
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
     networks:
       - cryptofunk
     restart: unless-stopped
@@ -206,6 +248,11 @@ services:
       - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       - prometheus
     networks:
@@ -227,6 +274,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
     networks:
       - cryptofunk
     command: ["up"]
@@ -244,6 +296,11 @@ services:
       NATS_URL: nats://nats:4222
       BIFROST_URL: http://bifrost:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
     ports:
       - "8081:8080"
     depends_on:
@@ -272,6 +329,11 @@ services:
       REDIS_URL: redis://redis:6379
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -295,6 +357,11 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -318,6 +385,11 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -344,6 +416,11 @@ services:
       BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
       TRADING_MODE: ${TRADING_MODE:-PAPER}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -370,6 +447,11 @@ services:
       BIFROST_URL: http://bifrost:8080
       ORCHESTRATOR_URL: http://orchestrator:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -400,6 +482,11 @@ services:
       BIFROST_URL: http://bifrost:8080
       ORCHESTRATOR_URL: http://orchestrator:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -430,6 +517,11 @@ services:
       BIFROST_URL: http://bifrost:8080
       ORCHESTRATOR_URL: http://orchestrator:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -460,6 +552,11 @@ services:
       BIFROST_URL: http://bifrost:8080
       ORCHESTRATOR_URL: http://orchestrator:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -490,6 +587,11 @@ services:
       BIFROST_URL: http://bifrost:8080
       ORCHESTRATOR_URL: http://orchestrator:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -520,6 +622,11 @@ services:
       BIFROST_URL: http://bifrost:8080
       ORCHESTRATOR_URL: http://orchestrator:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
     depends_on:
       postgres:
         condition: service_healthy
@@ -571,7 +678,7 @@ services:
       ORCHESTRATOR_URL: http://orchestrator:8080
       API_PORT: 8080
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET environment variable is required}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,*}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3333}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "8082:8080"
