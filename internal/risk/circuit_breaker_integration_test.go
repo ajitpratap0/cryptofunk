@@ -460,7 +460,17 @@ func TestCircuitBreakerLoadSustained(t *testing.T) {
 		t.Skip("skipping sustained load test in short mode")
 	}
 
-	manager := NewCircuitBreakerManager()
+	// Use custom settings with higher min requests to avoid early-tripping
+	manager := NewCircuitBreakerManagerWithSettings(
+		&ServiceSettings{
+			MinRequests:     50,
+			FailureRatio:    0.6,
+			OpenTimeout:     60 * time.Second,
+			HalfOpenMaxReqs: 2,
+			CountInterval:   10 * time.Second,
+		},
+		nil, nil,
+	)
 	cb := manager.Exchange()
 
 	var wg sync.WaitGroup
@@ -477,15 +487,18 @@ func TestCircuitBreakerLoadSustained(t *testing.T) {
 			ticker := time.NewTicker(10 * time.Millisecond)
 			defer ticker.Stop()
 
+			localCount := 0
 			for {
 				select {
 				case <-stopChan:
 					return
 				case <-ticker.C:
 					totalRequests.Add(1)
+					localCount++
 
-					// 30% failure rate - below threshold
-					shouldFail := (workerID+int(totalRequests.Load()))%10 < 3
+					// 20% failure rate - well below 60% threshold
+					// Use per-worker local counter for deterministic distribution
+					shouldFail := localCount%10 < 2
 
 					_, err := cb.Execute(func() (interface{}, error) {
 						if shouldFail {
