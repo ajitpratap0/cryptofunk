@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, UTCTimestamp } from 'lightweight-charts'
 import { CandlestickData as CustomCandlestickData, TradeMarker } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -28,14 +28,18 @@ export function CandlestickChart({
 }: CandlestickChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
-  const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
-  const [mounted, setMounted] = useState(false)
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
 
-  // Initialize chart
+  // Single effect: create chart, set data, handle cleanup
   useEffect(() => {
-    if (!chartContainerRef.current || mounted) return
+    if (!chartContainerRef.current) return
 
-    const chart = createChart(chartContainerRef.current, {
+    const container = chartContainerRef.current
+    const containerWidth = container.clientWidth || 800
+
+    const chart = createChart(container, {
+      width: containerWidth,
+      height,
       layout: {
         background: { color: 'transparent' },
         textColor: '#6B7280',
@@ -46,37 +50,20 @@ export function CandlestickChart({
       },
       crosshair: {
         mode: 1,
-        vertLine: {
-          width: 1,
-          color: '#6B7280',
-          style: 2,
-        },
-        horzLine: {
-          width: 1,
-          color: '#6B7280',
-          style: 2,
-        },
+        vertLine: { width: 1, color: '#6B7280', style: 2 },
+        horzLine: { width: 1, color: '#6B7280', style: 2 },
       },
-      rightPriceScale: {
-        borderColor: '#374151',
-      },
+      rightPriceScale: { borderColor: '#374151' },
       timeScale: {
         borderColor: '#374151',
         timeVisible: true,
         secondsVisible: false,
       },
-      handleScroll: {
-        mouseWheel: true,
-        pressedMouseMove: true,
-      },
-      handleScale: {
-        axisPressedMouseMove: true,
-        mouseWheel: true,
-        pinch: true,
-      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true },
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     })
 
-    const candlestickSeries = chart.addCandlestickSeries({
+    const series = chart.addCandlestickSeries({
       upColor: '#22C55E',
       downColor: '#EF4444',
       borderDownColor: '#EF4444',
@@ -86,73 +73,54 @@ export function CandlestickChart({
     })
 
     chartRef.current = chart
-    candlestickSeriesRef.current = candlestickSeries
-    setMounted(true)
+    seriesRef.current = series
 
-    // Crosshair move handler
+    // Set data if available
+    if (data.length > 0) {
+      const chartData: CandlestickData<Time>[] = data.map(item => ({
+        time: (new Date(item.time).getTime() / 1000) as UTCTimestamp,
+        open: item.open,
+        high: item.high,
+        low: item.low,
+        close: item.close,
+      }))
+      series.setData(chartData)
+      chart.timeScale().fitContent()
+    }
+
+    // Set trade markers
+    if (tradeMarkers.length > 0) {
+      const markers = tradeMarkers.map(marker => ({
+        time: (new Date(marker.time).getTime() / 1000) as UTCTimestamp,
+        position: marker.position,
+        color: marker.color,
+        shape: marker.shape,
+        text: marker.text,
+        size: marker.size,
+      }))
+      series.setMarkers(markers as any)
+    }
+
+    // Crosshair
     if (onCrosshairMove) {
-      chart.subscribeCrosshairMove((param) => {
-        onCrosshairMove(param)
-      })
+      chart.subscribeCrosshairMove(onCrosshairMove)
     }
 
-    // Cleanup function
-    return () => {
-      chart.remove()
-      chartRef.current = null
-      candlestickSeriesRef.current = null
-    }
-  }, [mounted, onCrosshairMove])
-
-  // Update data
-  useEffect(() => {
-    if (!candlestickSeriesRef.current || !data.length) return
-
-    const chartData: CandlestickData<Time>[] = data.map(item => ({
-      time: (new Date(item.time).getTime() / 1000) as UTCTimestamp,
-      open: item.open,
-      high: item.high,
-      low: item.low,
-      close: item.close,
-    }))
-
-    candlestickSeriesRef.current.setData(chartData)
-  }, [data])
-
-  // Update trade markers
-  useEffect(() => {
-    if (!candlestickSeriesRef.current || !tradeMarkers.length) return
-
-    const markers = tradeMarkers.map(marker => ({
-      time: (new Date(marker.time).getTime() / 1000) as UTCTimestamp,
-      position: marker.position,
-      color: marker.color,
-      shape: marker.shape,
-      text: marker.text,
-      size: marker.size,
-    }))
-
-    candlestickSeriesRef.current.setMarkers(markers as any)
-  }, [tradeMarkers])
-
-  // Handle resize
-  useEffect(() => {
-    if (!chartRef.current) return
-
+    // Resize handler
     const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height,
-        })
+      if (container && chart) {
+        chart.applyOptions({ width: container.clientWidth, height })
       }
     }
-
     window.addEventListener('resize', handleResize)
-    handleResize() // Initial resize
 
-    return () => window.removeEventListener('resize', handleResize)
-  }, [height])
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      chart.remove()
+      chartRef.current = null
+      seriesRef.current = null
+    }
+  }, [data, tradeMarkers, height, onCrosshairMove])
 
   if (loading) {
     return (
