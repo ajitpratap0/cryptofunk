@@ -921,7 +921,7 @@ func TestMCPServer_HandleRequest(t *testing.T) {
 		resp := mcpServer.handleRequest(req)
 
 		assert.NotNil(t, resp.Error)
-		assert.Equal(t, -32000, resp.Error.Code)
+		assert.Equal(t, -32602, resp.Error.Code)
 		assert.Contains(t, resp.Error.Message, "unknown tool")
 	})
 }

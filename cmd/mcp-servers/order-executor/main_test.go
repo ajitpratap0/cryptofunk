@@ -3,7 +3,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +19,46 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
 
-// setupTestDatabase creates a PostgreSQL container and returns a database connection
+// applyMigrationsRaw applies SQL migration files using a db.DB pool directly.
+// It skips migrations if the schema already exists (idempotent for shared CI databases).
+func applyMigrationsRaw(t *testing.T, database *db.DB, migrationsPath string) {
+	t.Helper()
+	ctx := context.Background()
+	pool := database.Pool()
+
+	// Check if schema already exists (e.g., from a prior test run in the same CI database)
+	var exists bool
+	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_type WHERE typname = 'order_side')").Scan(&exists)
+	if err == nil && exists {
+		return // Schema already applied
+	}
+
+	allFiles, err := filepath.Glob(filepath.Join(migrationsPath, "*.sql"))
+	if err != nil {
+		t.Fatalf("Failed to list migration files: %v", err)
+	}
+
+	var files []string
+	for _, f := range allFiles {
+		if !strings.HasSuffix(filepath.Base(f), "_down.sql") {
+			files = append(files, f)
+		}
+	}
+	sort.Strings(files)
+
+	for _, f := range files {
+		sqlBytes, err := os.ReadFile(f) // #nosec G304
+		if err != nil {
+			t.Fatalf("Failed to read migration %s: %v", f, err)
+		}
+		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
+			t.Fatalf("Failed to apply migration %s: %v", filepath.Base(f), err)
+		}
+	}
+}
+
+// setupTestDatabase creates a PostgreSQL connection and returns a database connection.
+// In CI (DATABASE_URL set), it connects directly. Locally, it uses testcontainers.
 func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 	t.Helper()
 
@@ -23,20 +67,30 @@ func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Use testhelpers for consistent database setup
-	tc := testhelpers.SetupTestDatabase(t)
+	migrationsPath := "../../../migrations"
 
-	// Apply migrations only if we're using a testcontainer (not CI with existing DB)
-	// In CI, migrations are applied separately before tests run
-	if tc.Container != nil {
-		// Note: Migrations path is relative to the cmd/mcp-servers/order-executor directory
-		err := tc.ApplyMigrations("../../../migrations")
+	// CI environment: DATABASE_URL is provided by the service container
+	if os.Getenv("DATABASE_URL") != "" {
+		ctx := context.Background()
+		database, err := db.New(ctx)
 		if err != nil {
-			t.Fatalf("Failed to apply migrations: %v", err)
+			t.Fatalf("Failed to connect to CI database: %v", err)
 		}
+		applyMigrationsRaw(t, database, migrationsPath)
+		cleanup := func() {
+			database.Close()
+		}
+		return database, cleanup
 	}
 
-	// Return database and cleanup function
+	// Local environment: use testcontainers
+	tc := testhelpers.SetupTestDatabase(t)
+
+	err := tc.ApplyMigrations(migrationsPath)
+	if err != nil {
+		t.Fatalf("Failed to apply migrations: %v", err)
+	}
+
 	cleanup := func() {
 		tc.Cleanup()
 	}
@@ -68,17 +122,17 @@ func TestOrderExecutorServer_ListTools(t *testing.T) {
 	result, ok := resp.Result.(map[string]interface{})
 	require.True(t, ok)
 
-	tools, ok := result["tools"].([]map[string]interface{})
+	toolsRaw, ok := result["tools"].([]interface{})
 	require.True(t, ok)
-	// 12 tools: 7 trading tools + 5 safety guard tools
-	assert.Len(t, tools, 12)
+	assert.Len(t, toolsRaw, 7) // 7 tools: place_market_order, place_limit_order, cancel_order, get_order_status, start_session, stop_session, get_session_stats
 
 	// Verify tool names
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool["name"].(string)
+	toolNames := make([]string, len(toolsRaw))
+	for i, tool := range toolsRaw {
+		toolMap, ok := tool.(map[string]interface{})
+		require.True(t, ok)
+		toolNames[i] = toolMap["name"].(string)
 	}
-	// Trading tools
 	assert.Contains(t, toolNames, "place_market_order")
 	assert.Contains(t, toolNames, "place_limit_order")
 	assert.Contains(t, toolNames, "cancel_order")
@@ -86,12 +140,6 @@ func TestOrderExecutorServer_ListTools(t *testing.T) {
 	assert.Contains(t, toolNames, "start_session")
 	assert.Contains(t, toolNames, "stop_session")
 	assert.Contains(t, toolNames, "get_session_stats")
-	// Safety guard tools
-	assert.Contains(t, toolNames, "get_safety_guard_stats")
-	assert.Contains(t, toolNames, "set_safety_guard_capital")
-	assert.Contains(t, toolNames, "record_trade_pnl")
-	assert.Contains(t, toolNames, "reset_safety_guard")
-	assert.Contains(t, toolNames, "reset_daily_counters")
 }
 
 func TestStartSession_ValidInput(t *testing.T) {
@@ -190,12 +238,10 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 	defer cleanup()
 
 	exchangeService := exchange.NewServicePaper(database)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: exchangeService,
 	}
-
-	// Set market price for BTC (required for safety guard validation)
-	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// Start session first
 	startReq := MCPRequest{
@@ -229,14 +275,13 @@ func TestPlaceMarketOrder_ValidInput(t *testing.T) {
 	assert.Equal(t, 6, resp.ID)
 	assert.Nil(t, resp.Error)
 
-	// PlaceMarketOrder now returns *exchange.Order directly
-	order, ok := resp.Result.(*exchange.Order)
-	require.True(t, ok, "Expected Result to be *exchange.Order")
-	assert.NotEmpty(t, order.ID)
-	assert.Equal(t, "BTCUSDT", order.Symbol)
-	assert.Equal(t, exchange.OrderSideBuy, order.Side)
-	assert.Equal(t, exchange.OrderTypeMarket, order.Type)
-	assert.Equal(t, 0.1, order.Quantity)
+	order, ok := resp.Result.(map[string]interface{})
+	require.True(t, ok, "Expected Result to be map[string]interface{}")
+	assert.NotEmpty(t, order["id"])
+	assert.Equal(t, "BTCUSDT", order["symbol"])
+	assert.Equal(t, string(exchange.OrderSideBuy), order["side"])
+	assert.Equal(t, string(exchange.OrderTypeMarket), order["type"])
+	assert.Equal(t, 0.1, order["quantity"])
 }
 
 func TestPlaceMarketOrder_MissingSymbol(t *testing.T) {
@@ -362,15 +407,14 @@ func TestPlaceLimitOrder_ValidInput(t *testing.T) {
 	assert.Equal(t, 11, resp.ID)
 	assert.Nil(t, resp.Error)
 
-	// PlaceLimitOrder now returns *exchange.Order directly
-	order, ok := resp.Result.(*exchange.Order)
-	require.True(t, ok, "Expected Result to be *exchange.Order")
-	assert.NotEmpty(t, order.ID)
-	assert.Equal(t, "BTCUSDT", order.Symbol)
-	assert.Equal(t, exchange.OrderSideSell, order.Side)
-	assert.Equal(t, exchange.OrderTypeLimit, order.Type)
-	assert.Equal(t, 0.1, order.Quantity)
-	assert.Equal(t, 50000.0, order.Price)
+	order, ok := resp.Result.(map[string]interface{})
+	require.True(t, ok, "Expected Result to be map[string]interface{}")
+	assert.NotEmpty(t, order["id"])
+	assert.Equal(t, "BTCUSDT", order["symbol"])
+	assert.Equal(t, string(exchange.OrderSideSell), order["side"])
+	assert.Equal(t, string(exchange.OrderTypeLimit), order["type"])
+	assert.Equal(t, 0.1, order["quantity"])
+	assert.Equal(t, 50000.0, order["price"])
 }
 
 func TestPlaceLimitOrder_MissingPrice(t *testing.T) {
@@ -434,12 +478,10 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 	defer cleanup()
 
 	exchangeService := exchange.NewServicePaper(database)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: exchangeService,
 	}
-
-	// Set market price for BTC (required for safety guard validation)
-	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// Start session
 	startReq := MCPRequest{
@@ -467,8 +509,10 @@ func TestGetOrderStatus_ValidInput(t *testing.T) {
 		"quantity": 0.1,
 	}
 	placeResp := server.handleRequest(&placeReq)
-	placeOrder := placeResp.Result.(*exchange.Order)
-	orderID := placeOrder.ID
+	placeOrder, ok := placeResp.Result.(map[string]interface{})
+	require.True(t, ok)
+	orderID, ok := placeOrder["id"].(string)
+	require.True(t, ok)
 
 	// Get order status
 	req := MCPRequest{
@@ -553,8 +597,10 @@ func TestCancelOrder_ValidInput(t *testing.T) {
 		"price":    40000.0, // Low price to avoid fill
 	}
 	placeResp := server.handleRequest(&placeReq)
-	placeOrder := placeResp.Result.(*exchange.Order)
-	orderID := placeOrder.ID
+	placeOrder, ok := placeResp.Result.(map[string]interface{})
+	require.True(t, ok)
+	orderID, ok := placeOrder["id"].(string)
+	require.True(t, ok)
 
 	// Cancel order
 	req := MCPRequest{
@@ -876,12 +922,10 @@ func TestCompleteSessionLifecycle(t *testing.T) {
 	defer cleanup()
 
 	exchangeService := exchange.NewServicePaper(database)
+	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 	server := &MCPServer{
 		service: exchangeService,
 	}
-
-	// Set market price for BTC (required for safety guard validation)
-	exchangeService.SetMarketPrice("BTCUSDT", 50000.0)
 
 	// 1. Start session
 	startReq := MCPRequest{

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -13,56 +12,37 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
-	"github.com/ajitpratap0/cryptofunk/internal/metrics"
-	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
+	mcpserver "github.com/ajitpratap0/cryptofunk/internal/mcp"
 )
 
 const (
-	serverName = "order-executor"
-)
+	serverName    = "order-executor"
+	serverVersion = "1.0.0"
 
-// MCP Tool Names - defined as constants to avoid repetition
-const (
-	toolPlaceMarketOrder      = "place_market_order"
-	toolPlaceLimitOrder       = "place_limit_order"
-	toolCancelOrder           = "cancel_order"
-	toolGetOrderStatus        = "get_order_status"
-	toolStartSession          = "start_session"
-	toolStopSession           = "stop_session"
-	toolGetSessionStats       = "get_session_stats"
-	toolGetSafetyGuardStats   = "get_safety_guard_stats"
-	toolSetSafetyGuardCapital = "set_safety_guard_capital"
-	toolRecordTradePnL        = "record_trade_pnl"
-	toolResetSafetyGuard      = "reset_safety_guard"
-	toolResetDailyCounters    = "reset_daily_counters"
-
-	// Polymarket tools
-	toolPolymarketPlaceOrder  = "polymarket_place_order"
-	toolPolymarketCancelOrder = "polymarket_cancel_order"
-	toolPolymarketGetOrders   = "polymarket_get_orders"
-	toolPolymarketGetPositions = "polymarket_get_positions"
-	toolPolymarketGetOrderbook = "polymarket_get_orderbook"
+	// MCP Tool Names
+	toolPlaceMarketOrder = "place_market_order"
+	toolPlaceLimitOrder  = "place_limit_order"
+	toolCancelOrder      = "cancel_order"
+	toolGetOrderStatus   = "get_order_status"
+	toolStartSession     = "start_session"
+	toolStopSession      = "stop_session"
+	toolGetSessionStats  = "get_session_stats"
 )
 
 func main() {
-	// Setup logging to stderr (stdout is reserved for MCP protocol)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-
 	log.Info().Msg("Order Executor MCP Server starting...")
 
-	// Load configuration (includes Vault secrets if enabled)
 	cfg, err := config.Load("")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load configuration")
 	}
 
-	// Read trading mode from environment or config
 	tradingMode := os.Getenv("TRADING_MODE")
 	if tradingMode == "" {
 		tradingMode = cfg.Trading.Mode
 	}
 
-	// Get Binance configuration (from Vault or env vars via config)
 	var binanceAPIKey, binanceSecret string
 	var binanceTestnet bool
 
@@ -71,8 +51,6 @@ func main() {
 		binanceSecret = binanceCfg.SecretKey
 		binanceTestnet = binanceCfg.Testnet
 	}
-
-	// Allow environment variable override for development
 	if envKey := os.Getenv("BINANCE_API_KEY"); envKey != "" {
 		binanceAPIKey = envKey
 	}
@@ -83,13 +61,8 @@ func main() {
 		binanceTestnet = true
 	}
 
-	log.Info().
-		Str("mode", tradingMode).
-		Bool("testnet", binanceTestnet).
-		Bool("vault_enabled", config.GetVaultConfigFromEnv().Enabled).
-		Msg("Configuration loaded successfully")
+	logger := log.With().Str("server", serverName).Logger()
 
-	// Initialize database connection
 	ctx := context.Background()
 	database, err := db.New(ctx)
 	if err != nil {
@@ -97,15 +70,11 @@ func main() {
 	}
 	defer database.Close()
 
-	log.Info().Msg("Database connection established")
-
-	// Create exchange service with configuration
 	exchangeConfig := exchange.ServiceConfig{
 		Mode:           exchange.TradingMode(tradingMode),
 		BinanceAPIKey:  binanceAPIKey,
 		BinanceSecret:  binanceSecret,
 		BinanceTestnet: binanceTestnet,
-		SafetyGuard:    cfg.Risk.SafetyGuard, // Pass safety guard configuration
 	}
 
 	exchangeService, err := exchange.NewService(database, exchangeConfig)
@@ -113,608 +82,130 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to create exchange service")
 	}
 
-	// Initialize Polymarket exchange
-	polyPrivateKey := os.Getenv("POLYMARKET_PRIVATE_KEY")
-	if polyPrivateKey == "" {
-		polyPrivateKey = cfg.Polymarket.PrivateKey
-	}
-	polyMode := os.Getenv("POLYMARKET_MODE")
-	if polyMode == "" {
-		polyMode = cfg.Polymarket.Mode
-	}
-	if polyMode == "" {
-		polyMode = "paper"
-	}
+	srv := mcpserver.New(mcpserver.Config{
+		Name:    serverName,
+		Version: serverVersion,
+		Logger:  logger,
+	})
 
-	var polyExchange *exchange.PolymarketExchange
-	if polyPrivateKey != "" || polyMode == "paper" {
-		var opts []polymarket.ClientOption
-		if cfg.Polymarket.FunderAddr != "" {
-			opts = append(opts, polymarket.WithFunder(cfg.Polymarket.FunderAddr))
-		}
-		pe, err := exchange.NewPolymarketExchange(polyPrivateKey, polyMode == "paper", database, opts...)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to initialize Polymarket exchange, Polymarket tools will be unavailable")
-		} else {
-			polyExchange = pe
-			log.Info().Str("mode", polyMode).Msg("Polymarket exchange initialized")
-		}
-	} else {
-		log.Info().Msg("Polymarket not configured (no private key), skipping")
-	}
+	registerTools(srv, exchangeService)
 
-	// Start MCP server with stdio transport
-	server := &MCPServer{
-		service:      exchangeService,
-		polyExchange: polyExchange,
-		db:           database,
-	}
-
-	if err := server.Run(); err != nil {
+	if err := srv.Run(); err != nil {
 		log.Fatal().Err(err).Msg("Server failed")
 	}
 }
 
-// MCPServer handles MCP protocol over stdio
-type MCPServer struct {
-	service      *exchange.Service
-	polyExchange *exchange.PolymarketExchange
-	db           *db.DB
+func registerTools(srv *mcpserver.Server, service *exchange.Service) {
+	srv.AddToolRaw(
+		mcpserver.NewTool("place_market_order", "Place a market order (immediate execution at current market price)", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"symbol":   map[string]interface{}{"type": "string", "description": "Trading pair symbol (e.g., 'BTCUSDT')"},
+				"side":     map[string]interface{}{"type": "string", "description": "Order side: 'buy' or 'sell'", "enum": []string{"buy", "sell"}},
+				"quantity": map[string]interface{}{"type": "number", "description": "Order quantity"},
+			},
+			"required": []string{"symbol", "side", "quantity"},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.PlaceMarketOrder(ctx, args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("place_limit_order", "Place a limit order (executed at specified price or better)", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"symbol":   map[string]interface{}{"type": "string", "description": "Trading pair symbol (e.g., 'BTCUSDT')"},
+				"side":     map[string]interface{}{"type": "string", "description": "Order side: 'buy' or 'sell'", "enum": []string{"buy", "sell"}},
+				"quantity": map[string]interface{}{"type": "number", "description": "Order quantity"},
+				"price":    map[string]interface{}{"type": "number", "description": "Limit price"},
+			},
+			"required": []string{"symbol", "side", "quantity", "price"},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.PlaceLimitOrder(ctx, args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("cancel_order", "Cancel an open or pending order", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"order_id": map[string]interface{}{"type": "string", "description": "Order ID to cancel"},
+			},
+			"required": []string{"order_id"},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.CancelOrder(ctx, args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_order_status", "Get current status and details of an order", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"order_id": map[string]interface{}{"type": "string", "description": "Order ID to query"},
+			},
+			"required": []string{"order_id"},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.GetOrderStatus(ctx, args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("start_session", "Start a new trading session for paper trading", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"symbol":          map[string]interface{}{"type": "string", "description": "Trading pair symbol (e.g., 'BTCUSDT')"},
+				"initial_capital": map[string]interface{}{"type": "number", "description": "Initial capital for the trading session"},
+				"config":          map[string]interface{}{"type": "object", "description": "Optional configuration parameters for the session"},
+			},
+			"required": []string{"symbol", "initial_capital"},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.StartSession(ctx, args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("stop_session", "Stop the current trading session and retrieve final statistics", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"final_capital": map[string]interface{}{"type": "number", "description": "Final capital at session end"},
+			},
+			"required": []string{"final_capital"},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.StopSession(ctx, args)
+		}),
+	)
+
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_session_stats", "Get current statistics for the active trading session", map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+			"required":   []string{},
+		}),
+		mcpserver.WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return service.GetSessionStats(ctx, args)
+		}),
+	)
 }
 
-// Run starts the MCP server
-func (s *MCPServer) Run() error {
-	log.Info().Msg("MCP server ready, listening on stdio")
-
-	// Read from stdin, process requests, write to stdout
-	decoder := json.NewDecoder(os.Stdin)
-	encoder := json.NewEncoder(os.Stdout)
-
-	for {
-		var request MCPRequest
-		if err := decoder.Decode(&request); err != nil {
-			if err.Error() == "EOF" {
-				log.Info().Msg("Client disconnected")
-				return nil
-			}
-			log.Error().Err(err).Msg("Failed to decode request")
-			continue
-		}
-
-		log.Debug().
-			Str("method", request.Method).
-			Str("tool", request.Params.Name).
-			Msg("Received request")
-
-		// Handle request
-		response := s.handleRequest(&request)
-
-		// Send response
-		if err := encoder.Encode(response); err != nil {
-			log.Error().Err(err).Msg("Failed to encode response")
-			return err
-		}
-	}
-}
-
-// MCPRequest represents an MCP tool call request
-type MCPRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
-	Method  string `json:"method"`
-	Params  struct {
-		Name      string                 `json:"name"`
-		Arguments map[string]interface{} `json:"arguments"`
-	} `json:"params"`
-}
-
-// MCPResponse represents an MCP response
-type MCPResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *MCPError   `json:"error,omitempty"`
-}
-
-// MCPError represents an MCP error
-type MCPError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// handleRequest routes the request to the appropriate handler
-func (s *MCPServer) handleRequest(req *MCPRequest) *MCPResponse {
-	timer := metrics.NewMCPRequestTimer(serverName, req.Method)
-
-	resp := &MCPResponse{
-		JSONRPC: "2.0",
-		ID:      req.ID,
-	}
-
-	defer func() {
-		success := resp.Error == nil
-		timer.Record(success)
-		if resp.Error != nil {
-			metrics.RecordMCPError(serverName, req.Method, resp.Error.Code)
-		}
-	}()
-
-	switch req.Method {
-	case "initialize":
-		resp.Result = map[string]interface{}{
-			"protocolVersion": "2024-11-05",
-			"capabilities": map[string]interface{}{
-				"tools": map[string]bool{
-					"listChanged": true,
-				},
-			},
-			"serverInfo": map[string]string{
-				"name":    serverName,
-				"version": config.Version,
-			},
-		}
-	case "tools/list":
-		resp.Result = s.listTools()
-	case "tools/call":
-		result, err := s.callTool(req.Params.Name, req.Params.Arguments)
-		if err != nil {
-			resp.Error = &MCPError{
-				Code:    -32603,
-				Message: err.Error(),
-			}
-		} else {
-			resp.Result = result
-		}
-	default:
-		resp.Error = &MCPError{
-			Code:    -32601,
-			Message: fmt.Sprintf("Method not found: %s", req.Method),
-		}
-	}
-
-	return resp
-}
-
-// listTools returns the list of available tools
-func (s *MCPServer) listTools() interface{} {
-	return map[string]interface{}{
-		"tools": []map[string]interface{}{
-			{
-				"name":        toolPlaceMarketOrder,
-				"description": "Place a market order (immediate execution at current market price)",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"symbol": map[string]interface{}{
-							"type":        "string",
-							"description": "Trading pair symbol (e.g., 'BTCUSDT')",
-						},
-						"side": map[string]interface{}{
-							"type":        "string",
-							"description": "Order side: 'buy' or 'sell'",
-							"enum":        []string{"buy", "sell"},
-						},
-						"quantity": map[string]interface{}{
-							"type":        "number",
-							"description": "Order quantity",
-						},
-					},
-					"required": []string{"symbol", "side", "quantity"},
-				},
-			},
-			{
-				"name":        toolPlaceLimitOrder,
-				"description": "Place a limit order (executed at specified price or better)",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"symbol": map[string]interface{}{
-							"type":        "string",
-							"description": "Trading pair symbol (e.g., 'BTCUSDT')",
-						},
-						"side": map[string]interface{}{
-							"type":        "string",
-							"description": "Order side: 'buy' or 'sell'",
-							"enum":        []string{"buy", "sell"},
-						},
-						"quantity": map[string]interface{}{
-							"type":        "number",
-							"description": "Order quantity",
-						},
-						"price": map[string]interface{}{
-							"type":        "number",
-							"description": "Limit price",
-						},
-					},
-					"required": []string{"symbol", "side", "quantity", "price"},
-				},
-			},
-			{
-				"name":        toolCancelOrder,
-				"description": "Cancel an open or pending order",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"order_id": map[string]interface{}{
-							"type":        "string",
-							"description": "Order ID to cancel",
-						},
-					},
-					"required": []string{"order_id"},
-				},
-			},
-			{
-				"name":        toolGetOrderStatus,
-				"description": "Get current status and details of an order",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"order_id": map[string]interface{}{
-							"type":        "string",
-							"description": "Order ID to query",
-						},
-					},
-					"required": []string{"order_id"},
-				},
-			},
-			{
-				"name":        toolStartSession,
-				"description": "Start a new trading session for paper trading",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"symbol": map[string]interface{}{
-							"type":        "string",
-							"description": "Trading pair symbol (e.g., 'BTCUSDT')",
-						},
-						"initial_capital": map[string]interface{}{
-							"type":        "number",
-							"description": "Initial capital for the trading session",
-						},
-						"config": map[string]interface{}{
-							"type":        "object",
-							"description": "Optional configuration parameters for the session",
-						},
-					},
-					"required": []string{"symbol", "initial_capital"},
-				},
-			},
-			{
-				"name":        toolStopSession,
-				"description": "Stop the current trading session and retrieve final statistics",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"final_capital": map[string]interface{}{
-							"type":        "number",
-							"description": "Final capital at session end",
-						},
-					},
-					"required": []string{"final_capital"},
-				},
-			},
-			{
-				"name":        toolGetSessionStats,
-				"description": "Get current statistics for the active trading session",
-				"inputSchema": map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-					"required":   []string{},
-				},
-			},
-			// Safety Guard Tools
-			{
-				"name":        toolGetSafetyGuardStats,
-				"description": "Get current safety guard statistics including daily P&L, trade count, consecutive losses, and circuit breaker status",
-				"inputSchema": map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-					"required":   []string{},
-				},
-			},
-			{
-				"name":        toolSetSafetyGuardCapital,
-				"description": "Set the capital for safety guard percentage calculations",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"capital": map[string]interface{}{
-							"type":        "number",
-							"description": "Current capital amount for safety guard calculations",
-						},
-					},
-					"required": []string{"capital"},
-				},
-			},
-			{
-				"name":        toolRecordTradePnL,
-				"description": "Record a trade's profit/loss for safety guard tracking. Negative values represent losses.",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"pnl": map[string]interface{}{
-							"type":        "number",
-							"description": "Profit (positive) or loss (negative) from the trade",
-						},
-					},
-					"required": []string{"pnl"},
-				},
-			},
-			{
-				"name":        toolResetSafetyGuard,
-				"description": "Manually reset the safety guard circuit breaker to resume trading",
-				"inputSchema": map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-					"required":   []string{},
-				},
-			},
-			{
-				"name":        toolResetDailyCounters,
-				"description": "Reset daily counters for a new trading day",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"capital": map[string]interface{}{
-							"type":        "number",
-							"description": "Starting capital for the new trading day",
-						},
-					},
-					"required": []string{"capital"},
-				},
-			},
-			// Polymarket tools
-			{
-				"name":        toolPolymarketPlaceOrder,
-				"description": "Place a limit order on Polymarket prediction market",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"market_id": map[string]interface{}{
-							"type":        "string",
-							"description": "Polymarket token ID (asset ID)",
-						},
-						"side": map[string]interface{}{
-							"type":        "string",
-							"description": "Order side: 'YES' or 'NO' (maps to BUY/SELL)",
-							"enum":        []string{"YES", "NO"},
-						},
-						"price": map[string]interface{}{
-							"type":        "number",
-							"description": "Limit price (0.01 to 0.99, probability)",
-						},
-						"size": map[string]interface{}{
-							"type":        "number",
-							"description": "Order size (number of shares)",
-						},
-					},
-					"required": []string{"market_id", "side", "price", "size"},
-				},
-			},
-			{
-				"name":        toolPolymarketCancelOrder,
-				"description": "Cancel an open Polymarket order",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"order_id": map[string]interface{}{
-							"type":        "string",
-							"description": "Internal order ID to cancel",
-						},
-					},
-					"required": []string{"order_id"},
-				},
-			},
-			{
-				"name":        toolPolymarketGetOrders,
-				"description": "List open Polymarket orders",
-				"inputSchema": map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-					"required":   []string{},
-				},
-			},
-			{
-				"name":        toolPolymarketGetPositions,
-				"description": "List Polymarket positions from the database",
-				"inputSchema": map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-					"required":   []string{},
-				},
-			},
-			{
-				"name":        toolPolymarketGetOrderbook,
-				"description": "Get the order book for a Polymarket token",
-				"inputSchema": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"token_id": map[string]interface{}{
-							"type":        "string",
-							"description": "Polymarket token ID",
-						},
-					},
-					"required": []string{"token_id"},
-				},
-			},
-		},
-	}
-}
-
-// callTool executes the specified tool
-func (s *MCPServer) callTool(name string, args map[string]interface{}) (interface{}, error) {
-	timer := metrics.NewMCPToolTimer(serverName, name)
-
-	// Create a context with timeout for tool execution
-	// 60 seconds for operations that might involve multiple API calls or database operations
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	var result interface{}
-	var err error
-
-	switch name {
-	case toolPlaceMarketOrder:
-		result, err = s.service.PlaceMarketOrder(ctx, args)
-	case toolPlaceLimitOrder:
-		result, err = s.service.PlaceLimitOrder(ctx, args)
-	case toolCancelOrder:
-		result, err = s.service.CancelOrder(ctx, args)
-	case toolGetOrderStatus:
-		result, err = s.service.GetOrderStatus(ctx, args)
-	case toolStartSession:
-		result, err = s.service.StartSession(ctx, args)
-	case toolStopSession:
-		result, err = s.service.StopSession(ctx, args)
-	case toolGetSessionStats:
-		result, err = s.service.GetSessionStats(ctx, args)
-	// Safety Guard Tools
-	case toolGetSafetyGuardStats:
-		result, err = s.service.GetSafetyGuardStats(ctx, args)
-	case toolSetSafetyGuardCapital:
-		result, err = s.service.SetSafetyGuardCapital(ctx, args)
-	case toolRecordTradePnL:
-		result, err = s.service.RecordTradePnL(ctx, args)
-	case toolResetSafetyGuard:
-		result, err = s.service.ResetSafetyGuardCircuitBreaker(ctx, args)
-	case toolResetDailyCounters:
-		result, err = s.service.ResetDailyCounters(ctx, args)
-	// Polymarket tools
-	case toolPolymarketPlaceOrder:
-		result, err = s.polymarketPlaceOrder(ctx, args)
-	case toolPolymarketCancelOrder:
-		result, err = s.polymarketCancelOrder(ctx, args)
-	case toolPolymarketGetOrders:
-		result, err = s.polymarketGetOrders(ctx, args)
-	case toolPolymarketGetPositions:
-		result, err = s.polymarketGetPositions(ctx, args)
-	case toolPolymarketGetOrderbook:
-		result, err = s.polymarketGetOrderbook(ctx, args)
-	default:
-		err = fmt.Errorf("unknown tool: %s", name)
-	}
-
-	// Record metrics
-	timer.Record(err == nil)
-
-	return result, err
-}
-
-// === Polymarket Tool Handlers ===
-
-func (s *MCPServer) polymarketPlaceOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	if s.polyExchange == nil {
-		return nil, fmt.Errorf("polymarket exchange not configured")
-	}
-
-	marketID, ok := args["market_id"].(string)
-	if !ok || marketID == "" {
-		return nil, fmt.Errorf("market_id is required")
-	}
-
-	sideStr, ok := args["side"].(string)
-	if !ok || sideStr == "" {
-		return nil, fmt.Errorf("side is required (YES or NO)")
-	}
-
-	price, ok := args["price"].(float64)
-	if !ok || price <= 0 || price >= 1 {
-		return nil, fmt.Errorf("price must be between 0 and 1 (exclusive)")
-	}
-
-	size, ok := args["size"].(float64)
-	if !ok || size <= 0 {
-		return nil, fmt.Errorf("size must be positive")
-	}
-
-	// Map YES/NO to buy/sell
-	var side exchange.OrderSide
-	if sideStr == "YES" {
-		side = exchange.OrderSideBuy
-	} else {
-		side = exchange.OrderSideSell
-	}
-
-	req := exchange.PlaceOrderRequest{
-		Symbol:   marketID,
-		Side:     side,
-		Type:     exchange.OrderTypeLimit,
-		Quantity: size,
-		Price:    price,
-	}
-
-	resp, err := s.polyExchange.PlaceOrder(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
-}
-
-func (s *MCPServer) polymarketCancelOrder(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	if s.polyExchange == nil {
-		return nil, fmt.Errorf("polymarket exchange not configured")
-	}
-
-	orderID, ok := args["order_id"].(string)
-	if !ok || orderID == "" {
-		return nil, fmt.Errorf("order_id is required")
-	}
-
-	order, err := s.polyExchange.CancelOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-
-	return order, nil
-}
-
-func (s *MCPServer) polymarketGetOrders(ctx context.Context, _ map[string]interface{}) (interface{}, error) {
-	if s.polyExchange == nil {
-		return nil, fmt.Errorf("polymarket exchange not configured")
-	}
-
-	orders, err := s.polyExchange.GetOpenOrders(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return map[string]interface{}{
-		"orders": orders,
-		"count":  len(orders),
-	}, nil
-}
-
-func (s *MCPServer) polymarketGetPositions(ctx context.Context, _ map[string]interface{}) (interface{}, error) {
-	if s.db == nil {
-		return nil, fmt.Errorf("database not available")
-	}
-
-	positions, err := s.db.GetOpenPolymarketPositions(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get positions: %w", err)
-	}
-
-	return map[string]interface{}{
-		"positions": positions,
-		"count":     len(positions),
-	}, nil
-}
-
-func (s *MCPServer) polymarketGetOrderbook(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	if s.polyExchange == nil {
-		return nil, fmt.Errorf("polymarket exchange not configured")
-	}
-
-	tokenID, ok := args["token_id"].(string)
-	if !ok || tokenID == "" {
-		return nil, fmt.Errorf("token_id is required")
-	}
-
-	book, err := s.polyExchange.GetOrderBook(ctx, tokenID)
-	if err != nil {
-		return nil, err
-	}
-
-	return book, nil
-}
+// Suppress unused import warning for fmt
+var _ = fmt.Sprintf
