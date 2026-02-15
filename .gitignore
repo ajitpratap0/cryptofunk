@@ -79,7 +79,7 @@ trades/
 backtest-results/
 
 # Model artifacts (future)
-models/
+/models/
 checkpoints/
 *.h5
 *.pkl
