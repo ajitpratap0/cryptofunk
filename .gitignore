@@ -98,3 +98,6 @@ certs/
 
 technical-indicators
 order-executor
+web/dashboard/node_modules/
+node_modules/
+.next/

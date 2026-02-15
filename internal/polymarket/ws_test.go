@@ -43,10 +43,17 @@ func TestNewWSClient_Options(t *testing.T) {
 }
 
 func TestWSClient_ConnectAndReceive(t *testing.T) {
-	var mu sync.Mutex
-	var received []string
-
 	done := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	})
+
+	msgReceived := make(chan struct{}, 1)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -68,12 +75,19 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
+	var mu sync.Mutex
+	var received []string
+
 	ws := NewWSClient(
 		WithWSURL(wsURL),
 		WithWSHandler(func(msgType string, data json.RawMessage) {
 			mu.Lock()
 			received = append(received, msgType)
 			mu.Unlock()
+			select {
+			case msgReceived <- struct{}{}:
+			default:
+			}
 		}),
 		WithWSLogger(zerolog.Nop()),
 	)
@@ -84,23 +98,34 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 	err := ws.Connect(ctx)
 	require.NoError(t, err)
 
-	// Wait for message
-	time.Sleep(100 * time.Millisecond)
+	// Wait for message via channel
+	select {
+	case <-msgReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for message")
+	}
 
 	mu.Lock()
 	assert.Contains(t, received, "price_change")
 	mu.Unlock()
 
+	close(done) // unblock server handler first
 	err = ws.Close()
 	assert.NoError(t, err)
-	close(done)
 }
 
 func TestWSClient_SubscribeMarket(t *testing.T) {
-	var mu sync.Mutex
-	var receivedCmd wsCommand
-
 	done := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	})
+
+	cmdReceived := make(chan wsCommand, 1)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -108,12 +133,9 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 		}
 		defer conn.Close()
 
-		// Read subscribe message
 		var cmd wsCommand
 		conn.ReadJSON(&cmd)
-		mu.Lock()
-		receivedCmd = cmd
-		mu.Unlock()
+		cmdReceived <- cmd
 		<-done
 	}))
 	defer server.Close()
@@ -130,22 +152,31 @@ func TestWSClient_SubscribeMarket(t *testing.T) {
 	err = ws.SubscribeMarket([]string{"asset1", "asset2"})
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	assert.Equal(t, "subscribe", receivedCmd.Type)
-	assert.Equal(t, "market", receivedCmd.Channel)
-	assert.Equal(t, []string{"asset1", "asset2"}, receivedCmd.Assets)
-	mu.Unlock()
+	select {
+	case receivedCmd := <-cmdReceived:
+		assert.Equal(t, "subscribe", receivedCmd.Type)
+		assert.Equal(t, "market", receivedCmd.Channel)
+		assert.Equal(t, []string{"asset1", "asset2"}, receivedCmd.Assets)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribe command")
+	}
 
-	ws.Close()
 	close(done)
+	ws.Close()
 }
 
 func TestWSClient_SubscribeUser(t *testing.T) {
-	var mu sync.Mutex
-	var receivedCmd wsCommand
-
 	done := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	})
+
+	cmdReceived := make(chan wsCommand, 1)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -154,9 +185,7 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 		defer conn.Close()
 		var cmd wsCommand
 		conn.ReadJSON(&cmd)
-		mu.Lock()
-		receivedCmd = cmd
-		mu.Unlock()
+		cmdReceived <- cmd
 		<-done
 	}))
 	defer server.Close()
@@ -174,16 +203,18 @@ func TestWSClient_SubscribeUser(t *testing.T) {
 	err = ws.SubscribeUser("market1", creds)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	assert.Equal(t, "subscribe", receivedCmd.Type)
-	assert.Equal(t, "user", receivedCmd.Channel)
-	assert.NotNil(t, receivedCmd.Auth)
-	assert.Equal(t, "key", receivedCmd.Auth.APIKey)
-	mu.Unlock()
+	select {
+	case receivedCmd := <-cmdReceived:
+		assert.Equal(t, "subscribe", receivedCmd.Type)
+		assert.Equal(t, "user", receivedCmd.Channel)
+		assert.NotNil(t, receivedCmd.Auth)
+		assert.Equal(t, "key", receivedCmd.Auth.APIKey)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribe command")
+	}
 
-	ws.Close()
 	close(done)
+	ws.Close()
 }
 
 func TestWSClient_SubscribeMarket_NotConnected(t *testing.T) {
