@@ -21,7 +21,7 @@ variables:
   GO_VERSION: "1.21"
   POSTGRES_DB: cryptofunk_test
   POSTGRES_USER: postgres
-  POSTGRES_PASSWORD: postgres
+  POSTGRES_PASSWORD: ${CI_POSTGRES_PASSWORD:-testpass}
   POSTGRES_HOST_AUTH_METHOD: trust
 
 # Reusable templates for Go caching

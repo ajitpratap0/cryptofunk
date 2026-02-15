@@ -21,6 +21,10 @@ func TestPolymarketFullFlow(t *testing.T) {
 	tc := testhelpers.SetupTestDatabase(t)
 	defer tc.Cleanup()
 
+	// Apply migrations so polymarket_markets table exists
+	err := tc.ApplyMigrations("../../migrations")
+	require.NoError(t, err, "should apply migrations")
+
 	database := tc.DB
 	ctx := context.Background()
 
