@@ -734,3 +734,5 @@ volumes:
     name: cryptofunk-grafana-data
   vault-data:
     name: cryptofunk-vault-data
+  nats-data:
+    name: cryptofunk-nats-data
