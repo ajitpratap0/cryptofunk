@@ -13,8 +13,6 @@ import (
 )
 
 // runHTTP starts the server with Streamable HTTP transport.
-// TODO: Add authentication (e.g. bearer token via flag/env) and restrict CORS origins
-// for production use. Currently the HTTP transport has no auth and allows all origins.
 func (s *Server) runHTTP(port int) error {
 	s.logger.Info().Int("port", port).Msg("MCP server starting with Streamable HTTP transport")
 
@@ -35,8 +33,13 @@ func (s *Server) runHTTP(port int) error {
 		fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"%s"}`, s.config.Name, s.config.Version)
 	})
 
-	// Wrap with CORS middleware
-	corsHandler := corsMiddleware(mux)
+	// Wrap with auth middleware, then CORS
+	authCfg := AuthConfig{
+		Token:     os.Getenv("MCP_AUTH_TOKEN"),
+		SkipPaths: []string{"/health"},
+	}
+	authedHandler := authMiddleware(authCfg, mux)
+	corsHandler := corsMiddleware(authedHandler)
 
 	addr := fmt.Sprintf(":%d", port)
 	httpServer := &http.Server{
@@ -88,10 +91,15 @@ func (s *Server) StartHTTPServer(port int) (*http.Server, error) {
 		fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"%s"}`, s.config.Name, s.config.Version)
 	})
 
+	authCfg := AuthConfig{
+		Token:     os.Getenv("MCP_AUTH_TOKEN"),
+		SkipPaths: []string{"/health"},
+	}
+
 	addr := fmt.Sprintf(":%d", port)
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           corsMiddleware(mux),
+		Handler:           corsMiddleware(authMiddleware(authCfg, mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -103,7 +111,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Mcp-Session-Id, Last-Event-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
 
 		if r.Method == http.MethodOptions {
