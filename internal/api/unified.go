@@ -55,7 +55,7 @@ func (h *UnifiedHandler) GetUnifiedPortfolio(c *gin.Context) {
 	}
 
 	// 3. Get trade counts for platform summaries
-	polyTrades, err := h.db.GetPolymarketTrades(ctx, 0)
+	polyTrades, err := h.db.GetPolymarketTrades(ctx, 10000)
 	if err == nil {
 		portfolio.SetPlatformTradeCount(models.PlatformPolymarket, len(polyTrades))
 	}

@@ -58,6 +58,11 @@ func NewPolymarketExchange(privateKey string, paperMode bool, database *db.DB, o
 	}, nil
 }
 
+// SetDB sets or replaces the database connection used for order persistence.
+func (p *PolymarketExchange) SetDB(database *db.DB) {
+	p.db = database
+}
+
 // SetSafetyCheck sets a safety check function called before order submission.
 // This avoids import cycles between exchange and safety packages.
 func (p *PolymarketExchange) SetSafetyCheck(fn func(ctx context.Context, req PlaceOrderRequest, orderValue float64) error) {

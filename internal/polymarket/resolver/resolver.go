@@ -4,7 +4,6 @@ package resolver
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -133,5 +132,3 @@ func (r *Resolver) ResolveAll(ctx context.Context) (polyResolved int, binanceRes
 	return polyResolved, binanceResolved, nil
 }
 
-// Ensure math import is used
-var _ = math.Abs

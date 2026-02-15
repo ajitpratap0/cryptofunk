@@ -146,7 +146,7 @@ func (s *APIServer) setupMiddleware() {
 			allowedOrigins = []string{} // Empty list = reject all
 		} else {
 			// Default origins for development
-			allowedOrigins = []string{"http://localhost:3000", "http://localhost:3333", "http://localhost:5173", "http://localhost:8080"}
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3333", "http://localhost:5173", "http://localhost:8080"}
 		}
 	}
 
@@ -1514,7 +1514,7 @@ func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
 			allowedOrigins = []string{} // Empty list = reject all
 		} else {
 			// Default origins for development
-			allowedOrigins = []string{"http://localhost:3000", "http://localhost:3333", "http://localhost:5173", "http://localhost:8080"}
+			allowedOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3333", "http://localhost:5173", "http://localhost:8080"}
 		}
 	}
 

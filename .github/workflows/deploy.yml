@@ -22,7 +22,7 @@ on:
       - 'v*.*.*'  # Auto-deploy to production on version tags
 
 env:
-  GO_VERSION: '1.25.x'
+  GO_VERSION: '1.21.x'
   REGISTRY: ${{ vars.ECR_REGISTRY || 'ghcr.io' }}
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 

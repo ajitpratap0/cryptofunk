@@ -1261,18 +1261,7 @@ func main() {
 			polyMode = "paper" // Default to paper for safety
 		}
 
-		var database *db.DB
-		if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
-			execCtx := context.Background()
-			d, err := db.New(execCtx)
-			if err != nil {
-				log.Warn().Err(err).Msg("Failed to connect to DB for execute mode")
-			} else {
-				database = d
-			}
-		}
-
-		pe, err := exchange.NewPolymarketExchange(polyPrivateKey, polyMode == "paper", database)
+		pe, err := exchange.NewPolymarketExchange(polyPrivateKey, polyMode == "paper", nil)
 		if err != nil {
 			log.Fatal().Err(err).Msg("Failed to initialize PolymarketExchange for execute mode")
 		}
@@ -1306,6 +1295,11 @@ func main() {
 
 	if err := agent.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize agent")
+	}
+
+	// Share the agent's database connection with the exchange to avoid duplicate connections
+	if agent.database != nil && agent.polyExchange != nil {
+		agent.polyExchange.SetDB(agent.database)
 	}
 
 	agent.heartbeat.Start()
