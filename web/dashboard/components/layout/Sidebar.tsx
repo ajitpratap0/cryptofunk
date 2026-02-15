@@ -104,7 +104,7 @@ export function Sidebar({ collapsed, onToggle, className }: SidebarProps) {
         className={cn(
           "sidebar",
           collapsed ? "sidebar-collapsed" : "sidebar-expanded",
-          "lg:relative lg:translate-x-0",
+          "lg:fixed lg:translate-x-0",
           !collapsed ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
           className
         )}

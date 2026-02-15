@@ -41,7 +41,7 @@ export default function RootLayout({
               />
 
               {/* Main Content */}
-              <div className={`transition-all duration-300 ${
+              <div className={`min-h-screen flex flex-col transition-all duration-300 ${
                 sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'
               }`}>
                 {/* Header */}
@@ -51,7 +51,7 @@ export default function RootLayout({
                 />
 
                 {/* Page Content */}
-                <main className="p-6">
+                <main className="flex-1 p-6">
                   {children}
                 </main>
               </div>
