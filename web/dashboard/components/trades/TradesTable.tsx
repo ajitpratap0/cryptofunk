@@ -1,16 +1,19 @@
 'use client'
 
 import { formatCurrency } from '@/lib/utils'
-import type { Trade } from '@/lib/types'
+import type { Trade, TradeFilters } from '@/lib/types'
+import type { Dispatch, SetStateAction } from 'react'
 
 interface TradesTableProps {
   trades: Trade[]
   loading?: boolean
   maxHeight?: string
   showFilters?: boolean
+  filters?: TradeFilters
+  onFiltersChange?: Dispatch<SetStateAction<TradeFilters>>
 }
 
-export function TradesTable({ trades, loading, maxHeight, showFilters }: TradesTableProps) {
+export function TradesTable({ trades, loading, maxHeight, showFilters, filters, onFiltersChange }: TradesTableProps) {
   if (loading) {
     return (
       <div className="bg-card border border-border rounded-lg p-6">
