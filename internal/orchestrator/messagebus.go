@@ -12,6 +12,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // MessageBus provides agent-to-agent communication via NATS
 type MessageBus struct {
 	nc     *nats.Conn

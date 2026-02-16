@@ -293,7 +293,10 @@ func (a *PolymarketAgent) Initialize(ctx context.Context) error {
 	}
 
 	// Connect to NATS
-	natsURL := viper.GetString("nats.url")
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = viper.GetString("nats.url")
+	}
 	if natsURL == "" {
 		natsURL = "nats://localhost:4222"
 	}
