@@ -1,5 +1,5 @@
 # MCP Servers Deployments
-# All MCP servers communicate via stdio, no port exposure needed
+# MCP servers use HTTP transport for standalone Docker/K8s operation
 
 ---
 apiVersion: apps/v1
@@ -25,9 +25,25 @@ spec:
       - name: market-data-server
         image: cryptofunk/market-data-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--transport", "http", "--port", "8090"]
+        ports:
+        - containerPort: 8090
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8090
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8090
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -112,9 +128,25 @@ spec:
       - name: technical-indicators-server
         image: cryptofunk/technical-indicators-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--transport", "http", "--port", "8093"]
+        ports:
+        - containerPort: 8093
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8093
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8093
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -193,9 +225,25 @@ spec:
       - name: risk-analyzer-server
         image: cryptofunk/risk-analyzer-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--transport", "http", "--port", "8092"]
+        ports:
+        - containerPort: 8092
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8092
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8092
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -274,9 +322,25 @@ spec:
       - name: order-executor-server
         image: cryptofunk/order-executor-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--transport", "http", "--port", "8091"]
+        ports:
+        - containerPort: 8091
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8091
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8091
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
