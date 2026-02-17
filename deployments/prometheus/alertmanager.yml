@@ -1,14 +1,11 @@
 global:
   resolve_timeout: 5m
-  # Slack API URL (set via environment variable)
-  slack_api_url: '${SLACK_WEBHOOK_URL}'
-
-  # SMTP configuration for email alerts
-  smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
-  smtp_from: '${SMTP_FROM}'
-  smtp_auth_username: '${SMTP_USERNAME}'
-  smtp_auth_password: '${SMTP_PASSWORD}'
-  smtp_require_tls: true
+  # SMTP configuration for email alerts (configure via docker-compose environment)
+  # smtp_smarthost: 'smtp.gmail.com:587'
+  # smtp_from: 'cryptofunk-alerts@example.com'
+  # smtp_auth_username: ''
+  # smtp_auth_password: ''
+  # smtp_require_tls: true
 
 # Templates for alert formatting
 templates:
