@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,8 +56,12 @@ type MessageHandler func(msg *AgentMessage) error
 
 // DefaultMessageBusConfig returns default configuration
 func DefaultMessageBusConfig() MessageBusConfig {
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = "nats://localhost:4222"
+	}
 	return MessageBusConfig{
-		NATSURL: "nats://localhost:4222",
+		NATSURL: natsURL,
 		Prefix:  "agents.",
 	}
 }

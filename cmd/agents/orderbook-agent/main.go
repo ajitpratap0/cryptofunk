@@ -187,7 +187,10 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 	agentConfig := config.Config
 
 	// Read NATS configuration
-	natsURL := viper.GetString("nats.url")
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = viper.GetString("nats.url")
+	}
 	if natsURL == "" {
 		natsURL = "nats://localhost:4222" // Default
 	}
