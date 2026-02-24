@@ -2,6 +2,13 @@ package strategy
 
 import "math"
 
+// Trade side constants.
+const (
+	SideYes     = "YES"
+	SideNo      = "NO"
+	SideNoTrade = "NO_TRADE"
+)
+
 // EdgeCalculator computes trading edges and position sizes.
 type EdgeCalculator struct {
 	minEdge      float64 // minimum absolute edge to trade
@@ -40,18 +47,18 @@ func (ec *EdgeCalculator) Calculate(predictedProb, marketPrice, confidence float
 
 	if edge > 0 {
 		// LLM thinks YES is underpriced → buy YES
-		result.Side = "YES"
+		result.Side = SideYes
 		result.ExpectedValue = (predictedProb * (1.0 / marketPrice)) - 1.0
 		result.KellyFraction = kellyFraction(predictedProb, marketPrice)
 	} else if edge < 0 {
 		// LLM thinks NO is underpriced → buy NO
 		noProb := 1.0 - predictedProb
 		noPrice := 1.0 - marketPrice
-		result.Side = "NO"
+		result.Side = SideNo
 		result.ExpectedValue = (noProb * (1.0 / noPrice)) - 1.0
 		result.KellyFraction = kellyFraction(noProb, noPrice)
 	} else {
-		result.Side = "NO_TRADE"
+		result.Side = SideNoTrade
 		result.KellyFraction = 0
 		result.ExpectedValue = 0
 	}

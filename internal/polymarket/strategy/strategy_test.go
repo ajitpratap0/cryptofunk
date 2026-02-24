@@ -37,7 +37,7 @@ func TestEdgeCalculator_BasicEdge(t *testing.T) {
 
 	// LLM says 70%, market says 50% → buy YES, edge = 0.20
 	r := ec.Calculate(0.70, 0.50, 0.8)
-	if r.Side != "YES" {
+	if r.Side != SideYes {
 		t.Errorf("expected YES, got %s", r.Side)
 	}
 	if !r.MeetsThreshold {
@@ -53,7 +53,7 @@ func TestEdgeCalculator_BuyNO(t *testing.T) {
 
 	// LLM says 30%, market says 60% → buy NO
 	r := ec.Calculate(0.30, 0.60, 0.9)
-	if r.Side != "NO" {
+	if r.Side != SideNo {
 		t.Errorf("expected NO, got %s", r.Side)
 	}
 	if !r.MeetsThreshold {
@@ -276,7 +276,7 @@ func TestAnalyzer_AnalyzeMarket(t *testing.T) {
 	if !rec.ShouldTrade {
 		t.Error("should recommend trading with 25% edge")
 	}
-	if rec.RecommendedSide != "YES" {
+	if rec.RecommendedSide != SideYes {
 		t.Errorf("expected YES, got %s", rec.RecommendedSide)
 	}
 	if rec.Analysis.PredictedProbability != 0.75 {

@@ -16,7 +16,7 @@ func TestNewEdgeCalculator_Defaults(t *testing.T) {
 func TestEdgeCalculator_ExactNoTrade(t *testing.T) {
 	ec := NewEdgeCalculator(0.10, 0.25)
 	r := ec.Calculate(0.50, 0.50, 1.0)
-	if r.Side != "NO_TRADE" {
+	if r.Side != SideNoTrade {
 		t.Errorf("expected NO_TRADE, got %s", r.Side)
 	}
 	if r.MeetsThreshold {
