@@ -3,18 +3,24 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	mcpserver "github.com/ajitpratap0/cryptofunk/internal/mcp"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
 )
 
-const serverName = "polymarket"
+const (
+	serverName    = "polymarket"
+	serverVersion = "1.0.0"
+)
 
 // MCPRequest represents an MCP tool call request
 type MCPRequest struct {
@@ -54,6 +60,10 @@ func main() {
 	logger := log.With().Str("server", serverName).Logger()
 	logger.Info().Msg("Starting Polymarket MCP Server")
 
+	transport := flag.String("transport", "stdio", "Transport mode: stdio or http")
+	port := flag.Int("port", mcpserver.DefaultPorts[serverName], "HTTP port (only used with --transport http)")
+	flag.Parse()
+
 	privateKey := os.Getenv("POLYMARKET_PRIVATE_KEY")
 	funder := os.Getenv("POLYMARKET_FUNDER_ADDRESS")
 
@@ -83,12 +93,206 @@ func main() {
 		}
 	}
 
-	server := &MCPServer{client: client, logger: logger}
-	logger.Info().Msg("Polymarket MCP Server ready, listening on stdio")
-
-	if err := server.Run(); err != nil {
-		logger.Fatal().Err(err).Msg("MCP server failed")
+	switch *transport {
+	case "http":
+		// Use the shared MCP server base for Streamable HTTP transport
+		srv := mcpserver.New(mcpserver.Config{
+			Name:    serverName,
+			Version: serverVersion,
+			Logger:  logger,
+		})
+		registerTools(srv, client)
+		if err := srv.RunWithArgs("http", *port); err != nil {
+			logger.Fatal().Err(err).Msg("MCP HTTP server failed")
+		}
+	default:
+		// Legacy stdio implementation (preserved for backward compatibility)
+		legacySrv := &MCPServer{client: client, logger: logger}
+		logger.Info().Msg("Polymarket MCP Server ready, listening on stdio")
+		if err := legacySrv.Run(); err != nil {
+			logger.Fatal().Err(err).Msg("MCP server failed")
+		}
 	}
+}
+
+// registerTools registers all Polymarket tools with the shared MCP server base.
+// This enables HTTP transport support via the standard Streamable HTTP handler.
+func registerTools(srv *mcpserver.Server, client *polymarket.Client) {
+	// get_markets
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_markets", "Get active prediction markets from Polymarket",
+			map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			markets, err := client.GetMarkets(ctx)
+			if err != nil {
+				return mcpserver.ToolError(err.Error()), nil
+			}
+			return mcpserver.ToolJSON(markets)
+		},
+	)
+
+	// get_market
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_market", "Get details for a specific Polymarket market by condition ID",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"condition_id": map[string]interface{}{"type": "string", "description": "Market condition ID"},
+				},
+				"required": []string{"condition_id"},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := mcpserver.MustUnmarshalArgs(req)
+			conditionID, _ := args["condition_id"].(string)
+			if conditionID == "" {
+				return mcpserver.ToolError("condition_id is required"), nil
+			}
+			market, err := client.GetMarket(ctx, conditionID)
+			if err != nil {
+				return mcpserver.ToolError(err.Error()), nil
+			}
+			return mcpserver.ToolJSON(market)
+		},
+	)
+
+	// get_orderbook
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_orderbook", "Get the order book for a Polymarket token",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"token_id": map[string]interface{}{"type": "string", "description": "Conditional token ID"},
+				},
+				"required": []string{"token_id"},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := mcpserver.MustUnmarshalArgs(req)
+			tokenID, _ := args["token_id"].(string)
+			if tokenID == "" {
+				return mcpserver.ToolError("token_id is required"), nil
+			}
+			book, err := client.GetOrderBook(ctx, tokenID)
+			if err != nil {
+				return mcpserver.ToolError(err.Error()), nil
+			}
+			return mcpserver.ToolJSON(book)
+		},
+	)
+
+	// get_price
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_price", "Get best bid/ask price for a Polymarket token",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"token_id": map[string]interface{}{"type": "string", "description": "Conditional token ID"},
+					"side":     map[string]interface{}{"type": "string", "description": "BUY or SELL", "enum": []string{"BUY", "SELL"}},
+				},
+				"required": []string{"token_id", "side"},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := mcpserver.MustUnmarshalArgs(req)
+			tokenID, _ := args["token_id"].(string)
+			sideStr, _ := args["side"].(string)
+			if tokenID == "" || sideStr == "" {
+				return mcpserver.ToolError("token_id and side are required"), nil
+			}
+			price, err := client.GetPrice(ctx, tokenID, polymarket.Side(sideStr))
+			if err != nil {
+				return mcpserver.ToolError(err.Error()), nil
+			}
+			return mcpserver.ToolJSON(map[string]string{"price": price})
+		},
+	)
+
+	// place_order
+	srv.AddToolRaw(
+		mcpserver.NewTool("place_order", "Place a limit order on Polymarket",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"token_id": map[string]interface{}{"type": "string", "description": "Conditional token ID"},
+					"side":     map[string]interface{}{"type": "string", "description": "BUY or SELL"},
+					"price":    map[string]interface{}{"type": "number", "description": "Limit price (0-1)"},
+					"size":     map[string]interface{}{"type": "number", "description": "Order size in tokens"},
+				},
+				"required": []string{"token_id", "side", "price", "size"},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := mcpserver.MustUnmarshalArgs(req)
+			tokenID, _ := args["token_id"].(string)
+			sideStr, _ := args["side"].(string)
+			priceVal, _ := args["price"].(float64)
+			sizeVal, _ := args["size"].(float64)
+			if tokenID == "" || sideStr == "" {
+				return mcpserver.ToolError("token_id and side are required"), nil
+			}
+			if priceVal == 0 {
+				if ps, ok := args["price"].(string); ok {
+					priceVal, _ = strconv.ParseFloat(ps, 64)
+				}
+			}
+			if sizeVal == 0 {
+				if ss, ok := args["size"].(string); ok {
+					sizeVal, _ = strconv.ParseFloat(ss, 64)
+				}
+			}
+			resp, err := client.CreateOrder(ctx, tokenID, polymarket.Side(sideStr), priceVal, sizeVal)
+			if err != nil {
+				return mcpserver.ToolError(err.Error()), nil
+			}
+			return mcpserver.ToolJSON(resp)
+		},
+	)
+
+	// cancel_order
+	srv.AddToolRaw(
+		mcpserver.NewTool("cancel_order", "Cancel an open order on Polymarket",
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"order_id": map[string]interface{}{"type": "string", "description": "Order ID to cancel"},
+				},
+				"required": []string{"order_id"},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := mcpserver.MustUnmarshalArgs(req)
+			orderID, _ := args["order_id"].(string)
+			if orderID == "" {
+				return mcpserver.ToolError("order_id is required"), nil
+			}
+			if err := client.CancelOrder(ctx, orderID); err != nil {
+				return mcpserver.ToolError(err.Error()), nil
+			}
+			return mcpserver.ToolJSON(map[string]string{"status": "cancelled", "order_id": orderID})
+		},
+	)
+
+	// get_positions
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_positions", "Get open orders and trade history (positions) on Polymarket",
+			map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			orders, err := client.GetOpenOrders(ctx)
+			if err != nil {
+				return mcpserver.ToolError(fmt.Sprintf("get open orders: %v", err)), nil
+			}
+			trades, err := client.GetTrades(ctx)
+			if err != nil {
+				return mcpserver.ToolError(fmt.Sprintf("get trades: %v", err)), nil
+			}
+			return mcpserver.ToolJSON(map[string]interface{}{
+				"open_orders": orders,
+				"trades":      trades,
+			})
+		},
+	)
 }
 
 // Run starts the MCP server with stdio transport

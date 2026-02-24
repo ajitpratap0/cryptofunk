@@ -84,3 +84,38 @@ func NewTool(name, description string, inputSchema map[string]interface{}) *mcp.
 		InputSchema: inputSchema,
 	}
 }
+
+// ToolError returns a CallToolResult with IsError=true and the given message.
+// Use this to return tool-level errors (as opposed to JSON-RPC errors).
+func ToolError(msg string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		IsError: true,
+	}
+}
+
+// ToolJSON marshals data to JSON and returns it as a text content result.
+// Returns a ToolError result if marshalling fails.
+func ToolJSON(data interface{}) (*mcp.CallToolResult, error) {
+	sanitized := sanitizeForJSON(data)
+	b, err := json.Marshal(sanitized)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tool result: %w", err)
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
+	}, nil
+}
+
+// MustUnmarshalArgs extracts tool call arguments from a CallToolRequest as a
+// map[string]interface{}. Returns an empty map if arguments are nil or invalid.
+func MustUnmarshalArgs(req *mcp.CallToolRequest) map[string]interface{} {
+	if req.Params == nil || req.Params.Arguments == nil {
+		return make(map[string]interface{})
+	}
+	var args map[string]interface{}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return make(map[string]interface{})
+	}
+	return args
+}
