@@ -182,7 +182,16 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, LGPL-3.0-only, LGPL-3.0-or-later, Unlicense, 0BSD, CC0-1.0, Artistic-2.0, Zlib, BSL-1.0, PostgreSQL, BlueOak-1.0.0
+          allow-licenses: >-
+            MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0,
+            LGPL-3.0-only, LGPL-3.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later,
+            Unlicense, 0BSD, CC0-1.0, Artistic-2.0, Zlib, BSL-1.0, PostgreSQL,
+            BlueOak-1.0.0,
+            BSD-3-Clause AND LicenseRef-scancode-google-patent-license-golang
+          # Some deps (go-ethereum, OTel detectors) have undetected licenses on GitHub
+          allow-packages: >-
+            pkg:golang/github.com/ethereum/go-ethereum,
+            pkg:golang/github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp
 
   # Check for TODO comments
   todo-check:
