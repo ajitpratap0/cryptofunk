@@ -31,7 +31,7 @@ for svc in "${SERVICES[@]}"; do
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "🔨 Building: $svc"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  if docker-compose build "$svc" 2>&1; then
+  if docker compose build "$svc" 2>&1; then
     SUCCEEDED+=("$svc")
     echo "✅ $svc built successfully"
   else

@@ -33,8 +33,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /out/${BINARY_NAME} \
     ./${CMD_PATH}
 
-# Stage 2: Minimal runtime (scratch for static binaries)
-FROM scratch
+# Stage 2: Minimal runtime
+# NOTE: FROM scratch does not include a shell, so Docker HEALTHCHECK CMD-SHELL
+# directives will not work. Using distroless instead for healthcheck compatibility.
+FROM gcr.io/distroless/static-debian12
 
 ARG BINARY_NAME
 
