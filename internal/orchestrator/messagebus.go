@@ -12,6 +12,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // MessageBus provides agent-to-agent communication via NATS
 type MessageBus struct {
 	nc     *nats.Conn
@@ -53,14 +60,6 @@ const (
 
 // MessageHandler is a callback for handling received messages
 type MessageHandler func(msg *AgentMessage) error
-
-// getEnvOrDefault returns the value of an environment variable, or a default if unset/empty.
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
 
 // DefaultMessageBusConfig returns default configuration
 func DefaultMessageBusConfig() MessageBusConfig {

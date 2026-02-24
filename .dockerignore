@@ -5,6 +5,8 @@
 
 # Build artifacts
 bin/
+coverage.out
+coverage.html
 *.exe
 *.exe~
 *.dll
@@ -66,6 +68,16 @@ logs/
 
 # Node modules (if any)
 node_modules/
+
+# Web/Dashboard (not needed for Go builds)
+web/
+
+# Worktrees
+*-worktrees/
+
+# Terraform state
+infra/terraform/.terraform/
+*.tfstate*
 
 # OS files
 .DS_Store
