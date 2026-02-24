@@ -52,9 +52,8 @@ type BlackboardConfig struct {
 
 // DefaultBlackboardConfig returns default configuration
 func DefaultBlackboardConfig() BlackboardConfig {
-	redisURL := getEnvOrDefault("REDIS_URL", "localhost:6379")
-	// Strip redis:// scheme if present — redis.Options.Addr expects host:port
-	redisURL = strings.TrimPrefix(redisURL, "redis://")
+	// Read REDIS_URL env var, stripping redis:// scheme if present (redis.Options.Addr expects host:port)
+	redisURL := strings.TrimPrefix(getEnvOrDefault("REDIS_URL", "localhost:6379"), "redis://")
 	return BlackboardConfig{
 		RedisURL:      redisURL,
 		RedisPassword: "",
