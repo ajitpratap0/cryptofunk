@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,10 +52,9 @@ type BlackboardConfig struct {
 
 // DefaultBlackboardConfig returns default configuration
 func DefaultBlackboardConfig() BlackboardConfig {
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "localhost:6379"
-	}
+	redisURL := getEnvOrDefault("REDIS_URL", "localhost:6379")
+	// Strip redis:// scheme if present — redis.Options.Addr expects host:port
+	redisURL = strings.TrimPrefix(redisURL, "redis://")
 	return BlackboardConfig{
 		RedisURL:      redisURL,
 		RedisPassword: "",
