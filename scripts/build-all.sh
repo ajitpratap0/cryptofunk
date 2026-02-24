@@ -21,7 +21,6 @@ SERVICES=(
   reversion-agent
   risk-agent
   orderbook-agent
-  dashboard
 )
 
 FAILED=()

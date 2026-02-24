@@ -1,5 +1,5 @@
 # MCP Servers Deployments
-# MCP servers use HTTP transport for standalone Docker/K8s operation
+# MCP servers use stdio transport (JSON-RPC 2.0 over stdin/stdout)
 
 ---
 apiVersion: apps/v1
@@ -25,20 +25,14 @@ spec:
       - name: market-data-server
         image: cryptofunk/market-data-server:v0.10.0
         imagePullPolicy: IfNotPresent
-        args: ["--transport", "http", "--port", "8090"]
-        ports:
-        - containerPort: 8090
-          protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /health
-            port: 8090
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
-            port: 8090
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 10
           periodSeconds: 30
         env:
@@ -86,6 +80,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: COINGECKO_API_KEY
           valueFrom:
             secretKeyRef:
@@ -128,20 +127,14 @@ spec:
       - name: technical-indicators-server
         image: cryptofunk/technical-indicators-server:v0.10.0
         imagePullPolicy: IfNotPresent
-        args: ["--transport", "http", "--port", "8093"]
-        ports:
-        - containerPort: 8093
-          protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /health
-            port: 8093
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
-            port: 8093
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 10
           periodSeconds: 30
         env:
@@ -189,6 +182,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -225,20 +223,14 @@ spec:
       - name: risk-analyzer-server
         image: cryptofunk/risk-analyzer-server:v0.10.0
         imagePullPolicy: IfNotPresent
-        args: ["--transport", "http", "--port", "8092"]
-        ports:
-        - containerPort: 8092
-          protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /health
-            port: 8092
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
-            port: 8092
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 10
           periodSeconds: 30
         env:
@@ -286,6 +278,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -322,20 +319,14 @@ spec:
       - name: order-executor-server
         image: cryptofunk/order-executor-server:v0.10.0
         imagePullPolicy: IfNotPresent
-        args: ["--transport", "http", "--port", "8091"]
-        ports:
-        - containerPort: 8091
-          protocol: TCP
         readinessProbe:
-          httpGet:
-            path: /health
-            port: 8091
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
-          httpGet:
-            path: /health
-            port: 8091
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
           initialDelaySeconds: 10
           periodSeconds: 30
         env:
@@ -383,6 +374,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: BINANCE_API_KEY
           valueFrom:
             secretKeyRef:

@@ -56,7 +56,7 @@ func DefaultBlackboardConfig() BlackboardConfig {
 	// Strip redis:// scheme if present — redis.Options.Addr expects host:port
 	redisURL = strings.TrimPrefix(redisURL, "redis://")
 	return BlackboardConfig{
-		RedisURL:      redisURL,
+		RedisURL:      getEnvOrDefault("REDIS_URL", "localhost:6379"),
 		RedisPassword: "",
 		RedisDB:       0,
 		Prefix:        "blackboard:",
