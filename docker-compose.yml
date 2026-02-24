@@ -325,6 +325,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     deploy:
@@ -354,6 +355,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
       LOG_LEVEL: ${LOG_LEVEL:-info}
     deploy:
       resources:
@@ -382,6 +384,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
       LOG_LEVEL: ${LOG_LEVEL:-info}
     deploy:
       resources:
@@ -410,6 +413,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
       BINANCE_API_KEY: ${BINANCE_API_KEY:-}
       BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
       TRADING_MODE: ${TRADING_MODE:-PAPER}
