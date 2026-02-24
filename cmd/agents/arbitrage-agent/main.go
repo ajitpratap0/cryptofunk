@@ -212,7 +212,11 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 	a.exchangeFees = a.loadExchangeFees()
 
 	// Connect to NATS for signal publishing
-	natsURL := viper.GetString("nats.url")
+	// Env var takes priority for Docker compatibility
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = viper.GetString("nats.url")
+	}
 	if natsURL == "" {
 		natsURL = nats.DefaultURL
 	}

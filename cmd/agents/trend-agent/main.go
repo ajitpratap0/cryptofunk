@@ -177,8 +177,11 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 	// Extract strategy configuration
 	agentConfig := config.Config
 
-	// Read NATS configuration
-	natsURL := viper.GetString("nats.url")
+	// Read NATS configuration - env var takes priority for Docker compatibility
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = viper.GetString("nats.url")
+	}
 	if natsURL == "" {
 		natsURL = "nats://localhost:4222"
 	}
@@ -1308,7 +1311,10 @@ func main() {
 	}
 
 	// Setup control subscription for pause/resume events
-	natsURL := viper.GetString("nats.url")
+	natsURL := os.Getenv("NATS_URL")
+	if natsURL == "" {
+		natsURL = viper.GetString("nats.url")
+	}
 	if natsURL == "" {
 		natsURL = "nats://localhost:4222"
 	}
