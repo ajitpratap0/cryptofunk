@@ -155,6 +155,7 @@ func (s *Server) Run() error {
 	case "stdio":
 		return s.runStdio()
 	case "http":
+		// S2: Auth warning is emitted inside runHTTP.
 		return s.runHTTP(*port)
 	default:
 		return fmt.Errorf("unknown transport: %s (use stdio or http)", *transport)

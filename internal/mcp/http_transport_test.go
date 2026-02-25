@@ -145,9 +145,9 @@ func newHTTPTestServer(t *testing.T, extraEnv ...string) (*httptest.Server, *Ser
 		}),
 	)
 
-	httpSrv, err := srv.StartHTTPServer(0)
+	httpSrv, err := srv.NewHTTPServer(0)
 	if err != nil {
-		t.Fatalf("StartHTTPServer failed: %v", err)
+		t.Fatalf("NewHTTPServer failed: %v", err)
 	}
 
 	ts := httptest.NewServer(httpSrv.Handler)
@@ -157,6 +157,7 @@ func newHTTPTestServer(t *testing.T, extraEnv ...string) (*httptest.Server, *Ser
 }
 
 // TestStreamableHTTP_HealthEndpoint verifies the /health endpoint is reachable without auth.
+// S6: By default, health returns only {"status":"ok"}. Verbose mode adds server info.
 func TestStreamableHTTP_HealthEndpoint(t *testing.T) {
 	ts, _ := newHTTPTestServer(t)
 
@@ -174,9 +175,6 @@ func TestStreamableHTTP_HealthEndpoint(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `"status":"ok"`) {
 		t.Fatalf("unexpected body: %s", body)
-	}
-	if !strings.Contains(string(body), `"server":"test-http"`) {
-		t.Fatalf("unexpected server name in body: %s", body)
 	}
 }
 
@@ -386,15 +384,26 @@ func TestStreamableHTTP_UnknownMethod(t *testing.T) {
 	// MCP SDK may return the error either as HTTP 4xx or as SSE data with error field
 	if resp.StatusCode == http.StatusOK {
 		data := readSSEData(t, resp.Body)
+		if data == nil {
+			t.Fatal("expected SSE data in response for unknown method")
+		}
 		var rpc struct {
 			Error *struct {
 				Code    int    `json:"code"`
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if err := json.Unmarshal(data, &rpc); err == nil && rpc.Error != nil {
-			t.Logf("Unknown method returned expected error: code=%d msg=%s", rpc.Error.Code, rpc.Error.Message)
+		if err := json.Unmarshal(data, &rpc); err != nil {
+			t.Fatalf("failed to parse unknown method response: %v\nraw: %s", err, data)
 		}
+		if rpc.Error == nil {
+			t.Fatal("expected JSON-RPC error for unknown method, got nil")
+		}
+		t.Logf("Unknown method returned expected error: code=%d msg=%s", rpc.Error.Code, rpc.Error.Message)
+	} else if resp.StatusCode >= 400 {
+		t.Logf("Unknown method returned HTTP %d (expected)", resp.StatusCode)
+	} else {
+		t.Fatalf("unexpected status %d for unknown method", resp.StatusCode)
 	}
 }
 
@@ -483,9 +492,9 @@ func TestStreamableHTTP_MultipleTools(t *testing.T) {
 		)
 	}
 
-	httpSrv, err := srv.StartHTTPServer(0)
+	httpSrv, err := srv.NewHTTPServer(0)
 	if err != nil {
-		t.Fatalf("StartHTTPServer: %v", err)
+		t.Fatalf("NewHTTPServer: %v", err)
 	}
 	ts := httptest.NewServer(httpSrv.Handler)
 	defer ts.Close()

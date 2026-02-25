@@ -107,9 +107,9 @@ func ToolJSON(data interface{}) (*mcp.CallToolResult, error) {
 	}, nil
 }
 
-// MustUnmarshalArgs extracts tool call arguments from a CallToolRequest as a
+// ParseArgs extracts tool call arguments from a CallToolRequest as a
 // map[string]interface{}. Returns an empty map if arguments are nil or invalid.
-func MustUnmarshalArgs(req *mcp.CallToolRequest) map[string]interface{} {
+func ParseArgs(req *mcp.CallToolRequest) map[string]interface{} {
 	if req.Params == nil || req.Params.Arguments == nil {
 		return make(map[string]interface{})
 	}

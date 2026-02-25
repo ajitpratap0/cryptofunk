@@ -44,7 +44,7 @@ func newHTTPPolyServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server
 	})
 	registerTools(srv, client)
 
-	httpSrv, err := srv.StartHTTPServer(0)
+	httpSrv, err := srv.NewHTTPServer(0)
 	require.NoError(t, err)
 
 	ts := httptest.NewServer(httpSrv.Handler)
@@ -239,5 +239,4 @@ func TestHTTP_PolymarketHealthCheck(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
 	assert.Contains(t, string(body), `"status":"ok"`)
-	assert.Contains(t, string(body), `"server":"polymarket"`)
 }

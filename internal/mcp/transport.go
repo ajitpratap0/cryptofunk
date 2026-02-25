@@ -6,46 +6,42 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/time/rate"
 )
 
 // runHTTP starts the server with Streamable HTTP transport.
 func (s *Server) runHTTP(port int) error {
 	s.logger.Info().Int("port", port).Msg("MCP server starting with Streamable HTTP transport")
 
-	// Create the StreamableHTTPHandler from the SDK
-	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		return s.mcpSrv
-	}, nil)
-
-	mux := http.NewServeMux()
-
-	// Mount the MCP handler at /mcp (handles both POST and GET /mcp for SSE)
-	mux.Handle("/mcp", handler)
-
-	// Health check endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"%s"}`, s.config.Name, s.config.Version)
-	})
-
-	// Wrap with auth middleware, then CORS
-	authCfg := AuthConfig{
-		Token:     os.Getenv("MCP_AUTH_TOKEN"),
-		SkipPaths: []string{"/health"},
+	// S2: Warn when MCP_AUTH_TOKEN is not set for HTTP transport.
+	if os.Getenv("MCP_AUTH_TOKEN") == "" && os.Getenv("MCP_ALLOW_NO_AUTH") == "" {
+		s.logger.Warn().Msg("MCP_AUTH_TOKEN not set — HTTP transport is UNAUTHENTICATED. Set MCP_AUTH_TOKEN or use --allow-no-auth to suppress this warning.")
 	}
-	authedHandler := authMiddleware(authCfg, mux)
-	corsHandler := corsMiddleware(authedHandler)
+
+	// S3: Warn when CORS origin defaults to wildcard.
+	if os.Getenv("MCP_CORS_ORIGIN") == "" {
+		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
+	}
+
+	mux := s.buildMux()
+
+	// Wrap with middleware stack: rate limit → auth → CORS → content-type check
+	handler := s.wrapMiddleware(mux)
 
 	addr := fmt.Sprintf(":%d", port)
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           corsHandler,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,   // S4: read timeout
+		MaxHeaderBytes:    64 * 1024,           // S4: 64KB max headers
+		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
 	}
 
 	// Graceful shutdown
@@ -72,40 +68,79 @@ func (s *Server) runHTTP(port int) error {
 	return err
 }
 
-// StartHTTPServer starts the HTTP server and returns it for testing.
-// The caller is responsible for shutting it down.
-func (s *Server) StartHTTPServer(port int) (*http.Server, error) {
-	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		return s.mcpSrv
-	}, nil)
-
-	mux := http.NewServeMux()
-	mux.Handle("/mcp", handler)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"%s"}`, s.config.Name, s.config.Version)
-	})
-
-	authCfg := AuthConfig{
-		Token:     os.Getenv("MCP_AUTH_TOKEN"),
-		SkipPaths: []string{"/health"},
-	}
+// NewHTTPServer creates an HTTP server with the MCP handler configured but does
+// not start it. The caller is responsible for starting and shutting it down.
+func (s *Server) NewHTTPServer(port int) (*http.Server, error) {
+	mux := s.buildMux()
 
 	addr := fmt.Sprintf(":%d", port)
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           corsMiddleware(authMiddleware(authCfg, mux)),
+		Handler:           s.wrapMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second, // S4
+		MaxHeaderBytes:    64 * 1024,        // S4
+		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
 	}
 
 	return httpServer, nil
 }
 
-// corsMiddleware adds CORS headers for browser-based clients.
+// buildMux constructs the HTTP mux with /mcp and /health routes.
+func (s *Server) buildMux() *http.ServeMux {
+	// Create the StreamableHTTPHandler from the SDK
+	streamHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		return s.mcpSrv
+	}, nil)
+
+	mux := http.NewServeMux()
+
+	// Mount the MCP handler at /mcp (handles both POST and GET /mcp for SSE).
+	// Accept header: Clients should send "Accept: application/json, text/event-stream"
+	// for POST requests per the MCP Streamable HTTP spec. GET requests for SSE
+	// should use "Accept: text/event-stream".
+	mux.Handle("/mcp", s.bodyLimitMiddleware(streamHandler))
+
+	// S6: Health check endpoint — verbose if MCP_HEALTH_VERBOSE is set.
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if os.Getenv("MCP_HEALTH_VERBOSE") != "" {
+			fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"%s"}`, s.config.Name, s.config.Version)
+		} else {
+			fmt.Fprint(w, `{"status":"ok"}`)
+		}
+	})
+
+	return mux
+}
+
+// wrapMiddleware applies the full middleware stack around a handler.
+func (s *Server) wrapMiddleware(handler http.Handler) http.Handler {
+	authCfg := AuthConfig{
+		Token:     os.Getenv("MCP_AUTH_TOKEN"),
+		SkipPaths: []string{"/health"},
+	}
+
+	// Apply from innermost to outermost:
+	// handler → content-type check → auth → CORS → rate limit
+	h := contentTypeMiddleware(handler)
+	h = authMiddleware(authCfg, h)
+	h = corsMiddleware(h)
+	h = rateLimitMiddleware(h, parseRateLimit())
+	return h
+}
+
+// S3: corsMiddleware adds CORS headers for browser-based clients.
+// Uses MCP_CORS_ORIGIN env var if set, otherwise defaults to * with a warning.
 func corsMiddleware(next http.Handler) http.Handler {
+	origin := os.Getenv("MCP_CORS_ORIGIN")
+	if origin == "" {
+		origin = "*"
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
@@ -115,6 +150,64 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+// S1: rateLimitMiddleware limits request rate using a token bucket.
+// Returns HTTP 429 when the limit is exceeded.
+func rateLimitMiddleware(next http.Handler, limiter *rate.Limiter) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.Allow() {
+			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// parseRateLimit reads MCP_RATE_LIMIT env var (format: "rps,burst" e.g. "100,200")
+// and returns a configured rate.Limiter. Defaults to 100 req/s with burst 200.
+func parseRateLimit() *rate.Limiter {
+	rps := float64(100)
+	burst := 200
+
+	if env := os.Getenv("MCP_RATE_LIMIT"); env != "" {
+		parts := strings.SplitN(env, ",", 2)
+		if v, err := strconv.ParseFloat(parts[0], 64); err == nil && v > 0 {
+			rps = v
+		}
+		if len(parts) == 2 {
+			if v, err := strconv.Atoi(parts[1]); err == nil && v > 0 {
+				burst = v
+			}
+		}
+	}
+
+	return rate.NewLimiter(rate.Limit(rps), burst)
+}
+
+// U1: contentTypeMiddleware validates that POST requests to /mcp have
+// Content-Type: application/json. Returns 415 Unsupported Media Type if not.
+func contentTypeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/mcp" {
+			ct := r.Header.Get("Content-Type")
+			if !strings.HasPrefix(ct, "application/json") {
+				http.Error(w, `{"error":"Content-Type must be application/json"}`, http.StatusUnsupportedMediaType)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// S5: bodyLimitMiddleware wraps a handler to limit POST request body size to 1MB.
+func (s *Server) bodyLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+		}
 		next.ServeHTTP(w, r)
 	})
 }
