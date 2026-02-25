@@ -236,4 +236,3 @@ func registerTools(srv *mcpserver.Server, client *polymarket.Client) {
 		}),
 	)
 }
-
