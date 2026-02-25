@@ -114,7 +114,7 @@ func initMCPSession(t *testing.T, ts *httptest.Server, extraHeaders ...string) s
 }
 
 // newHTTPTestServer creates a test server with the given tools registered.
-func newHTTPTestServer(t *testing.T, extraEnv ...string) (*httptest.Server, *Server) {
+func newHTTPTestServer(t *testing.T) (*httptest.Server, *Server) {
 	t.Helper()
 	logger := zerolog.New(io.Discard)
 	srv := New(Config{Name: "test-http", Version: "0.0.1", Logger: logger})
@@ -157,7 +157,7 @@ func newHTTPTestServer(t *testing.T, extraEnv ...string) (*httptest.Server, *Ser
 }
 
 // TestStreamableHTTP_HealthEndpoint verifies the /health endpoint is reachable without auth.
-// S6: By default, health returns only {"status":"ok"}. Verbose mode adds server info.
+// By default, health returns only {"status":"ok"}. Verbose mode adds server info.
 func TestStreamableHTTP_HealthEndpoint(t *testing.T) {
 	ts, _ := newHTTPTestServer(t)
 
@@ -470,6 +470,50 @@ func TestStreamableHTTP_SessionRequired(t *testing.T) {
 		t.Fatalf("expected error for uninitialized session, got successful response")
 	}
 	t.Logf("Uninitialized session error: %s", rpc.Error.Message)
+}
+
+// TestRateLimiting verifies that the rate limiter returns 429 when the limit is exceeded.
+func TestRateLimiting(t *testing.T) {
+	t.Setenv("MCP_RATE_LIMIT", "1,1")
+
+	ts, _ := newHTTPTestServer(t)
+
+	var got429 bool
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/mcp", nil)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			got429 = true
+			break
+		}
+	}
+	if !got429 {
+		t.Fatal("expected at least one 429 response from rate limiter")
+	}
+}
+
+// TestContentTypeEnforcement verifies that POST to /mcp with wrong Content-Type returns 415.
+func TestContentTypeEnforcement(t *testing.T) {
+	ts, _ := newHTTPTestServer(t)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL+"/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 415, got %d: %s", resp.StatusCode, respBody)
+	}
 }
 
 // TestStreamableHTTP_MultipleTools verifies that multiple tools can be registered

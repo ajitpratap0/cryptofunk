@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,12 +20,12 @@ import (
 func (s *Server) runHTTP(port int) error {
 	s.logger.Info().Int("port", port).Msg("MCP server starting with Streamable HTTP transport")
 
-	// S2: Warn when MCP_AUTH_TOKEN is not set for HTTP transport.
+	// Warn when MCP_AUTH_TOKEN is not set for HTTP transport.
 	if os.Getenv("MCP_AUTH_TOKEN") == "" && os.Getenv("MCP_ALLOW_NO_AUTH") == "" {
-		s.logger.Warn().Msg("MCP_AUTH_TOKEN not set — HTTP transport is UNAUTHENTICATED. Set MCP_AUTH_TOKEN or use --allow-no-auth to suppress this warning.")
+		s.logger.Warn().Msg("MCP_AUTH_TOKEN not set — HTTP transport is UNAUTHENTICATED. Set MCP_AUTH_TOKEN or set MCP_ALLOW_NO_AUTH=1 to suppress this warning.")
 	}
 
-	// S3: Warn when CORS origin defaults to wildcard.
+	// Warn when CORS origin defaults to wildcard.
 	if os.Getenv("MCP_CORS_ORIGIN") == "" {
 		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
 	}
@@ -39,8 +40,8 @@ func (s *Server) runHTTP(port int) error {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second, // S4: read timeout
-		MaxHeaderBytes:    64 * 1024,        // S4: 64KB max headers
+		ReadTimeout:       30 * time.Second,
+		MaxHeaderBytes:    64 * 1024, // 64KB max headers
 		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
 	}
 
@@ -78,8 +79,8 @@ func (s *Server) NewHTTPServer(port int) (*http.Server, error) {
 		Addr:              addr,
 		Handler:           s.wrapMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second, // S4
-		MaxHeaderBytes:    64 * 1024,        // S4
+		ReadTimeout:       30 * time.Second,
+		MaxHeaderBytes:    64 * 1024, // 64KB max headers
 		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
 	}
 
@@ -101,29 +102,45 @@ func (s *Server) buildMux() *http.ServeMux {
 	// should use "Accept: text/event-stream".
 	mux.Handle("/mcp", s.bodyLimitMiddleware(streamHandler))
 
-	// S6: Health check endpoint — verbose if MCP_HEALTH_VERBOSE is set.
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if os.Getenv("MCP_HEALTH_VERBOSE") != "" {
-			_, _ = w.Write([]byte(`{"status":"ok","server":"` + s.config.Name + `","version":"` + s.config.Version + `"}`))
-		} else {
-			_, _ = w.Write([]byte(`{"status":"ok"}`))
-		}
-	})
+	// Health check endpoint — verbose if MCP_HEALTH_VERBOSE is set.
+	// Registered directly on the mux so it bypasses the middleware stack
+	// (no rate limiting, auth, or content-type checks on health probes).
+	mux.HandleFunc("/health", s.healthHandler)
 
 	return mux
 }
 
+// healthHandler responds to health probe requests. When MCP_HEALTH_VERBOSE is
+// set, the response includes the server name and version.
+func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if os.Getenv("MCP_HEALTH_VERBOSE") != "" {
+		resp := struct {
+			Status  string `json:"status"`
+			Server  string `json:"server"`
+			Version string `json:"version"`
+		}{
+			Status:  "ok",
+			Server:  s.config.Name,
+			Version: s.config.Version,
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	} else {
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}
+}
+
 // wrapMiddleware applies the full middleware stack around a handler.
+// The /health endpoint is registered outside this stack on the mux directly.
 func (s *Server) wrapMiddleware(handler http.Handler) http.Handler {
 	authCfg := AuthConfig{
 		Token:     os.Getenv("MCP_AUTH_TOKEN"),
 		SkipPaths: []string{"/health"},
 	}
 
-	// Apply from innermost to outermost:
-	// handler → content-type check → auth → CORS → rate limit
+	// Apply from innermost to outermost (request execution order is reversed):
+	// Request flow: rate limit -> CORS -> auth -> content-type -> handler
 	h := contentTypeMiddleware(handler)
 	h = authMiddleware(authCfg, h)
 	h = corsMiddleware(h)
@@ -131,7 +148,7 @@ func (s *Server) wrapMiddleware(handler http.Handler) http.Handler {
 	return h
 }
 
-// S3: corsMiddleware adds CORS headers for browser-based clients.
+// corsMiddleware adds CORS headers for browser-based clients.
 // Uses MCP_CORS_ORIGIN env var if set, otherwise defaults to * with a warning.
 func corsMiddleware(next http.Handler) http.Handler {
 	origin := os.Getenv("MCP_CORS_ORIGIN")
@@ -154,7 +171,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// S1: rateLimitMiddleware limits request rate using a token bucket.
+// rateLimitMiddleware limits request rate using a token bucket.
 // Returns HTTP 429 when the limit is exceeded.
 func rateLimitMiddleware(next http.Handler, limiter *rate.Limiter) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +204,7 @@ func parseRateLimit() *rate.Limiter {
 	return rate.NewLimiter(rate.Limit(rps), burst)
 }
 
-// U1: contentTypeMiddleware validates that POST requests to /mcp have
+// contentTypeMiddleware validates that POST requests to /mcp have
 // Content-Type: application/json. Returns 415 Unsupported Media Type if not.
 func contentTypeMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +219,7 @@ func contentTypeMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// S5: bodyLimitMiddleware wraps a handler to limit POST request body size to 1MB.
+// bodyLimitMiddleware wraps a handler to limit POST request body size to 1MB.
 func (s *Server) bodyLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {

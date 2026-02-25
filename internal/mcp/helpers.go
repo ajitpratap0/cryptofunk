@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog/log"
 )
 
 // WrapLegacyHandler wraps a legacy tool handler that takes map[string]interface{} args
@@ -100,7 +101,7 @@ func ToolJSON(data interface{}) (*mcp.CallToolResult, error) {
 	sanitized := sanitizeForJSON(data)
 	b, err := json.Marshal(sanitized)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal tool result: %w", err)
+		return ToolError("failed to marshal result: " + err.Error()), nil
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
@@ -115,6 +116,7 @@ func ParseArgs(req *mcp.CallToolRequest) map[string]interface{} {
 	}
 	var args map[string]interface{}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		log.Debug().Err(err).Msg("Failed to parse tool call arguments")
 		return make(map[string]interface{})
 	}
 	return args
