@@ -39,8 +39,8 @@ func (s *Server) runHTTP(port int) error {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,   // S4: read timeout
-		MaxHeaderBytes:    64 * 1024,           // S4: 64KB max headers
+		ReadTimeout:       30 * time.Second, // S4: read timeout
+		MaxHeaderBytes:    64 * 1024,        // S4: 64KB max headers
 		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
 	}
 
@@ -106,9 +106,9 @@ func (s *Server) buildMux() *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if os.Getenv("MCP_HEALTH_VERBOSE") != "" {
-			fmt.Fprintf(w, `{"status":"ok","server":"%s","version":"%s"}`, s.config.Name, s.config.Version)
+			_, _ = w.Write([]byte(`{"status":"ok","server":"` + s.config.Name + `","version":"` + s.config.Version + `"}`))
 		} else {
-			fmt.Fprint(w, `{"status":"ok"}`)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		}
 	})
 

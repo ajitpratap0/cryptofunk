@@ -133,7 +133,9 @@ func TestHTTP_PolymarketToolsRegistered(t *testing.T) {
 	data := readSSELine(t, resp.Body)
 	var listRPC struct {
 		Result struct {
-			Tools []struct{ Name string `json:"name"` } `json:"tools"`
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
 		} `json:"result"`
 	}
 	require.NoError(t, json.Unmarshal(data, &listRPC))
@@ -217,7 +219,9 @@ func TestHTTP_MissingRequiredArg(t *testing.T) {
 	data := readSSELine(t, resp.Body)
 	var callRPC struct {
 		Result struct {
-			Content []struct{ Text string `json:"text"` } `json:"content"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
 			IsError bool `json:"isError"`
 		} `json:"result"`
 	}

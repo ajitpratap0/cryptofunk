@@ -94,7 +94,7 @@ func initMCPSession(t *testing.T, ts *httptest.Server, extraHeaders ...string) s
 
 	data := readSSEData(t, resp.Body)
 	var rpc struct {
-		Result map[string]interface{} `json:"result"`
+		Result map[string]interface{}    `json:"result"`
 		Error  *struct{ Message string } `json:"error"`
 	}
 	if err := json.Unmarshal(data, &rpc); err != nil {
@@ -336,7 +336,9 @@ func TestStreamableHTTP_FullMCPSessionFlow(t *testing.T) {
 	failData := readSSEData(t, failResp.Body)
 	var failRPC struct {
 		Result struct {
-			Content []struct{ Text string `json:"text"` } `json:"content"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
 			IsError bool `json:"isError"`
 		} `json:"result"`
 		Error *struct{ Message string } `json:"error"`
@@ -510,7 +512,9 @@ func TestStreamableHTTP_MultipleTools(t *testing.T) {
 	data := readSSEData(t, resp.Body)
 	var listRPC struct {
 		Result struct {
-			Tools []struct{ Name string `json:"name"` } `json:"tools"`
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &listRPC); err != nil {
