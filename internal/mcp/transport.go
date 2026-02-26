@@ -109,7 +109,9 @@ func (s *Server) buildMux() *http.ServeMux {
 	// Accept header: Clients should send "Accept: application/json, text/event-stream"
 	// for POST requests per the MCP Streamable HTTP spec. GET requests for SSE
 	// should use "Accept: text/event-stream".
-	mux.Handle("/mcp", s.bodyLimitMiddleware(streamHandler))
+	// Note: bodyLimitMiddleware is applied in wrapMiddleware AFTER auth so that
+	// unauthenticated requests are rejected before their body is read.
+	mux.Handle("/mcp", streamHandler)
 
 	return mux
 }
@@ -131,7 +133,10 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	} else {
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		// Use json.NewEncoder for consistent trailing newline behavior with the verbose path.
+		_ = json.NewEncoder(w).Encode(struct {
+			Status string `json:"status"`
+		}{Status: "ok"})
 	}
 }
 
@@ -144,8 +149,11 @@ func (s *Server) wrapMiddleware(handler http.Handler) http.Handler {
 	}
 
 	// Apply from innermost to outermost (request execution order is reversed):
-	// Request flow: rate limit -> CORS -> auth -> content-type -> handler
+	// Request flow: rate limit -> CORS -> auth -> body limit -> content-type -> handler
+	// bodyLimitMiddleware is placed AFTER auth so unauthenticated requests are
+	// rejected before their body is consumed.
 	h := contentTypeMiddleware(handler)
+	h = s.bodyLimitMiddleware(h)
 	h = authMiddleware(authCfg, h)
 	h = corsMiddleware(h)
 	h = rateLimitMiddleware(h, parseRateLimit())
@@ -180,7 +188,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 func rateLimitMiddleware(next http.Handler, limiter *rate.Limiter) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !limiter.Allow() {
-			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -189,6 +199,11 @@ func rateLimitMiddleware(next http.Handler, limiter *rate.Limiter) http.Handler 
 
 // parseRateLimit reads MCP_RATE_LIMIT env var (format: "rps,burst" e.g. "100,200")
 // and returns a configured rate.Limiter. Defaults to 100 req/s with burst 200.
+//
+// NOTE: Rate limiting is global per-process, not per-client IP. A single
+// aggressive client can starve others. For production deployments with multiple
+// clients, consider adding per-IP rate limiting via a reverse proxy (e.g.,
+// nginx, envoy).
 func parseRateLimit() *rate.Limiter {
 	rps := float64(100)
 	burst := 200
@@ -215,7 +230,9 @@ func contentTypeMiddleware(next http.Handler) http.Handler {
 		if r.Method == http.MethodPost && r.URL.Path == "/mcp" {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") {
-				http.Error(w, `{"error":"Content-Type must be application/json"}`, http.StatusUnsupportedMediaType)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnsupportedMediaType)
+				_, _ = w.Write([]byte(`{"error":"Content-Type must be application/json"}`))
 				return
 			}
 		}

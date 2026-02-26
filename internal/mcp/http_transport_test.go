@@ -23,6 +23,9 @@ import (
 //	event: message
 //	id: <event-id>
 //	data: <json-payload>
+//
+// Calls t.Fatal if no data line is found, to catch test bugs early (consistent
+// with readSSELine in compat_test.go).
 func readSSEData(t *testing.T, body io.Reader) json.RawMessage {
 	t.Helper()
 	scanner := bufio.NewScanner(body)
@@ -36,6 +39,7 @@ func readSSEData(t *testing.T, body io.Reader) json.RawMessage {
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("error reading SSE response: %v", err)
 	}
+	t.Fatal("no SSE data line found in response")
 	return nil
 }
 
@@ -386,9 +390,6 @@ func TestStreamableHTTP_UnknownMethod(t *testing.T) {
 	// MCP SDK may return the error either as HTTP 4xx or as SSE data with error field
 	if resp.StatusCode == http.StatusOK {
 		data := readSSEData(t, resp.Body)
-		if data == nil {
-			t.Fatal("expected SSE data in response for unknown method")
-		}
 		var rpc struct {
 			Error *struct {
 				Code    int    `json:"code"`
@@ -457,9 +458,6 @@ func TestStreamableHTTP_SessionRequired(t *testing.T) {
 
 	// Per MCP spec the server must return an error for requests without a session
 	data := readSSEData(t, resp.Body)
-	if data == nil {
-		t.Fatal("expected SSE data in response")
-	}
 	var rpc struct {
 		Error *struct{ Message string } `json:"error"`
 	}
@@ -473,6 +471,8 @@ func TestStreamableHTTP_SessionRequired(t *testing.T) {
 }
 
 // TestRateLimiting verifies that the rate limiter returns 429 when the limit is exceeded.
+// Note: t.Setenv is safe here as this test must not run with t.Parallel() due to
+// global env mutation affecting parseRateLimit() which reads the env at server creation time.
 func TestRateLimiting(t *testing.T) {
 	t.Setenv("MCP_RATE_LIMIT", "1,1")
 
@@ -543,7 +543,7 @@ func TestStreamableHTTP_MultipleTools(t *testing.T) {
 		t.Fatalf("NewHTTPServer: %v", err)
 	}
 	ts := httptest.NewServer(httpSrv.Handler)
-	defer ts.Close()
+	t.Cleanup(ts.Close)
 
 	sid := initMCPSession(t, ts)
 
@@ -551,7 +551,7 @@ func TestStreamableHTTP_MultipleTools(t *testing.T) {
 		"jsonrpc": "2.0", "id": 2,
 		"method": "tools/list", "params": map[string]interface{}{},
 	})
-	defer resp.Body.Close()
+	t.Cleanup(func() { resp.Body.Close() })
 
 	data := readSSEData(t, resp.Body)
 	var listRPC struct {

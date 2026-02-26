@@ -110,6 +110,10 @@ func ToolJSON(data interface{}) *mcp.CallToolResult {
 
 // ParseArgs extracts tool call arguments from a CallToolRequest as a
 // map[string]interface{}. Returns an empty map if arguments are nil or invalid.
+//
+// WARNING: Returns empty map on unmarshal failure. Callers must validate
+// required fields independently, as missing arguments will silently appear as
+// zero values rather than triggering an error here.
 func ParseArgs(req *mcp.CallToolRequest) map[string]interface{} {
 	if req.Params == nil || req.Params.Arguments == nil {
 		return make(map[string]interface{})
