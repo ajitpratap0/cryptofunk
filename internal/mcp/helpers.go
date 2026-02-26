@@ -97,15 +97,15 @@ func ToolError(msg string) *mcp.CallToolResult {
 
 // ToolJSON marshals data to JSON and returns it as a text content result.
 // Returns a ToolError result if marshalling fails.
-func ToolJSON(data interface{}) (*mcp.CallToolResult, error) {
+func ToolJSON(data interface{}) *mcp.CallToolResult {
 	sanitized := sanitizeForJSON(data)
 	b, err := json.Marshal(sanitized)
 	if err != nil {
-		return ToolError("failed to marshal result: " + err.Error()), nil
+		return ToolError("failed to marshal result: " + err.Error())
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
-	}, nil
+	}
 }
 
 // ParseArgs extracts tool call arguments from a CallToolRequest as a
@@ -116,7 +116,7 @@ func ParseArgs(req *mcp.CallToolRequest) map[string]interface{} {
 	}
 	var args map[string]interface{}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-		log.Debug().Err(err).Msg("Failed to parse tool call arguments")
+		log.Warn().Err(err).Msg("Failed to parse tool call arguments")
 		return make(map[string]interface{})
 	}
 	return args

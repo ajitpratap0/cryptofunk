@@ -30,10 +30,7 @@ func (s *Server) runHTTP(port int) error {
 		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
 	}
 
-	mux := s.buildMux()
-
-	// Wrap with middleware stack: rate limit → auth → CORS → content-type check
-	handler := s.wrapMiddleware(mux)
+	handler := s.buildHandler()
 
 	addr := fmt.Sprintf(":%d", port)
 	httpServer := &http.Server{
@@ -72,12 +69,10 @@ func (s *Server) runHTTP(port int) error {
 // NewHTTPServer creates an HTTP server with the MCP handler configured but does
 // not start it. The caller is responsible for starting and shutting it down.
 func (s *Server) NewHTTPServer(port int) (*http.Server, error) {
-	mux := s.buildMux()
-
 	addr := fmt.Sprintf(":%d", port)
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           s.wrapMiddleware(mux),
+		Handler:           s.buildHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		MaxHeaderBytes:    64 * 1024, // 64KB max headers
@@ -87,7 +82,21 @@ func (s *Server) NewHTTPServer(port int) (*http.Server, error) {
 	return httpServer, nil
 }
 
-// buildMux constructs the HTTP mux with /mcp and /health routes.
+// buildHandler constructs the two-layer HTTP handler.
+// The outer mux serves /health directly (bypassing all middleware so that K8s
+// liveness/readiness probes cannot exhaust the rate limiter).
+// All other paths are routed through the full middleware stack.
+func (s *Server) buildHandler() http.Handler {
+	inner := s.buildMux()
+
+	outer := http.NewServeMux()
+	outer.HandleFunc("/health", s.healthHandler)      // bypasses all middleware
+	outer.Handle("/", s.wrapMiddleware(inner))         // everything else wrapped
+
+	return outer
+}
+
+// buildMux constructs the inner HTTP mux with /mcp routes (no /health).
 func (s *Server) buildMux() *http.ServeMux {
 	// Create the StreamableHTTPHandler from the SDK
 	streamHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
@@ -101,11 +110,6 @@ func (s *Server) buildMux() *http.ServeMux {
 	// for POST requests per the MCP Streamable HTTP spec. GET requests for SSE
 	// should use "Accept: text/event-stream".
 	mux.Handle("/mcp", s.bodyLimitMiddleware(streamHandler))
-
-	// Health check endpoint — verbose if MCP_HEALTH_VERBOSE is set.
-	// Registered directly on the mux so it bypasses the middleware stack
-	// (no rate limiting, auth, or content-type checks on health probes).
-	mux.HandleFunc("/health", s.healthHandler)
 
 	return mux
 }
@@ -132,11 +136,11 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 // wrapMiddleware applies the full middleware stack around a handler.
-// The /health endpoint is registered outside this stack on the mux directly.
+// /health is served on the outer mux before reaching this stack, so it
+// never hits rate limiting or auth.
 func (s *Server) wrapMiddleware(handler http.Handler) http.Handler {
 	authCfg := AuthConfig{
-		Token:     os.Getenv("MCP_AUTH_TOKEN"),
-		SkipPaths: []string{"/health"},
+		Token: os.Getenv("MCP_AUTH_TOKEN"),
 	}
 
 	// Apply from innermost to outermost (request execution order is reversed):
