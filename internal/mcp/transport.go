@@ -90,8 +90,8 @@ func (s *Server) buildHandler() http.Handler {
 	inner := s.buildMux()
 
 	outer := http.NewServeMux()
-	outer.HandleFunc("/health", s.healthHandler)      // bypasses all middleware
-	outer.Handle("/", s.wrapMiddleware(inner))         // everything else wrapped
+	outer.HandleFunc("/health", s.healthHandler) // bypasses all middleware
+	outer.Handle("/", s.wrapMiddleware(inner))   // everything else wrapped
 
 	return outer
 }
