@@ -162,9 +162,9 @@ jobs:
         image:
           - orchestrator
           - api
-          - technical-agent
-          - trend-agent
-          - risk-agent
+          # NOTE: Agent images (technical-agent, trend-agent, risk-agent) are not
+          # built/pushed in this workflow yet. Add them here once agent Docker
+          # builds are added to the build-and-push matrix.
 
     steps:
       - name: Run Trivy vulnerability scanner
@@ -198,7 +198,7 @@ jobs:
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
 
           find deployments/k8s -name '*.yaml' -type f | while read file; do
-            sed -i "s|image: ghcr.io/${{ github.repository_owner }}/cryptofunk-.*:.*|image: ghcr.io/${{ github.repository_owner }}/cryptofunk-\1:main-${SHORT_SHA}|g" "$file"
+            sed -i -E "s|image: ghcr.io/${{ github.repository_owner }}/cryptofunk-([^:]+):.*|image: ghcr.io/${{ github.repository_owner }}/cryptofunk-\1:main-${SHORT_SHA}|g" "$file"
           done
 
       - name: Commit and push updated manifests
