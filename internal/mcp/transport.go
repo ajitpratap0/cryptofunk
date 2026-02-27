@@ -35,6 +35,11 @@ func (s *Server) runHTTP(port int) error {
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			s.logger.Error().Err(err).Msg("HTTP server shutdown error")
 		}
+		if s.metricsSrv != nil {
+			if err := s.metricsSrv.Shutdown(shutdownCtx); err != nil {
+				s.logger.Error().Err(err).Msg("Metrics server shutdown error")
+			}
+		}
 	}()
 
 	s.logger.Info().Str("addr", httpServer.Addr).Msg("MCP HTTP server listening")

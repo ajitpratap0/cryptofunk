@@ -311,8 +311,8 @@ func TestIntegration_TechnicalAnalysisAgent(t *testing.T) {
 	// Add mock MCP server configurations
 	// Note: In real tests, these would be actual mock server processes
 	// For this example, we demonstrate the pattern
-	AddMockMCPServer(config, "market-data", "mock-server", []string{"market-data"})
-	AddMockMCPServer(config, "technical-indicators", "mock-server", []string{"technical-indicators"})
+	AddMockMCPServer(config, "market-data", "http://localhost:8093/mcp")
+	AddMockMCPServer(config, "technical-indicators", "http://localhost:8094/mcp")
 
 	// Create agent
 	agent := agents.NewBaseAgent(config, helper.Logger(), GetTestMetricsPort(t))

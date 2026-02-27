@@ -113,15 +113,13 @@ type MCPExternalServerConfig struct {
 
 // MCPInternalServerConfig contains configuration for a custom MCP server
 type MCPInternalServerConfig struct {
-	Enabled     bool              `mapstructure:"enabled"`
-	Name        string            `mapstructure:"name"`
-	Command     string            `mapstructure:"command"`   // path to binary
-	Transport   string            `mapstructure:"transport"` // "stdio"
-	Description string            `mapstructure:"description"`
-	Args        []string          `mapstructure:"args"`
-	Env         map[string]string `mapstructure:"env"`
-	Tools       []string          `mapstructure:"tools"`
-	Note        string            `mapstructure:"note"` // optional note
+	Enabled     bool     `mapstructure:"enabled"`
+	Name        string   `mapstructure:"name"`
+	URL         string   `mapstructure:"url"`       // HTTP endpoint, e.g. "http://localhost:8090/mcp"
+	Transport   string   `mapstructure:"transport"` // "http" (Streamable HTTP)
+	Description string   `mapstructure:"description"`
+	Tools       []string `mapstructure:"tools"`
+	Note        string   `mapstructure:"note"` // optional note
 }
 
 // MCPRateLimitConfig contains rate limit settings
@@ -403,26 +401,26 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mcp.external.coingecko.rate_limit.enabled", true)
 	v.SetDefault("mcp.external.coingecko.rate_limit.requests_per_minute", 100)
 
-	// MCP defaults - Internal servers
+	// MCP defaults - Internal servers (Streamable HTTP transport)
 	v.SetDefault("mcp.internal.order_executor.enabled", true)
 	v.SetDefault("mcp.internal.order_executor.name", "Order Executor")
-	v.SetDefault("mcp.internal.order_executor.command", "./bin/order-executor-server")
-	v.SetDefault("mcp.internal.order_executor.transport", "stdio")
+	v.SetDefault("mcp.internal.order_executor.url", "http://localhost:8091/mcp")
+	v.SetDefault("mcp.internal.order_executor.transport", "http")
 
 	v.SetDefault("mcp.internal.risk_analyzer.enabled", true)
 	v.SetDefault("mcp.internal.risk_analyzer.name", "Risk Analyzer")
-	v.SetDefault("mcp.internal.risk_analyzer.command", "./bin/risk-analyzer-server")
-	v.SetDefault("mcp.internal.risk_analyzer.transport", "stdio")
+	v.SetDefault("mcp.internal.risk_analyzer.url", "http://localhost:8092/mcp")
+	v.SetDefault("mcp.internal.risk_analyzer.transport", "http")
 
 	v.SetDefault("mcp.internal.technical_indicators.enabled", true)
 	v.SetDefault("mcp.internal.technical_indicators.name", "Technical Indicators")
-	v.SetDefault("mcp.internal.technical_indicators.command", "./bin/technical-indicators-server")
-	v.SetDefault("mcp.internal.technical_indicators.transport", "stdio")
+	v.SetDefault("mcp.internal.technical_indicators.url", "http://localhost:8093/mcp")
+	v.SetDefault("mcp.internal.technical_indicators.transport", "http")
 
 	v.SetDefault("mcp.internal.market_data.enabled", false)
 	v.SetDefault("mcp.internal.market_data.name", "Market Data (Binance)")
-	v.SetDefault("mcp.internal.market_data.command", "./bin/market-data-server")
-	v.SetDefault("mcp.internal.market_data.transport", "stdio")
+	v.SetDefault("mcp.internal.market_data.url", "http://localhost:8090/mcp")
+	v.SetDefault("mcp.internal.market_data.transport", "http")
 
 	// Trading defaults
 	v.SetDefault("trading.mode", "paper")

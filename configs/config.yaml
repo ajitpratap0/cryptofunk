@@ -82,8 +82,8 @@ mcp:
     order_executor:
       enabled: true
       name: "Order Executor"
-      command: "./bin/order-executor-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8091/mcp"
       description: "Execute orders on exchanges (Binance via CCXT)"
       args: []
       env:
@@ -99,8 +99,8 @@ mcp:
     risk_analyzer:
       enabled: true
       name: "Risk Analyzer"
-      command: "./bin/risk-analyzer-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8092/mcp"
       description: "Portfolio risk management and position sizing"
       args: []
       tools:
@@ -113,8 +113,8 @@ mcp:
     technical_indicators:
       enabled: true
       name: "Technical Indicators"
-      command: "./bin/technical-indicators-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8093/mcp"
       description: "Technical analysis indicators (RSI, MACD, Bollinger, etc.)"
       args: []
       tools:
@@ -128,8 +128,8 @@ mcp:
     market_data:
       enabled: false  # Optional: Use only if you need Binance-specific features
       name: "Market Data (Binance)"
-      command: "./bin/market-data-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8090/mcp"
       description: "Binance-specific market data (optional, CoinGecko covers most use cases)"
       args: []
       note: "Disabled by default - CoinGecko MCP is primary data source"

@@ -1260,27 +1260,8 @@ func main() {
 						Type: server["type"].(string),
 					}
 
-					switch serverConfig.Type {
-					case "internal":
-						if cmd, ok := server["command"].(string); ok {
-							serverConfig.Command = cmd
-						}
-						if args, ok := server["args"].([]interface{}); ok {
-							serverConfig.Args = make([]string, len(args))
-							for i, arg := range args {
-								serverConfig.Args[i] = arg.(string)
-							}
-						}
-						if env, ok := server["env"].(map[string]interface{}); ok {
-							serverConfig.Env = make(map[string]string, len(env))
-							for k, v := range env {
-								serverConfig.Env[k] = v.(string)
-							}
-						}
-					case "external":
-						if url, ok := server["url"].(string); ok {
-							serverConfig.URL = url
-						}
+					if url, ok := server["url"].(string); ok {
+						serverConfig.URL = url
 					}
 
 					agentConfig.MCPServers = append(agentConfig.MCPServers, serverConfig)

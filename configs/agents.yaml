@@ -33,7 +33,7 @@ analysis_agents:
     mcp_servers:
       # Primary: CoinGecko for market data
       - name: "coingecko"
-        type: "external"
+        type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
@@ -41,14 +41,8 @@ analysis_agents:
 
       # Technical Indicators server
       - name: "technical_indicators"
-        type: "internal"
-        command: "./bin/technical-indicators-server"
-        tools:
-          - "calculate_rsi"
-          - "calculate_macd"
-          - "calculate_bollinger_bands"
-          - "calculate_ema"
-          - "calculate_adx"
+        type: "http"
+        url: "http://localhost:8093/mcp"
 
     # Decision cycle timing
     step_interval: "30s"  # Analyze market every 30 seconds
@@ -92,15 +86,13 @@ analysis_agents:
 
     mcp_servers:
       - name: "coingecko"
-        type: "external"
+        type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
       - name: "market_data"
-        type: "internal"
-        command: "./bin/market-data-server"
-        tools:
-          - "get_order_book"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     step_interval: "10s"  # Order book changes quickly
 
@@ -117,7 +109,7 @@ analysis_agents:
 
     mcp_servers:
       - name: "coingecko"
-        type: "external"
+        type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_trending"
@@ -176,17 +168,14 @@ strategy_agents:
 
     mcp_servers:
       - name: "coingecko"
-        type: "external"
+        type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
           - "get_market_chart"
       - name: "technical_indicators"
-        type: "internal"
-        command: "./bin/technical-indicators-server"
-        tools:
-          - "calculate_ema"
-          - "calculate_adx"
+        type: "http"
+        url: "http://localhost:8093/mcp"
 
     step_interval: "5m"  # Analyze trend every 5 minutes
 
@@ -224,17 +213,14 @@ strategy_agents:
 
     mcp_servers:
       - name: "coingecko"
-        type: "external"
+        type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_price"
           - "get_market_chart"
       - name: "technical_indicators"
-        type: "internal"
-        command: "./bin/technical-indicators-server"
-        tools:
-          - "calculate_rsi"
-          - "calculate_bollinger_bands"
+        type: "http"
+        url: "http://localhost:8093/mcp"
 
     step_interval: "1m"
 
@@ -261,16 +247,13 @@ strategy_agents:
 
     mcp_servers:
       - name: "coingecko"
-        type: "external"
+        type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
         tools:
           - "get_simple_price"
       - name: "market_data"
-        type: "internal"
-        command: "./bin/market-data-server"
-        tools:
-          - "get_price"
-          - "get_order_book"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     step_interval: "5s"  # Arbitrage requires speed
 
@@ -310,14 +293,14 @@ strategy_agents:
 
     mcp_servers:
       - name: "polymarket"
-        type: "external"
+        type: "sse"
         url: "http://localhost:8090/sse"
         tools:
           - "list_markets"
           - "get_market"
           - "place_order"
       - name: "bifrost"
-        type: "external"
+        type: "sse"
         url: "http://localhost:8091/sse"
         tools:
           - "chat"
@@ -374,21 +357,12 @@ risk_agent:
 
   mcp_servers:
     - name: "risk_analyzer"
-      type: "internal"
-      command: "./bin/risk-analyzer-server"
-      tools:
-        - "calculate_position_size"
-        - "calculate_var"
-        - "check_portfolio_limits"
-        - "calculate_sharpe"
-        - "calculate_drawdown"
+      type: "http"
+      url: "http://localhost:8092/mcp"
 
     - name: "order_executor"
-      type: "internal"
-      command: "./bin/order-executor-server"
-      tools:
-        - "get_positions"
-        - "get_order_status"
+      type: "http"
+      url: "http://localhost:8091/mcp"
 
   step_interval: "10s"  # Monitor risk frequently
 

@@ -61,11 +61,10 @@ type RiskAgent struct {
 
 // MCPServerConnection describes how an agent connects to an MCP server
 type MCPServerConnection struct {
-	Name    string   `mapstructure:"name"`
-	Type    string   `mapstructure:"type"`    // "external" or "internal"
-	URL     string   `mapstructure:"url"`     // For external servers (e.g., CoinGecko MCP)
-	Command string   `mapstructure:"command"` // For internal servers
-	Tools   []string `mapstructure:"tools"`   // Tools agent will use
+	Name  string   `mapstructure:"name"`
+	Type  string   `mapstructure:"type"` // "http" (Streamable HTTP, default) or "sse" (legacy SSE for external providers)
+	URL   string   `mapstructure:"url"`
+	Tools []string `mapstructure:"tools"` // Tools agent will use
 }
 
 // OrchestrationConfig defines how agents coordinate

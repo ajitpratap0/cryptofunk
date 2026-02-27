@@ -21,14 +21,13 @@ func TestAgentConfig(name, agentType string) *agents.AgentConfig {
 	}
 }
 
-// AddMockMCPServer adds a mock MCP server configuration to an agent config
-func AddMockMCPServer(config *agents.AgentConfig, serverName, command string, args []string) {
+// AddMockMCPServer adds a mock MCP server configuration to an agent config.
+// url is the Streamable HTTP endpoint of the server (e.g., "http://localhost:8093/mcp").
+func AddMockMCPServer(config *agents.AgentConfig, serverName, url string) {
 	config.MCPServers = append(config.MCPServers, agents.MCPServerConfig{
-		Name:    serverName,
-		Type:    "internal",
-		Command: command,
-		Args:    args,
-		Env:     make(map[string]string),
+		Name: serverName,
+		URL:  url,
+		Type: "http",
 	})
 }
 

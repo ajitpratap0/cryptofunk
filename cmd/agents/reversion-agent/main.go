@@ -1530,10 +1530,9 @@ func convertMCPServers(servers []config.MCPServerConnection) []agents.MCPServerC
 	result := make([]agents.MCPServerConfig, len(servers))
 	for i, server := range servers {
 		result[i] = agents.MCPServerConfig{
-			Name:    server.Name,
-			Type:    server.Type,
-			URL:     server.URL,
-			Command: server.Command,
+			Name: server.Name,
+			Type: server.Type,
+			URL:  server.URL,
 		}
 	}
 	return result
