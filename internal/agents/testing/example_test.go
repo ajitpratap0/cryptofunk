@@ -310,8 +310,8 @@ func TestIntegration_TechnicalAnalysisAgent(t *testing.T) {
 
 	// Add mock MCP server configurations via HTTP URLs
 	// For this example, we demonstrate the pattern
-	AddMockMCPServer(config, "market-data", "http://localhost:8093/mcp")
-	AddMockMCPServer(config, "technical-indicators", "http://localhost:8094/mcp")
+	AddMockMCPServer(config, "market-data", "http://localhost:8090/mcp")
+	AddMockMCPServer(config, "technical-indicators", "http://localhost:8093/mcp")
 
 	// Create agent
 	agent := agents.NewBaseAgent(config, helper.Logger(), GetTestMetricsPort(t))

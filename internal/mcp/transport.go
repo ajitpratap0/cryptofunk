@@ -39,10 +39,10 @@ func (s *Server) runHTTP(port int) error {
 			// Give metrics server its own independent timeout so it is not starved
 			// if the main server uses the full 10-second grace period.
 			metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer metricsCancel()
 			if err := s.metricsSrv.Shutdown(metricsCtx); err != nil {
 				s.logger.Error().Err(err).Msg("Metrics server shutdown error")
 			}
+			metricsCancel()
 		}
 	}()
 

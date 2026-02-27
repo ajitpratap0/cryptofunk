@@ -156,10 +156,13 @@ func TestHandleJSONRPC(t *testing.T) {
 		t.Fatal("expected error for unknown tool")
 	}
 
-	// unknown method
+	// unknown method — must return JSON-RPC "Method not found" code -32601
 	resp = srv.HandleJSONRPC(ctx, "unknown/method", json.RawMessage(`{}`), 5)
 	if resp.Error == nil {
 		t.Fatal("expected error for unknown method")
+	}
+	if resp.Error.Code != -32601 {
+		t.Fatalf("expected JSON-RPC error code -32601, got %d", resp.Error.Code)
 	}
 }
 

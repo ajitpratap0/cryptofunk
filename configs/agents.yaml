@@ -289,15 +289,12 @@ strategy_agents:
     name: "polymarket-agent"
     type: "strategy"
     version: "1.0.0"
-    metrics_port: 9108
+    metrics_port: 9109
 
     mcp_servers:
       - name: "polymarket"
         type: "http"
         url: "http://localhost:8094/mcp"
-      - name: "bifrost"
-        type: "sse"
-        url: "http://localhost:8091/sse"
 
     step_interval: "5m"
 
