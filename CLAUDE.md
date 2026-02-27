@@ -44,14 +44,20 @@ task run-telegram-bot       # Run Telegram bot
 task run-paper              # Start paper trading mode (safe)
 task run-live               # Start live trading (CAUTION: real money)
 
+# Git Hooks
+task install-hooks          # Install pre-commit hooks
+task pre-commit             # Run pre-commit checks manually
+
 # Database
 task db-status              # Show migration status
 task db-reset               # Reset database (WARNING: destructive)
 task db-shell               # Open PostgreSQL shell
+task db-backup              # Dump database to timestamped SQL file
 
-# Git Hooks
-task install-hooks          # Install pre-commit hooks
-task pre-commit             # Run pre-commit checks manually
+# Monitoring
+task monitor                # Open Grafana (http://localhost:3000) in browser
+task alertmanager           # Open AlertManager (http://localhost:9093) in browser
+task test-alerts            # Run end-to-end AlertManager integration test
 
 # Health checks
 curl http://localhost:8081/health        # Orchestrator basic health
@@ -60,7 +66,33 @@ curl http://localhost:8081/readiness     # Orchestrator K8s readiness probe (che
 curl http://localhost:8081/api/v1/status # Orchestrator status (active agents, sessions)
 curl http://localhost:8081/metrics       # Orchestrator Prometheus metrics
 curl http://localhost:8080/health        # API
+# Prometheus at http://localhost:9090, Grafana at http://localhost:3000, AlertManager at http://localhost:9093
 ```
+
+## Web Frontends
+
+Two separate Node.js apps live in `web/`:
+
+**`web/dashboard/`** - Next.js 15 / React 19 trading dashboard (recharts, lightweight-charts, framer-motion):
+```bash
+cd web/dashboard
+npm install
+npm run dev          # Development server (Next.js)
+npm run build        # Production build
+npm run test         # Run tests (vitest)
+npm run type-check   # TypeScript check only
+```
+
+**`web/explainability/`** - Vite / React 18 dashboard for LLM decision explainability (@tanstack/react-query, Tailwind):
+```bash
+cd web/explainability
+npm install
+npm run dev          # Vite dev server
+npm run test         # Run tests (vitest)
+npm run test:run     # Single test run (CI mode)
+npm run build        # Production build
+```
+Configure the backend URL via `web/explainability/.env` (see `.env.example` in that directory).
 
 ## Architecture Overview
 
@@ -72,7 +104,7 @@ CryptoFunk follows a **Hybrid MCP Architecture** - external MCP servers (CoinGec
 External MCP Servers (CoinGecko)
     ↓ (market data tools)
 MCP Orchestrator (cmd/orchestrator/)
-    ↓ (stdio JSON-RPC 2.0)
+    ↓ (Streamable HTTP JSON-RPC 2.0)
 Internal MCP Servers:
   ├─ Market Data Server (Redis caching)
   ├─ Technical Indicators Server (RSI, MACD, Bollinger, 60+ indicators)
@@ -94,7 +126,7 @@ Monitoring: Prometheus + Grafana
 
 ### Key Architectural Patterns
 
-**MCP Communication**: All agents communicate via JSON-RPC 2.0 over stdio. Logs go to stderr, protocol messages to stdout. This is enforced throughout.
+**MCP Communication**: All internal MCP servers use **Streamable HTTP transport** (`POST /mcp` for JSON-RPC, `GET /mcp` for SSE streaming). External providers like CoinGecko use legacy SSE transport (`/sse` endpoint). The `MCPServerConfig.Type` field controls this: `"http"` (default, our servers) or `"sse"` (legacy SSE for external providers).
 
 **Weighted Voting**: Strategy agents vote on trades, orchestrator aggregates with confidence-based weights. Risk agent has veto power.
 
@@ -106,23 +138,34 @@ Monitoring: Prometheus + Grafana
 
 All services use fixed ports to avoid conflicts and enable Prometheus scraping:
 
-| Port  | Service            | Purpose                    |
-|-------|--------------------|-----------------------------|
-| 8080  | API Server         | REST/WebSocket API          |
-| 8081  | Orchestrator       | MCP coordination + metrics  |
-| 9101  | technical-agent    | Technical analysis metrics  |
-| 9102  | trend-agent        | Trend following metrics     |
-| 9104  | sentiment-agent    | Sentiment analysis metrics  |
-| 9105  | orderbook-agent    | Order book analysis metrics |
-| 9106  | reversion-agent    | Mean reversion metrics      |
-| 9107  | arbitrage-agent    | Arbitrage strategy metrics  |
-| 9108  | risk-agent         | Risk management metrics     |
+| Port  | Service                    | Purpose                          |
+|-------|----------------------------|----------------------------------|
+| 8080  | API Server                 | REST/WebSocket API               |
+| 8081  | Orchestrator               | MCP coordination + metrics       |
+| 8090  | market-data-server         | MCP HTTP (Streamable HTTP)       |
+| 8091  | order-executor-server      | MCP HTTP                         |
+| 8092  | risk-analyzer-server       | MCP HTTP                         |
+| 8093  | technical-indicators-server| MCP HTTP                         |
+| 8094  | polymarket-server          | MCP HTTP                         |
+| 9101  | technical-agent            | Technical analysis metrics       |
+| 9102  | trend-agent                | Trend following metrics          |
+| 9104  | sentiment-agent            | Sentiment analysis metrics       |
+| 9105  | orderbook-agent            | Order book analysis metrics      |
+| 9106  | reversion-agent            | Mean reversion metrics           |
+| 9107  | arbitrage-agent            | Arbitrage strategy metrics       |
+| 9108  | risk-agent                 | Risk management metrics          |
+| 9109  | polymarket-agent           | Polymarket strategy metrics      |
+| 9110  | market-data metrics        | `--metrics-port 9110`            |
+| 9111  | order-executor metrics     | `--metrics-port 9111`            |
+| 9112  | risk-analyzer metrics      | `--metrics-port 9112`            |
+| 9113  | technical-indicators metrics| `--metrics-port 9113`           |
+| 9114  | polymarket-server metrics  | `--metrics-port 9114`            |
 
-**Note**: Port 9103 is reserved/skipped. Prometheus scrape config in `deployments/prometheus/prometheus.yml` must match these ports.
+**Note**: Port 9103 is reserved/skipped. MCP server metrics are disabled by default; use `--metrics-port <port>` to enable. Prometheus scrape config in `deployments/prometheus/prometheus.yml` must match these ports.
 
 ## Technology Stack
 
-- **Language**: Go 1.25+ (requires generics for cinar/indicator v2)
+- **Language**: Go 1.24+ (requires generics for cinar/indicator v2)
 - **MCP**: `github.com/modelcontextprotocol/go-sdk v1.0.0`
 - **LLM Gateway**: Bifrost (unified Claude/GPT-4/Gemini with failover)
 - **Exchanges**: CCXT (100+ exchanges) + Binance SDK (`github.com/adshao/go-binance/v2`)
@@ -130,7 +173,9 @@ All services use fixed ports to avoid conflicts and enable Prometheus scraping:
 - **Database**: PostgreSQL 15+ with TimescaleDB + pgvector
 - **Cache/Messaging**: Redis, NATS
 - **Web**: Gin, Gorilla WebSocket
-- **Monitoring**: Prometheus + Grafana
+- **Secrets**: HashiCorp Vault (`scripts/vault-init.sh` for setup)
+- **Monitoring**: Prometheus + Grafana + AlertManager
+- **Frontend**: Two React apps in `web/` (Next.js dashboard + Vite explainability UI)
 
 ## Directory Structure
 
@@ -138,7 +183,7 @@ All services use fixed ports to avoid conflicts and enable Prometheus scraping:
 cryptofunk/
 ├── cmd/
 │   ├── orchestrator/              # MCP orchestrator (coordinates everything)
-│   ├── mcp-servers/               # MCP tool servers (stdio JSON-RPC 2.0)
+│   ├── mcp-servers/               # MCP tool servers (Streamable HTTP, port 8090-8094)
 │   │   ├── market-data/
 │   │   ├── technical-indicators/
 │   │   ├── risk-analyzer/
@@ -203,26 +248,20 @@ cryptofunk/
 
 ## MCP Server Implementation Pattern
 
-**CRITICAL**: stdout is for MCP protocol only. ALL logs must go to stderr.
+All MCP servers use the shared `internal/mcp` package with Streamable HTTP transport. Servers are standalone HTTP processes (not subprocesses).
 
 ```go
-// 1. Logging to stderr (stdout reserved for MCP protocol)
-log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-
-// 2. JSON-RPC 2.0 over stdio
-func (s *MCPServer) Run() error {
-    decoder := json.NewDecoder(os.Stdin)
-    encoder := json.NewEncoder(os.Stdout)
-    for {
-        var request MCPRequest
-        decoder.Decode(&request)
-        response := s.handleRequest(&request)
-        encoder.Encode(response)
-    }
-}
+// Typical MCP server main.go pattern
+srv := mcpserver.New(mcpserver.Config{
+    Name:    "market-data",
+    Version: "1.0.0",
+    Logger:  log.Logger,
+})
+srv.AddToolRaw(mcpserver.NewTool("tool-name", "desc", inputSchema), handlerFunc)
+srv.Run()  // Parses --port flag, starts HTTP on DefaultPorts["market-data"]=8090
 ```
 
-**DEBUGGING TIP**: If you add `fmt.Printf()`, `log.Println()`, or `println()` to stdout in MCP servers, the protocol breaks immediately. This is the #1 cause of "MCP server not responding" errors.
+**Logging**: Use `zerolog` to `os.Stderr` so it doesn't interfere with HTTP responses.
 
 ## Paper Trading vs Live Trading
 
@@ -257,6 +296,19 @@ rsiValues := <-rsiChan
 
 **Trading Safety**: Always verify `trading_mode` before placing real orders. Default to PAPER.
 
+**Config Override**: All `CRYPTOFUNK_*` environment variables override `configs/config.yaml` (via Viper). Example: `CRYPTOFUNK_TRADING_MODE=live` overrides `trading.mode`. See `.env.example` for the full list.
+
+**MCP Server Types**: `MCPServerConfig.Type` is `"http"` (Streamable HTTP, default for our servers at ports 8090-8094) or `"sse"` (legacy SSE for CoinGecko/external providers). Both use the `URL` field. Configured in `configs/agents.yaml` and `configs/config.yaml`.
+
+**K8s MCP URLs**: In-cluster agents cannot use `localhost` URLs. Override via env vars:
+```
+CRYPTOFUNK_MCP_INTERNAL_MARKET_DATA_URL=http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp
+CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL=http://order-executor-server.cryptofunk.svc.cluster.local:8091/mcp
+CRYPTOFUNK_MCP_INTERNAL_RISK_ANALYZER_URL=http://risk-analyzer-server.cryptofunk.svc.cluster.local:8092/mcp
+CRYPTOFUNK_MCP_INTERNAL_TECHNICAL_INDICATORS_URL=http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp
+CRYPTOFUNK_MCP_INTERNAL_POLYMARKET_URL=http://polymarket-server.cryptofunk.svc.cluster.local:8094/mcp
+```
+
 ## Testing
 
 **Build Tags**: Integration tests use `-tags=integration`. Test commands are in Essential Commands section above.
@@ -284,7 +336,7 @@ LOG_LEVEL=debug ./bin/orchestrator    # Enable debug logging
 MCP_TRACE=1 ./bin/technical-agent     # Enable MCP message tracing
 ```
 
-**MCP Server Not Responding**: Check stderr logs. Ensure no stdout debugging.
+**MCP Server Not Responding**: Check that the server process is running on the expected port (8090-8094). Check stderr logs for startup errors. Test with `curl http://localhost:8090/health`.
 
 **Database Connection**: Verify Docker services (`docker-compose ps`). Check health: `curl http://localhost:8081/health`
 

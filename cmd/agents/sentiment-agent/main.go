@@ -940,35 +940,20 @@ func main() {
 			agentConfig.MCPServers = make([]agents.MCPServerConfig, 0, len(servers))
 			for _, srv := range servers {
 				if server, ok := srv.(map[string]interface{}); ok {
-					serverConfig := agents.MCPServerConfig{
-						Name: server["name"].(string),
-						Type: server["type"].(string),
+					serverConfig := agents.MCPServerConfig{}
+					if n, ok := server["name"].(string); ok {
+						serverConfig.Name = n
 					}
-
-					// Set fields based on server type
-					switch serverConfig.Type {
-					case "internal":
-						if cmd, ok := server["command"].(string); ok {
-							serverConfig.Command = cmd
-						}
-						if args, ok := server["args"].([]interface{}); ok {
-							serverConfig.Args = make([]string, len(args))
-							for i, arg := range args {
-								serverConfig.Args[i] = arg.(string)
-							}
-						}
-						if env, ok := server["env"].(map[string]interface{}); ok {
-							serverConfig.Env = make(map[string]string, len(env))
-							for k, v := range env {
-								serverConfig.Env[k] = v.(string)
-							}
-						}
-					case "external":
-						if url, ok := server["url"].(string); ok {
-							serverConfig.URL = url
-						}
+					if t, ok := server["type"].(string); ok {
+						serverConfig.Type = t
 					}
-
+					if u, ok := server["url"].(string); ok {
+						serverConfig.URL = u
+					}
+					if serverConfig.Name == "" {
+						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
+						continue
+					}
 					agentConfig.MCPServers = append(agentConfig.MCPServers, serverConfig)
 					log.Info().
 						Str("name", serverConfig.Name).
