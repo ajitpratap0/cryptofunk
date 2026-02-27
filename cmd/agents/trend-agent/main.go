@@ -1255,15 +1255,16 @@ func main() {
 			agentConfig.MCPServers = make([]agents.MCPServerConfig, 0, len(servers))
 			for _, srv := range servers {
 				if server, ok := srv.(map[string]interface{}); ok {
-					serverConfig := agents.MCPServerConfig{
-						Name: server["name"].(string),
-						Type: server["type"].(string),
+					serverConfig := agents.MCPServerConfig{}
+					if n, ok := server["name"].(string); ok {
+						serverConfig.Name = n
 					}
-
-					if url, ok := server["url"].(string); ok {
-						serverConfig.URL = url
+					if t, ok := server["type"].(string); ok {
+						serverConfig.Type = t
 					}
-
+					if u, ok := server["url"].(string); ok {
+						serverConfig.URL = u
+					}
 					agentConfig.MCPServers = append(agentConfig.MCPServers, serverConfig)
 				}
 			}

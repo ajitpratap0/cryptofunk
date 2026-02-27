@@ -16,6 +16,12 @@ rule_files:
   - "alerts/*.yml"
 
 # Scrape configurations
+#
+# NOTE: host.docker.internal resolves to the Docker host on macOS/Windows.
+# On Linux (including Kubernetes nodes), use the host's actual IP address or
+# a NodePort/ClusterIP service instead. For K8s deployments, replace
+# host.docker.internal targets with in-cluster service addresses (e.g.,
+# orchestrator.cryptofunk.svc.cluster.local:8081).
 scrape_configs:
   # Prometheus itself
   - job_name: 'prometheus'

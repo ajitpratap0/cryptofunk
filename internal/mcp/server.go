@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -127,7 +128,7 @@ func (s *Server) Run() error {
 	fs := flag.NewFlagSet("mcp-server", flag.ExitOnError)
 	port := fs.Int("port", DefaultPorts[s.config.Name], "HTTP port")
 	metricsPort := fs.Int("metrics-port", s.config.MetricsPort, "Prometheus metrics port (0 to disable)")
-	if err := fs.Parse(flag.Args()); err != nil {
+	if err := fs.Parse(os.Args[1:]); err != nil {
 		return fmt.Errorf("flag parse: %w", err)
 	}
 

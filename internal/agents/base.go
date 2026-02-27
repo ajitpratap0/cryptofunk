@@ -247,11 +247,13 @@ func (a *BaseAgent) connectMCPServers() error {
 			if err != nil {
 				return fmt.Errorf("failed to create SSE session for %s: %w", serverConfig.Name, err)
 			}
-		default: // "http" or empty — Streamable HTTP (our servers)
+		case "http", "": // Streamable HTTP transport (our internal servers)
 			session, err = a.createHTTPClient(a.ctx, serverConfig)
 			if err != nil {
 				return fmt.Errorf("failed to create HTTP session for %s: %w", serverConfig.Name, err)
 			}
+		default:
+			return fmt.Errorf("unknown MCP server type %q for server %s (use \"http\" or \"sse\")", serverConfig.Type, serverConfig.Name)
 		}
 
 		// Store session in map

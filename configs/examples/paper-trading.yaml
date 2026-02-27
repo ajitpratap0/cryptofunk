@@ -75,8 +75,6 @@ mcp:
       transport: "http"
       url: "http://localhost:8091/mcp"
       description: "Simulated order execution"
-      env:
-        TRADING_MODE: "paper"  # PAPER MODE - no real trades
 
     risk_analyzer:
       enabled: true
