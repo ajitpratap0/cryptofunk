@@ -175,13 +175,6 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
-      - name: Save base coverage to cache
-        if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: coverage.out
-          key: coverage-main-${{ github.sha }}
-
       - name: Run concurrent tests with race detector (stress test)
         # Only run expensive stress tests on main branch, PRs targeting main, or scheduled runs
         if: github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'schedule'
@@ -228,7 +221,7 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, build]
 
     steps:
       - name: Checkout code
