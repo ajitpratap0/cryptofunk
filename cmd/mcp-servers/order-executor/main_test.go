@@ -83,7 +83,8 @@ func setupTestDatabase(t *testing.T) (*db.DB, func()) {
 		return database, cleanup
 	}
 
-	// Local environment: use testcontainers
+	// Local environment: use testcontainers (skip if Docker unavailable)
+	testhelpers.RequireDocker(t)
 	tc := testhelpers.SetupTestDatabase(t)
 
 	err := tc.ApplyMigrations(migrationsPath)
