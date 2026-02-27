@@ -91,7 +91,9 @@ func main() {
 	// Override with environment variables if set
 	// Note: BindEnv() doesn't work with UnmarshalKey() due to sub-viper creation
 	// So we manually check env vars and use Set() to override YAML values
-	if url := os.Getenv("CRYPTOFUNK_ORCHESTRATOR_NATS_URL"); url != "" {
+	if url := os.Getenv("NATS_URL"); url != "" {
+		viper.Set("orchestrator.nats_url", url)
+	} else if url := os.Getenv("CRYPTOFUNK_ORCHESTRATOR_NATS_URL"); url != "" {
 		viper.Set("orchestrator.nats_url", url)
 	}
 	if topic := os.Getenv("CRYPTOFUNK_ORCHESTRATOR_SIGNAL_TOPIC"); topic != "" {

@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# Unified Dockerfile for all Go services
+# Build with: docker build -f Dockerfile.go-service --build-arg CMD_PATH=cmd/api --build-arg BINARY_NAME=api-server .
+
+ARG CMD_PATH=cmd/api
+ARG BINARY_NAME=server
+ARG EXPOSE_PORT=""
+
+# Stage 1: Builder
+FROM golang:1.25-alpine AS builder
+
+ARG CMD_PATH
+ARG BINARY_NAME
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+
+# Copy go mod files first (layer cache)
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# Copy source code
+COPY . .
+
+# Build static binary with cached module + build cache
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags='-w -s -extldflags "-static"' \
+    -o /out/${BINARY_NAME} \
+    ./${CMD_PATH}
+
+# Stage 2: Minimal runtime
+# NOTE: FROM scratch does not include a shell, so Docker HEALTHCHECK CMD-SHELL
+# directives will not work. Using distroless instead for healthcheck compatibility.
+FROM gcr.io/distroless/static-debian12
+
+ARG BINARY_NAME
+
+# Import certs and timezone data from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copy binary
+COPY --from=builder /out/${BINARY_NAME} /app/server
+
+# Copy configs and migrations if they exist
+COPY --from=builder /build/configs /app/configs
+COPY --from=builder /build/migrations* /app/migrations/
+
+WORKDIR /app
+
+ENTRYPOINT ["/app/server"]

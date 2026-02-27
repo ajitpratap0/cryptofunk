@@ -1,5 +1,5 @@
 # MCP Servers Deployments
-# All MCP servers communicate via stdio, no port exposure needed
+# MCP servers use stdio transport (JSON-RPC 2.0 over stdin/stdout)
 
 ---
 apiVersion: apps/v1
@@ -25,9 +25,19 @@ spec:
       - name: market-data-server
         image: cryptofunk/market-data-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -70,6 +80,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: COINGECKO_API_KEY
           valueFrom:
             secretKeyRef:
@@ -112,9 +127,19 @@ spec:
       - name: technical-indicators-server
         image: cryptofunk/technical-indicators-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -157,6 +182,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -193,9 +223,19 @@ spec:
       - name: risk-analyzer-server
         image: cryptofunk/risk-analyzer-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -238,6 +278,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -274,9 +319,19 @@ spec:
       - name: order-executor-server
         image: cryptofunk/order-executor-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["pgrep", "-x", "mcp-server"]
+          initialDelaySeconds: 10
+          periodSeconds: 30
         env:
         - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable"
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -319,6 +374,11 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: NATS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_URL
         - name: BINANCE_API_KEY
           valueFrom:
             secretKeyRef:

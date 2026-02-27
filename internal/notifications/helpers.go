@@ -3,6 +3,8 @@ package notifications
 import (
 	"context"
 	"fmt"
+
+	"github.com/rs/zerolog/log"
 )
 
 // NotificationHelper provides convenient methods for sending common notifications
@@ -79,7 +81,7 @@ func (h *NotificationHelper) BulkSendTradeExecution(ctx context.Context, userIDs
 	for _, userID := range userIDs {
 		if err := h.SendTradeExecution(ctx, userID, orderID, symbol, side, quantity, price); err != nil {
 			// Log error but continue sending to other users
-			fmt.Printf("Failed to send trade notification to user %s: %v\n", userID, err)
+			log.Warn().Err(err).Str("userID", userID).Msg("Failed to send trade notification")
 		}
 	}
 	return nil
@@ -171,7 +173,7 @@ func (h *NotificationHelper) BulkSendPositionClosed(ctx context.Context, userIDs
 	for _, userID := range userIDs {
 		if err := h.SendPositionClosed(ctx, userID, positionID, symbol, side, quantity, entryPrice, exitPrice, pnl, pnlPercent); err != nil {
 			// Log error but continue sending to other users
-			fmt.Printf("Failed to send position closed notification to user %s: %v\n", userID, err)
+			log.Warn().Err(err).Str("userID", userID).Msg("Failed to send position closed notification")
 		}
 	}
 	return nil
@@ -182,7 +184,7 @@ func (h *NotificationHelper) BulkSendSafetyGuard(ctx context.Context, userIDs []
 	for _, userID := range userIDs {
 		if err := h.SendSafetyGuardTriggered(ctx, userID, guardType, reason, currentValue, threshold); err != nil {
 			// Log error but continue sending to other users
-			fmt.Printf("Failed to send safety guard notification to user %s: %v\n", userID, err)
+			log.Warn().Err(err).Str("userID", userID).Msg("Failed to send safety guard notification")
 		}
 	}
 	return nil
@@ -193,7 +195,7 @@ func (h *NotificationHelper) BulkSendSystemError(ctx context.Context, userIDs []
 	for _, userID := range userIDs {
 		if err := h.SendSystemError(ctx, userID, component, errorType, errorMsg); err != nil {
 			// Log error but continue sending to other users
-			fmt.Printf("Failed to send system error notification to user %s: %v\n", userID, err)
+			log.Warn().Err(err).Str("userID", userID).Msg("Failed to send system error notification")
 		}
 	}
 	return nil
@@ -204,7 +206,7 @@ func (h *NotificationHelper) BulkSendDailySummary(ctx context.Context, userIDs [
 	for _, userID := range userIDs {
 		if err := h.SendDailySummary(ctx, userID, date, totalTrades, winningTrades, losingTrades, totalPnL, totalPnLPercent, winRate); err != nil {
 			// Log error but continue sending to other users
-			fmt.Printf("Failed to send daily summary notification to user %s: %v\n", userID, err)
+			log.Warn().Err(err).Str("userID", userID).Msg("Failed to send daily summary notification")
 		}
 	}
 	return nil

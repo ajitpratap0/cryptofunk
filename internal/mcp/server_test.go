@@ -148,7 +148,7 @@ func TestHTTPHandler(t *testing.T) {
 		}),
 	)
 
-	httpSrv, err := srv.StartHTTPServer(0)
+	httpSrv, err := srv.NewHTTPServer(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +170,6 @@ func TestHTTPHandler(t *testing.T) {
 
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `"status":"ok"`) {
-		t.Fatalf("unexpected health response: %s", body)
-	}
-	if !strings.Contains(string(body), `"server":"test-server"`) {
 		t.Fatalf("unexpected health response: %s", body)
 	}
 

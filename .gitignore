@@ -11,6 +11,7 @@ bin/
 /*-server
 /orchestrator
 /migrate
+/polymarket
 
 # Test binary, built with `go test -c`
 *.test

@@ -4,12 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 )
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 // MessageBus provides agent-to-agent communication via NATS
 type MessageBus struct {
@@ -56,7 +64,7 @@ type MessageHandler func(msg *AgentMessage) error
 // DefaultMessageBusConfig returns default configuration
 func DefaultMessageBusConfig() MessageBusConfig {
 	return MessageBusConfig{
-		NATSURL: "nats://localhost:4222",
+		NATSURL: getEnvOrDefault("NATS_URL", "nats://localhost:4222"),
 		Prefix:  "agents.",
 	}
 }

@@ -233,6 +233,9 @@ func main() {
 		config.Weight = viper.GetFloat64("risk_agent.weight")
 	}
 	if config.NATSUrl == "" {
+		config.NATSUrl = os.Getenv("NATS_URL")
+	}
+	if config.NATSUrl == "" {
 		config.NATSUrl = viper.GetString("risk_agent.nats_url")
 	}
 	if config.SignalTopic == "" {
