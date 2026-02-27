@@ -1,0 +1,25 @@
+codecov:
+  notify:
+    wait_for_ci: true
+
+coverage:
+  # Fail the PR if total project coverage drops by more than 1%
+  status:
+    project:
+      default:
+        target: auto      # compare against base commit
+        threshold: 1%     # allow up to 1% drop
+        if_not_found: success
+        if_ci_failed: error
+    # Fail if the changed lines (patch) have less than 60% coverage
+    patch:
+      default:
+        target: 60%
+        threshold: 5%     # allow up to 5% below target for small patches
+        if_not_found: success
+        if_ci_failed: error
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default       # post new comment, update existing on new push
+  require_changes: true   # only comment when coverage changes
