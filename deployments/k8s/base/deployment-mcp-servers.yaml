@@ -512,6 +512,9 @@ metadata:
     app.kubernetes.io/name: market-data-server
     app.kubernetes.io/component: mcp-server
 spec:
+  # sessionAffinity: ClientIP ensures a client always lands on the same pod.
+  # Required because Streamable HTTP sessions are stateful (Mcp-Session-Id).
+  sessionAffinity: ClientIP
   selector:
     app.kubernetes.io/name: market-data-server
   ports:
@@ -529,6 +532,9 @@ metadata:
     app.kubernetes.io/name: technical-indicators-server
     app.kubernetes.io/component: mcp-server
 spec:
+  # sessionAffinity: ClientIP ensures a client always lands on the same pod.
+  # Required because Streamable HTTP sessions are stateful (Mcp-Session-Id).
+  sessionAffinity: ClientIP
   selector:
     app.kubernetes.io/name: technical-indicators-server
   ports:
@@ -546,6 +552,9 @@ metadata:
     app.kubernetes.io/name: risk-analyzer-server
     app.kubernetes.io/component: mcp-server
 spec:
+  # sessionAffinity: ClientIP ensures a client always lands on the same pod.
+  # Required because Streamable HTTP sessions are stateful (Mcp-Session-Id).
+  sessionAffinity: ClientIP
   selector:
     app.kubernetes.io/name: risk-analyzer-server
   ports:
@@ -563,6 +572,9 @@ metadata:
     app.kubernetes.io/name: order-executor-server
     app.kubernetes.io/component: mcp-server
 spec:
+  # sessionAffinity: ClientIP ensures a client always lands on the same pod.
+  # Required because Streamable HTTP sessions are stateful (Mcp-Session-Id).
+  sessionAffinity: ClientIP
   selector:
     app.kubernetes.io/name: order-executor-server
   ports:
@@ -580,6 +592,9 @@ metadata:
     app.kubernetes.io/name: polymarket-server
     app.kubernetes.io/component: mcp-server
 spec:
+  # sessionAffinity: ClientIP ensures a client always lands on the same pod.
+  # Required because Streamable HTTP sessions are stateful (Mcp-Session-Id).
+  sessionAffinity: ClientIP
   selector:
     app.kubernetes.io/name: polymarket-server
   ports:

@@ -125,7 +125,7 @@ func (s *Server) MCPServer() *mcp.Server {
 // It uses a scoped FlagSet (not flag.CommandLine) to avoid global state
 // conflicts when multiple Server instances exist in the same process.
 func (s *Server) Run() error {
-	fs := flag.NewFlagSet("mcp-server", flag.ExitOnError)
+	fs := flag.NewFlagSet("mcp-server", flag.ContinueOnError)
 	port := fs.Int("port", DefaultPorts[s.config.Name], "HTTP port")
 	metricsPort := fs.Int("metrics-port", s.config.MetricsPort, "Prometheus metrics port (0 to disable)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
