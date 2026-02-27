@@ -300,6 +300,15 @@ rsiValues := <-rsiChan
 
 **MCP Server Types**: `MCPServerConfig.Type` is `"http"` (Streamable HTTP, default for our servers at ports 8090-8094) or `"sse"` (legacy SSE for CoinGecko/external providers). Both use the `URL` field. Configured in `configs/agents.yaml` and `configs/config.yaml`.
 
+**K8s MCP URLs**: In-cluster agents cannot use `localhost` URLs. Override via env vars:
+```
+CRYPTOFUNK_MCP_INTERNAL_MARKET_DATA_URL=http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp
+CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL=http://order-executor-server.cryptofunk.svc.cluster.local:8091/mcp
+CRYPTOFUNK_MCP_INTERNAL_RISK_ANALYZER_URL=http://risk-analyzer-server.cryptofunk.svc.cluster.local:8092/mcp
+CRYPTOFUNK_MCP_INTERNAL_TECHNICAL_INDICATORS_URL=http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp
+CRYPTOFUNK_MCP_INTERNAL_POLYMARKET_URL=http://polymarket-server.cryptofunk.svc.cluster.local:8094/mcp
+```
+
 ## Testing
 
 **Build Tags**: Integration tests use `-tags=integration`. Test commands are in Essential Commands section above.

@@ -74,6 +74,9 @@ mcp:
       name: "Order Executor"
       transport: "http"
       url: "http://localhost:8091/mcp"
+      # Paper mode is controlled at the order-executor server level via the
+      # TRADING_MODE=paper environment variable (or --trading-mode flag) when
+      # starting the server — not via this config file.
       description: "Simulated order execution"
 
     risk_analyzer:

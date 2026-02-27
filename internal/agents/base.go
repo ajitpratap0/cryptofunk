@@ -231,6 +231,14 @@ func (a *BaseAgent) connectMCPServers() error {
 	a.log.Info().Int("server_count", len(a.config.MCPServers)).Msg("Connecting to MCP servers")
 
 	for _, serverConfig := range a.config.MCPServers {
+		if serverConfig.Name == "" {
+			a.log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
+			continue
+		}
+		if serverConfig.URL == "" {
+			return fmt.Errorf("MCP server %q has empty URL (type=%q)", serverConfig.Name, serverConfig.Type)
+		}
+
 		a.log.Info().
 			Str("name", serverConfig.Name).
 			Str("type", serverConfig.Type).

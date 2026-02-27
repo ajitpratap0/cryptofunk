@@ -950,6 +950,10 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if serverConfig.Name == "" {
+						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
+						continue
+					}
 					agentConfig.MCPServers = append(agentConfig.MCPServers, serverConfig)
 					log.Info().
 						Str("name", serverConfig.Name).
