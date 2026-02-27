@@ -190,6 +190,9 @@ jobs:
           # Whitelist deps with compound/undetected licenses (Go ecosystem, go-ethereum, OTel)
           allow-dependencies-licenses: >-
             pkg:golang/golang.org/x/sys,
+            pkg:golang/golang.org/x/crypto,
+            pkg:golang/golang.org/x/sync,
+            pkg:golang/golang.org/x/text,
             pkg:golang/google.golang.org/protobuf,
             pkg:golang/github.com/ethereum/go-ethereum,
             pkg:golang/github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp
