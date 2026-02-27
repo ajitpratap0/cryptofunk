@@ -3,11 +3,31 @@ name: CI
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'deployments/k8s/**'
+      - 'deployments/grafana/**'
+      - 'deployments/prometheus/**'
+      - '.github/CODEOWNERS'
+      - 'web/**'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'deployments/k8s/**'
+      - 'deployments/grafana/**'
+      - 'deployments/prometheus/**'
+      - '.github/CODEOWNERS'
+      - 'web/**'
   schedule:
     # Run nightly at 2 AM UTC for thorough race detection
     - cron: '0 2 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -58,9 +78,6 @@ jobs:
         run: |
           docker compose -f docker/ci/docker-compose.yml up -d --build --wait
           echo "Services started successfully"
-
-      - name: Install dependencies
-        run: go mod download
 
       - name: Verify services are ready
         run: |
@@ -158,6 +175,13 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
+      - name: Save base coverage to cache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: coverage.out
+          key: coverage-main-${{ github.sha }}
+
       - name: Run concurrent tests with race detector (stress test)
         # Only run expensive stress tests on main branch, PRs targeting main, or scheduled runs
         if: github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'schedule'
@@ -186,20 +210,6 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        component:
-          - cmd/orchestrator
-          - cmd/api
-          - cmd/migrate
-          - cmd/mcp-servers/market-data
-          - cmd/mcp-servers/technical-indicators
-          - cmd/mcp-servers/risk-analyzer
-          - cmd/mcp-servers/order-executor
-          - cmd/agents/technical-agent
-          - cmd/agents/trend-agent
-          - cmd/agents/risk-agent
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -210,14 +220,15 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Build ${{ matrix.component }}
+      - name: Build all components
         run: |
-          go build -v -o /dev/null ./${{ matrix.component }}
+          # Build all cmd packages in parallel (Go handles internal concurrency)
+          go build ./cmd/...
 
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint, test, build]
+    needs: [lint, test]
 
     steps:
       - name: Checkout code
