@@ -7,7 +7,7 @@ import (
 	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 // WrapLegacyHandler wraps a legacy tool handler that takes map[string]interface{} args
@@ -111,16 +111,19 @@ func ToolJSON(data interface{}) *mcp.CallToolResult {
 // ParseArgs extracts tool call arguments from a CallToolRequest as a
 // map[string]interface{}. Returns an empty map if arguments are nil or invalid.
 //
+// The logger parameter should be the server's own logger rather than the global
+// zerolog logger (M5). Pass zerolog.Nop() to silence the warning in tests.
+//
 // WARNING: Returns empty map on unmarshal failure. Callers must validate
 // required fields independently, as missing arguments will silently appear as
 // zero values rather than triggering an error here.
-func ParseArgs(req *mcp.CallToolRequest) map[string]interface{} {
+func ParseArgs(logger zerolog.Logger, req *mcp.CallToolRequest) map[string]interface{} {
 	if req.Params == nil || req.Params.Arguments == nil {
 		return make(map[string]interface{})
 	}
 	var args map[string]interface{}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-		log.Warn().Err(err).Msg("Failed to parse tool call arguments")
+		logger.Warn().Err(err).Msg("Failed to parse tool call arguments")
 		return make(map[string]interface{})
 	}
 	return args

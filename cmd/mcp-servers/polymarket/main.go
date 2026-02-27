@@ -187,6 +187,14 @@ func registerTools(srv *mcpserver.Server, client *polymarket.Client) {
 			if sizeVal <= 0 {
 				return nil, fmt.Errorf("size must be greater than 0, got %v", sizeVal)
 			}
+			// m5: upper bound sanity check — Polymarket tokens are binary
+			// contracts with values between 0 and 1. A position size above
+			// 1,000,000 tokens is almost certainly a data-entry error and
+			// could represent significant unintended financial exposure.
+			const maxOrderSize = 1_000_000
+			if sizeVal > maxOrderSize {
+				return nil, fmt.Errorf("size %v exceeds maximum allowed order size of %v tokens; for intentionally large orders contact Polymarket directly", sizeVal, maxOrderSize)
+			}
 			return client.CreateOrder(ctx, tokenID, polymarket.Side(sideStr), priceVal, sizeVal)
 		}),
 	)

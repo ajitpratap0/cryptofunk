@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,34 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
-)
 
-// readSSEData reads a single SSE response from an HTTP response body and returns
-// the JSON data field. For the MCP Streamable HTTP transport, responses are
-// delivered as SSE events in the format:
-//
-//	event: message
-//	id: <event-id>
-//	data: <json-payload>
-//
-// Calls t.Fatal if no data line is found, to catch test bugs early (consistent
-// with readSSELine in compat_test.go).
-func readSSEData(t *testing.T, body io.Reader) json.RawMessage {
-	t.Helper()
-	scanner := bufio.NewScanner(body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "data:") {
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			return json.RawMessage(data)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("error reading SSE response: %v", err)
-	}
-	t.Fatal("no SSE data line found in response")
-	return nil
-}
+	"github.com/ajitpratap0/cryptofunk/internal/testhelpers"
+)
 
 // mcpPost sends an MCP JSON-RPC request to the test server and returns the raw
 // response body. The caller must close the body.
@@ -96,7 +70,7 @@ func initMCPSession(t *testing.T, ts *httptest.Server, extraHeaders ...string) s
 		t.Fatalf("initialize returned status %d: %s", resp.StatusCode, body)
 	}
 
-	data := readSSEData(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var rpc struct {
 		Result map[string]interface{}    `json:"result"`
 		Error  *struct{ Message string } `json:"error"`
@@ -249,7 +223,7 @@ func TestStreamableHTTP_FullMCPSessionFlow(t *testing.T) {
 		t.Fatalf("tools/list returned %d: %s", toolsResp.StatusCode, body)
 	}
 
-	listData := readSSEData(t, toolsResp.Body)
+	listData := testhelpers.ReadSSEData(t, toolsResp.Body)
 	var listRPC struct {
 		Result struct {
 			Tools []struct {
@@ -294,7 +268,7 @@ func TestStreamableHTTP_FullMCPSessionFlow(t *testing.T) {
 		t.Fatalf("tools/call returned %d: %s", callResp.StatusCode, body)
 	}
 
-	callData := readSSEData(t, callResp.Body)
+	callData := testhelpers.ReadSSEData(t, callResp.Body)
 	var callRPC struct {
 		Result struct {
 			Content []struct {
@@ -337,7 +311,7 @@ func TestStreamableHTTP_FullMCPSessionFlow(t *testing.T) {
 	})
 	defer failResp.Body.Close()
 
-	failData := readSSEData(t, failResp.Body)
+	failData := testhelpers.ReadSSEData(t, failResp.Body)
 	var failRPC struct {
 		Result struct {
 			Content []struct {
@@ -389,7 +363,7 @@ func TestStreamableHTTP_UnknownMethod(t *testing.T) {
 
 	// MCP SDK may return the error either as HTTP 4xx or as SSE data with error field
 	if resp.StatusCode == http.StatusOK {
-		data := readSSEData(t, resp.Body)
+		data := testhelpers.ReadSSEData(t, resp.Body)
 		var rpc struct {
 			Error *struct {
 				Code    int    `json:"code"`
@@ -426,7 +400,7 @@ func TestStreamableHTTP_UnknownTool(t *testing.T) {
 	})
 	defer resp.Body.Close()
 
-	data := readSSEData(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var rpc struct {
 		Error *struct {
 			Code    int    `json:"code"`
@@ -457,7 +431,7 @@ func TestStreamableHTTP_SessionRequired(t *testing.T) {
 	defer resp.Body.Close()
 
 	// Per MCP spec the server must return an error for requests without a session
-	data := readSSEData(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var rpc struct {
 		Error *struct{ Message string } `json:"error"`
 	}
@@ -471,9 +445,16 @@ func TestStreamableHTTP_SessionRequired(t *testing.T) {
 }
 
 // TestRateLimiting verifies that the rate limiter returns 429 when the limit is exceeded.
-// Note: t.Setenv is safe here as this test must not run with t.Parallel() due to
-// global env mutation affecting parseRateLimit() which reads the env at server creation time.
+//
+// NOTE (m4): Do NOT add t.Parallel() to this test. It uses t.Setenv to configure
+// MCP_RATE_LIMIT, which mutates the global environment. Although parseRateLimit
+// now accepts the env value as a parameter (making it directly unit-testable),
+// the full-stack integration test path through wrapMiddleware still reads
+// os.Getenv("MCP_RATE_LIMIT") at server construction time. Running in parallel
+// with other tests that create servers would create a race on the env variable.
 func TestRateLimiting(t *testing.T) {
+	// Explicit guard: if this test is ever refactored to run in parallel,
+	// replace t.Setenv with: limiter := parseRateLimit("1,1") and inject it directly.
 	t.Setenv("MCP_RATE_LIMIT", "1,1")
 
 	ts, _ := newHTTPTestServer(t)
@@ -553,7 +534,7 @@ func TestStreamableHTTP_MultipleTools(t *testing.T) {
 	})
 	t.Cleanup(func() { resp.Body.Close() })
 
-	data := readSSEData(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var listRPC struct {
 		Result struct {
 			Tools []struct {

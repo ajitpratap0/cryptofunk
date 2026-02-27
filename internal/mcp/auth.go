@@ -12,6 +12,14 @@ type AuthConfig struct {
 	// If empty, authentication is disabled.
 	Token string
 	// SkipPaths are paths that bypass authentication (e.g., /health).
+	//
+	// NOTE (m2): This field is intentionally not populated in production code.
+	// The outer mux in buildHandler routes /health directly to healthHandler
+	// before any middleware (including authMiddleware) is applied, so /health
+	// never reaches the auth layer and does not need to be listed here.
+	// SkipPaths is preserved to support unit-test scenarios and potential
+	// future use cases where path-level auth bypass is needed within the
+	// inner mux.
 	SkipPaths []string
 }
 

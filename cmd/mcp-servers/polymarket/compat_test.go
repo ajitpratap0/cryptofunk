@@ -4,14 +4,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -20,6 +18,7 @@ import (
 
 	mcpserver "github.com/ajitpratap0/cryptofunk/internal/mcp"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
+	"github.com/ajitpratap0/cryptofunk/internal/testhelpers"
 )
 
 // newHTTPPolyServer creates a test Polymarket MCP server using the shared base
@@ -51,21 +50,6 @@ func newHTTPPolyServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server
 	t.Cleanup(ts.Close)
 
 	return ts, srv
-}
-
-// readSSELine reads the "data:" line from an SSE response body.
-func readSSELine(t *testing.T, body io.Reader) json.RawMessage {
-	t.Helper()
-	scanner := bufio.NewScanner(body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "data:") {
-			return json.RawMessage(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		}
-	}
-	require.NoError(t, scanner.Err())
-	t.Fatal("no SSE data line found in response")
-	return nil
 }
 
 // mcpHTTPPost posts a JSON-RPC request to the MCP endpoint and returns the response.
@@ -102,7 +86,7 @@ func initHTTPSession(t *testing.T, ts *httptest.Server) string {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.NotEmpty(t, sid, "expected Mcp-Session-Id in response")
 
-	data := readSSELine(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var rpc struct {
 		Result map[string]interface{} `json:"result"`
 	}
@@ -130,7 +114,7 @@ func TestHTTP_PolymarketToolsRegistered(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	data := readSSELine(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var listRPC struct {
 		Result struct {
 			Tools []struct {
@@ -178,7 +162,7 @@ func TestHTTP_GetMarketsOverHTTP(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	data := readSSELine(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var callRPC struct {
 		Result struct {
 			Content []struct {
@@ -216,7 +200,7 @@ func TestHTTP_MissingRequiredArg(t *testing.T) {
 	})
 	defer resp.Body.Close()
 
-	data := readSSELine(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var callRPC struct {
 		Result struct {
 			Content []struct {

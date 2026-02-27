@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/ajitpratap0/cryptofunk/internal/testhelpers"
 )
 
 // callPlaceOrderHTTPPath calls place_order via the registerTools (HTTP) path.
@@ -28,7 +30,7 @@ func callPlaceOrderHTTPPath(t *testing.T, args map[string]interface{}) (isError 
 	})
 	defer resp.Body.Close()
 
-	data := readSSELine(t, resp.Body)
+	data := testhelpers.ReadSSEData(t, resp.Body)
 	var rpc struct {
 		Result *struct {
 			Content []struct {

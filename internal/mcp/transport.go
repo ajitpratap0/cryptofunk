@@ -20,31 +20,12 @@ import (
 func (s *Server) runHTTP(port int) error {
 	s.logger.Info().Int("port", port).Msg("MCP server starting with Streamable HTTP transport")
 
-	// Warn when MCP_AUTH_TOKEN is not set for HTTP transport.
-	if os.Getenv("MCP_AUTH_TOKEN") == "" && os.Getenv("MCP_ALLOW_NO_AUTH") == "" {
-		s.logger.Warn().Msg("MCP_AUTH_TOKEN not set — HTTP transport is UNAUTHENTICATED. Set MCP_AUTH_TOKEN or set MCP_ALLOW_NO_AUTH=1 to suppress this warning.")
-	}
-
-	// Warn when CORS origin defaults to wildcard.
-	if os.Getenv("MCP_CORS_ORIGIN") == "" {
-		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
-	}
-
-	handler := s.buildHandler()
-
-	addr := fmt.Sprintf(":%d", port)
-	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		MaxHeaderBytes:    64 * 1024, // 64KB max headers
-		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
-	}
+	httpServer := s.buildHTTPServer(port)
 
 	// Graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh) // M1: prevent goroutine leak if runHTTP returns early
 
 	go func() {
 		<-sigCh
@@ -56,7 +37,7 @@ func (s *Server) runHTTP(port int) error {
 		}
 	}()
 
-	s.logger.Info().Str("addr", addr).Msg("MCP HTTP server listening")
+	s.logger.Info().Str("addr", httpServer.Addr).Msg("MCP HTTP server listening")
 
 	err := httpServer.ListenAndServe()
 	if err == http.ErrServerClosed {
@@ -69,8 +50,14 @@ func (s *Server) runHTTP(port int) error {
 // NewHTTPServer creates an HTTP server with the MCP handler configured but does
 // not start it. The caller is responsible for starting and shutting it down.
 func (s *Server) NewHTTPServer(port int) (*http.Server, error) {
+	return s.buildHTTPServer(port), nil
+}
+
+// buildHTTPServer constructs an *http.Server for the given port. Used by both
+// runHTTP and NewHTTPServer to avoid duplicating server configuration (M3).
+func (s *Server) buildHTTPServer(port int) *http.Server {
 	addr := fmt.Sprintf(":%d", port)
-	httpServer := &http.Server{
+	return &http.Server{
 		Addr:              addr,
 		Handler:           s.buildHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -78,15 +65,25 @@ func (s *Server) NewHTTPServer(port int) (*http.Server, error) {
 		MaxHeaderBytes:    64 * 1024, // 64KB max headers
 		// Note: WriteTimeout is intentionally omitted — it breaks SSE streaming.
 	}
-
-	return httpServer, nil
 }
 
 // buildHandler constructs the two-layer HTTP handler.
 // The outer mux serves /health directly (bypassing all middleware so that K8s
 // liveness/readiness probes cannot exhaust the rate limiter).
 // All other paths are routed through the full middleware stack.
+// Auth/CORS startup warnings are emitted here so both runHTTP and NewHTTPServer
+// paths surface them (M3).
 func (s *Server) buildHandler() http.Handler {
+	// Warn when MCP_AUTH_TOKEN is not set for HTTP transport.
+	if os.Getenv("MCP_AUTH_TOKEN") == "" && os.Getenv("MCP_ALLOW_NO_AUTH") == "" {
+		s.logger.Warn().Msg("MCP_AUTH_TOKEN not set — HTTP transport is UNAUTHENTICATED. Set MCP_AUTH_TOKEN or set MCP_ALLOW_NO_AUTH=1 to suppress this warning.")
+	}
+
+	// Warn when CORS origin defaults to wildcard.
+	if os.Getenv("MCP_CORS_ORIGIN") == "" {
+		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
+	}
+
 	inner := s.buildMux()
 
 	outer := http.NewServeMux()
@@ -118,7 +115,15 @@ func (s *Server) buildMux() *http.ServeMux {
 
 // healthHandler responds to health probe requests. When MCP_HEALTH_VERBOSE is
 // set, the response includes the server name and version.
-func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
+// Only GET and HEAD are accepted; other methods return 405 (m1).
+func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write([]byte(`{"error":"method not allowed"}`))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if os.Getenv("MCP_HEALTH_VERBOSE") != "" {
@@ -156,12 +161,15 @@ func (s *Server) wrapMiddleware(handler http.Handler) http.Handler {
 	h = s.bodyLimitMiddleware(h)
 	h = authMiddleware(authCfg, h)
 	h = corsMiddleware(h)
-	h = rateLimitMiddleware(h, parseRateLimit())
+	h = rateLimitMiddleware(h, parseRateLimit(os.Getenv("MCP_RATE_LIMIT")))
 	return h
 }
 
 // corsMiddleware adds CORS headers for browser-based clients.
 // Uses MCP_CORS_ORIGIN env var if set, otherwise defaults to * with a warning.
+//
+// NOTE (m7): The origin value is captured once at server startup. A process
+// restart is required to pick up changes to MCP_CORS_ORIGIN at runtime.
 func corsMiddleware(next http.Handler) http.Handler {
 	origin := os.Getenv("MCP_CORS_ORIGIN")
 	if origin == "" {
@@ -174,6 +182,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
 
+		// M4: Add Vary: Origin when the allowed origin is a specific domain
+		// (not "*") so caches serve the correct response per requesting origin.
+		if origin != "*" {
+			w.Header().Add("Vary", "Origin")
+		}
+
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -185,10 +199,17 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 // rateLimitMiddleware limits request rate using a token bucket.
 // Returns HTTP 429 when the limit is exceeded.
+//
+// NOTE (M2): The limiter is global per-process, not per-client IP. A single
+// aggressive client can starve others. For production deployments consider
+// per-IP limiting via a reverse proxy (e.g. nginx, envoy).
+// Retry-After: 1 is a conservative approximation based on the token-bucket
+// refill interval; it is not precise for high-burst configurations.
 func rateLimitMiddleware(next http.Handler, limiter *rate.Limiter) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !limiter.Allow() {
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "1") // M2: inform clients when to retry
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
 			return
@@ -197,19 +218,19 @@ func rateLimitMiddleware(next http.Handler, limiter *rate.Limiter) http.Handler 
 	})
 }
 
-// parseRateLimit reads MCP_RATE_LIMIT env var (format: "rps,burst" e.g. "100,200")
+// parseRateLimit parses the rate limit string (format: "rps,burst" e.g. "100,200")
 // and returns a configured rate.Limiter. Defaults to 100 req/s with burst 200.
 //
-// NOTE: Rate limiting is global per-process, not per-client IP. A single
-// aggressive client can starve others. For production deployments with multiple
-// clients, consider adding per-IP rate limiting via a reverse proxy (e.g.,
-// nginx, envoy).
-func parseRateLimit() *rate.Limiter {
+// The envValue parameter accepts the raw value of MCP_RATE_LIMIT. Accepting
+// it as a parameter (rather than reading the env directly) makes this function
+// testable without global environment mutation (m4).
+// Production callers should pass os.Getenv("MCP_RATE_LIMIT").
+func parseRateLimit(envValue string) *rate.Limiter {
 	rps := float64(100)
 	burst := 200
 
-	if env := os.Getenv("MCP_RATE_LIMIT"); env != "" {
-		parts := strings.SplitN(env, ",", 2)
+	if envValue != "" {
+		parts := strings.SplitN(envValue, ",", 2)
 		if v, err := strconv.ParseFloat(parts[0], 64); err == nil && v > 0 {
 			rps = v
 		}
@@ -241,10 +262,25 @@ func contentTypeMiddleware(next http.Handler) http.Handler {
 }
 
 // bodyLimitMiddleware wraps a handler to limit POST request body size to 1MB.
+// C1: Two-stage enforcement:
+//  1. Content-Length pre-check: reject immediately with 413 JSON error when
+//     the client advertises a body larger than the limit (avoids reading any
+//     bytes for clearly oversized requests).
+//  2. MaxBytesReader fallback: handles chunked / no Content-Length bodies by
+//     limiting the bytes actually read during handler execution.
 func (s *Server) bodyLimitMiddleware(next http.Handler) http.Handler {
+	const maxBodyBytes = int64(1 << 20) // 1MB
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+			// Fast-path: reject immediately when Content-Length exceeds limit.
+			if r.ContentLength > maxBodyBytes {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				_, _ = w.Write([]byte(`{"error":"request body too large"}`))
+				return
+			}
+			// Fallback for chunked / unknown-length bodies.
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		}
 		next.ServeHTTP(w, r)
 	})
