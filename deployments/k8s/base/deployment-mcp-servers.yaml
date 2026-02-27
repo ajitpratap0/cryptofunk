@@ -1,6 +1,6 @@
 # MCP Servers Deployments
 # MCP servers expose Streamable HTTP transport on dedicated ports:
-#   market-data: 8090 | order-executor: 8091 | risk-analyzer: 8092 | technical-indicators: 8093
+#   market-data: 8090 | order-executor: 8091 | risk-analyzer: 8092 | technical-indicators: 8093 | polymarket: 8094
 
 ---
 apiVersion: apps/v1
@@ -434,6 +434,59 @@ spec:
             cpu: "500m"
             memory: "512Mi"
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: polymarket-server
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: polymarket-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: polymarket-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: polymarket-server
+        app.kubernetes.io/component: mcp-server
+    spec:
+      containers:
+      - name: polymarket-server
+        image: cryptofunk/polymarket-server:v0.10.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: mcp-http
+          containerPort: 8094
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: mcp-http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: mcp-http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: LOG_LEVEL
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+---
 # Services expose each MCP server within the cluster
 apiVersion: v1
 kind: Service
@@ -497,4 +550,20 @@ spec:
   ports:
   - name: mcp-http
     port: 8091
+    targetPort: mcp-http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: polymarket-server
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: polymarket-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: polymarket-server
+  ports:
+  - name: mcp-http
+    port: 8094
     targetPort: mcp-http

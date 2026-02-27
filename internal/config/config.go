@@ -422,6 +422,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mcp.internal.market_data.url", "http://localhost:8090/mcp")
 	v.SetDefault("mcp.internal.market_data.transport", "http")
 
+	v.SetDefault("mcp.internal.polymarket.enabled", true)
+	v.SetDefault("mcp.internal.polymarket.name", "Polymarket")
+	v.SetDefault("mcp.internal.polymarket.url", "http://localhost:8094/mcp")
+	v.SetDefault("mcp.internal.polymarket.transport", "http")
+
 	// Trading defaults
 	v.SetDefault("trading.mode", "paper")
 	v.SetDefault("trading.symbols", []string{"BTCUSDT", "ETHUSDT"})

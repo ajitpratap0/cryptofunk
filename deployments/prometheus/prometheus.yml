@@ -39,7 +39,7 @@ scrape_configs:
   # MCP Servers (standalone HTTP services on ports 8090-8093)
   # Metrics require starting each server with --metrics-port <port>
   # Default metric ports: market-data=9110, order-executor=9111,
-  #                       risk-analyzer=9112, technical-indicators=9113
+  #                       risk-analyzer=9112, technical-indicators=9113, polymarket=9114
   - job_name: 'mcp-servers'
     static_configs:
       - targets:
@@ -47,6 +47,7 @@ scrape_configs:
         - 'host.docker.internal:9111'  # order-executor-server (--metrics-port 9111)
         - 'host.docker.internal:9112'  # risk-analyzer-server (--metrics-port 9112)
         - 'host.docker.internal:9113'  # technical-indicators-server (--metrics-port 9113)
+        - 'host.docker.internal:9114'  # polymarket-server (--metrics-port 9114)
     metrics_path: '/metrics'
     scrape_interval: 10s
 

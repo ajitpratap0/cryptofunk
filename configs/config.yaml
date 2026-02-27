@@ -134,6 +134,13 @@ mcp:
       args: []
       note: "Disabled by default - CoinGecko MCP is primary data source"
 
+    polymarket:
+      enabled: true
+      name: "Polymarket"
+      transport: "http"
+      url: "http://localhost:8094/mcp"
+      description: "Polymarket prediction market data and trading"
+
 trading:
   mode: "paper"  # paper or live
   symbols:

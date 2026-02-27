@@ -159,6 +159,7 @@ All services use fixed ports to avoid conflicts and enable Prometheus scraping:
 | 9111  | order-executor metrics     | `--metrics-port 9111`            |
 | 9112  | risk-analyzer metrics      | `--metrics-port 9112`            |
 | 9113  | technical-indicators metrics| `--metrics-port 9113`           |
+| 9114  | polymarket-server metrics  | `--metrics-port 9114`            |
 
 **Note**: Port 9103 is reserved/skipped. MCP server metrics are disabled by default; use `--metrics-port <port>` to enable. Prometheus scrape config in `deployments/prometheus/prometheus.yml` must match these ports.
 
