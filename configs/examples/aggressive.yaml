@@ -73,22 +73,22 @@ mcp:
     order_executor:
       enabled: true
       name: "Order Executor"
-      command: "./bin/order-executor-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8091/mcp"
       description: "Execute orders aggressively"
 
     risk_analyzer:
       enabled: true
       name: "Risk Analyzer"
-      command: "./bin/risk-analyzer-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8092/mcp"
       description: "Balanced risk management"
 
     technical_indicators:
       enabled: true
       name: "Technical Indicators"
-      command: "./bin/technical-indicators-server"
-      transport: "stdio"
+      transport: "http"
+      url: "http://localhost:8093/mcp"
       description: "Aggressive technical analysis"
 
 trading:

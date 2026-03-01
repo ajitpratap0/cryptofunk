@@ -76,13 +76,9 @@ func TestAgentConfig(t *testing.T) {
 		Enabled:      true,
 		MCPServers: []MCPServerConfig{
 			{
-				Name:    "test-server",
-				Type:    "internal",
-				Command: "node",
-				Args:    []string{"server.js"},
-				Env: map[string]string{
-					"API_KEY": "test-key",
-				},
+				Name: "test-server",
+				Type: "http",
+				URL:  "http://localhost:8090/mcp",
 			},
 		},
 		Config: map[string]interface{}{
@@ -100,9 +96,6 @@ func TestAgentConfig(t *testing.T) {
 	assert.Equal(t, 0.8, config.Config["threshold"])
 	assert.Len(t, config.MCPServers, 1)
 	assert.Equal(t, "test-server", config.MCPServers[0].Name)
-	assert.Equal(t, "internal", config.MCPServers[0].Type)
-	assert.Equal(t, "node", config.MCPServers[0].Command)
-	assert.Len(t, config.MCPServers[0].Args, 1)
-	assert.Equal(t, "server.js", config.MCPServers[0].Args[0])
-	assert.Equal(t, "test-key", config.MCPServers[0].Env["API_KEY"])
+	assert.Equal(t, "http", config.MCPServers[0].Type)
+	assert.Equal(t, "http://localhost:8090/mcp", config.MCPServers[0].URL)
 }

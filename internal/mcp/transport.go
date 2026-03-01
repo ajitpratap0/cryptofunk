@@ -35,6 +35,15 @@ func (s *Server) runHTTP(port int) error {
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			s.logger.Error().Err(err).Msg("HTTP server shutdown error")
 		}
+		if s.metricsSrv != nil {
+			// Give metrics server its own independent timeout so it is not starved
+			// if the main server uses the full 10-second grace period.
+			metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer metricsCancel()
+			if err := s.metricsSrv.Shutdown(metricsCtx); err != nil {
+				s.logger.Error().Err(err).Msg("Metrics server shutdown error")
+			}
+		}
 	}()
 
 	s.logger.Info().Str("addr", httpServer.Addr).Msg("MCP HTTP server listening")

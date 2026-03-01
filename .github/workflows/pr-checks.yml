@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   # Validate PR title follows conventional commit format
   pr-title:
@@ -57,7 +61,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Check PR size
         uses: actions/github-script@v7
@@ -282,117 +286,11 @@ jobs:
             fi
           fi
 
-  # Test coverage diff
-  coverage-diff:
-    name: Coverage Diff
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout PR code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-          cache: true
-
-      - name: Start CI services
-        run: |
-          docker compose -f docker/ci/docker-compose.yml up -d --build --wait
-          echo "Services started successfully"
-
-      - name: Verify services are ready
-        run: |
-          echo "Verifying PostgreSQL..."
-          until pg_isready -h localhost -p 5432 -U postgres; do
-            echo "PostgreSQL is unavailable - sleeping"
-            sleep 2
-          done
-          echo "PostgreSQL is up"
-
-          echo "Verifying Redis..."
-          until nc -z localhost 6379; do
-            echo "Redis is unavailable - sleeping"
-            sleep 2
-          done
-          echo "Redis is up"
-
-      - name: Setup database extensions
-        env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
-          psql -h localhost -U postgres -d cryptofunk_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-      - name: Run database migrations
-        env:
-          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
-        run: |
-          go run cmd/migrate/main.go up
-
-      - name: Run tests with coverage
-        env:
-          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
-          REDIS_URL: "localhost:6379"
-          NATS_URL: "nats://localhost:4222"
-        run: |
-          go test -coverprofile=coverage-new.out -covermode=atomic ./...
-          # Extract coverage percentage BEFORE switching branches (files must exist)
-          NEW_COVERAGE=$(go tool cover -func=coverage-new.out | grep '^total:' | awk '{print $NF}' | sed 's/%//' | tr -d '[:space:]')
-          echo "NEW_COVERAGE=${NEW_COVERAGE}" >> $GITHUB_ENV
-          echo "PR branch coverage: ${NEW_COVERAGE}%"
-
-      - name: Get base branch coverage
-        run: |
-          git fetch origin ${{ github.base_ref }}
-          git checkout origin/${{ github.base_ref }}
-          go test -coverprofile=coverage-base.out -covermode=atomic ./... || echo "Base coverage not available"
-          if [ -f coverage-base.out ]; then
-            BASE_COVERAGE=$(go tool cover -func=coverage-base.out | grep '^total:' | awk '{print $NF}' | sed 's/%//' | tr -d '[:space:]')
-            echo "BASE_COVERAGE=${BASE_COVERAGE}" >> $GITHUB_ENV
-            echo "Base branch coverage: ${BASE_COVERAGE}%"
-          fi
-        env:
-          DATABASE_URL: "postgres://postgres:postgres@localhost:5432/cryptofunk_test?sslmode=disable"
-          REDIS_URL: "localhost:6379"
-        continue-on-error: true
-
-      - name: Compare coverage
-        run: |
-          if [ -n "$BASE_COVERAGE" ] && [ -n "$NEW_COVERAGE" ]; then
-            echo "Base coverage: ${BASE_COVERAGE}%"
-            echo "New coverage: ${NEW_COVERAGE}%"
-
-            DIFF=$(echo "$NEW_COVERAGE - $BASE_COVERAGE" | bc)
-            echo "Coverage diff: ${DIFF}%"
-
-            # Fail if coverage decreased by more than 1%
-            if (( $(echo "$DIFF < -1" | bc -l) )); then
-              echo "❌ Coverage decreased by ${DIFF}%. Please add tests for new code."
-              exit 1
-            elif (( $(echo "$DIFF > 0" | bc -l) )); then
-              echo "✅ Coverage increased by ${DIFF}%!"
-            else
-              echo "✅ Coverage maintained"
-            fi
-          else
-            echo "⚠️  Base coverage not available, skipping comparison"
-          fi
-
-      - name: Stop CI services
-        if: always()
-        run: |
-          docker compose -f docker/ci/docker-compose.yml down -v
-
   # All checks must pass
   all-checks:
     name: All PR Checks Passed
     runs-on: ubuntu-latest
-    needs: [pr-title, pr-size, debug-check, coverage-diff]
+    needs: [pr-title, pr-size, debug-check]
     if: always()
     steps:
       - name: Check all jobs

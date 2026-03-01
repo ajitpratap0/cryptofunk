@@ -47,94 +47,6 @@ func TestToolRegistration(t *testing.T) {
 	}
 }
 
-func TestJSONRPCDispatch(t *testing.T) {
-	srv := newTestServer()
-
-	srv.AddToolRaw(
-		NewTool("add", "Adds two numbers", map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"a": map[string]interface{}{"type": "number"},
-				"b": map[string]interface{}{"type": "number"},
-			},
-		}),
-		WrapLegacyHandler(func(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-			a, _ := args["a"].(float64)
-			b, _ := args["b"].(float64)
-			return map[string]interface{}{"sum": a + b}, nil
-		}),
-	)
-
-	ctx := context.Background()
-
-	// Test initialize
-	resp := srv.HandleJSONRPC(ctx, "initialize", nil, 1)
-	if resp.Error != nil {
-		t.Fatalf("initialize error: %s", resp.Error.Message)
-	}
-	result, ok := resp.Result.(map[string]interface{})
-	if !ok {
-		t.Fatal("expected map result")
-	}
-	if result["protocolVersion"] != "2024-11-05" {
-		t.Fatalf("unexpected protocol version: %v", result["protocolVersion"])
-	}
-
-	// Test tools/list
-	resp = srv.HandleJSONRPC(ctx, "tools/list", nil, 2)
-	if resp.Error != nil {
-		t.Fatalf("tools/list error: %s", resp.Error.Message)
-	}
-	listResult, ok := resp.Result.(map[string]interface{})
-	if !ok {
-		t.Fatal("expected map result for tools/list")
-	}
-	tools, ok := listResult["tools"].([]map[string]interface{})
-	if !ok || len(tools) != 1 {
-		t.Fatalf("expected 1 tool in list, got %v", listResult["tools"])
-	}
-
-	// Test tools/call
-	params, _ := json.Marshal(map[string]interface{}{
-		"name":      "add",
-		"arguments": map[string]interface{}{"a": 3, "b": 4},
-	})
-	resp = srv.HandleJSONRPC(ctx, "tools/call", params, 3)
-	if resp.Error != nil {
-		t.Fatalf("tools/call error: %s", resp.Error.Message)
-	}
-	callResult, ok := resp.Result.(*mcp.CallToolResult)
-	if !ok {
-		t.Fatalf("expected CallToolResult, got %T", resp.Result)
-	}
-	if len(callResult.Content) == 0 {
-		t.Fatal("expected content in result")
-	}
-	text := callResult.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(text, `"sum":7`) {
-		t.Fatalf("unexpected result text: %s", text)
-	}
-
-	// Test unknown method
-	resp = srv.HandleJSONRPC(ctx, "foo/bar", nil, 4)
-	if resp.Error == nil {
-		t.Fatal("expected error for unknown method")
-	}
-	if resp.Error.Code != -32601 {
-		t.Fatalf("expected code -32601, got %d", resp.Error.Code)
-	}
-
-	// Test unknown tool
-	params, _ = json.Marshal(map[string]interface{}{
-		"name":      "nonexistent",
-		"arguments": map[string]interface{}{},
-	})
-	resp = srv.HandleJSONRPC(ctx, "tools/call", params, 5)
-	if resp.Error == nil {
-		t.Fatal("expected error for unknown tool")
-	}
-}
-
 func TestHTTPHandler(t *testing.T) {
 	srv := newTestServer()
 
@@ -182,6 +94,75 @@ func TestHTTPHandler(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatal("missing CORS header")
+	}
+}
+
+func TestHandleJSONRPC(t *testing.T) {
+	srv := newTestServer()
+	srv.AddToolRaw(
+		NewTool("echo", "Echoes input", map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{"msg": map[string]interface{}{"type": "string"}},
+		}),
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "echoed"}},
+			}, nil
+		},
+	)
+
+	ctx := context.Background()
+
+	// initialize
+	resp := srv.HandleJSONRPC(ctx, "initialize", json.RawMessage(`{}`), 1)
+	if resp.Error != nil {
+		t.Fatalf("initialize error: %v", resp.Error)
+	}
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("initialize result is not a map")
+	}
+	if result["protocolVersion"] != "2024-11-05" {
+		t.Fatalf("unexpected protocolVersion: %v", result["protocolVersion"])
+	}
+
+	// tools/list
+	resp = srv.HandleJSONRPC(ctx, "tools/list", json.RawMessage(`{}`), 2)
+	if resp.Error != nil {
+		t.Fatalf("tools/list error: %v", resp.Error)
+	}
+	listResult, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatal("tools/list result is not a map")
+	}
+	tools, ok := listResult["tools"].([]map[string]interface{})
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got: %v", listResult["tools"])
+	}
+	if tools[0]["name"] != "echo" {
+		t.Fatalf("unexpected tool name: %v", tools[0]["name"])
+	}
+
+	// tools/call — found
+	callParams := json.RawMessage(`{"name":"echo","arguments":{"msg":"hi"}}`)
+	resp = srv.HandleJSONRPC(ctx, "tools/call", callParams, 3)
+	if resp.Error != nil {
+		t.Fatalf("tools/call error: %v", resp.Error)
+	}
+
+	// tools/call — unknown tool
+	resp = srv.HandleJSONRPC(ctx, "tools/call", json.RawMessage(`{"name":"nope","arguments":{}}`), 4)
+	if resp.Error == nil {
+		t.Fatal("expected error for unknown tool")
+	}
+
+	// unknown method — must return JSON-RPC "Method not found" code -32601
+	resp = srv.HandleJSONRPC(ctx, "unknown/method", json.RawMessage(`{}`), 5)
+	if resp.Error == nil {
+		t.Fatal("expected error for unknown method")
+	}
+	if resp.Error.Code != -32601 {
+		t.Fatalf("expected JSON-RPC error code -32601, got %d", resp.Error.Code)
 	}
 }
 

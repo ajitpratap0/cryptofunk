@@ -1,5 +1,4 @@
-// Package mcpserver provides a shared MCP server base that supports both
-// stdio and Streamable HTTP transports.
+// Package mcpserver provides a shared MCP server base that supports Streamable HTTP transport.
 package mcpserver
 
 import (
@@ -9,8 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,13 +44,14 @@ type Config struct {
 
 // Server wraps mcp.Server with transport selection and metrics.
 type Server struct {
-	config   Config
-	mcpSrv   *mcp.Server
-	logger   zerolog.Logger
-	tools    []ToolDef
-	registry *prometheus.Registry
-	toolCall *prometheus.CounterVec
-	toolDur  *prometheus.HistogramVec
+	config     Config
+	mcpSrv     *mcp.Server
+	logger     zerolog.Logger
+	tools      []ToolDef
+	registry   *prometheus.Registry
+	toolCall   *prometheus.CounterVec
+	toolDur    *prometheus.HistogramVec
+	metricsSrv *http.Server // non-nil when a metrics server is running
 }
 
 // New creates a new MCP server with the given config.
@@ -124,120 +122,49 @@ func (s *Server) MCPServer() *mcp.Server {
 }
 
 // Run parses CLI flags and starts the server with the selected transport.
+// It uses a scoped FlagSet (not flag.CommandLine) to avoid global state
+// conflicts when multiple Server instances exist in the same process.
 func (s *Server) Run() error {
-	transport := flag.String("transport", "stdio", "Transport mode: stdio or http")
-	port := flag.Int("port", DefaultPorts[s.config.Name], "HTTP port (only used with --transport http)")
-	metricsPort := flag.Int("metrics-port", s.config.MetricsPort, "Prometheus metrics port (0 to disable)")
-	flag.Parse()
+	fs := flag.NewFlagSet("mcp-server", flag.ContinueOnError)
+	port := fs.Int("port", DefaultPorts[s.config.Name], "HTTP port")
+	metricsPort := fs.Int("metrics-port", s.config.MetricsPort, "Prometheus metrics port (0 to disable)")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return fmt.Errorf("flag parse: %w", err)
+	}
 
-	// Start metrics server if configured
 	if *metricsPort > 0 {
-		go func() {
-			mux := http.NewServeMux()
-			mux.Handle("/metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{}))
-			addr := fmt.Sprintf(":%d", *metricsPort)
-			s.logger.Info().Str("addr", addr).Msg("Starting metrics server")
-			metricsSrv := &http.Server{
-				Addr:              addr,
-				Handler:           mux,
-				ReadTimeout:       5 * time.Second,
-				ReadHeaderTimeout: 5 * time.Second,
-				WriteTimeout:      10 * time.Second,
-				IdleTimeout:       120 * time.Second,
-			}
-			if err := metricsSrv.ListenAndServe(); err != nil {
-				s.logger.Error().Err(err).Msg("Metrics server failed")
-			}
-		}()
+		s.startMetricsServer(*metricsPort)
 	}
 
-	switch *transport {
-	case "stdio":
-		return s.runStdio()
-	case "http":
-		// Auth warning is emitted inside runHTTP.
-		return s.runHTTP(*port)
-	default:
-		return fmt.Errorf("unknown transport: %s (use stdio or http)", *transport)
-	}
+	return s.runHTTP(*port)
 }
 
-// RunWithArgs starts the server with explicit args (useful for testing).
-func (s *Server) RunWithArgs(transport string, port int) error {
-	switch transport {
-	case "stdio":
-		return s.runStdio()
-	case "http":
-		return s.runHTTP(port)
-	default:
-		return fmt.Errorf("unknown transport: %s", transport)
+// startMetricsServer starts the Prometheus metrics HTTP server and stores it
+// on s.metricsSrv so it can be shut down alongside the main server.
+func (s *Server) startMetricsServer(metricsPort int) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{}))
+	addr := fmt.Sprintf(":%d", metricsPort)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
-}
-
-// runStdio runs the server using stdio transport (stdin/stdout).
-func (s *Server) runStdio() error {
-	s.logger.Info().Msg("MCP server starting with stdio transport")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle shutdown signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	s.metricsSrv = srv
 	go func() {
-		<-sigCh
-		s.logger.Info().Msg("Shutdown signal received")
-		cancel()
+		s.logger.Info().Str("addr", addr).Msg("Starting metrics server")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.logger.Error().Err(err).Msg("Metrics server failed")
+		}
 	}()
-
-	// For stdio, we use the raw JSON-RPC protocol like before
-	// since the SDK's stdio transport is client-side only
-	return s.runStdioLoop(ctx)
 }
 
-// runStdioLoop implements the stdio JSON-RPC loop compatible with the existing protocol.
-func (s *Server) runStdioLoop(ctx context.Context) error {
-	s.logger.Info().Msg("MCP server ready, listening on stdio")
-
-	decoder := json.NewDecoder(os.Stdin)
-	encoder := json.NewEncoder(os.Stdout)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			if err.Error() == "EOF" {
-				s.logger.Info().Msg("Client disconnected")
-				return nil
-			}
-			s.logger.Error().Err(err).Msg("Failed to decode request")
-			continue
-		}
-
-		var req struct {
-			JSONRPC string          `json:"jsonrpc"`
-			ID      any             `json:"id"`
-			Method  string          `json:"method"`
-			Params  json.RawMessage `json:"params"`
-		}
-		if err := json.Unmarshal(raw, &req); err != nil {
-			s.logger.Error().Err(err).Msg("Failed to parse request")
-			continue
-		}
-
-		s.logger.Debug().Str("method", req.Method).Msg("Received request")
-
-		resp := s.HandleJSONRPC(ctx, req.Method, req.Params, req.ID)
-		if err := encoder.Encode(resp); err != nil {
-			s.logger.Error().Err(err).Msg("Failed to encode response")
-			return err
-		}
-	}
+// RunWithArgs starts the server on the given port (useful for testing).
+func (s *Server) RunWithArgs(port int) error {
+	return s.runHTTP(port)
 }
 
 // JSONRPCResponse is a JSON-RPC 2.0 response.
