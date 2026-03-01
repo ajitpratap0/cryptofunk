@@ -43,17 +43,20 @@ func authMiddleware(cfg AuthConfig, next http.Handler) http.Handler {
 
 		auth := r.Header.Get("Authorization")
 		if auth == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="MCP"`)
 			http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
 			return
 		}
 
 		if !strings.HasPrefix(auth, "Bearer ") {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="MCP"`)
 			http.Error(w, `{"error":"invalid authorization format, expected Bearer token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		token := strings.TrimPrefix(auth, "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(token), []byte(cfg.Token)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="MCP"`)
 			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 			return
 		}

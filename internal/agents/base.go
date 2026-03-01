@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -48,12 +47,11 @@ func DefaultShutdownConfig() ShutdownConfig {
 
 // MCPServerConfig holds configuration for a single MCP server
 type MCPServerConfig struct {
-	Name    string            `json:"name" yaml:"name"`       // Server identifier (e.g., "coingecko", "technical_indicators")
-	Type    string            `json:"type" yaml:"type"`       // "internal" (stdio) or "external" (HTTP)
-	Command string            `json:"command" yaml:"command"` // Command to start internal server
-	Args    []string          `json:"args" yaml:"args"`       // Arguments for internal server command
-	Env     map[string]string `json:"env" yaml:"env"`         // Environment variables for internal server
-	URL     string            `json:"url" yaml:"url"`         // URL for external HTTP server
+	Name string `json:"name" yaml:"name"` // Server identifier (e.g., "coingecko", "technical_indicators")
+	URL  string `json:"url" yaml:"url"`   // HTTP URL of the MCP server (e.g., "http://localhost:8093/mcp")
+	// Type controls the client transport: "http" uses Streamable HTTP (default, for our servers);
+	// "sse" uses the legacy SSE transport (for external providers like CoinGecko).
+	Type string `json:"type" yaml:"type"`
 }
 
 // AgentConfig holds configuration for an agent
@@ -233,6 +231,14 @@ func (a *BaseAgent) connectMCPServers() error {
 	a.log.Info().Int("server_count", len(a.config.MCPServers)).Msg("Connecting to MCP servers")
 
 	for _, serverConfig := range a.config.MCPServers {
+		if serverConfig.Name == "" {
+			a.log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
+			continue
+		}
+		if serverConfig.URL == "" {
+			return fmt.Errorf("MCP server %q has empty URL (type=%q)", serverConfig.Name, serverConfig.Type)
+		}
+
 		a.log.Info().
 			Str("name", serverConfig.Name).
 			Str("type", serverConfig.Type).
@@ -241,24 +247,21 @@ func (a *BaseAgent) connectMCPServers() error {
 		var session *mcp.ClientSession
 		var err error
 
-		// Create appropriate session based on server type
+		// Create appropriate session based on transport type
 		switch serverConfig.Type {
-		case "internal":
-			// Internal server: spawn process with stdio transport
-			session, err = a.createStdioClient(a.ctx, serverConfig)
+		case "sse":
+			// Legacy SSE transport for external providers (e.g., CoinGecko)
+			session, err = a.createSSEClient(a.ctx, serverConfig)
 			if err != nil {
-				return fmt.Errorf("failed to create stdio session for %s: %w", serverConfig.Name, err)
+				return fmt.Errorf("failed to create SSE session for %s: %w", serverConfig.Name, err)
 			}
-
-		case "external":
-			// External server: HTTP streaming transport
+		case "http", "": // Streamable HTTP transport (our internal servers)
 			session, err = a.createHTTPClient(a.ctx, serverConfig)
 			if err != nil {
 				return fmt.Errorf("failed to create HTTP session for %s: %w", serverConfig.Name, err)
 			}
-
 		default:
-			return fmt.Errorf("unknown server type %s for %s", serverConfig.Type, serverConfig.Name)
+			return fmt.Errorf("unknown MCP server type %q for server %s (use \"http\" or \"sse\")", serverConfig.Type, serverConfig.Name)
 		}
 
 		// Store session in map
@@ -270,36 +273,23 @@ func (a *BaseAgent) connectMCPServers() error {
 	return nil
 }
 
-// createStdioClient creates an MCP session with stdio transport for internal servers
-func (a *BaseAgent) createStdioClient(ctx context.Context, config MCPServerConfig) (*mcp.ClientSession, error) {
-	// Create command transport (spawns process with exec.CommandContext)
-	cmd := exec.CommandContext(ctx, config.Command, config.Args...) // #nosec G204 Command from validated agent config
-	// Convert env map to KEY=value slice format
-	for key, val := range config.Env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, val))
-	}
-	transport := &mcp.CommandTransport{Command: cmd}
-
-	// Create session using the BaseAgent's client instance
+// createHTTPClient creates an MCP session with Streamable HTTP transport.
+func (a *BaseAgent) createHTTPClient(ctx context.Context, config MCPServerConfig) (*mcp.ClientSession, error) {
+	transport := &mcp.StreamableClientTransport{Endpoint: config.URL}
 	session, err := a.mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
-
 	return session, nil
 }
 
-// createHTTPClient creates an MCP session with HTTP streaming transport for external servers
-func (a *BaseAgent) createHTTPClient(ctx context.Context, config MCPServerConfig) (*mcp.ClientSession, error) {
-	// Create SSE client transport for HTTP
+// createSSEClient creates an MCP session with legacy SSE transport (for external providers like CoinGecko).
+func (a *BaseAgent) createSSEClient(ctx context.Context, config MCPServerConfig) (*mcp.ClientSession, error) {
 	transport := &mcp.SSEClientTransport{Endpoint: config.URL}
-
-	// Create session using the BaseAgent's client instance
 	session, err := a.mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
-
 	return session, nil
 }
 
