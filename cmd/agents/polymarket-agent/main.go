@@ -1186,17 +1186,12 @@ func main() {
 					if t, ok := server["type"].(string); ok {
 						sc.Type = t
 					}
-					if cmd, ok := server["command"].(string); ok {
-						sc.Command = cmd
-					}
-					if args, ok := server["args"].([]interface{}); ok {
-						sc.Args = make([]string, len(args))
-						for i, arg := range args {
-							sc.Args[i] = fmt.Sprint(arg)
-						}
-					}
 					if u, ok := server["url"].(string); ok {
 						sc.URL = u
+					}
+					if sc.Name == "" {
+						log.Warn().Str("url", sc.URL).Msg("Skipping MCP server entry with empty name")
+						continue
 					}
 					agentConfig.MCPServers = append(agentConfig.MCPServers, sc)
 				}
@@ -1206,7 +1201,7 @@ func main() {
 
 	metricsPort := viper.GetInt("strategy_agents.polymarket.metrics_port")
 	if metricsPort == 0 {
-		metricsPort = 9108
+		metricsPort = 9109
 	}
 
 	baseAgent := agents.NewBaseAgent(&agentConfig, log.Logger, metricsPort)

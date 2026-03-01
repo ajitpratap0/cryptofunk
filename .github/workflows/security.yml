@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: '0 3 * * 1' # Weekly Monday 3 AM UTC
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
@@ -22,6 +26,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: true
 
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
@@ -47,6 +52,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: true
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -58,12 +64,11 @@ jobs:
   trivy:
     name: Container Security Scan
     runs-on: ubuntu-latest
+    # On PRs: scan only the api image (~2 min) to catch new vulnerable deps early.
+    # On push/schedule: scan the full matrix for comprehensive coverage.
     strategy:
       matrix:
-        image:
-          - api
-          - agent
-          - orchestrator
+        image: ${{ github.event_name == 'pull_request' && fromJSON('["api"]') || fromJSON('["api","agent","orchestrator"]') }}
     steps:
       - uses: actions/checkout@v4
 

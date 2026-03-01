@@ -358,18 +358,13 @@ func TestAgentConfig_Validation(t *testing.T) {
 			Enabled:      true,
 			MCPServers: []MCPServerConfig{
 				{
-					Name:    "server1",
-					Type:    "internal",
-					Command: "bin/server1",
-					Args:    []string{"--config", "config.json"},
-					Env: map[string]string{
-						"API_KEY":   "key123",
-						"LOG_LEVEL": "debug",
-					},
+					Name: "server1",
+					Type: "http",
+					URL:  "http://localhost:8090/mcp",
 				},
 				{
 					Name: "server2",
-					Type: "external",
+					Type: "sse",
 					URL:  "http://localhost:8080/mcp",
 				},
 			},
@@ -396,18 +391,12 @@ func TestAgentConfig_Validation(t *testing.T) {
 
 		// Server 1
 		assert.Equal(t, "server1", config.MCPServers[0].Name)
-		assert.Equal(t, "internal", config.MCPServers[0].Type)
-		assert.Equal(t, "bin/server1", config.MCPServers[0].Command)
-		assert.Len(t, config.MCPServers[0].Args, 2)
-		assert.Equal(t, "--config", config.MCPServers[0].Args[0])
-		assert.Equal(t, "config.json", config.MCPServers[0].Args[1])
-		assert.Len(t, config.MCPServers[0].Env, 2)
-		assert.Equal(t, "key123", config.MCPServers[0].Env["API_KEY"])
-		assert.Equal(t, "debug", config.MCPServers[0].Env["LOG_LEVEL"])
+		assert.Equal(t, "http", config.MCPServers[0].Type)
+		assert.Equal(t, "http://localhost:8090/mcp", config.MCPServers[0].URL)
 
 		// Server 2
 		assert.Equal(t, "server2", config.MCPServers[1].Name)
-		assert.Equal(t, "external", config.MCPServers[1].Type)
+		assert.Equal(t, "sse", config.MCPServers[1].Type)
 		assert.Equal(t, "http://localhost:8080/mcp", config.MCPServers[1].URL)
 
 		// Verify config map
@@ -425,43 +414,28 @@ func TestAgentConfig_Validation(t *testing.T) {
 }
 
 func TestMCPServerConfig_Types(t *testing.T) {
-	t.Run("InternalServerConfig", func(t *testing.T) {
+	t.Run("HTTPServerConfig", func(t *testing.T) {
 		config := MCPServerConfig{
-			Name:    "internal-server",
-			Type:    "internal",
-			Command: "node",
-			Args:    []string{"server.js", "--port", "3000"},
-			Env: map[string]string{
-				"NODE_ENV": "development",
-				"PORT":     "3000",
-			},
+			Name: "http-server",
+			Type: "http",
+			URL:  "http://localhost:8090/mcp",
 		}
 
-		assert.Equal(t, "internal-server", config.Name)
-		assert.Equal(t, "internal", config.Type)
-		assert.Equal(t, "node", config.Command)
-		assert.Len(t, config.Args, 3)
-		assert.Equal(t, "server.js", config.Args[0])
-		assert.Equal(t, "--port", config.Args[1])
-		assert.Equal(t, "3000", config.Args[2])
-		assert.Len(t, config.Env, 2)
-		assert.Equal(t, "development", config.Env["NODE_ENV"])
-		assert.Equal(t, "3000", config.Env["PORT"])
+		assert.Equal(t, "http-server", config.Name)
+		assert.Equal(t, "http", config.Type)
+		assert.Equal(t, "http://localhost:8090/mcp", config.URL)
 	})
 
-	t.Run("ExternalServerConfig", func(t *testing.T) {
+	t.Run("SSEServerConfig", func(t *testing.T) {
 		config := MCPServerConfig{
-			Name: "external-server",
-			Type: "external",
-			URL:  "https://api.example.com/mcp/v1",
+			Name: "sse-server",
+			Type: "sse",
+			URL:  "https://api.example.com/sse",
 		}
 
-		assert.Equal(t, "external-server", config.Name)
-		assert.Equal(t, "external", config.Type)
-		assert.Equal(t, "https://api.example.com/mcp/v1", config.URL)
-		assert.Empty(t, config.Command)
-		assert.Nil(t, config.Args)
-		assert.Nil(t, config.Env)
+		assert.Equal(t, "sse-server", config.Name)
+		assert.Equal(t, "sse", config.Type)
+		assert.Equal(t, "https://api.example.com/sse", config.URL)
 	})
 }
 

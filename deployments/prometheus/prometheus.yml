@@ -16,6 +16,12 @@ rule_files:
   - "alerts/*.yml"
 
 # Scrape configurations
+#
+# NOTE: host.docker.internal resolves to the Docker host on macOS/Windows.
+# On Linux (including Kubernetes nodes), use the host's actual IP address or
+# a NodePort/ClusterIP service instead. For K8s deployments, replace
+# host.docker.internal targets with in-cluster service addresses (e.g.,
+# orchestrator.cryptofunk.svc.cluster.local:8081).
 scrape_configs:
   # Prometheus itself
   - job_name: 'prometheus'
@@ -36,10 +42,18 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 10s
 
-  # MCP Servers (not currently running as separate processes)
+  # MCP Servers (standalone HTTP services on ports 8090-8093)
+  # Metrics require starting each server with --metrics-port <port>
+  # Default metric ports: market-data=9110, order-executor=9111,
+  #                       risk-analyzer=9112, technical-indicators=9113, polymarket=9114
   - job_name: 'mcp-servers'
     static_configs:
-      - targets: []  # MCP servers run as subprocesses, not separate services
+      - targets:
+        - 'host.docker.internal:9110'  # market-data-server (--metrics-port 9110)
+        - 'host.docker.internal:9111'  # order-executor-server (--metrics-port 9111)
+        - 'host.docker.internal:9112'  # risk-analyzer-server (--metrics-port 9112)
+        - 'host.docker.internal:9113'  # technical-indicators-server (--metrics-port 9113)
+        - 'host.docker.internal:9114'  # polymarket-server (--metrics-port 9114)
     metrics_path: '/metrics'
     scrape_interval: 10s
 
@@ -54,6 +68,7 @@ scrape_configs:
         - 'host.docker.internal:9106'  # reversion-agent
         - 'host.docker.internal:9107'  # arbitrage-agent
         - 'host.docker.internal:9108'  # risk-agent
+        - 'host.docker.internal:9109'  # polymarket-agent
     metrics_path: '/metrics'
     scrape_interval: 15s
 

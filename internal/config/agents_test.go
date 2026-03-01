@@ -38,10 +38,10 @@ func TestAnalysisAgentConfig(t *testing.T) {
 	// Test MCP server connections
 	require.Len(t, technicalAgent.MCPServers, 2)
 	assert.Equal(t, "coingecko", technicalAgent.MCPServers[0].Name)
-	assert.Equal(t, "external", technicalAgent.MCPServers[0].Type)
+	assert.Equal(t, "sse", technicalAgent.MCPServers[0].Type)
 	assert.Equal(t, "technical_indicators", technicalAgent.MCPServers[1].Name)
-	assert.Equal(t, "internal", technicalAgent.MCPServers[1].Type)
-	assert.Equal(t, "./bin/technical-indicators-server", technicalAgent.MCPServers[1].Command)
+	assert.Equal(t, "http", technicalAgent.MCPServers[1].Type)
+	assert.Equal(t, "http://localhost:8093/mcp", technicalAgent.MCPServers[1].URL)
 
 	// Test orderbook agent (now enabled for testing)
 	orderbookAgent, ok := cfg.AnalysisAgents["orderbook"]
@@ -111,8 +111,8 @@ func TestRiskAgentConfig(t *testing.T) {
 	// Test MCP server connections
 	require.Len(t, riskAgent.MCPServers, 2)
 	assert.Equal(t, "risk_analyzer", riskAgent.MCPServers[0].Name)
-	assert.Equal(t, "internal", riskAgent.MCPServers[0].Type)
-	assert.Equal(t, "./bin/risk-analyzer-server", riskAgent.MCPServers[0].Command)
+	assert.Equal(t, "http", riskAgent.MCPServers[0].Type)
+	assert.Equal(t, "http://localhost:8092/mcp", riskAgent.MCPServers[0].URL)
 	assert.Equal(t, "order_executor", riskAgent.MCPServers[1].Name)
 
 	// Verify risk-specific config
@@ -243,19 +243,14 @@ func TestMCPServerTools(t *testing.T) {
 	assert.Contains(t, coingeckoServer.Tools, "get_price")
 	assert.Contains(t, coingeckoServer.Tools, "get_market_chart")
 
+	// HTTP servers use Streamable HTTP transport — tools are auto-discovered, no static list needed
 	techIndicatorsServer := technicalAgent.MCPServers[1]
-	assert.Contains(t, techIndicatorsServer.Tools, "calculate_rsi")
-	assert.Contains(t, techIndicatorsServer.Tools, "calculate_macd")
-	assert.Contains(t, techIndicatorsServer.Tools, "calculate_bollinger_bands")
-	assert.Contains(t, techIndicatorsServer.Tools, "calculate_ema")
-	assert.Contains(t, techIndicatorsServer.Tools, "calculate_adx")
+	assert.Equal(t, "http", techIndicatorsServer.Type)
+	assert.Equal(t, "http://localhost:8093/mcp", techIndicatorsServer.URL)
 
-	// Test risk agent tools
+	// Test risk agent
 	riskAgent := cfg.RiskAgent
 	riskAnalyzerServer := riskAgent.MCPServers[0]
-	assert.Contains(t, riskAnalyzerServer.Tools, "calculate_position_size")
-	assert.Contains(t, riskAnalyzerServer.Tools, "calculate_var")
-	assert.Contains(t, riskAnalyzerServer.Tools, "check_portfolio_limits")
-	assert.Contains(t, riskAnalyzerServer.Tools, "calculate_sharpe")
-	assert.Contains(t, riskAnalyzerServer.Tools, "calculate_drawdown")
+	assert.Equal(t, "http", riskAnalyzerServer.Type)
+	assert.Equal(t, "http://localhost:8092/mcp", riskAnalyzerServer.URL)
 }
