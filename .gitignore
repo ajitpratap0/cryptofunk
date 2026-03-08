@@ -12,6 +12,17 @@ bin/
 /orchestrator
 /migrate
 /polymarket
+/market-data
+/risk-analyzer
+/api-server
+/technical-indicators
+# Build artifacts inside cmd/ subdirectories (go build run from within package dir)
+cmd/**/*-agent
+cmd/**/*-server
+cmd/**/market-data
+cmd/**/risk-analyzer
+cmd/**/orchestrator
+cmd/**/migrate
 
 # Test binary, built with `go test -c`
 *.test
