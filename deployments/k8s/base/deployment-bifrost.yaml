@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: bifrost
-        image: maximhq/bifrost:v0.3.0
+        image: maximhq/bifrost:v1.4.9
         ports:
         - containerPort: 8080
           name: http
@@ -30,8 +30,7 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: BIFROST_PORT
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -42,6 +41,8 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_PORT
+        - name: REDIS_URL
+          value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:
@@ -58,6 +59,13 @@ spec:
               name: cryptofunk-secrets
               key: GEMINI_API_KEY
               optional: true
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         resources:
           requests:
             cpu: "200m"

@@ -31,6 +31,7 @@ import (
 // newEdgeTestServer creates a minimal httptest.Server backed by a real MCP stack.
 func newEdgeTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	t.Setenv("MCP_ALLOW_NO_AUTH", "true")
 	logger := zerolog.New(io.Discard)
 	srv := New(Config{Name: "qa-edge", Version: "0.0.1", Logger: logger})
 

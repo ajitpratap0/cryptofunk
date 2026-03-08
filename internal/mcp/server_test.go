@@ -48,6 +48,7 @@ func TestToolRegistration(t *testing.T) {
 }
 
 func TestHTTPHandler(t *testing.T) {
+	t.Setenv("MCP_ALLOW_NO_AUTH", "true")
 	srv := newTestServer()
 
 	srv.AddToolRaw(

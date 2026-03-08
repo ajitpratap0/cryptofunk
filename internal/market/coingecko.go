@@ -529,18 +529,13 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 			}
 		}
 
-		// Fix: Create context with timeout and ensure proper cleanup with defer
-		// This prevents context leak even if panic occurs before cancel() is called
-		reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
-		defer cancel()
-
-		// Call MCP tool
+		// Call MCP tool using doAttempt to ensure cancel() fires per attempt
 		params := &mcp.CallToolParams{
 			Name:      toolName,
 			Arguments: args,
 		}
 
-		response, err := session.CallTool(reqCtx, params)
+		response, err := c.doAttempt(ctx, session, params)
 
 		if err != nil {
 			lastErr = fmt.Errorf("attempt %d failed: %w", attempt+1, err)
@@ -593,6 +588,15 @@ func (c *CoinGeckoClient) callToolWithRetry(ctx context.Context, toolName string
 	finalErr := fmt.Errorf("max retries (%d) exceeded: %w", c.maxRetries, lastErr)
 	c.setLastError(finalErr)
 	return finalErr
+}
+
+// doAttempt performs a single MCP tool call attempt with its own timeout context.
+// Using a helper ensures cancel() is called at the end of each attempt rather than
+// deferred to function exit, preventing context accumulation across retry iterations.
+func (c *CoinGeckoClient) doAttempt(ctx context.Context, session *mcp.ClientSession, params *mcp.CallToolParams) (*mcp.CallToolResult, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return session.CallTool(reqCtx, params)
 }
 
 // setLastError safely sets the last error with mutex protection

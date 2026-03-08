@@ -20,6 +20,9 @@ spec:
       containers:
       - name: nats
         image: nats:2-alpine
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
         ports:
         - containerPort: 4222
           name: client
@@ -30,11 +33,21 @@ spec:
         - containerPort: 6222
           name: cluster
           protocol: TCP
-        command:
-        - nats-server
-        - -js
-        - -m
-        - "8222"
+        command: ["nats-server", "-js", "-m", "8222", "--user", "$(NATS_USER)", "--pass", "$(NATS_PASSWORD)"]
+        env:
+        - name: NATS_USER
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: NATS_USER
+        - name: NATS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: NATS_PASSWORD
+        volumeMounts:
+        - name: nats-data
+          mountPath: /data/jetstream
         resources:
           requests:
             cpu: "100m"
@@ -58,3 +71,7 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 1
           failureThreshold: 3
+      volumes:
+      - name: nats-data
+        persistentVolumeClaim:
+          claimName: nats-data-pvc

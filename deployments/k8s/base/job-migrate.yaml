@@ -19,8 +19,7 @@ spec:
         image: cryptofunk/migrate:v0.10.0
         imagePullPolicy: IfNotPresent
         env:
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -46,6 +45,13 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
         command: ["/app/migrate", "up"]
         resources:
           requests:

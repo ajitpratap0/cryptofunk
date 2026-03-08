@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -79,9 +80,20 @@ func NewHTTPServer(port int, orch *orchestrator.Orchestrator) *HTTPServer {
 	}
 }
 
+func orchestratorAuthMiddleware(secret string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if secret != "" && r.Header.Get("X-Orchestrator-Secret") != secret {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // Start starts the HTTP server in a goroutine
 func (h *HTTPServer) Start() error {
 	mux := http.NewServeMux()
+	secret := os.Getenv("ORCHESTRATOR_SECRET")
 
 	// Health check endpoints
 	mux.HandleFunc("/health", h.handleHealth)
@@ -92,9 +104,9 @@ func (h *HTTPServer) Start() error {
 	mux.HandleFunc("/api/v1/status", h.handleStatus)
 
 	// Control endpoints (pause/resume trading)
-	mux.HandleFunc("/pause", h.orchestrator.HandlePauseRequest)
-	mux.HandleFunc("/resume", h.orchestrator.HandleResumeRequest)
-	mux.HandleFunc("/status", h.orchestrator.HandleControlStatusRequest)
+	mux.HandleFunc("/pause", orchestratorAuthMiddleware(secret, h.orchestrator.HandlePauseRequest))
+	mux.HandleFunc("/resume", orchestratorAuthMiddleware(secret, h.orchestrator.HandleResumeRequest))
+	mux.HandleFunc("/status", orchestratorAuthMiddleware(secret, h.orchestrator.HandleControlStatusRequest))
 
 	// Prometheus metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())

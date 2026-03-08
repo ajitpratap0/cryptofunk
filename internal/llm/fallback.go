@@ -304,8 +304,8 @@ func NewCircuitBreaker(numModels int, config CircuitBreakerConfig) *CircuitBreak
 
 // IsOpen checks if the circuit is open for a given model
 func (cb *CircuitBreaker) IsOpen(modelIndex int) bool {
-	cb.mu.RLock()
-	defer cb.mu.RUnlock()
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
 
 	if modelIndex < 0 || modelIndex >= len(cb.models) {
 		return true // Safe default
@@ -317,11 +317,7 @@ func (cb *CircuitBreaker) IsOpen(modelIndex int) bool {
 	case CircuitOpen:
 		// Check if timeout has passed to transition to half-open
 		if time.Since(circuit.openedAt) >= cb.config.Timeout {
-			cb.mu.RUnlock()
-			cb.mu.Lock()
 			circuit.state = CircuitHalfOpen
-			cb.mu.Unlock()
-			cb.mu.RLock()
 			return false
 		}
 		return true

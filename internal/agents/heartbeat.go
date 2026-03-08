@@ -3,6 +3,7 @@ package agents
 
 import (
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +43,7 @@ type HeartbeatPublisher struct {
 	agentType string
 	log       zerolog.Logger
 	stopChan  chan struct{}
+	stopOnce  sync.Once
 	running   atomic.Bool
 }
 
@@ -131,10 +133,10 @@ func (h *HeartbeatPublisher) publish() {
 
 // Stop stops the heartbeat publisher
 func (h *HeartbeatPublisher) Stop() {
-	if !h.running.Load() {
-		return
-	}
-	close(h.stopChan)
+	h.stopOnce.Do(func() {
+		h.running.Store(false)
+		close(h.stopChan)
+	})
 }
 
 // IsRunning returns whether the heartbeat publisher is currently running

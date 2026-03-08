@@ -22,6 +22,9 @@ spec:
       containers:
       - name: postgres
         image: timescale/timescaledb:2.14.2-pg17
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
         ports:
         - containerPort: 5432
           name: postgres

@@ -267,6 +267,33 @@ var (
 	}, []string{"tool_name", "server"})
 )
 
+// Reliability Metrics
+var (
+	// LLMFallbackTotal counts LLM fallback events to rule-based analysis
+	LLMFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cryptofunk_llm_fallback_total",
+		Help: "Total number of times LLM failed and fell back to rule-based analysis",
+	})
+
+	// NATSPublishErrorsTotal counts NATS publish failures
+	NATSPublishErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cryptofunk_nats_publish_errors_total",
+		Help: "Total number of NATS publish errors",
+	})
+
+	// PositionUpdateErrors counts position update failures after order fill
+	PositionUpdateErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cryptofunk_position_update_errors_total",
+		Help: "Total number of position update errors after order fill",
+	})
+
+	// AgentConsecutiveStepFailures tracks consecutive step failures per agent
+	AgentConsecutiveStepFailures = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cryptofunk_agent_consecutive_step_failures",
+		Help: "Number of consecutive step failures for each agent",
+	}, []string{"agent"})
+)
+
 // Agent Activity Metrics
 var (
 	// Active agents
@@ -365,7 +392,7 @@ var (
 	SafetyGuardOrdersRejected = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "cryptofunk_safety_guard_orders_rejected_total",
 		Help: "Total number of orders rejected by safety guards by reason",
-	}, []string{"reason", "symbol"})
+	}, []string{"reason"})
 
 	// Safety guard orders allowed
 	SafetyGuardOrdersAllowed = promauto.NewCounter(prometheus.CounterOpts{
@@ -631,7 +658,7 @@ func RecordSafetyGuardViolation(violationType string) {
 
 // RecordSafetyGuardOrderRejected records a rejected order
 func RecordSafetyGuardOrderRejected(reason, symbol string) {
-	SafetyGuardOrdersRejected.WithLabelValues(reason, symbol).Inc()
+	SafetyGuardOrdersRejected.WithLabelValues(reason).Inc()
 	RecordSafetyGuardViolation(reason)
 }
 

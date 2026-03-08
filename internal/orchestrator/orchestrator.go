@@ -1,13 +1,13 @@
 // Package orchestrator coordinates multiple trading agents via weighted voting and consensus
-//
-//nolint:goconst // Trading signals are domain-specific strings
 package orchestrator
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -19,6 +19,15 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
+)
+
+// SignalAction represents the typed set of valid trading signal actions.
+type SignalAction string
+
+const (
+	SignalActionBuy  SignalAction = "BUY"
+	SignalActionSell SignalAction = "SELL"
+	SignalActionHold SignalAction = "HOLD"
 )
 
 const (
@@ -41,7 +50,7 @@ type AgentSignal struct {
 	AgentName  string                 `json:"agent_name"`
 	AgentType  string                 `json:"agent_type"`
 	Symbol     string                 `json:"symbol"`
-	Signal     string                 `json:"signal"` // BUY, SELL, HOLD
+	Signal     SignalAction           `json:"signal"` // BUY, SELL, HOLD
 	Confidence float64                `json:"confidence"`
 	Reasoning  string                 `json:"reasoning"`
 	Timestamp  time.Time              `json:"timestamp"`
@@ -74,7 +83,7 @@ type DecisionContext struct {
 // TradingDecision represents the final orchestrator decision
 type TradingDecision struct {
 	Symbol              string                 `json:"symbol"`
-	Action              string                 `json:"action"` // BUY, SELL, HOLD
+	Action              SignalAction            `json:"action"` // BUY, SELL, HOLD
 	Confidence          float64                `json:"confidence"`
 	Consensus           float64                `json:"consensus"` // 0.0-1.0
 	ParticipatingAgents int                    `json:"participating_agents"`
@@ -96,6 +105,7 @@ type OrchestratorConfig struct {
 	MinConfidence       float64       `json:"min_confidence" yaml:"min_confidence"`   // Minimum confidence threshold
 	MaxSignalAge        time.Duration `json:"max_signal_age" yaml:"max_signal_age"`   // Discard signals older than this
 	HealthCheckInterval time.Duration `json:"health_check_interval" yaml:"health_check_interval"`
+	AllowedAgents       []string      `json:"allowed_agents" yaml:"allowed_agents"` // Allowlist of agent names; empty means allow all
 }
 
 // OrchestratorMetrics holds Prometheus metrics for orchestrator
@@ -332,6 +342,22 @@ func (o *Orchestrator) handleSignal(msg *nats.Msg) {
 		return
 	}
 
+	// Validate signal action
+	switch signal.Signal {
+	case SignalActionBuy, SignalActionSell, SignalActionHold:
+		// valid
+	default:
+		o.log.Warn().Str("signal", string(signal.Signal)).Msg("invalid signal action, ignoring")
+		o.metrics.SignalsDropped.Inc()
+		return
+	}
+
+	// Validate and clamp confidence bounds
+	if signal.Confidence < 0 || signal.Confidence > 1 {
+		o.log.Warn().Float64("confidence", signal.Confidence).Msg("invalid confidence value, clamping")
+		signal.Confidence = math.Max(0, math.Min(1, signal.Confidence))
+	}
+
 	// Validate signal age
 	if time.Since(signal.Timestamp) > o.config.MaxSignalAge {
 		o.log.Warn().
@@ -364,7 +390,7 @@ func (o *Orchestrator) handleSignal(msg *nats.Msg) {
 	o.log.Debug().
 		Str("agent", signal.AgentName).
 		Str("symbol", signal.Symbol).
-		Str("signal", signal.Signal).
+		Str("signal", string(signal.Signal)).
 		Float64("confidence", signal.Confidence).
 		Msg("Received agent signal")
 }
@@ -380,6 +406,11 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 
 	if err := json.Unmarshal(msg.Data, &heartbeat); err != nil {
 		o.log.Error().Err(err).Msg("Failed to unmarshal heartbeat")
+		return
+	}
+
+	if len(o.config.AllowedAgents) > 0 && !slices.Contains(o.config.AllowedAgents, heartbeat.AgentName) {
+		o.log.Warn().Str("agent", heartbeat.AgentName).Msg("rejected unrecognized agent")
 		return
 	}
 
@@ -458,7 +489,7 @@ func (o *Orchestrator) getDefaultWeight(agentType string) float64 {
 }
 
 // makeDecision performs the decision-making cycle
-func (o *Orchestrator) makeDecision(ctx context.Context) error {
+func (o *Orchestrator) makeDecision(_ context.Context) error {
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
@@ -516,7 +547,7 @@ func (o *Orchestrator) makeDecision(ctx context.Context) error {
 
 		o.log.Info().
 			Str("symbol", decision.Symbol).
-			Str("action", decision.Action).
+			Str("action", string(decision.Action)).
 			Float64("confidence", decision.Confidence).
 			Float64("consensus", decision.Consensus).
 			Int("agents", decision.ParticipatingAgents).
@@ -557,9 +588,9 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 
 	// Initialize voting scores
 	votingScores := map[string]float64{
-		"BUY":  0.0,
-		"SELL": 0.0,
-		"HOLD": 0.0,
+		string(SignalActionBuy):  0.0,
+		string(SignalActionSell): 0.0,
+		string(SignalActionHold): 0.0,
 	}
 
 	totalWeight := 0.0
@@ -579,22 +610,22 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		confidence := signal.Confidence
 		vote := weight * confidence
 
-		votingScores[signal.Signal] += vote
+		votingScores[string(signal.Signal)] += vote
 		totalWeight += weight
 
 		participatingAgents++
 		reasoning = append(reasoning, fmt.Sprintf("%s(%s): %.2f confidence",
-			signal.AgentName, signal.Signal, signal.Confidence))
+			signal.AgentName, string(signal.Signal), signal.Confidence))
 	}
 	o.agentsMutex.RUnlock()
 
 	// Find winning action
 	maxScore := 0.0
-	winningAction := "HOLD"
+	winningAction := SignalActionHold
 	for action, score := range votingScores {
 		if score > maxScore {
 			maxScore = score
-			winningAction = action
+			winningAction = SignalAction(action)
 		}
 	}
 
@@ -605,11 +636,14 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 	}
 
 	// Calculate final confidence
-	confidence := maxScore / totalWeight
+	confidence := 0.0
+	if totalWeight > 0 {
+		confidence = maxScore / totalWeight
+	}
 
 	// Check thresholds
 	if consensus < ctx.MinConsensus || confidence < ctx.MinConfidence {
-		winningAction = "HOLD"
+		winningAction = SignalActionHold
 		reasoning = append(reasoning, fmt.Sprintf(
 			"Insufficient consensus (%.2f < %.2f) or confidence (%.2f < %.2f)",
 			consensus, ctx.MinConsensus, confidence, ctx.MinConfidence))

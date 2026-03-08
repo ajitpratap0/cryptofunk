@@ -83,9 +83,9 @@ func (s *Server) buildHTTPServer(port int) *http.Server {
 // Auth/CORS startup warnings are emitted here so both runHTTP and NewHTTPServer
 // paths surface them (M3).
 func (s *Server) buildHandler() http.Handler {
-	// Warn when MCP_AUTH_TOKEN is not set for HTTP transport.
+	// Require MCP_AUTH_TOKEN for HTTP transport.
 	if os.Getenv("MCP_AUTH_TOKEN") == "" && os.Getenv("MCP_ALLOW_NO_AUTH") == "" {
-		s.logger.Warn().Msg("MCP_AUTH_TOKEN not set — HTTP transport is UNAUTHENTICATED. Set MCP_AUTH_TOKEN or set MCP_ALLOW_NO_AUTH=1 to suppress this warning.")
+		s.logger.Fatal().Msg("MCP_AUTH_TOKEN must be set (or set MCP_ALLOW_NO_AUTH=true to explicitly disable auth)")
 	}
 
 	// Warn when CORS origin defaults to wildcard.

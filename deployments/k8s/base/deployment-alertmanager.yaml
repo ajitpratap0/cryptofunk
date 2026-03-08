@@ -20,6 +20,9 @@ spec:
       containers:
       - name: alertmanager
         image: prom/alertmanager:v0.27.0
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
         ports:
         - containerPort: 9093
           name: http
@@ -113,4 +116,3 @@ spec:
       - name: alertmanager-config
         configMap:
           name: alertmanager-config
-          optional: true

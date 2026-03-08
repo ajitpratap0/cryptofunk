@@ -319,6 +319,8 @@ func (a *BaseAgent) Run(ctx context.Context) error {
 	ticker := time.NewTicker(a.config.StepInterval)
 	defer ticker.Stop()
 
+	consecutiveFailures := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -330,7 +332,15 @@ func (a *BaseAgent) Run(ctx context.Context) error {
 		case <-ticker.C:
 			if err := a.Step(ctx); err != nil {
 				a.log.Error().Err(err).Msg("Error in agent step")
+				consecutiveFailures++
+				metrics.AgentConsecutiveStepFailures.WithLabelValues(a.config.Name).Set(float64(consecutiveFailures))
+				if consecutiveFailures >= 10 {
+					a.log.Warn().Int("failures", consecutiveFailures).Msg("agent entering degraded state")
+				}
 				// Continue running despite errors
+			} else {
+				consecutiveFailures = 0
+				metrics.AgentConsecutiveStepFailures.WithLabelValues(a.config.Name).Set(0)
 			}
 		}
 	}

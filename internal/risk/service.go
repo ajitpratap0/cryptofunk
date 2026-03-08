@@ -2,6 +2,7 @@ package risk
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/rs/zerolog/log"
 )
@@ -190,6 +191,9 @@ func (s *Service) CheckPortfolioLimits(args map[string]interface{}) (interface{}
 
 	// Parse new trade
 	newTrade := parseTrade(newTradeRaw)
+	if newTrade.Size <= 0 {
+		return nil, fmt.Errorf("invalid trade size: %v (must be positive)", newTrade.Size)
+	}
 
 	// Calculate current portfolio metrics
 	totalExposure := calculateTotalExposure(positions)
@@ -286,7 +290,7 @@ func (s *Service) CalculateSharpe(args map[string]interface{}) (interface{}, err
 		varianceSum += diff * diff
 	}
 	variance := varianceSum / float64(len(returns))
-	stdDev := sqrt(variance)
+	stdDev := math.Sqrt(variance)
 
 	// Avoid division by zero
 	if stdDev == 0 {
@@ -299,7 +303,7 @@ func (s *Service) CalculateSharpe(args map[string]interface{}) (interface{}, err
 
 	// Annualize if needed (assuming daily returns)
 	// Multiply by sqrt(252) for daily to annual conversion
-	annualizedSharpe := sharpeRatio * sqrt(252)
+	annualizedSharpe := sharpeRatio * math.Sqrt(252)
 
 	return &SharpeResult{
 		SharpeRatio:      sharpeRatio,
@@ -559,23 +563,6 @@ func getDrawdownInterpretation(maxDrawdown float64) string {
 	} else {
 		return "Extreme - unacceptable drawdown level"
 	}
-}
-
-// sqrt calculates the square root of a number using Newton's method
-func sqrt(x float64) float64 {
-	if x < 0 {
-		return 0 // Return 0 for negative numbers
-	}
-	if x == 0 {
-		return 0
-	}
-
-	// Newton's method for square root
-	z := x
-	for i := 0; i < 10; i++ {
-		z = z - (z*z-x)/(2*z)
-	}
-	return z
 }
 
 // PortfolioLimitsResult represents the result of portfolio limits check

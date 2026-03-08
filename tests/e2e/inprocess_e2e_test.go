@@ -167,7 +167,7 @@ func TestE2E_InProcess(t *testing.T) {
 					AgentName:  "mock-technical",
 					AgentType:  "technical",
 					Symbol:     "BTC/USDT",
-					Signal:     "BUY",
+					Signal:     orchestrator.SignalActionBuy,
 					Confidence: 0.85,
 					Reasoning:  "RSI oversold, MACD bullish crossover",
 				}
@@ -177,7 +177,7 @@ func TestE2E_InProcess(t *testing.T) {
 					AgentName:  "mock-trend",
 					AgentType:  "trend",
 					Symbol:     "BTC/USDT",
-					Signal:     "BUY",
+					Signal:     orchestrator.SignalActionBuy,
 					Confidence: 0.80,
 					Reasoning:  "Strong uptrend detected",
 				}
@@ -187,7 +187,7 @@ func TestE2E_InProcess(t *testing.T) {
 					AgentName:  "mock-orderbook",
 					AgentType:  "orderbook",
 					Symbol:     "BTC/USDT",
-					Signal:     "BUY",
+					Signal:     orchestrator.SignalActionBuy,
 					Confidence: 0.75,
 					Reasoning:  "Strong bid support",
 				}
@@ -197,7 +197,7 @@ func TestE2E_InProcess(t *testing.T) {
 					AgentName:  "mock-risk",
 					AgentType:  "risk",
 					Symbol:     "BTC/USDT",
-					Signal:     "BUY",
+					Signal:     orchestrator.SignalActionBuy,
 					Confidence: 0.90,
 					Reasoning:  "Risk parameters within limits",
 				}

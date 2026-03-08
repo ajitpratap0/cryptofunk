@@ -1,0 +1,92 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cryptofunk
+
+resources:
+  - ../../base
+  - agents-k8s.yaml
+  - netpol-agents-external.yaml
+
+images:
+  - name: cryptofunk/migrate
+    newName: cryptofunk/migrate
+    newTag: local
+  - name: cryptofunk/orchestrator
+    newName: cryptofunk/orchestrator
+    newTag: local
+  - name: cryptofunk/api
+    newName: cryptofunk/api
+    newTag: local
+  - name: cryptofunk/market-data-server
+    newName: cryptofunk/market-data-server
+    newTag: local
+  - name: cryptofunk/technical-indicators-server
+    newName: cryptofunk/technical-indicators-server
+    newTag: local
+  - name: cryptofunk/risk-analyzer-server
+    newName: cryptofunk/risk-analyzer-server
+    newTag: local
+  - name: cryptofunk/order-executor-server
+    newName: cryptofunk/order-executor-server
+    newTag: local
+  - name: cryptofunk/polymarket-server
+    newName: cryptofunk/polymarket-server
+    newTag: local
+  - name: cryptofunk/technical-agent
+    newName: cryptofunk/technical-agent
+    newTag: local
+  - name: cryptofunk/orderbook-agent
+    newName: cryptofunk/orderbook-agent
+    newTag: local
+  - name: cryptofunk/sentiment-agent
+    newName: cryptofunk/sentiment-agent
+    newTag: local
+  - name: cryptofunk/trend-agent
+    newName: cryptofunk/trend-agent
+    newTag: local
+  - name: cryptofunk/reversion-agent
+    newName: cryptofunk/reversion-agent
+    newTag: local
+  - name: cryptofunk/risk-agent
+    newName: cryptofunk/risk-agent
+    newTag: local
+  - name: cryptofunk/arbitrage-agent
+    newName: cryptofunk/arbitrage-agent
+    newTag: local
+  - name: cryptofunk/polymarket-agent
+    newName: cryptofunk/polymarket-agent
+    newTag: local
+  - name: cryptofunk/dashboard
+    newName: cryptofunk/dashboard
+    newTag: local
+
+replicas:
+  - name: api
+    count: 1
+  - name: bifrost
+    count: 1
+  - name: dashboard
+    count: 1
+  - name: market-data-server
+    count: 1
+  - name: order-executor-server
+    count: 1
+  - name: polymarket-server
+    count: 1
+  - name: risk-analyzer-server
+    count: 1
+  - name: technical-indicators-server
+    count: 1
+
+patches:
+  - path: secret-local.yaml
+  - path: configmap-local.yaml
+  - path: configmap-alertmanager-local.yaml
+  - path: patches/remove-storage-class.yaml
+    target:
+      kind: PersistentVolumeClaim
+  - path: patches/agents-config-mount.yaml
+    target:
+      kind: Deployment
+      labelSelector: "component=agent"
+  - path: patches/prometheus-resources.yaml

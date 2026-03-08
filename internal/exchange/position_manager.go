@@ -64,20 +64,22 @@ func (pm *PositionManager) SetSession(sessionID *uuid.UUID) {
 
 	// Load open positions for this session (only if database is available)
 	if sessionID != nil && pm.db != nil {
-		pm.loadOpenPositions(*sessionID)
+		if err := pm.loadOpenPositions(*sessionID); err != nil {
+			log.Error().Err(err).Msg("Session setup failed: could not load open positions")
+		}
 	} else {
 		pm.openPositions = make(map[string]*db.Position)
 	}
 }
 
 // loadOpenPositions loads open positions from database
-func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) {
+func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	positions, err := pm.db.GetOpenPositions(ctx, sessionID)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load open positions")
-		return
+		return err
 	}
 
 	pm.openPositions = make(map[string]*db.Position)
@@ -88,6 +90,7 @@ func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) {
 	log.Info().
 		Int("count", len(positions)).
 		Msg("Loaded open positions from database")
+	return nil
 }
 
 // OnOrderFilled handles order fill events and updates positions
@@ -280,6 +283,10 @@ func (pm *PositionManager) closePosition(ctx context.Context, position *db.Posit
 
 // partialClosePosition partially closes a position
 func (pm *PositionManager) partialClosePosition(ctx context.Context, position *db.Position, closeQuantity, exitPrice float64, reason string, fees float64) error {
+	// Update in-memory position (always, regardless of DB availability)
+	position.Quantity -= closeQuantity
+	position.Fees += fees
+
 	// Use database method for partial close
 	if pm.db != nil {
 		closedPos, err := pm.db.PartialClosePosition(ctx, position.ID, closeQuantity, exitPrice, reason, fees)
@@ -287,10 +294,6 @@ func (pm *PositionManager) partialClosePosition(ctx context.Context, position *d
 			log.Error().Err(err).Msg("Failed to partial close position in database")
 			return err
 		}
-
-		// Update in-memory position
-		position.Quantity -= closeQuantity
-		position.Fees += fees
 
 		log.Info().
 			Str("position_id", position.ID.String()).

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
 
@@ -131,10 +132,10 @@ func NewServicePaper(database *db.DB) *Service {
 		MarketImpact: 0.0001, // 0.01%
 		MaxSlippage:  0.003,  // 0.3%
 	}
-	service, _ := NewService(database, ServiceConfig{
-		Mode: TradingModePaper,
-		Fees: defaultFees,
-	})
+	service, err := NewService(database, ServiceConfig{Mode: TradingModePaper, Fees: defaultFees})
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create paper trading service")
+	}
 	return service
 }
 
@@ -284,7 +285,8 @@ func (s *Service) PlaceMarketOrder(ctx context.Context, args map[string]interfac
 			fills := fillsResult.([]Fill)
 			if len(fills) > 0 {
 				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
-					log.Error().Err(err).Msg("Failed to update positions after order fill")
+					log.Error().Err(err).Str("order_id", order.ID).Msg("CRITICAL: position update failed after fill")
+					metrics.PositionUpdateErrors.Inc()
 				}
 
 				// Update safety guard position tracking
@@ -444,7 +446,8 @@ func (s *Service) PlaceLimitOrder(ctx context.Context, args map[string]interface
 			fills := fillsResult.([]Fill)
 			if len(fills) > 0 {
 				if err := s.positionManager.OnOrderFilled(exchangeCtx, order, fills); err != nil {
-					log.Error().Err(err).Msg("Failed to update positions after order fill")
+					log.Error().Err(err).Str("order_id", order.ID).Msg("CRITICAL: position update failed after fill")
+					metrics.PositionUpdateErrors.Inc()
 				}
 
 				// Update safety guard position tracking

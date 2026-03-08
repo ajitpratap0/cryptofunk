@@ -17,6 +17,7 @@ data:
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "cryptofunk"
   POSTGRES_USER: "postgres"
+  POSTGRES_SSLMODE: "require"
 
   # Redis Configuration
   REDIS_HOST: "redis-service"
@@ -26,6 +27,7 @@ data:
   # NATS Configuration
   NATS_HOST: "nats-service"
   NATS_PORT: "4222"
+  NATS_URL: "nats://nats-service:4222"
 
   # Bifrost LLM Gateway Configuration
   BIFROST_HOST: "bifrost-service"
@@ -33,7 +35,7 @@ data:
 
   # Orchestrator Configuration
   ORCHESTRATOR_HOST: "orchestrator-service"
-  ORCHESTRATOR_PORT: "8080"
+  ORCHESTRATOR_PORT: "8081"
 
   # API Configuration
   API_PORT: "8080"
@@ -41,3 +43,10 @@ data:
   # Prometheus Configuration
   PROMETHEUS_HOST: "prometheus-service"
   PROMETHEUS_PORT: "9090"
+
+  # MCP Internal Cluster URLs (Viper overrides for in-cluster agent communication)
+  CRYPTOFUNK_MCP_INTERNAL_MARKET_DATA_URL: "http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp"
+  CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL: "http://order-executor-server.cryptofunk.svc.cluster.local:8091/mcp"
+  CRYPTOFUNK_MCP_INTERNAL_RISK_ANALYZER_URL: "http://risk-analyzer-server.cryptofunk.svc.cluster.local:8092/mcp"
+  CRYPTOFUNK_MCP_INTERNAL_TECHNICAL_INDICATORS_URL: "http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp"
+  CRYPTOFUNK_MCP_INTERNAL_POLYMARKET_URL: "http://polymarket-server.cryptofunk.svc.cluster.local:8094/mcp"

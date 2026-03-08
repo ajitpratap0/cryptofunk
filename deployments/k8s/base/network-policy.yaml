@@ -249,7 +249,7 @@ spec:
           app.kubernetes.io/component: agent
     ports:
     - protocol: TCP
-      port: 8080
+      port: 8081
   # Allow from API server
   - from:
     - podSelector:
@@ -257,7 +257,7 @@ spec:
           app.kubernetes.io/name: api
     ports:
     - protocol: TCP
-      port: 8080
+      port: 8081
   # Allow Prometheus to scrape metrics
   - from:
     - podSelector:
@@ -265,7 +265,7 @@ spec:
           app.kubernetes.io/name: prometheus
     ports:
     - protocol: TCP
-      port: 8080  # Assuming metrics on same port
+      port: 8081
   egress:
   # Allow to PostgreSQL
   - to:
@@ -301,7 +301,7 @@ spec:
     ports:
     - protocol: TCP
       port: 8080
-  # Allow to MCP servers (stdio communication)
+  # Allow to MCP servers (Streamable HTTP communication)
   - to:
     - podSelector:
         matchLabels:
@@ -339,19 +339,32 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow from orchestrator (stdio communication)
+  # Allow from orchestrator (Streamable HTTP communication)
   - from:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: orchestrator
-  # Allow Prometheus to scrape metrics
+  # Allow from agents (Streamable HTTP communication)
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: agent
+  # Allow Prometheus to scrape metrics (ports 9110-9114)
   - from:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: prometheus
     ports:
     - protocol: TCP
-      port: 8080  # Assuming metrics on port 8080
+      port: 9110  # market-data-server metrics
+    - protocol: TCP
+      port: 9111  # order-executor-server metrics
+    - protocol: TCP
+      port: 9112  # risk-analyzer-server metrics
+    - protocol: TCP
+      port: 9113  # technical-indicators-server metrics
+    - protocol: TCP
+      port: 9114  # polymarket-server metrics
   egress:
   # Allow to PostgreSQL
   - to:
@@ -404,14 +417,28 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow Prometheus to scrape metrics
+  # Allow Prometheus to scrape metrics (ports 9101-9109)
   - from:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: prometheus
     ports:
     - protocol: TCP
-      port: 8080  # Assuming metrics on port 8080
+      port: 9101  # technical-agent
+    - protocol: TCP
+      port: 9102  # trend-agent
+    - protocol: TCP
+      port: 9104  # sentiment-agent
+    - protocol: TCP
+      port: 9105  # orderbook-agent
+    - protocol: TCP
+      port: 9106  # reversion-agent
+    - protocol: TCP
+      port: 9107  # arbitrage-agent
+    - protocol: TCP
+      port: 9108  # risk-agent
+    - protocol: TCP
+      port: 9109  # polymarket-agent
   egress:
   # Allow to orchestrator
   - to:
@@ -420,7 +447,23 @@ spec:
           app.kubernetes.io/name: orchestrator
     ports:
     - protocol: TCP
-      port: 8080
+      port: 8081
+  # Allow to MCP servers (Streamable HTTP on ports 8090-8094)
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: mcp-server
+    ports:
+    - protocol: TCP
+      port: 8090
+    - protocol: TCP
+      port: 8091
+    - protocol: TCP
+      port: 8092
+    - protocol: TCP
+      port: 8093
+    - protocol: TCP
+      port: 8094
   # Allow to PostgreSQL
   - to:
     - podSelector:
@@ -506,7 +549,7 @@ spec:
           app.kubernetes.io/name: orchestrator
     ports:
     - protocol: TCP
-      port: 8080
+      port: 8081
   # Allow to PostgreSQL
   - to:
     - podSelector:
@@ -660,7 +703,35 @@ spec:
     - protocol: TCP
       port: 8080
     - protocol: TCP
-      port: 8222  # NATS monitoring
+      port: 8081   # orchestrator
+    - protocol: TCP
+      port: 8222   # NATS monitoring
+    - protocol: TCP
+      port: 9101   # technical-agent
+    - protocol: TCP
+      port: 9102   # trend-agent
+    - protocol: TCP
+      port: 9104   # sentiment-agent
+    - protocol: TCP
+      port: 9105   # orderbook-agent
+    - protocol: TCP
+      port: 9106   # reversion-agent
+    - protocol: TCP
+      port: 9107   # arbitrage-agent
+    - protocol: TCP
+      port: 9108   # risk-agent
+    - protocol: TCP
+      port: 9109   # polymarket-agent
+    - protocol: TCP
+      port: 9110   # market-data-server metrics
+    - protocol: TCP
+      port: 9111   # order-executor-server metrics
+    - protocol: TCP
+      port: 9112   # risk-analyzer-server metrics
+    - protocol: TCP
+      port: 9113   # technical-indicators-server metrics
+    - protocol: TCP
+      port: 9114   # polymarket-server metrics
   # Allow to send alerts to AlertManager
   - to:
     - podSelector:
