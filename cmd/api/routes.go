@@ -183,6 +183,7 @@ func (s *APIServer) setupRoutes() {
 		}
 
 		{
+			trade.POST("", s.handlePaperTrade)
 			trade.POST("/start", s.handleStartTrading)
 			trade.POST("/stop", s.handleStopTrading)
 			trade.POST("/pause", s.handlePauseTrading)
