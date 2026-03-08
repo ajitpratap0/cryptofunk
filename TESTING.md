@@ -130,8 +130,7 @@ task validate
 
 ### 7. Binary Builds
 ```bash
-✓ Builds market-data-server
-✓ Builds test-client
+✓ Builds all agent and server binaries (orchestrator, api, agents, mcp-servers)
 ✓ Reports binary sizes
 ```
 
@@ -194,7 +193,7 @@ git commit -m "feat(config): add new configuration option"
 # ✓ All checks passed! Ready to commit.
 
 # 5. Push
-git push origin master
+git push origin main
 ```
 
 ### Manual Testing
@@ -329,25 +328,13 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
+          go-version: '1.24'
       
       - name: Install dependencies
         run: go mod download
       
       - name: Run validation
         run: ./scripts/test-all.sh
-```
-
-### GitLab CI
-
-```yaml
-test:
-  image: golang:1.21
-  script:
-    - ./scripts/test-all.sh
-  only:
-    - merge_requests
-    - master
 ```
 
 ## Configuration
@@ -431,19 +418,6 @@ If you encounter issues:
 2. Run `./scripts/test-all.sh --fast` manually for details
 3. Open an issue on GitHub
 4. Check commit logs for working examples
-
-## Future Enhancements
-
-- [ ] Add integration tests
-- [ ] Add benchmark tests
-- [ ] Add security scanning
-- [ ] Add dependency vulnerability checking
-- [ ] Add code coverage thresholds
-- [ ] Add performance regression tests
-- [ ] Add parallel test execution
-- [ ] Add custom lint rules
-- [ ] Add auto-fixing for common issues
-- [ ] Add commit template
 
 ---
 
