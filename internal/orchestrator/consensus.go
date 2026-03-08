@@ -748,10 +748,13 @@ func (cm *ConsensusManager) collectBids(ctx context.Context, taskID uuid.UUID, t
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	done := make(chan struct{})
 
 	// Collect bids until timeout
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -780,7 +783,9 @@ func (cm *ConsensusManager) collectBids(ctx context.Context, taskID uuid.UUID, t
 		select {
 		case <-timer.C:
 			close(done)
+			wg.Wait() // wait for goroutine to finish before draining
 			// Drain remaining bids
+		drainLoop:
 			for {
 				select {
 				case bid := <-bidChan:
@@ -788,9 +793,10 @@ func (cm *ConsensusManager) collectBids(ctx context.Context, taskID uuid.UUID, t
 						bids = append(bids, bid)
 					}
 				default:
-					return bids
+					break drainLoop
 				}
 			}
+			return bids
 		case bid := <-bidChan:
 			if bid != nil {
 				bids = append(bids, bid)

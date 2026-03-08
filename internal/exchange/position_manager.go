@@ -283,17 +283,17 @@ func (pm *PositionManager) closePosition(ctx context.Context, position *db.Posit
 
 // partialClosePosition partially closes a position
 func (pm *PositionManager) partialClosePosition(ctx context.Context, position *db.Position, closeQuantity, exitPrice float64, reason string, fees float64) error {
-	// Update in-memory position (always, regardless of DB availability)
-	position.Quantity -= closeQuantity
-	position.Fees += fees
-
-	// Use database method for partial close
 	if pm.db != nil {
+		// Do DB write first; only update memory if DB succeeds
 		closedPos, err := pm.db.PartialClosePosition(ctx, position.ID, closeQuantity, exitPrice, reason, fees)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to partial close position in database")
 			return err
 		}
+
+		// DB succeeded — now update memory
+		position.Quantity -= closeQuantity
+		position.Fees += fees
 
 		log.Info().
 			Str("position_id", position.ID.String()).
@@ -305,6 +305,11 @@ func (pm *PositionManager) partialClosePosition(ctx context.Context, position *d
 			Float64("exit_price", exitPrice).
 			Float64("realized_pnl", *closedPos.RealizedPnL).
 			Msg("Position partially closed")
+	} else {
+		// No DB: update memory directly
+		position.Quantity -= closeQuantity
+		position.Fees += fees
+		log.Warn().Msg("no database: position update is in-memory only")
 	}
 
 	return nil

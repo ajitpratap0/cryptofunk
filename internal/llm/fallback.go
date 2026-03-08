@@ -302,32 +302,43 @@ func NewCircuitBreaker(numModels int, config CircuitBreakerConfig) *CircuitBreak
 	}
 }
 
-// IsOpen checks if the circuit is open for a given model
+// IsOpen checks if the circuit is open for a given model.
+// Uses a read lock for the common fast path (circuit closed or half-open),
+// and upgrades to a write lock only when a state transition (open→half-open)
+// is needed. Double-checked locking ensures correctness under concurrent access.
 func (cb *CircuitBreaker) IsOpen(modelIndex int) bool {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
+	cb.mu.RLock()
 	if modelIndex < 0 || modelIndex >= len(cb.models) {
+		cb.mu.RUnlock()
 		return true // Safe default
 	}
 
 	circuit := &cb.models[modelIndex]
+	state := circuit.state
 
-	switch circuit.state {
-	case CircuitOpen:
-		// Check if timeout has passed to transition to half-open
-		if time.Since(circuit.openedAt) >= cb.config.Timeout {
-			circuit.state = CircuitHalfOpen
-			return false
-		}
-		return true
-	case CircuitHalfOpen:
-		return false // Allow one request through
-	case CircuitClosed:
-		return false
-	default:
+	// Fast path: circuit is closed or half-open — no state transition needed.
+	if state != CircuitOpen {
+		cb.mu.RUnlock()
 		return false
 	}
+
+	// Circuit is open; check if the timeout has elapsed to transition to half-open.
+	needsTransition := time.Now().After(circuit.openedAt.Add(cb.config.Timeout))
+	if !needsTransition {
+		cb.mu.RUnlock()
+		return true
+	}
+
+	// Upgrade to write lock to perform the state transition.
+	cb.mu.RUnlock()
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	// Re-check after acquiring write lock (double-checked locking pattern).
+	if cb.models[modelIndex].state == CircuitOpen && time.Now().After(cb.models[modelIndex].openedAt.Add(cb.config.Timeout)) {
+		cb.models[modelIndex].state = CircuitHalfOpen
+	}
+	return cb.models[modelIndex].state == CircuitOpen
 }
 
 // RecordSuccess records a successful request

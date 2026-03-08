@@ -134,7 +134,7 @@ func NewServicePaper(database *db.DB) *Service {
 	}
 	service, err := NewService(database, ServiceConfig{Mode: TradingModePaper, Fees: defaultFees})
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create paper trading service")
+		log.Panic().Err(err).Msg("failed to create paper trading service")
 	}
 	return service
 }

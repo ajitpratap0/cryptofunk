@@ -95,6 +95,10 @@ func (h *HTTPServer) Start() error {
 	mux := http.NewServeMux()
 	secret := os.Getenv("ORCHESTRATOR_SECRET")
 
+	if secret == "" {
+		log.Warn().Msg("ORCHESTRATOR_SECRET is not set: /pause, /resume, and /status endpoints are unprotected")
+	}
+
 	// Health check endpoints
 	mux.HandleFunc("/health", h.handleHealth)
 	mux.HandleFunc("/readiness", h.handleReadiness)

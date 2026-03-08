@@ -727,9 +727,8 @@ func TestConvertToDBOrder(t *testing.T) {
 
 		dbOrder := exchange.convertToDBOrder(order)
 
-		// Should handle empty ID gracefully
-		assert.NotNil(t, dbOrder)
-		assert.Equal(t, order.Symbol, dbOrder.Symbol)
+		// Should return nil for empty/invalid ID to avoid corrupt DB records
+		assert.Nil(t, dbOrder, "should return nil for empty/invalid ID")
 	})
 }
 

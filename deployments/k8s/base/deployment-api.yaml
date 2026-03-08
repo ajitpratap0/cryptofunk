@@ -78,8 +78,13 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
         - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
         # NATS vars BEFORE NATS_URL
         - name: NATS_HOST
           valueFrom:

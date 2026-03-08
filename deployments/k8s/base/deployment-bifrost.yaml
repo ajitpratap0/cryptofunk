@@ -41,8 +41,13 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
         - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)"
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:

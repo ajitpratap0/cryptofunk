@@ -760,6 +760,16 @@ func (a *TechnicalAgent) calculateEMA(ctx context.Context, prices []float64, per
 	return emaValue, nil
 }
 
+// applyFallbackMarkers marks a signal as rule-based fallback and updates metrics.
+func applyFallbackMarkers(signal *TechnicalSignal) {
+	signal.Confidence *= 0.7
+	if signal.Metadata == nil {
+		signal.Metadata = make(map[string]interface{})
+	}
+	signal.Metadata["source"] = "rule_based_fallback"
+	metrics.LLMFallbackTotal.Inc()
+}
+
 // generateSignalWithLLM uses LLM to analyze indicators and generate a trading signal
 func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol string, indicators *IndicatorValues, currentPrice float64) (*TechnicalSignal, error) {
 	log.Debug().Str("symbol", symbol).Msg("Generating LLM-powered trading signal")
@@ -810,12 +820,7 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 		if rErr != nil {
 			return nil, rErr
 		}
-		signal.Confidence *= 0.7
-		if signal.Metadata == nil {
-			signal.Metadata = make(map[string]interface{})
-		}
-		signal.Metadata["source"] = "rule_based_fallback"
-		metrics.LLMFallbackTotal.Inc()
+		applyFallbackMarkers(signal)
 		return signal, nil
 	}
 
@@ -825,12 +830,7 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 		if rErr != nil {
 			return nil, rErr
 		}
-		signal.Confidence *= 0.7
-		if signal.Metadata == nil {
-			signal.Metadata = make(map[string]interface{})
-		}
-		signal.Metadata["source"] = "rule_based_fallback"
-		metrics.LLMFallbackTotal.Inc()
+		applyFallbackMarkers(signal)
 		return signal, nil
 	}
 
@@ -844,12 +844,7 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 		if rErr != nil {
 			return nil, rErr
 		}
-		signal.Confidence *= 0.7
-		if signal.Metadata == nil {
-			signal.Metadata = make(map[string]interface{})
-		}
-		signal.Metadata["source"] = "rule_based_fallback"
-		metrics.LLMFallbackTotal.Inc()
+		applyFallbackMarkers(signal)
 		return signal, nil
 	}
 

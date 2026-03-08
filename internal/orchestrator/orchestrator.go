@@ -342,6 +342,11 @@ func (o *Orchestrator) handleSignal(msg *nats.Msg) {
 		return
 	}
 
+	if len(o.config.AllowedAgents) > 0 && !slices.Contains(o.config.AllowedAgents, signal.AgentName) {
+		o.log.Warn().Str("agent", signal.AgentName).Msg("rejected signal from unrecognized agent")
+		return
+	}
+
 	// Validate signal action
 	switch signal.Signal {
 	case SignalActionBuy, SignalActionSell, SignalActionHold:

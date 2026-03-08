@@ -421,8 +421,8 @@ func (m *MockExchange) simulatePartialFills(order *Order, basePrice float64, sta
 func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
 	orderID, err := uuid.Parse(order.ID)
 	if err != nil {
-		log.Warn().Err(err).Str("order_id", order.ID).Msg("invalid order ID, using zero UUID for DB operation")
-		orderID = uuid.Nil
+		log.Error().Err(err).Str("order_id", order.ID).Msg("invalid order ID, skipping DB operation")
+		return nil
 	}
 
 	var price *float64
