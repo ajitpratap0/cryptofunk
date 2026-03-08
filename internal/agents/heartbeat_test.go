@@ -151,8 +151,8 @@ func TestHeartbeatPublisher_StartStop(t *testing.T) {
 		if hb.AgentType != "technical" {
 			t.Errorf("Expected agent type 'technical', got '%s'", hb.AgentType)
 		}
-		if hb.Status != "healthy" {
-			t.Errorf("Expected status 'healthy', got '%s'", hb.Status)
+		if hb.Status != "HEALTHY" {
+			t.Errorf("Expected status 'HEALTHY', got '%s'", hb.Status)
 		}
 		if hb.Timestamp.IsZero() {
 			t.Error("Timestamp should not be zero")

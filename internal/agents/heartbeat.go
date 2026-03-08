@@ -113,7 +113,7 @@ func (h *HeartbeatPublisher) publish() {
 		AgentName: h.agentName,
 		AgentType: h.agentType,
 		Timestamp: time.Now(),
-		Status:    "healthy",
+		Status:    "HEALTHY",
 	}
 
 	data, err := json.Marshal(heartbeat)
