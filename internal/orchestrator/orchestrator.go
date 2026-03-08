@@ -83,7 +83,7 @@ type DecisionContext struct {
 // TradingDecision represents the final orchestrator decision
 type TradingDecision struct {
 	Symbol              string                 `json:"symbol"`
-	Action              SignalAction            `json:"action"` // BUY, SELL, HOLD
+	Action              SignalAction           `json:"action"` // BUY, SELL, HOLD
 	Confidence          float64                `json:"confidence"`
 	Consensus           float64                `json:"consensus"` // 0.0-1.0
 	ParticipatingAgents int                    `json:"participating_agents"`

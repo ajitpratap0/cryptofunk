@@ -188,13 +188,13 @@ func (bb *BeliefBase) GetConfidence() float64 {
 
 // TechnicalSignal represents a trading signal generated from technical analysis
 type TechnicalSignal struct {
-	Timestamp  time.Time        `json:"timestamp"`
-	Symbol     string           `json:"symbol"`
-	Signal     string           `json:"signal"`     // "BUY", "SELL", "HOLD"
-	Confidence float64          `json:"confidence"` // 0.0 to 1.0
-	Indicators *IndicatorValues `json:"indicators"`
-	Reasoning  string           `json:"reasoning"` // Human-readable explanation
-	Price      float64          `json:"price"`     // Current price at signal generation
+	Timestamp  time.Time              `json:"timestamp"`
+	Symbol     string                 `json:"symbol"`
+	Signal     string                 `json:"signal"`     // "BUY", "SELL", "HOLD"
+	Confidence float64                `json:"confidence"` // 0.0 to 1.0
+	Indicators *IndicatorValues       `json:"indicators"`
+	Reasoning  string                 `json:"reasoning"` // Human-readable explanation
+	Price      float64                `json:"price"`     // Current price at signal generation
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 

@@ -562,10 +562,10 @@ func TestSqrt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := tt.input
-		if input < 0 {
-			input = 0
-		}
-		result := math.Sqrt(input)
+			if input < 0 {
+				input = 0
+			}
+			result := math.Sqrt(input)
 			if abs(result-tt.expected) > tt.tolerance {
 				t.Errorf("Expected %.4f, got %.4f", tt.expected, result)
 			}
