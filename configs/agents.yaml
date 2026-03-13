@@ -44,6 +44,11 @@ analysis_agents:
         type: "http"
         url: "http://localhost:8093/mcp"
 
+      # Market Data server (fallback when CoinGecko is unavailable)
+      - name: "market_data"
+        type: "http"
+        url: "http://localhost:8090/mcp"
+
     # Decision cycle timing
     step_interval: "30s"  # Analyze market every 30 seconds
 

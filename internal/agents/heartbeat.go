@@ -15,7 +15,7 @@ import (
 type HeartbeatConfig struct {
 	// Interval between heartbeat messages (default: 30 seconds)
 	Interval time.Duration
-	// Topic is the NATS topic to publish heartbeats to (e.g., "agents.heartbeat")
+	// Topic is the NATS topic to publish heartbeats to (e.g., "cryptofunk.agent.heartbeat")
 	Topic string
 }
 
@@ -23,7 +23,7 @@ type HeartbeatConfig struct {
 func DefaultHeartbeatConfig() HeartbeatConfig {
 	return HeartbeatConfig{
 		Interval: 30 * time.Second,
-		Topic:    "agents.heartbeat",
+		Topic:    "cryptofunk.agent.heartbeat",
 	}
 }
 
