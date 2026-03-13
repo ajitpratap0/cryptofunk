@@ -159,16 +159,16 @@ func TestCommunicationConfig(t *testing.T) {
 	cfg, err := LoadAgentConfig("../../configs/agents.yaml")
 	require.NoError(t, err)
 
-	// Test NATS topics
+	// Test NATS topics — all signal topics now unified to cryptofunk.agent.signals
 	topics := cfg.Communication.NATS.Topics
-	assert.Equal(t, "agents.analysis.technical", topics.TechnicalSignals)
-	assert.Equal(t, "agents.analysis.orderbook", topics.OrderbookSignals)
-	assert.Equal(t, "agents.analysis.sentiment", topics.SentimentSignals)
-	assert.Equal(t, "agents.strategy.decisions", topics.StrategyDecisions)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.TechnicalSignals)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.OrderbookSignals)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.SentimentSignals)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.StrategyDecisions)
 	assert.Equal(t, "agents.strategy.proposals", topics.TradeProposals)
 	assert.Equal(t, "agents.risk.approvals", topics.RiskApprovals)
 	assert.Equal(t, "agents.risk.vetoes", topics.RiskVetoes)
-	assert.Equal(t, "agents.system.heartbeat", topics.AgentHeartbeat)
+	assert.Equal(t, "cryptofunk.agent.heartbeat", topics.AgentHeartbeat)
 	assert.Equal(t, "agents.system.errors", topics.AgentErrors)
 
 	// Test NATS retention
