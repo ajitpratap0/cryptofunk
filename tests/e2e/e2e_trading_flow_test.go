@@ -194,7 +194,7 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 		case decision := <-decisionChan:
 			buyDecision = decision
 			assert.Equal(t, "BTC/USDT", decision.Symbol)
-			assert.Equal(t, "BUY", decision.Action)
+			assert.Equal(t, "BUY", string(decision.Action))
 			assert.Greater(t, decision.Confidence, 0.7)
 			assert.Greater(t, decision.Consensus, 0.6)
 			assert.Equal(t, 6, decision.ParticipatingAgents)
@@ -261,7 +261,7 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 		select {
 		case decision := <-decisionChan:
 			assert.Equal(t, "BTC/USDT", decision.Symbol)
-			assert.Equal(t, "SELL", decision.Action)
+			assert.Equal(t, "SELL", string(decision.Action))
 			assert.Greater(t, decision.Confidence, 0.6)
 			assert.Greater(t, decision.Consensus, 0.5)
 
@@ -334,7 +334,7 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 			// dominates the BUY votes from technical (weight=0.25) and trend (weight=0.30).
 			// The HOLD vote score (0.95) exceeds BUY vote score (0.25*0.90 + 0.30*0.85 = 0.48),
 			// so consensus falls below MinConsensus threshold and the decision must be HOLD.
-			assert.Equal(t, "HOLD", decision.Action, "risk agent veto must override BUY consensus")
+			assert.Equal(t, "HOLD", string(decision.Action), "risk agent veto must override BUY consensus")
 			assert.Less(t, decision.Consensus, 0.8, "consensus must be suppressed by risk agent weight")
 			t.Logf("Risk veto confirmed: Action=%s, Consensus=%.2f", decision.Action, decision.Consensus)
 		case <-time.After(3 * time.Second):

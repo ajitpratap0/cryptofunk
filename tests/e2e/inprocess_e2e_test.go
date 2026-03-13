@@ -231,7 +231,7 @@ func TestE2E_InProcess(t *testing.T) {
 			decisionMu.Unlock()
 
 			assert.Equal(t, "BTC/USDT", lastDecision.Symbol)
-			assert.Equal(t, "BUY", lastDecision.Action)
+			assert.Equal(t, "BUY", string(lastDecision.Action))
 			assert.Greater(t, lastDecision.Confidence, 0.5)
 			assert.Greater(t, lastDecision.ParticipatingAgents, 0)
 
@@ -376,7 +376,7 @@ func TestE2E_InProcess(t *testing.T) {
 
 		if decision != nil {
 			// Low confidence should result in HOLD
-			assert.Equal(t, "HOLD", decision.Action, "Low confidence signals should result in HOLD")
+			assert.Equal(t, "HOLD", string(decision.Action), "Low confidence signals should result in HOLD")
 			t.Logf("Low confidence test: action=%s (expected HOLD)", decision.Action)
 		}
 
