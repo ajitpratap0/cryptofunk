@@ -36,12 +36,15 @@ func TestAnalysisAgentConfig(t *testing.T) {
 	assert.NotNil(t, technicalAgent.Config)
 
 	// Test MCP server connections
-	require.Len(t, technicalAgent.MCPServers, 2)
+	require.Len(t, technicalAgent.MCPServers, 3)
 	assert.Equal(t, "coingecko", technicalAgent.MCPServers[0].Name)
 	assert.Equal(t, "sse", technicalAgent.MCPServers[0].Type)
 	assert.Equal(t, "technical_indicators", technicalAgent.MCPServers[1].Name)
 	assert.Equal(t, "http", technicalAgent.MCPServers[1].Type)
 	assert.Equal(t, "http://localhost:8093/mcp", technicalAgent.MCPServers[1].URL)
+	assert.Equal(t, "market_data", technicalAgent.MCPServers[2].Name)
+	assert.Equal(t, "http", technicalAgent.MCPServers[2].Type)
+	assert.Equal(t, "http://localhost:8090/mcp", technicalAgent.MCPServers[2].URL)
 
 	// Test orderbook agent (now enabled for testing)
 	orderbookAgent, ok := cfg.AnalysisAgents["orderbook"]

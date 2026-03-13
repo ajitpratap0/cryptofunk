@@ -139,6 +139,20 @@ func registerTools(srv *mcpserver.Server, service *MarketDataServer) {
 		mcpserver.WrapLegacyHandler(service.handleGetOrderbook),
 	)
 
+	// Always register get_klines — uses Binance, no CoinGecko needed
+	srv.AddToolRaw(
+		mcpserver.NewTool("get_klines", "Get historical OHLCV candlestick data from Binance", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"symbol":   map[string]interface{}{"type": "string", "description": "Binance trading pair (e.g., 'BTCUSDT')"},
+				"interval": map[string]interface{}{"type": "string", "description": "Kline interval: 1m, 5m, 15m, 1h, 4h, 1d", "default": "1h"},
+				"limit":    map[string]interface{}{"type": "number", "description": "Number of candles (max 1000, default 100)", "default": 100},
+			},
+			"required": []string{"symbol"},
+		}),
+		mcpserver.WrapLegacyHandler(service.handleGetKlines),
+	)
+
 	if service.coingeckoClient != nil {
 		srv.AddToolRaw(
 			mcpserver.NewTool("get_market_chart", "Get historical market data (prices, market caps, volumes)", map[string]interface{}{
@@ -325,4 +339,95 @@ func (s *MarketDataServer) handleGetCoinInfo(ctx context.Context, args map[strin
 		"market_data": info.MarketData,
 		"timestamp":   time.Now().Unix(),
 	}, nil
+}
+
+// handleGetKlines returns OHLCV candlestick data from Binance.
+// Returns a list of candles with open/high/low/close/volume fields.
+func (s *MarketDataServer) handleGetKlines(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	symbol, ok := args["symbol"].(string)
+	if !ok {
+		return nil, fmt.Errorf("symbol must be a string")
+	}
+
+	interval := "1h"
+	if iv, ok := args["interval"].(string); ok && iv != "" {
+		interval = iv
+	}
+
+	limit := 100
+	if l, ok := args["limit"]; ok {
+		if lf, ok := l.(float64); ok {
+			limit = int(lf)
+		}
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	// Map CoinGecko-style intervals to Binance intervals
+	switch interval {
+	case "hourly":
+		interval = "1h"
+	case "daily":
+		interval = "1d"
+	case "5m", "15m", "1h", "4h", "1d":
+		// already valid Binance intervals
+	default:
+		interval = "1h"
+	}
+
+	klines, err := s.binanceClient.NewKlinesService().
+		Symbol(symbol).
+		Interval(interval).
+		Limit(limit).
+		Do(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get klines from Binance: %w", err)
+	}
+
+	candles := make([]map[string]interface{}, 0, len(klines))
+	var prices [][]interface{}
+	var volumes [][]interface{}
+
+	for _, k := range klines {
+		openPrice := parseFloat(k.Open)
+		highPrice := parseFloat(k.High)
+		lowPrice := parseFloat(k.Low)
+		closePrice := parseFloat(k.Close)
+		vol := parseFloat(k.Volume)
+
+		candles = append(candles, map[string]interface{}{
+			"open_time": k.OpenTime,
+			"open":      k.Open,
+			"high":      k.High,
+			"low":       k.Low,
+			"close":     k.Close,
+			"volume":    k.Volume,
+		})
+
+		// CoinGecko-compatible prices format: [[timestamp_ms, price], ...]
+		prices = append(prices, []interface{}{k.OpenTime, closePrice})
+		_ = openPrice
+		_ = highPrice
+		_ = lowPrice
+		// CoinGecko-compatible volumes format: [[timestamp_ms, volume], ...]
+		volumes = append(volumes, []interface{}{k.OpenTime, vol})
+	}
+
+	return map[string]interface{}{
+		"symbol":        symbol,
+		"interval":      interval,
+		"candles":       candles,
+		"prices":        prices,        // CoinGecko-compatible format
+		"total_volumes": volumes,       // CoinGecko-compatible format
+		"count":         len(candles),
+		"timestamp":     time.Now().Unix(),
+	}, nil
+}
+
+// parseFloat safely parses a float from a string, returning 0 on error.
+func parseFloat(s string) float64 {
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
 }

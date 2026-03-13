@@ -216,7 +216,7 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	natsTopic := viper.GetString("communication.nats.topics.technical_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.analysis.technical" // Default
+		natsTopic = "cryptofunk.agent.signals" // Default
 	}
 
 	heartbeatTopic := viper.GetString("analysis_agents.technical.heartbeat_topic")
@@ -658,8 +658,14 @@ func (a *TechnicalAgent) calculateRSI(ctx context.Context, prices []float64) (*R
 		return nil, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract RSI result: %w", err)
+	}
+
 	// Parse result
-	rsi, err := parseRSIResult(result)
+	rsi, err := parseRSIResult(resultMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse RSI result: %w", err)
 	}
@@ -689,8 +695,14 @@ func (a *TechnicalAgent) calculateMACD(ctx context.Context, prices []float64) (*
 		return nil, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract MACD result: %w", err)
+	}
+
 	// Parse result
-	macd, err := parseMACDResult(result)
+	macd, err := parseMACDResult(resultMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse MACD result: %w", err)
 	}
@@ -719,8 +731,14 @@ func (a *TechnicalAgent) calculateBollingerBands(ctx context.Context, prices []f
 		return nil, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract Bollinger result: %w", err)
+	}
+
 	// Parse result
-	bollinger, err := parseBollingerBandsResult(result)
+	bollinger, err := parseBollingerBandsResult(resultMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Bollinger Bands result: %w", err)
 	}
@@ -746,8 +764,14 @@ func (a *TechnicalAgent) calculateEMA(ctx context.Context, prices []float64, per
 		return 0, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return 0, fmt.Errorf("failed to extract EMA result: %w", err)
+	}
+
 	// Parse result - EMA returns a single float64 value
-	emaValue, err := parseEMAResult(result)
+	emaValue, err := parseEMAResult(resultMap)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse EMA result: %w", err)
 	}
@@ -1289,13 +1313,14 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 		"interval":    interval,
 	})
 	if err != nil {
-		// Fallback to market-data server if CoinGecko fails
+		// Fallback to market-data server (Binance get_klines) if CoinGecko fails
 		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
-		result, err = a.CallMCPTool(ctx, "market_data", "get_market_chart", map[string]interface{}{
-			"id":          symbol,
-			"vs_currency": "usd",
-			"days":        days,
-			"interval":    interval,
+		// Map CoinGecko coin ID to Binance trading pair (e.g., bitcoin → BTCUSDT)
+		binanceSymbol := coinGeckoIDToBinanceSymbol(symbol)
+		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
+			"symbol":   binanceSymbol,
+			"interval": interval,
+			"limit":    limit,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("all market data sources failed: %w", err)
@@ -1329,6 +1354,27 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 		Msg("Candlesticks fetched")
 
 	return candlesticks, nil
+}
+
+// coinGeckoIDToBinanceSymbol converts a CoinGecko ID to a Binance trading pair.
+func coinGeckoIDToBinanceSymbol(coinGeckoID string) string {
+	mapping := map[string]string{
+		"bitcoin":  "BTCUSDT",
+		"ethereum": "ETHUSDT",
+		"solana":   "SOLUSDT",
+		"cardano":  "ADAUSDT",
+		"ripple":   "XRPUSDT",
+		"dogecoin": "DOGEUSDT",
+		"polkadot": "DOTUSDT",
+		"avalanche": "AVAXUSDT",
+		"chainlink": "LINKUSDT",
+		"polygon":  "MATICUSDT",
+	}
+	if sym, ok := mapping[coinGeckoID]; ok {
+		return sym
+	}
+	// Fallback: uppercase + USDT
+	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // calculateDaysForInterval determines how many days of data to request
@@ -1478,6 +1524,23 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// extractMCPResultMap extracts a JSON map from an MCP CallToolResult.
+// The MCP SDK wraps results as TextContent JSON strings.
+func extractMCPResultMap(result *mcp.CallToolResult) (map[string]interface{}, error) {
+	if result == nil || len(result.Content) == 0 {
+		return nil, fmt.Errorf("empty MCP result")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, fmt.Errorf("unexpected MCP content type")
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &m); err != nil {
+		return nil, fmt.Errorf("failed to parse MCP result JSON: %w", err)
+	}
+	return m, nil
 }
 
 // Result parser functions - convert MCP CallToolResult to typed indicator results
@@ -1830,6 +1893,9 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
+					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
 						continue
@@ -1873,6 +1939,9 @@ func main() {
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Register the agent's Step method so BaseAgent.Run calls it correctly
+	agent.SetStepFn(agent.Step)
 
 	// Run agent in goroutine
 	errChan := make(chan error, 1)

@@ -308,7 +308,7 @@ func (a *PolymarketAgent) Initialize(ctx context.Context) error {
 	a.natsConn = nc
 	a.natsTopic = viper.GetString("communication.nats.topics.polymarket_signals")
 	if a.natsTopic == "" {
-		a.natsTopic = "agents.strategy.polymarket"
+		a.natsTopic = "cryptofunk.agent.signals"
 	}
 
 	// Create heartbeat publisher
@@ -1188,6 +1188,9 @@ func main() {
 					}
 					if u, ok := server["url"].(string); ok {
 						sc.URL = u
+					}
+					if opt, ok := server["optional"].(bool); ok {
+						sc.Optional = opt
 					}
 					if sc.Name == "" {
 						log.Warn().Str("url", sc.URL).Msg("Skipping MCP server entry with empty name")

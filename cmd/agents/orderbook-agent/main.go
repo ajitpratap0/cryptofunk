@@ -197,7 +197,7 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	natsTopic := viper.GetString("communication.nats.topics.orderbook_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.analysis.orderbook" // Default
+		natsTopic = "cryptofunk.agent.signals" // Default
 	}
 
 	// Connect to NATS
@@ -1028,6 +1028,9 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
+					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
 						continue
@@ -1071,6 +1074,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run agent in goroutine
+	agent.SetStepFn(agent.Step)
+
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- agent.Run(ctx)

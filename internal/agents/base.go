@@ -52,6 +52,8 @@ type MCPServerConfig struct {
 	// Type controls the client transport: "http" uses Streamable HTTP (default, for our servers);
 	// "sse" uses the legacy SSE transport (for external providers like CoinGecko).
 	Type string `json:"type" yaml:"type"`
+	// Optional, if true, connection failures are logged as warnings and the agent continues without this server.
+	Optional bool `json:"optional" yaml:"optional"`
 }
 
 // AgentConfig holds configuration for an agent
@@ -105,6 +107,10 @@ type BaseAgent struct {
 	// Metrics
 	metrics       *AgentMetrics
 	metricsServer *metrics.Server
+
+	// stepFn allows subagents to register their Step implementation.
+	// When set, BaseAgent.Run calls this instead of BaseAgent.Step.
+	stepFn func(ctx context.Context) error
 }
 
 // AgentMetrics holds Prometheus metrics for an agent
@@ -253,11 +259,19 @@ func (a *BaseAgent) connectMCPServers() error {
 			// Legacy SSE transport for external providers (e.g., CoinGecko)
 			session, err = a.createSSEClient(a.ctx, serverConfig)
 			if err != nil {
+				if serverConfig.Optional {
+					a.log.Warn().Err(err).Str("name", serverConfig.Name).Msg("Optional MCP server unavailable, continuing without it")
+					continue
+				}
 				return fmt.Errorf("failed to create SSE session for %s: %w", serverConfig.Name, err)
 			}
 		case "http", "": // Streamable HTTP transport (our internal servers)
 			session, err = a.createHTTPClient(a.ctx, serverConfig)
 			if err != nil {
+				if serverConfig.Optional {
+					a.log.Warn().Err(err).Str("name", serverConfig.Name).Msg("Optional MCP server unavailable, continuing without it")
+					continue
+				}
 				return fmt.Errorf("failed to create HTTP session for %s: %w", serverConfig.Name, err)
 			}
 		default:
@@ -312,12 +326,24 @@ func (a *BaseAgent) initializeMCPConnections() error {
 	return nil
 }
 
+// SetStepFn registers a step function that Run will call instead of BaseAgent.Step.
+// Use this in subagents to ensure their Step implementation is called correctly.
+func (a *BaseAgent) SetStepFn(fn func(ctx context.Context) error) {
+	a.stepFn = fn
+}
+
 // Run starts the agent's main loop
 func (a *BaseAgent) Run(ctx context.Context) error {
 	a.log.Info().Msg("Starting agent run loop")
 
 	ticker := time.NewTicker(a.config.StepInterval)
 	defer ticker.Stop()
+
+	// Use the registered step function if provided, otherwise fall back to BaseAgent.Step
+	stepFn := a.stepFn
+	if stepFn == nil {
+		stepFn = a.Step
+	}
 
 	consecutiveFailures := 0
 
@@ -330,7 +356,7 @@ func (a *BaseAgent) Run(ctx context.Context) error {
 			a.log.Info().Msg("Agent run loop stopped by internal context")
 			return a.ctx.Err()
 		case <-ticker.C:
-			if err := a.Step(ctx); err != nil {
+			if err := stepFn(ctx); err != nil {
 				a.log.Error().Err(err).Msg("Error in agent step")
 				consecutiveFailures++
 				metrics.AgentConsecutiveStepFailures.WithLabelValues(a.config.Name).Set(float64(consecutiveFailures))

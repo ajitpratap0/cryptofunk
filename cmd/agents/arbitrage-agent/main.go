@@ -228,7 +228,7 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 	a.natsConn = nc
 	a.natsTopic = viper.GetString("communication.nats.topics.strategy_decisions")
 	if a.natsTopic == "" {
-		a.natsTopic = "agents.strategy.decisions"
+		a.natsTopic = "cryptofunk.agent.signals"
 	}
 
 	log.Info().
@@ -1321,6 +1321,9 @@ func main() {
 					}
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
+					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
 					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")

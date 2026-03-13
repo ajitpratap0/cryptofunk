@@ -57,8 +57,8 @@ func TestDefaultHeartbeatConfig(t *testing.T) {
 	if config.Interval != 30*time.Second {
 		t.Errorf("Expected interval 30s, got %v", config.Interval)
 	}
-	if config.Topic != "agents.heartbeat" {
-		t.Errorf("Expected topic 'agents.heartbeat', got '%s'", config.Topic)
+	if config.Topic != "cryptofunk.agent.heartbeat" {
+		t.Errorf("Expected topic 'cryptofunk.agent.heartbeat', got '%s'", config.Topic)
 	}
 }
 

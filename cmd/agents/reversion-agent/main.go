@@ -204,7 +204,7 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	natsTopic := viper.GetString("communication.nats.topics.reversion_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.strategy.reversion"
+		natsTopic = "cryptofunk.agent.signals"
 	}
 
 	// Connect to NATS
@@ -1489,6 +1489,8 @@ func main() {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	agent.SetStepFn(agent.Step)
+
 	// Start agent run loop in background
 	go func() {
 		if err := agent.Run(runCtx); err != nil && err != context.Canceled {
@@ -1530,9 +1532,10 @@ func convertMCPServers(servers []config.MCPServerConnection) []agents.MCPServerC
 	result := make([]agents.MCPServerConfig, len(servers))
 	for i, server := range servers {
 		result[i] = agents.MCPServerConfig{
-			Name: server.Name,
-			Type: server.Type,
-			URL:  server.URL,
+			Name:     server.Name,
+			Type:     server.Type,
+			URL:      server.URL,
+			Optional: server.Optional,
 		}
 	}
 	return result
