@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: mcp-coordinator
 spec:
   replicas: 1  # Single orchestrator coordinates all agents
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: orchestrator

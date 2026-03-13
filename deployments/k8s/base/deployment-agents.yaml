@@ -13,6 +13,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: technical-agent
@@ -149,6 +154,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: orderbook-agent
@@ -285,6 +295,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: sentiment-agent
@@ -421,6 +436,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: trend-agent
@@ -557,6 +577,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: reversion-agent
@@ -693,6 +718,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: risk-agent
@@ -829,6 +859,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: arbitrage-agent
@@ -965,6 +1000,11 @@ metadata:
     app.kubernetes.io/part-of: cryptofunk-trading-system
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # remove old pod first to avoid resource spikes
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: polymarket-agent

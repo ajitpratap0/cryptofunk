@@ -551,6 +551,10 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 	defer cancel()
 
 	session := a.mcpSessions[serverName]
+	if session == nil {
+		a.metrics.MCPErrorsTotal.Inc()
+		return nil, fmt.Errorf("MCP server %s not connected (session is nil)", serverName)
+	}
 	result, err := session.CallTool(toolCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
@@ -581,14 +585,10 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 }
 
 // reconnectMCPServer closes the existing session (if any) and creates a fresh one.
+// The stale session is not removed from the map until the new session is established,
+// so concurrent callers don't get nil from the map during reconnection.
 func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServerConfig) (*mcp.ClientSession, error) {
-	// Close stale session
-	if old, ok := a.mcpSessions[serverConfig.Name]; ok {
-		if err := old.Close(); err != nil {
-			a.log.Warn().Err(err).Str("server", serverConfig.Name).Msg("Error closing stale MCP session (ignored)")
-		}
-		delete(a.mcpSessions, serverConfig.Name)
-	}
+	old := a.mcpSessions[serverConfig.Name]
 
 	// Re-establish connection
 	var session *mcp.ClientSession
@@ -600,7 +600,15 @@ func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServ
 		session, err = a.createHTTPClient(ctx, serverConfig)
 	}
 	if err != nil {
+		// Leave old (broken) session in place; callers will keep getting errors
+		// but at least won't panic on nil dereference.
 		return nil, err
+	}
+	// Close stale session only after the new one is ready
+	if old != nil {
+		if closeErr := old.Close(); closeErr != nil {
+			a.log.Warn().Err(closeErr).Str("server", serverConfig.Name).Msg("Error closing stale MCP session (ignored)")
+		}
 	}
 	a.mcpSessions[serverConfig.Name] = session
 	a.log.Info().Str("server", serverConfig.Name).Msg("MCP session reconnected")
