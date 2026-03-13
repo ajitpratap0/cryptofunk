@@ -1545,6 +1545,10 @@ func extractMCPResultMap(result *mcp.CallToolResult) (map[string]interface{}, er
 	if !ok {
 		return nil, fmt.Errorf("unexpected MCP content type")
 	}
+	// If the tool reported an error, the text is a plain error message (not JSON)
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 	var m map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &m); err != nil {
 		return nil, fmt.Errorf("failed to parse MCP result JSON: %w", err)

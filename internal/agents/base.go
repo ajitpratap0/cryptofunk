@@ -533,9 +533,15 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 		a.metrics.MCPCallsTotal.Inc()
 	}()
 
-	// Get session for the specified server
-	session, ok := a.mcpSessions[serverName]
-	if !ok {
+	// Get server config for reconnection
+	var serverConfig *MCPServerConfig
+	for i := range a.config.MCPServers {
+		if a.config.MCPServers[i].Name == serverName {
+			serverConfig = &a.config.MCPServers[i]
+			break
+		}
+	}
+	if serverConfig == nil {
 		a.metrics.MCPErrorsTotal.Inc()
 		return nil, fmt.Errorf("MCP server %s not found", serverName)
 	}
@@ -544,17 +550,61 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 	toolCtx, cancel := context.WithTimeout(ctx, mcpToolCallTimeout)
 	defer cancel()
 
-	// Call tool on session
+	session := a.mcpSessions[serverName]
 	result, err := session.CallTool(toolCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
 	if err != nil {
-		a.metrics.MCPErrorsTotal.Inc()
-		return nil, fmt.Errorf("tool call failed: %w", err)
+		// Session may have been broken (connection reset, client closing).
+		// Attempt to reconnect once and retry.
+		a.log.Warn().Err(err).Str("server", serverName).Msg("MCP session failed, reconnecting")
+		newSession, reconnErr := a.reconnectMCPServer(ctx, *serverConfig)
+		if reconnErr != nil {
+			a.metrics.MCPErrorsTotal.Inc()
+			return nil, fmt.Errorf("tool call failed: %w (reconnect failed: %v)", err, reconnErr)
+		}
+		// Retry with fresh session
+		retryCtx, retryCancel := context.WithTimeout(ctx, mcpToolCallTimeout)
+		defer retryCancel()
+		result, err = newSession.CallTool(retryCtx, &mcp.CallToolParams{
+			Name:      toolName,
+			Arguments: arguments,
+		})
+		if err != nil {
+			a.metrics.MCPErrorsTotal.Inc()
+			return nil, fmt.Errorf("tool call failed: %w", err)
+		}
 	}
 
 	return result, nil
+}
+
+// reconnectMCPServer closes the existing session (if any) and creates a fresh one.
+func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServerConfig) (*mcp.ClientSession, error) {
+	// Close stale session
+	if old, ok := a.mcpSessions[serverConfig.Name]; ok {
+		if err := old.Close(); err != nil {
+			a.log.Warn().Err(err).Str("server", serverConfig.Name).Msg("Error closing stale MCP session (ignored)")
+		}
+		delete(a.mcpSessions, serverConfig.Name)
+	}
+
+	// Re-establish connection
+	var session *mcp.ClientSession
+	var err error
+	switch serverConfig.Type {
+	case "sse":
+		session, err = a.createSSEClient(ctx, serverConfig)
+	default: // "http" or ""
+		session, err = a.createHTTPClient(ctx, serverConfig)
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.mcpSessions[serverConfig.Name] = session
+	a.log.Info().Str("server", serverConfig.Name).Msg("MCP session reconnected")
+	return session, nil
 }
 
 // ListMCPTools lists available tools from a specific MCP server
