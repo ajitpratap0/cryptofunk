@@ -1055,7 +1055,31 @@ func (a *PolymarketAgent) fetchMarketByID(ctx context.Context, marketID string) 
 
 // publishSignal publishes a trade signal to NATS
 func (a *PolymarketAgent) publishSignal(signal *TradeSignal) error {
-	data, err := json.Marshal(signal)
+	// Map polymarket signals to orchestrator-compatible BUY/SELL/HOLD
+	orchestratorSignal := signal.Signal
+	switch orchestratorSignal {
+	case "BUY_YES", "BUY_NO":
+		orchestratorSignal = "BUY"
+	case "SELL_YES", "SELL_NO":
+		orchestratorSignal = "SELL"
+	default:
+		orchestratorSignal = "HOLD"
+	}
+
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Symbol    string `json:"symbol"` // use MarketID as symbol
+		Signal    string `json:"signal"` // orchestrator expects BUY/SELL/HOLD
+		*TradeSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:   a.GetName(),
+		AgentType:   a.GetType(),
+		Symbol:      signal.MarketID,
+		Signal:      orchestratorSignal,
+		TradeSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}

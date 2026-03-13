@@ -1221,7 +1221,24 @@ func (a *ArbitrageAgent) buildReasoning(topOpp *ArbitrageOpportunity, allOpps []
 
 // publishSignal publishes signal to NATS
 func (a *ArbitrageAgent) publishSignal(signal *ArbitrageSignal) error {
-	data, err := json.Marshal(signal)
+	// Map internal "ARBITRAGE" signal to orchestrator-compatible BUY (buy low, sell high)
+	orchestratorSignal := signal.Signal
+	if orchestratorSignal == "ARBITRAGE" {
+		orchestratorSignal = "BUY" // arbitrage = take the buy leg of the opportunity
+	}
+
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Signal    string `json:"signal"` // orchestrator expects BUY/SELL/HOLD
+		*ArbitrageSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		Signal:          orchestratorSignal,
+		ArbitrageSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}

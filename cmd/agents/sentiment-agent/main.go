@@ -806,8 +806,19 @@ func (a *SentimentAgent) generateSignal(articles []Article, fearGreed *FearGreed
 
 // publishSignal publishes a sentiment signal to NATS
 func (a *SentimentAgent) publishSignal(ctx context.Context, signal *SentimentSignal) error {
-	// Marshal signal to JSON
-	data, err := json.Marshal(signal)
+	// Wrap in orchestrator-compatible envelope; map Action → signal field
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Signal    string `json:"signal"` // orchestrator expects "signal" not "action"
+		*SentimentSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		Signal:          signal.Action,
+		SentimentSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}

@@ -1210,8 +1210,17 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 
 // publishSignal publishes a technical signal to NATS for other agents to consume
 func (a *TechnicalAgent) publishSignal(ctx context.Context, signal *TechnicalSignal) error {
-	// Marshal signal to JSON
-	data, err := json.Marshal(signal)
+	// Wrap signal in orchestrator-compatible envelope with agent identity fields
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*TechnicalSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		TechnicalSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}

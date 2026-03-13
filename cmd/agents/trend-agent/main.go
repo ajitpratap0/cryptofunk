@@ -1087,7 +1087,16 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 
 // publishSignal publishes a trend signal to NATS
 func (a *TrendAgent) publishSignal(ctx context.Context, signal *TrendSignal) error {
-	data, err := json.Marshal(signal)
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*TrendSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:   a.GetName(),
+		AgentType:   a.GetType(),
+		TrendSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}

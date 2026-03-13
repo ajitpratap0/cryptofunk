@@ -857,7 +857,19 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 
 // publishSignal publishes an order book signal to NATS
 func (a *OrderBookAgent) publishSignal(ctx context.Context, signal *OrderBookSignal) error {
-	data, err := json.Marshal(signal)
+	// Wrap in orchestrator-compatible envelope; map Action → signal field
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Signal    string `json:"signal"` // orchestrator expects "signal" not "action"
+		*OrderBookSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		Signal:          signal.Action,
+		OrderBookSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}

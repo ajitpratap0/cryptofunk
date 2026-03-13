@@ -1311,7 +1311,16 @@ func (a *ReversionAgent) generateTradingSignal(
 
 // publishSignal publishes a trading signal to NATS
 func (a *ReversionAgent) publishSignal(ctx context.Context, signal *ReversionSignal) error {
-	data, err := json.Marshal(signal)
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*ReversionSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		ReversionSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
