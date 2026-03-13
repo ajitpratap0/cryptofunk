@@ -52,12 +52,8 @@ func WrapLegacyHandler(fn func(ctx context.Context, args map[string]interface{})
 func sanitizeForJSON(v interface{}) interface{} {
 	switch val := v.(type) {
 	case float64:
-		if math.IsInf(val, 1) {
-			return "Infinity"
-		} else if math.IsInf(val, -1) {
-			return "-Infinity"
-		} else if math.IsNaN(val) {
-			return "NaN"
+		if math.IsInf(val, 0) || math.IsNaN(val) {
+			return nil // marshal as JSON null — consumers must handle missing data
 		}
 		return val
 	case map[string]interface{}:

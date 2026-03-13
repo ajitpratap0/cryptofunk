@@ -1671,6 +1671,8 @@ func extractFloat64(m map[string]interface{}, key string) (float64, error) {
 	}
 
 	switch v := val.(type) {
+	case nil:
+		return 0, fmt.Errorf("key '%s' is null (insufficient data)", key)
 	case float64:
 		return v, nil
 	case float32:
