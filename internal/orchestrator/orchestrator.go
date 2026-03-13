@@ -247,7 +247,7 @@ func (o *Orchestrator) Initialize(ctx context.Context) error {
 	o.log.Info().Msg("Initializing orchestrator")
 
 	// Create cancellable context
-	o.ctx, o.cancel = context.WithCancel(ctx)
+	o.ctx, o.cancel = context.WithCancel(ctx) //nolint:gosec
 
 	// Load persisted pause state from database
 	if o.db != nil {

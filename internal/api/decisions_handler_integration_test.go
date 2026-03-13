@@ -44,7 +44,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 	testDecisions := insertTestDecisions(t, tc.DB.Pool(), ctx)
 
 	t.Run("ListDecisions", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -60,7 +60,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 	})
 
 	t.Run("ListDecisions_WithFilters", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions?symbol=BTC/USDT&outcome=SUCCESS", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions?symbol=BTC/USDT&outcome=SUCCESS", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -81,7 +81,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 	})
 
 	t.Run("ListDecisions_WithPagination", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions?limit=2&offset=0", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions?limit=2&offset=0", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -101,7 +101,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 			t.Skip("No test decisions available")
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions/"+testDecisions[0].String(), nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions/"+testDecisions[0].String(), nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -115,7 +115,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 
 	t.Run("GetDecision_NotFound", func(t *testing.T) {
 		nonExistentID := uuid.New()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions/"+nonExistentID.String(), nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions/"+nonExistentID.String(), nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -123,7 +123,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 	})
 
 	t.Run("GetDecision_InvalidID", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions/invalid-uuid", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions/invalid-uuid", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -131,7 +131,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 	})
 
 	t.Run("GetStats", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions/stats", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions/stats", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -150,7 +150,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/decisions/search", bytes.NewReader(jsonBody))
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/decisions/search", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -172,7 +172,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 		body := SearchRequest{}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/decisions/search", bytes.NewReader(jsonBody))
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/decisions/search", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -192,7 +192,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 		}
 		jsonBody, _ := json.Marshal(body)
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/decisions/search", bytes.NewReader(jsonBody))
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/decisions/search", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -205,7 +205,7 @@ func TestDecisionEndpoints_Integration(t *testing.T) {
 			t.Skip("No test decisions available")
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/decisions/"+testDecisions[0].String()+"/similar?limit=5", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/decisions/"+testDecisions[0].String()+"/similar?limit=5", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 

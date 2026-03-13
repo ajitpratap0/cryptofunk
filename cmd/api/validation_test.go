@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -49,10 +50,10 @@ func TestInputValidationSQLInjection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var req *http.Request
 			if tt.body != "" {
-				req = httptest.NewRequest(tt.method, tt.endpoint, bytes.NewBufferString(tt.body))
+				req = httptest.NewRequestWithContext(context.Background(), tt.method, tt.endpoint, bytes.NewBufferString(tt.body))
 				req.Header.Set("Content-Type", "application/json")
 			} else {
-				req = httptest.NewRequest(tt.method, tt.endpoint, nil)
+				req = httptest.NewRequestWithContext(context.Background(), tt.method, tt.endpoint, nil)
 			}
 			w := httptest.NewRecorder()
 
@@ -85,7 +86,7 @@ func TestInputValidationXSS(t *testing.T) {
 			}
 			jsonBody, _ := json.Marshal(body)
 
-			req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewBuffer(jsonBody))
+			req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewBuffer(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -114,7 +115,7 @@ func TestInputValidationOversizedPayload(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(body)
 
-	req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewBuffer(jsonBody))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -140,7 +141,7 @@ func TestInputValidationInvalidJSON(t *testing.T) {
 
 	for i, payload := range invalidJSONPayloads {
 		t.Run("InvalidJSON_"+string(rune(i+'0')), func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewBufferString(payload))
+			req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewBufferString(payload))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -176,7 +177,7 @@ func TestInputValidationCommandInjection(t *testing.T) {
 	for i, payload := range commandInjectionPayloads {
 		t.Run("CommandInjection_"+string(rune(i+'0')), func(t *testing.T) {
 			// Try command injection in agent name parameter
-			req := httptest.NewRequest("GET", "/api/v1/agents/"+payload, nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/agents/"+payload, nil)
 			w := httptest.NewRecorder()
 
 			server.router.ServeHTTP(w, req)
@@ -204,7 +205,7 @@ func TestInputValidationPathTraversal(t *testing.T) {
 
 	for _, payload := range pathTraversalPayloads {
 		t.Run("PathTraversal_"+payload[:10], func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/api/v1/agents/"+payload, nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/agents/"+payload, nil)
 			w := httptest.NewRecorder()
 
 			server.router.ServeHTTP(w, req)
@@ -248,7 +249,7 @@ func TestHTTPMethodRestrictions(t *testing.T) {
 	for _, tt := range tests {
 		for _, method := range tt.bannedMethods {
 			t.Run(tt.endpoint+"_"+method, func(t *testing.T) {
-				req := httptest.NewRequest(method, tt.endpoint, nil)
+				req := httptest.NewRequestWithContext(context.Background(), method, tt.endpoint, nil)
 				w := httptest.NewRecorder()
 
 				server.router.ServeHTTP(w, req)
@@ -269,7 +270,7 @@ func TestCORSHeaders(t *testing.T) {
 	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
 	// Test OPTIONS preflight request
-	req := httptest.NewRequest("OPTIONS", "/api/v1/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "OPTIONS", "/api/v1/health", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	w := httptest.NewRecorder()
@@ -298,7 +299,7 @@ func TestContentTypeValidation(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(body)
 
-	req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewBuffer(jsonBody))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "text/plain") // Wrong content type
 	w := httptest.NewRecorder()
 

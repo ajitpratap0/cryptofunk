@@ -203,8 +203,9 @@ func sanitizeForPrompt(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\x00", "")
-	if len(s) > 200 {
-		s = s[:200]
+	runes := []rune(s)
+	if len(runes) > 200 {
+		return string(runes[:200])
 	}
 	return s
 }

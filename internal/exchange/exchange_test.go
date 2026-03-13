@@ -675,7 +675,8 @@ func TestConvertToDBOrder(t *testing.T) {
 			FilledAt:     &filledAt,
 		}
 
-		dbOrder := exchange.convertToDBOrder(order)
+		dbOrder, err := exchange.convertToDBOrder(order)
+		require.NoError(t, err)
 
 		assert.Equal(t, order.Symbol, dbOrder.Symbol)
 		assert.Equal(t, "PAPER", dbOrder.Exchange)
@@ -704,7 +705,8 @@ func TestConvertToDBOrder(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		dbOrder := exchange.convertToDBOrder(order)
+		dbOrder, err := exchange.convertToDBOrder(order)
+		require.NoError(t, err)
 
 		assert.Nil(t, dbOrder.Price) // Price should be nil when zero
 		assert.Equal(t, db.OrderTypeLimit, dbOrder.Type)
@@ -725,10 +727,11 @@ func TestConvertToDBOrder(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		dbOrder := exchange.convertToDBOrder(order)
+		dbOrder, err := exchange.convertToDBOrder(order)
 
-		// Should return nil for empty/invalid ID to avoid corrupt DB records
-		assert.Nil(t, dbOrder, "should return nil for empty/invalid ID")
+		// Should return an error for empty/invalid ID to avoid corrupt DB records
+		assert.Error(t, err, "should return error for empty/invalid ID")
+		assert.Nil(t, dbOrder, "should return nil order for empty/invalid ID")
 	})
 }
 

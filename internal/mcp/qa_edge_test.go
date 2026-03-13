@@ -157,7 +157,7 @@ func TestQA_AuthMiddleware_EmptyHeader_Returns401(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil)
 			if tc.header != "" {
 				req.Header.Set("Authorization", tc.header)
 			}
@@ -231,14 +231,14 @@ func TestQA_RateLimiter_BlocksAfterBurst(t *testing.T) {
 
 	// First: should pass (burst available)
 	rr1 := httptest.NewRecorder()
-	handler.ServeHTTP(rr1, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+	handler.ServeHTTP(rr1, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil))
 	if rr1.Code != http.StatusOK {
 		t.Errorf("first request: want 200, got %d", rr1.Code)
 	}
 
 	// Second (immediate): burst exhausted → 429
 	rr2 := httptest.NewRecorder()
-	handler.ServeHTTP(rr2, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+	handler.ServeHTTP(rr2, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp", nil))
 	if rr2.Code != http.StatusTooManyRequests {
 		t.Errorf("second request: want 429, got %d (rate limiter not blocking)", rr2.Code)
 	}

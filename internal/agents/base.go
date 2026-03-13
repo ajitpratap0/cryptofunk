@@ -193,7 +193,7 @@ func (a *BaseAgent) Initialize(ctx context.Context) error {
 	a.log.Info().Msg("Initializing agent")
 
 	// Create cancellable context
-	a.ctx, a.cancel = context.WithCancel(ctx)
+	a.ctx, a.cancel = context.WithCancel(ctx) //nolint:gosec
 
 	// Connect to all configured MCP servers
 	if err := a.connectMCPServers(); err != nil {
@@ -334,7 +334,7 @@ func (a *BaseAgent) Run(ctx context.Context) error {
 				a.log.Error().Err(err).Msg("Error in agent step")
 				consecutiveFailures++
 				metrics.AgentConsecutiveStepFailures.WithLabelValues(a.config.Name).Set(float64(consecutiveFailures))
-				if consecutiveFailures >= 10 {
+				if consecutiveFailures == 10 {
 					a.log.Warn().Int("failures", consecutiveFailures).Msg("agent entering degraded state")
 				}
 				// Continue running despite errors

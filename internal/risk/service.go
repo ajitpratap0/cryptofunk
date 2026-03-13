@@ -3,6 +3,7 @@ package risk
 import (
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/rs/zerolog/log"
 )
@@ -131,7 +132,7 @@ func (s *Service) CalculateVaR(args map[string]interface{}) (interface{}, error)
 	// Sort returns in ascending order
 	sortedReturns := make([]float64, len(returns))
 	copy(sortedReturns, returns)
-	sortFloat64s(sortedReturns)
+	sort.Float64s(sortedReturns)
 
 	// Find the percentile corresponding to (1 - confidence_level)
 	// For 95% confidence, we look at the 5th percentile (worst 5% of returns)
@@ -710,17 +711,5 @@ func getProjectedMetrics(positions []Position, trade Trade, newTotalExposure flo
 		"open_positions":      newPositionCount,
 		"total_exposure":      newTotalExposure,
 		"utilization_percent": utilizationPercent,
-	}
-}
-
-// sortFloat64s sorts a float64 slice in ascending order (simple bubble sort for small arrays)
-func sortFloat64s(arr []float64) {
-	n := len(arr)
-	for i := 0; i < n-1; i++ {
-		for j := 0; j < n-i-1; j++ {
-			if arr[j] > arr[j+1] {
-				arr[j], arr[j+1] = arr[j+1], arr[j]
-			}
-		}
 	}
 }

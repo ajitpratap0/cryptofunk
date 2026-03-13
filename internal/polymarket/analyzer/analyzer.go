@@ -54,7 +54,7 @@ func Analyze(market *gamma.Market) (*Analysis, error) {
 
 func buildPrompt(market *gamma.Market, articles []news.Article) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`You are a prediction market analyst. Analyze this Polymarket question and estimate the TRUE probability of YES.
+	fmt.Fprintf(&sb, `You are a prediction market analyst. Analyze this Polymarket question and estimate the TRUE probability of YES.
 
 Market Question: %s
 Description: %s
@@ -63,12 +63,12 @@ Current NO price: %.2f
 End Date: %s
 Volume: $%.0f
 
-`, market.Question, market.Description, market.OutcomeYesPrice, market.OutcomeNoPrice, market.EndDate, market.Volume))
+`, market.Question, market.Description, market.OutcomeYesPrice, market.OutcomeNoPrice, market.EndDate, market.Volume)
 
 	if len(articles) > 0 {
 		sb.WriteString("Recent relevant news:\n")
 		for i, a := range articles {
-			sb.WriteString(fmt.Sprintf("%d. %s (%s)\n   %s\n", i+1, a.Title, a.PubDate, a.Description))
+			fmt.Fprintf(&sb, "%d. %s (%s)\n   %s\n", i+1, a.Title, a.PubDate, a.Description)
 		}
 		sb.WriteString("\n")
 	}

@@ -2,6 +2,7 @@ package risk
 
 import (
 	"math"
+	"sort"
 	"testing"
 )
 
@@ -608,7 +609,7 @@ func TestSortFloat64s(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sortFloat64s(tt.input)
+			sort.Float64s(tt.input)
 			if len(tt.input) != len(tt.expected) {
 				t.Fatalf("Length mismatch: expected %d, got %d", len(tt.expected), len(tt.input))
 			}

@@ -7,6 +7,7 @@
 package api
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -102,7 +103,7 @@ func TestRunBacktest(t *testing.T) {
 			body, err := json.Marshal(tt.requestBody)
 			require.NoError(t, err)
 
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/backtest/run", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/backtest/run", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -166,7 +167,7 @@ func TestGetBacktest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/backtest/"+tt.jobID, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/backtest/"+tt.jobID, nil)
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)
@@ -231,7 +232,7 @@ func TestListBacktests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/backtest"+tt.queryParams, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/backtest"+tt.queryParams, nil)
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)
@@ -281,7 +282,7 @@ func TestDeleteBacktest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodDelete, "/api/v1/backtest/"+tt.jobID, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/backtest/"+tt.jobID, nil)
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)
@@ -336,7 +337,7 @@ func TestCancelBacktest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/backtest/"+tt.jobID+"/cancel", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/backtest/"+tt.jobID+"/cancel", nil)
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)

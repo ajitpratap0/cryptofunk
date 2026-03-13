@@ -190,7 +190,7 @@ func TestConfigEndpoint_Unit(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.GET("/api/v1/config", server.handleGetConfig)
 
-	req := httptest.NewRequest("GET", "/api/v1/config", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/config", nil)
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
 
@@ -215,7 +215,7 @@ func TestStatusEndpoint_Unit(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.GET("/api/v1/status", server.handleStatus)
 
-	req := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/status", nil)
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
 
@@ -245,7 +245,7 @@ func TestUpdateConfig_Unit(t *testing.T) {
 
 	// Test valid update
 	body := `{"trading_mode": "paper", "initial_capital": 5000}`
-	req := httptest.NewRequest("PATCH", "/api/v1/config", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "PATCH", "/api/v1/config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -270,7 +270,7 @@ func TestUpdateConfig_InvalidMode(t *testing.T) {
 	server.router.PATCH("/api/v1/config", server.handleUpdateConfig)
 
 	body := `{"trading_mode": "invalid_mode"}`
-	req := httptest.NewRequest("PATCH", "/api/v1/config", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "PATCH", "/api/v1/config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -286,7 +286,7 @@ func TestUpdateConfig_EmptyBody(t *testing.T) {
 	server.router.PATCH("/api/v1/config", server.handleUpdateConfig)
 
 	body := `{}`
-	req := httptest.NewRequest("PATCH", "/api/v1/config", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "PATCH", "/api/v1/config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -302,7 +302,7 @@ func TestUpdateConfig_RiskParams(t *testing.T) {
 	server.router.PATCH("/api/v1/config", server.handleUpdateConfig)
 
 	body := `{"max_position_size": 0.05, "max_daily_loss": 0.03, "max_drawdown": 0.15}`
-	req := httptest.NewRequest("PATCH", "/api/v1/config", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "PATCH", "/api/v1/config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -320,7 +320,7 @@ func TestPlaceOrder_InvalidJSON(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.POST("/api/v1/orders", server.handlePlaceOrder)
 
-	req := httptest.NewRequest("POST", "/api/v1/orders", strings.NewReader("invalid json"))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", strings.NewReader("invalid json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -336,7 +336,7 @@ func TestPlaceOrder_MissingSymbol(t *testing.T) {
 	server.router.POST("/api/v1/orders", server.handlePlaceOrder)
 
 	body := `{"side": "BUY", "type": "MARKET", "quantity": 0.01}`
-	req := httptest.NewRequest("POST", "/api/v1/orders", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -352,7 +352,7 @@ func TestPlaceOrder_LimitNoPrice(t *testing.T) {
 	server.router.POST("/api/v1/orders", server.handlePlaceOrder)
 
 	body := `{"symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "quantity": 0.01}`
-	req := httptest.NewRequest("POST", "/api/v1/orders", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -367,7 +367,7 @@ func TestStartTrading_InvalidJSON(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.POST("/api/v1/trade/start", server.handleStartTrading)
 
-	req := httptest.NewRequest("POST", "/api/v1/trade/start", strings.NewReader("bad"))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/start", strings.NewReader("bad"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -383,7 +383,7 @@ func TestStartTrading_MissingFields(t *testing.T) {
 	server.router.POST("/api/v1/trade/start", server.handleStartTrading)
 
 	body := `{"mode": "paper"}`
-	req := httptest.NewRequest("POST", "/api/v1/trade/start", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/start", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -399,7 +399,7 @@ func TestStopTrading_InvalidUUID(t *testing.T) {
 	server.router.POST("/api/v1/trade/stop", server.handleStopTrading)
 
 	body := `{"session_id": "not-a-uuid", "final_capital": 10000}`
-	req := httptest.NewRequest("POST", "/api/v1/trade/stop", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/stop", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -414,7 +414,7 @@ func TestCancelOrder_InvalidUUID(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.DELETE("/api/v1/orders/:id", server.handleCancelOrder)
 
-	req := httptest.NewRequest("DELETE", "/api/v1/orders/invalid-id", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "DELETE", "/api/v1/orders/invalid-id", nil)
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
 
@@ -428,7 +428,7 @@ func TestGetOrder_InvalidUUID(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.GET("/api/v1/orders/:id", server.handleGetOrder)
 
-	req := httptest.NewRequest("GET", "/api/v1/orders/not-a-uuid", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/orders/not-a-uuid", nil)
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
 
@@ -442,7 +442,7 @@ func TestPauseTrading_InvalidJSON(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.POST("/api/v1/trade/pause", server.handlePauseTrading)
 
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", strings.NewReader("bad"))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", strings.NewReader("bad"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -458,7 +458,7 @@ func TestPauseTrading_InvalidUUID(t *testing.T) {
 	server.router.POST("/api/v1/trade/pause", server.handlePauseTrading)
 
 	body := `{"session_id": "not-a-uuid"}`
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -473,7 +473,7 @@ func TestResumeTrading_InvalidJSON(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.POST("/api/v1/trade/resume", server.handleResumeTrading)
 
-	req := httptest.NewRequest("POST", "/api/v1/trade/resume", strings.NewReader("bad"))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/resume", strings.NewReader("bad"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -489,7 +489,7 @@ func TestResumeTrading_InvalidUUID(t *testing.T) {
 	server.router.POST("/api/v1/trade/resume", server.handleResumeTrading)
 
 	body := `{"session_id": "not-a-uuid"}`
-	req := httptest.NewRequest("POST", "/api/v1/trade/resume", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/resume", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
@@ -504,7 +504,7 @@ func TestListPositions_InvalidSessionID(t *testing.T) {
 	server.router.Use(gin.Recovery())
 	server.router.GET("/api/v1/positions", server.handleListPositions)
 
-	req := httptest.NewRequest("GET", "/api/v1/positions?session_id=bad-uuid", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/positions?session_id=bad-uuid", nil)
 	w := httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
 
@@ -522,7 +522,7 @@ func TestRateLimiterMiddleware_Headers(t *testing.T) {
 	})
 
 	// First request
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -543,13 +543,13 @@ func TestRateLimiterMiddleware_Blocked(t *testing.T) {
 	})
 
 	// First request — allowed
-	req1 := httptest.NewRequest("GET", "/test", nil)
+	req1 := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusOK, w1.Code)
 
 	// Second request — blocked
-	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusTooManyRequests, w2.Code)
@@ -587,7 +587,7 @@ func TestRateLimiterMiddleware_Config(t *testing.T) {
 	})
 
 	for i := 0; i < 200; i++ {
-		req := httptest.NewRequest("GET", "/test", nil)
+		req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -626,7 +626,7 @@ func TestSecurityHeaders(t *testing.T) {
 		c.JSON(200, gin.H{"ok": true})
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

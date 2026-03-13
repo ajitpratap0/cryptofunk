@@ -334,8 +334,14 @@ func (cm *ConsensusManager) completeDelphiRound(ctx context.Context, session *Co
 	now := time.Now()
 	round.CompletedAt = &now
 
+	// Apply default convergence threshold if unset (zero value would make everything converge trivially)
+	threshold := config.ConvergenceThreshold
+	if threshold == 0 {
+		threshold = 0.8
+	}
+
 	// Calculate statistics
-	round.Statistics = cm.calculateStatistics(round, config.ConvergenceThreshold)
+	round.Statistics = cm.calculateStatistics(round, threshold)
 
 	session.UpdatedAt = time.Now()
 
@@ -374,13 +380,15 @@ func (cm *ConsensusManager) finalizeDelphiConsensus(session *ConsensusSession, f
 	}
 	session.UpdatedAt = time.Now()
 
-	log.Info().
+	event := log.Info().
 		Str("session_id", session.ID.String()).
 		Int("rounds", session.Result.Rounds).
-		Float64("decision", session.Result.Decision.(float64)).
 		Float64("agreement", session.Result.Agreement).
-		Dur("duration", session.Result.Duration).
-		Msg("Delphi consensus reached")
+		Dur("duration", session.Result.Duration)
+	if f, ok := session.Result.Decision.(float64); ok {
+		event = event.Float64("decision", f)
+	}
+	event.Msg("Delphi consensus reached")
 
 	// Post result to blackboard
 	msg, _ := NewMessage(session.Topic, "orchestrator", session.Result)

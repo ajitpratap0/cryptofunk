@@ -112,15 +112,18 @@ func (m *MockExchange) PlaceOrder(ctx context.Context, req PlaceOrderRequest) (*
 
 	// Persist to database if available
 	if m.db != nil {
-		dbOrder := m.convertToDBOrder(order)
-		if dbOrder != nil {
-			if err := m.db.InsertOrder(ctx, dbOrder); err != nil {
-				log.Error().
-					Err(err).
-					Str("order_id", order.ID).
-					Msg("Failed to persist order to database")
-				// Continue even if database insert fails (paper trading mode)
-			}
+		dbOrder, err := m.convertToDBOrder(order)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("order_id", order.ID).
+				Msg("Failed to convert order for database, skipping persist")
+		} else if err := m.db.InsertOrder(ctx, dbOrder); err != nil {
+			log.Error().
+				Err(err).
+				Str("order_id", order.ID).
+				Msg("Failed to persist order to database")
+			// Continue even if database insert fails (paper trading mode)
 		}
 	}
 
@@ -418,11 +421,10 @@ func (m *MockExchange) simulatePartialFills(order *Order, basePrice float64, sta
 }
 
 // convertToDBOrder converts application Order to database Order
-func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
+func (m *MockExchange) convertToDBOrder(order *Order) (*db.Order, error) {
 	orderID, err := uuid.Parse(order.ID)
 	if err != nil {
-		log.Error().Err(err).Str("order_id", order.ID).Msg("invalid order ID, skipping DB operation")
-		return nil
+		return nil, fmt.Errorf("invalid order ID %q: %w", order.ID, err)
 	}
 
 	var price *float64
@@ -458,7 +460,7 @@ func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
 		Metadata:              nil,
 		CreatedAt:             order.CreatedAt,
 		UpdatedAt:             order.UpdatedAt,
-	}
+	}, nil
 }
 
 // updateOrderStatusInDB updates order status in database

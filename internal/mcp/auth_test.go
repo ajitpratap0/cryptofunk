@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +16,7 @@ func okHandler() http.Handler {
 
 func TestAuthMiddleware_NoToken_PassThrough(t *testing.T) {
 	h := authMiddleware(AuthConfig{}, okHandler())
-	req := httptest.NewRequest("GET", "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/mcp", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -25,7 +26,7 @@ func TestAuthMiddleware_NoToken_PassThrough(t *testing.T) {
 
 func TestAuthMiddleware_ValidToken(t *testing.T) {
 	h := authMiddleware(AuthConfig{Token: "secret123"}, okHandler())
-	req := httptest.NewRequest("GET", "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer secret123")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -36,7 +37,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 
 func TestAuthMiddleware_MissingHeader(t *testing.T) {
 	h := authMiddleware(AuthConfig{Token: "secret123"}, okHandler())
-	req := httptest.NewRequest("GET", "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/mcp", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -46,7 +47,7 @@ func TestAuthMiddleware_MissingHeader(t *testing.T) {
 
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	h := authMiddleware(AuthConfig{Token: "secret123"}, okHandler())
-	req := httptest.NewRequest("GET", "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -57,7 +58,7 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 
 func TestAuthMiddleware_BadFormat(t *testing.T) {
 	h := authMiddleware(AuthConfig{Token: "secret123"}, okHandler())
-	req := httptest.NewRequest("GET", "/mcp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/mcp", nil)
 	req.Header.Set("Authorization", "Basic abc")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -68,7 +69,7 @@ func TestAuthMiddleware_BadFormat(t *testing.T) {
 
 func TestAuthMiddleware_SkipPaths(t *testing.T) {
 	h := authMiddleware(AuthConfig{Token: "secret123", SkipPaths: []string{"/health"}}, okHandler())
-	req := httptest.NewRequest("GET", "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/health", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

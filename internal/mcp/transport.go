@@ -84,7 +84,9 @@ func (s *Server) buildHTTPServer(port int) *http.Server {
 // paths surface them (M3).
 func (s *Server) buildHandler() http.Handler {
 	// Require MCP_AUTH_TOKEN for HTTP transport.
-	if os.Getenv("MCP_AUTH_TOKEN") == "" && os.Getenv("MCP_ALLOW_NO_AUTH") == "" {
+	// MCP_ALLOW_NO_AUTH must be explicitly "true" or "1" — "false" or empty will NOT suppress.
+	allowNoAuth, _ := strconv.ParseBool(os.Getenv("MCP_ALLOW_NO_AUTH"))
+	if os.Getenv("MCP_AUTH_TOKEN") == "" && !allowNoAuth {
 		s.logger.Fatal().Msg("MCP_AUTH_TOKEN must be set (or set MCP_ALLOW_NO_AUTH=true to explicitly disable auth)")
 	}
 

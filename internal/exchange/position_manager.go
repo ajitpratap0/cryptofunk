@@ -359,8 +359,8 @@ func (pm *PositionManager) averagePosition(ctx context.Context, position *db.Pos
 
 // UpdateUnrealizedPnL updates unrealized P&L for all open positions
 func (pm *PositionManager) UpdateUnrealizedPnL(ctx context.Context, prices map[string]float64) error {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	for symbol, position := range pm.openPositions {
 		currentPrice, ok := prices[symbol]

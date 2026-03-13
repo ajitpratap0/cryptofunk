@@ -366,7 +366,7 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 
 	// Update last used timestamp asynchronously
 	// Use a detached context since this is fire-and-forget, but add safety checks
-	go func(keyID uuid.UUID) {
+	go func(keyID uuid.UUID) { //nolint:gosec
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		// Only update if key is still active to prevent race with rotation/revocation

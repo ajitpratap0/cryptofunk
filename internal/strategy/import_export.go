@@ -116,8 +116,8 @@ func exportToYAML(strategy *StrategyConfig, opts ExportOptions) ([]byte, error) 
 	if opts.AddComments {
 		// Add header comment
 		buf.WriteString("# CryptoFunk Strategy Configuration\n")
-		buf.WriteString(fmt.Sprintf("# Schema Version: %s\n", strategy.Metadata.SchemaVersion))
-		buf.WriteString(fmt.Sprintf("# Exported: %s\n", time.Now().Format(time.RFC3339)))
+		fmt.Fprintf(&buf, "# Schema Version: %s\n", strategy.Metadata.SchemaVersion)
+		fmt.Fprintf(&buf, "# Exported: %s\n", time.Now().Format(time.RFC3339))
 		buf.WriteString("# Documentation: https://github.com/ajitpratap0/cryptofunk/docs/strategy.md\n")
 		buf.WriteString("\n")
 	}

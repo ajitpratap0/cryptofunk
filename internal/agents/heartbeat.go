@@ -68,16 +68,15 @@ func (h *HeartbeatPublisher) SetNATSConn(conn *nats.Conn) {
 // Start begins publishing heartbeat messages at the configured interval
 // The goroutine will publish immediately on start, then at the configured interval
 func (h *HeartbeatPublisher) Start() {
-	if h.running.Load() {
+	if !h.running.CompareAndSwap(false, true) {
 		h.log.Warn().Msg("Heartbeat publisher already running")
 		return
 	}
 	if h.natsConn == nil {
+		h.running.Store(false)
 		h.log.Warn().Msg("Cannot start heartbeat publisher: NATS connection not set")
 		return
 	}
-
-	h.running.Store(true)
 	ticker := time.NewTicker(h.config.Interval)
 
 	go func() {

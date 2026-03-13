@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -82,9 +83,12 @@ func NewHTTPServer(port int, orch *orchestrator.Orchestrator) *HTTPServer {
 
 func orchestratorAuthMiddleware(secret string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if secret != "" && r.Header.Get("X-Orchestrator-Secret") != secret {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+		if secret != "" {
+			header := r.Header.Get("X-Orchestrator-Secret")
+			if subtle.ConstantTimeCompare([]byte(header), []byte(secret)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
 		next(w, r)
 	}

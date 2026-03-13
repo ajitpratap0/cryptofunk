@@ -104,7 +104,7 @@ func TestPauseTrading_Success(t *testing.T) {
 		"session_id": session.ID.String(),
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -136,7 +136,7 @@ func TestPauseTrading_InvalidSessionID(t *testing.T) {
 		"session_id": "invalid-uuid",
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -166,7 +166,7 @@ func TestPauseTrading_NonExistentSession(t *testing.T) {
 		"session_id": uuid.New().String(),
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -217,7 +217,7 @@ func TestResumeTrading_Success(t *testing.T) {
 		"session_id": session.ID.String(),
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/trade/resume", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/resume", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -263,7 +263,7 @@ func TestOrchestratorFailure(t *testing.T) {
 		"session_id": session.ID.String(),
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -312,7 +312,7 @@ func TestRateLimiting(t *testing.T) {
 	// Make 11 requests rapidly (rate limit is 10 per minute)
 	var successCount, rateLimitedCount int
 	for i := 0; i < 11; i++ {
-		req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		// Set a consistent client IP for rate limiting
 		req.RemoteAddr = "127.0.0.1:12345"
@@ -381,7 +381,7 @@ func TestConcurrentPauseResume(t *testing.T) {
 	go func() {
 		reqBody := map[string]string{"session_id": session1.ID.String()}
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "127.0.0.1:10001"
 		w := httptest.NewRecorder()
@@ -397,7 +397,7 @@ func TestConcurrentPauseResume(t *testing.T) {
 		time.Sleep(5 * time.Millisecond) // Slight offset
 		reqBody := map[string]string{"session_id": session1.ID.String()}
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("POST", "/api/v1/trade/resume", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/resume", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "127.0.0.1:10002"
 		w := httptest.NewRecorder()
@@ -412,7 +412,7 @@ func TestConcurrentPauseResume(t *testing.T) {
 	go func() {
 		reqBody := map[string]string{"session_id": session2.ID.String()}
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "127.0.0.1:10003"
 		w := httptest.NewRecorder()
@@ -428,7 +428,7 @@ func TestConcurrentPauseResume(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 		reqBody := map[string]string{"session_id": session2.ID.String()}
 		body, _ := json.Marshal(reqBody)
-		req := httptest.NewRequest("POST", "/api/v1/trade/resume", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/resume", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.RemoteAddr = "127.0.0.1:10004"
 		w := httptest.NewRecorder()
@@ -482,7 +482,7 @@ func TestOrchestratorRetry(t *testing.T) {
 		"session_id": session.ID.String(),
 	}
 	body, _ := json.Marshal(reqBody)
-	req := httptest.NewRequest("POST", "/api/v1/trade/pause", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
