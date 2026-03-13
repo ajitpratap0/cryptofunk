@@ -18,6 +18,13 @@ const (
 	OrderSideSell OrderSide = "SELL"
 )
 
+// ToDBSide returns the uppercase string representation of the side suitable for
+// database storage. For db.OrderSide values this is already uppercase, but the
+// method provides a uniform API across OrderSide types.
+func (s OrderSide) ToDBSide() string {
+	return strings.ToUpper(string(s))
+}
+
 // OrderType represents order type (database enum)
 type OrderType string
 

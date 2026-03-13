@@ -87,14 +87,14 @@ func handleTrades(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 			if t.PnL < 0 {
 				emoji = emojiRed
 			}
-			sb.WriteString(fmt.Sprintf("%s *%d. %s %s*\n", emoji, i+1, t.Side, t.Symbol))
-			sb.WriteString(fmt.Sprintf("   Entry: $%.2f → Exit: $%.2f\n", t.Entry, t.Exit))
-			sb.WriteString(fmt.Sprintf("   Qty: %.6f\n", t.Quantity))
-			sb.WriteString(fmt.Sprintf("   P&L: $%.2f (%.2f%%)\n", t.PnL, t.PnLPct))
-			sb.WriteString(fmt.Sprintf("   %s\n\n", t.ExitAt.Format("2006-01-02 15:04:05")))
+			fmt.Fprintf(&sb, "%s *%d. %s %s*\n", emoji, i+1, t.Side, t.Symbol)
+			fmt.Fprintf(&sb, "   Entry: $%.2f → Exit: $%.2f\n", t.Entry, t.Exit)
+			fmt.Fprintf(&sb, "   Qty: %.6f\n", t.Quantity)
+			fmt.Fprintf(&sb, "   P&L: $%.2f (%.2f%%)\n", t.PnL, t.PnLPct)
+			fmt.Fprintf(&sb, "   %s\n\n", t.ExitAt.Format("2006-01-02 15:04:05"))
 			totalPnL += t.PnL
 		}
-		sb.WriteString(fmt.Sprintf("*Total P&L (shown):* $%.2f\n", totalPnL))
+		fmt.Fprintf(&sb, "*Total P&L (shown):* $%.2f\n", totalPnL)
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
@@ -125,11 +125,11 @@ func handleBalance(ctx context.Context, bot *Bot, message *tgbotapi.Message) err
 
 	var sb strings.Builder
 	sb.WriteString("*Portfolio Balance* 💰\n\n")
-	sb.WriteString(fmt.Sprintf("*Total Balance:* $%.2f\n", balance.TotalBalance))
-	sb.WriteString(fmt.Sprintf("*Available Margin:* $%.2f\n", balance.AvailableMargin))
-	sb.WriteString(fmt.Sprintf("*Used Margin:* $%.2f\n\n", balance.UsedMargin))
-	sb.WriteString(fmt.Sprintf("*Initial Capital:* $%.2f\n", balance.InitialCapital))
-	sb.WriteString(fmt.Sprintf("%s *Total P&L:* $%.2f (%.2f%%)\n", emoji, balance.TotalPnL, balance.TotalPnLPct))
+	fmt.Fprintf(&sb, "*Total Balance:* $%.2f\n", balance.TotalBalance)
+	fmt.Fprintf(&sb, "*Available Margin:* $%.2f\n", balance.AvailableMargin)
+	fmt.Fprintf(&sb, "*Used Margin:* $%.2f\n\n", balance.UsedMargin)
+	fmt.Fprintf(&sb, "*Initial Capital:* $%.2f\n", balance.InitialCapital)
+	fmt.Fprintf(&sb, "%s *Total P&L:* $%.2f (%.2f%%)\n", emoji, balance.TotalPnL, balance.TotalPnLPct)
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
 	msg.ParseMode = ParseModeMarkdown
@@ -222,11 +222,11 @@ func handleAgents(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 			case "paused":
 				statusEmoji = "⏸️"
 			}
-			sb.WriteString(fmt.Sprintf("%s *%d. %s*\n", statusEmoji, i+1, a.Name))
-			sb.WriteString(fmt.Sprintf("   Status: %s | Symbol: %s\n", a.Status, a.Symbol))
-			sb.WriteString(fmt.Sprintf("   Decisions: %d\n", a.Decisions))
+			fmt.Fprintf(&sb, "%s *%d. %s*\n", statusEmoji, i+1, a.Name)
+			fmt.Fprintf(&sb, "   Status: %s | Symbol: %s\n", a.Status, a.Symbol)
+			fmt.Fprintf(&sb, "   Decisions: %d\n", a.Decisions)
 			if !a.LastRun.IsZero() {
-				sb.WriteString(fmt.Sprintf("   Last run: %s\n", a.LastRun.Format("15:04:05")))
+				fmt.Fprintf(&sb, "   Last run: %s\n", a.LastRun.Format("15:04:05"))
 			}
 			sb.WriteString("\n")
 		}
@@ -300,9 +300,9 @@ func handleSignals(ctx context.Context, bot *Bot, message *tgbotapi.Message) err
 			case "HOLD":
 				emoji = "🟡"
 			}
-			sb.WriteString(fmt.Sprintf("%s *%d. %s — %s %s*\n", emoji, i+1, s.AgentName, s.Signal, s.Symbol))
-			sb.WriteString(fmt.Sprintf("   Confidence: %.0f%% | Price: $%.2f\n", s.Confidence*100, s.Price))
-			sb.WriteString(fmt.Sprintf("   %s\n\n", s.CreatedAt.Format("15:04:05")))
+			fmt.Fprintf(&sb, "%s *%d. %s — %s %s*\n", emoji, i+1, s.AgentName, s.Signal, s.Symbol)
+			fmt.Fprintf(&sb, "   Confidence: %.0f%% | Price: $%.2f\n", s.Confidence*100, s.Price)
+			fmt.Fprintf(&sb, "   %s\n\n", s.CreatedAt.Format("15:04:05"))
 		}
 	}
 

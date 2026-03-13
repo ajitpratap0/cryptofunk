@@ -112,7 +112,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  agent.name,
 				AgentType:  agent.typ,
 				Symbol:     "BTC/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.85,
 				Reasoning:  "Strong bullish indicators",
 				Timestamp:  time.Now(),
@@ -123,7 +123,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		// Wait for decision
 		select {
 		case decision := <-decisionChan:
-			assert.Equal(t, "BUY", decision.Action)
+			assert.Equal(t, orchestrator.SignalActionBuy, decision.Action)
 			assert.Equal(t, "BTC/USDT", decision.Symbol)
 			assert.Greater(t, decision.Confidence, 0.7)
 			assert.Greater(t, decision.Consensus, 0.8)
@@ -142,7 +142,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  name,
 				AgentType:  "analysis",
 				Symbol:     "ETH/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.75,
 				Reasoning:  "Bullish signals",
 				Timestamp:  time.Now(),
@@ -155,7 +155,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			AgentName:  "risk-agent",
 			AgentType:  "risk",
 			Symbol:     "ETH/USDT",
-			Signal:     "HOLD",
+			Signal:     orchestrator.SignalActionHold,
 			Confidence: 0.90,
 			Reasoning:  "High risk - position limits exceeded",
 			Timestamp:  time.Now(),
@@ -166,7 +166,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		select {
 		case decision := <-decisionChan:
 			// Risk agent's high weight should influence decision
-			if decision.Action == "HOLD" {
+			if decision.Action == orchestrator.SignalActionHold {
 				// Risk veto worked
 				assert.Greater(t, decision.VotingResults["HOLD"], decision.VotingResults["BUY"])
 			} else {
@@ -203,7 +203,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  agent.name,
 				AgentType:  agent.typ,
 				Symbol:     "SOL/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.35, // Below threshold
 				Reasoning:  "Weak signals",
 				Timestamp:  time.Now(),
@@ -214,7 +214,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		// Wait for decision
 		select {
 		case decision := <-decisionChan:
-			assert.Equal(t, "HOLD", decision.Action)
+			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
 			assert.Less(t, decision.Confidence, config.MinConfidence)
 		case <-time.After(5 * time.Second):
 			t.Fatal("Timeout waiting for decision")
@@ -232,7 +232,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  name,
 				AgentType:  "analysis",
 				Symbol:     "ADA/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.70,
 				Reasoning:  "Bullish",
 				Timestamp:  time.Now(),
@@ -245,7 +245,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  name,
 				AgentType:  "analysis",
 				Symbol:     "ADA/USDT",
-				Signal:     "SELL",
+				Signal:     orchestrator.SignalActionSell,
 				Confidence: 0.70,
 				Reasoning:  "Bearish",
 				Timestamp:  time.Now(),
@@ -259,7 +259,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			// With equal votes, consensus should be low
 			assert.Less(t, decision.Consensus, config.MinConsensus)
 			// Should default to HOLD
-			assert.Equal(t, "HOLD", decision.Action)
+			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
 		case <-time.After(5 * time.Second):
 			t.Fatal("Timeout waiting for decision")
 		}
@@ -328,7 +328,7 @@ func TestIntegration_AgentHealthMonitoring(t *testing.T) {
 			AgentName:  "test-agent",
 			AgentType:  "analysis",
 			Symbol:     "BTC/USDT",
-			Signal:     "BUY",
+			Signal:     orchestrator.SignalActionBuy,
 			Confidence: 0.8,
 			Reasoning:  "Test",
 			Timestamp:  time.Now(),
@@ -412,7 +412,7 @@ func TestIntegration_EventDrivenCoordination(t *testing.T) {
 				AgentName:  "agent-1",
 				AgentType:  "analysis",
 				Symbol:     "BTC/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.8,
 				Reasoning:  "Rapid test",
 				Timestamp:  time.Now(),

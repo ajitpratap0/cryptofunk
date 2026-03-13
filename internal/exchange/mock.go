@@ -112,8 +112,13 @@ func (m *MockExchange) PlaceOrder(ctx context.Context, req PlaceOrderRequest) (*
 
 	// Persist to database if available
 	if m.db != nil {
-		dbOrder := m.convertToDBOrder(order)
-		if err := m.db.InsertOrder(ctx, dbOrder); err != nil {
+		dbOrder, err := m.convertToDBOrder(order)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("order_id", order.ID).
+				Msg("Failed to convert order for database, skipping persist")
+		} else if err := m.db.InsertOrder(ctx, dbOrder); err != nil {
 			log.Error().
 				Err(err).
 				Str("order_id", order.ID).
@@ -170,9 +175,13 @@ func (m *MockExchange) CancelOrder(ctx context.Context, orderID string) (*Order,
 
 	// Update in database
 	if m.db != nil {
-		orderUUID, _ := uuid.Parse(orderID)
+		orderUUID, err := uuid.Parse(orderID)
+		if err != nil {
+			log.Error().Err(err).Str("order_id", orderID).Msg("invalid order ID, skipping DB operation")
+			return order, nil
+		}
 		status := db.ConvertOrderStatus(string(order.Status))
-		err := m.db.UpdateOrderStatus(
+		err = m.db.UpdateOrderStatus(
 			ctx,
 			orderUUID,
 			status,
@@ -412,8 +421,11 @@ func (m *MockExchange) simulatePartialFills(order *Order, basePrice float64, sta
 }
 
 // convertToDBOrder converts application Order to database Order
-func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
-	orderID, _ := uuid.Parse(order.ID)
+func (m *MockExchange) convertToDBOrder(order *Order) (*db.Order, error) {
+	orderID, err := uuid.Parse(order.ID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid order ID %q: %w", order.ID, err)
+	}
 
 	var price *float64
 	if order.Price > 0 {
@@ -448,7 +460,7 @@ func (m *MockExchange) convertToDBOrder(order *Order) *db.Order {
 		Metadata:              nil,
 		CreatedAt:             order.CreatedAt,
 		UpdatedAt:             order.UpdatedAt,
-	}
+	}, nil
 }
 
 // updateOrderStatusInDB updates order status in database
@@ -457,11 +469,15 @@ func (m *MockExchange) updateOrderStatusInDB(ctx context.Context, order *Order) 
 		return
 	}
 
-	orderID, _ := uuid.Parse(order.ID)
+	orderID, err := uuid.Parse(order.ID)
+	if err != nil {
+		log.Error().Err(err).Str("order_id", order.ID).Msg("invalid order ID, skipping DB operation")
+		return
+	}
 	status := db.ConvertOrderStatus(string(order.Status))
 	quoteQty := order.FilledQty * order.AvgFillPrice
 
-	err := m.db.UpdateOrderStatus(
+	err = m.db.UpdateOrderStatus(
 		ctx,
 		orderID,
 		status,
@@ -486,7 +502,11 @@ func (m *MockExchange) persistTradeInDB(ctx context.Context, orderID string, fil
 		return
 	}
 
-	orderUUID, _ := uuid.Parse(orderID)
+	orderUUID, err := uuid.Parse(orderID)
+	if err != nil {
+		log.Error().Err(err).Str("order_id", orderID).Msg("invalid order ID, skipping DB operation")
+		return
+	}
 	order := m.orders[orderID]
 
 	// Calculate commission based on order type

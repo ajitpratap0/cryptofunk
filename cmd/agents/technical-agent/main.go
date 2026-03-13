@@ -25,6 +25,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // TechnicalAgent performs technical analysis and generates trading signals
@@ -187,13 +188,14 @@ func (bb *BeliefBase) GetConfidence() float64 {
 
 // TechnicalSignal represents a trading signal generated from technical analysis
 type TechnicalSignal struct {
-	Timestamp  time.Time        `json:"timestamp"`
-	Symbol     string           `json:"symbol"`
-	Signal     string           `json:"signal"`     // "BUY", "SELL", "HOLD"
-	Confidence float64          `json:"confidence"` // 0.0 to 1.0
-	Indicators *IndicatorValues `json:"indicators"`
-	Reasoning  string           `json:"reasoning"` // Human-readable explanation
-	Price      float64          `json:"price"`     // Current price at signal generation
+	Timestamp  time.Time              `json:"timestamp"`
+	Symbol     string                 `json:"symbol"`
+	Signal     string                 `json:"signal"`     // "BUY", "SELL", "HOLD"
+	Confidence float64                `json:"confidence"` // 0.0 to 1.0
+	Indicators *IndicatorValues       `json:"indicators"`
+	Reasoning  string                 `json:"reasoning"` // Human-readable explanation
+	Price      float64                `json:"price"`     // Current price at signal generation
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // NewTechnicalAgent creates a new technical analysis agent
@@ -575,6 +577,7 @@ func (a *TechnicalAgent) Step(ctx context.Context) error {
 	// Step 4: Publish signal to NATS
 	if err := a.publishSignal(ctx, signal); err != nil {
 		log.Error().Err(err).Msg("Failed to publish signal to NATS")
+		metrics.NATSPublishErrorsTotal.Inc()
 		// Don't fail the step - log and continue
 		// Signal was still generated successfully
 	}
@@ -757,6 +760,16 @@ func (a *TechnicalAgent) calculateEMA(ctx context.Context, prices []float64, per
 	return emaValue, nil
 }
 
+// applyFallbackMarkers marks a signal as rule-based fallback and updates metrics.
+func applyFallbackMarkers(signal *TechnicalSignal) {
+	signal.Confidence *= 0.7
+	if signal.Metadata == nil {
+		signal.Metadata = make(map[string]interface{})
+	}
+	signal.Metadata["source"] = "rule_based_fallback"
+	metrics.LLMFallbackTotal.Inc()
+}
+
 // generateSignalWithLLM uses LLM to analyze indicators and generate a trading signal
 func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol string, indicators *IndicatorValues, currentPrice float64) (*TechnicalSignal, error) {
 	log.Debug().Str("symbol", symbol).Msg("Generating LLM-powered trading signal")
@@ -803,12 +816,22 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 	if err != nil {
 		log.Error().Err(err).Msg("LLM call failed")
 		// Fall back to rule-based signal generation
-		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		signal, rErr := a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		if rErr != nil {
+			return nil, rErr
+		}
+		applyFallbackMarkers(signal)
+		return signal, nil
 	}
 
 	if len(response.Choices) == 0 {
 		log.Warn().Msg("No choices in LLM response, falling back to rule-based")
-		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		signal, rErr := a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		if rErr != nil {
+			return nil, rErr
+		}
+		applyFallbackMarkers(signal)
+		return signal, nil
 	}
 
 	// Parse LLM response
@@ -817,7 +840,12 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 	if err := a.llmClient.ParseJSONResponse(content, &llmSignal); err != nil {
 		log.Error().Err(err).Str("content", content).Msg("Failed to parse LLM response")
 		// Fall back to rule-based signal generation
-		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		signal, rErr := a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		if rErr != nil {
+			return nil, rErr
+		}
+		applyFallbackMarkers(signal)
+		return signal, nil
 	}
 
 	// Convert LLM signal to TechnicalSignal

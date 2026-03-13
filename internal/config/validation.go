@@ -23,9 +23,9 @@ func (ve ValidationErrors) Error() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Configuration validation failed with %d error(s):\n\n", len(ve)))
+	fmt.Fprintf(&sb, "Configuration validation failed with %d error(s):\n\n", len(ve))
 	for i, err := range ve {
-		sb.WriteString(fmt.Sprintf("  %d. %s: %s\n", i+1, err.Field, err.Message))
+		fmt.Fprintf(&sb, "  %d. %s: %s\n", i+1, err.Field, err.Message)
 	}
 	sb.WriteString("\nPlease fix the above errors and try again.\n")
 	return sb.String()

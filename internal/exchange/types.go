@@ -1,6 +1,9 @@
 package exchange
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // OrderSide represents buy or sell
 type OrderSide string
@@ -9,6 +12,12 @@ const (
 	OrderSideBuy  OrderSide = "buy"
 	OrderSideSell OrderSide = "sell"
 )
+
+// ToDBSide returns the uppercase string representation of the side suitable for
+// database storage (e.g., "BUY", "SELL"), since DB enums use uppercase values.
+func (s OrderSide) ToDBSide() string {
+	return strings.ToUpper(string(s))
+}
 
 // OrderType represents market or limit order
 type OrderType string

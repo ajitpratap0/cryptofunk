@@ -25,9 +25,11 @@ spec:
         - containerPort: 8080
           name: http
           protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -53,8 +55,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -70,8 +78,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
-        - name: NATS_URL
-          value: "nats://$(NATS_HOST):$(NATS_PORT)"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
         - name: NATS_HOST
           valueFrom:
             configMapKeyRef:
@@ -82,8 +96,9 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: NATS_PORT
-        - name: ORCHESTRATOR_URL
-          value: "http://$(ORCHESTRATOR_HOST):$(ORCHESTRATOR_PORT)"
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
+        # ORCHESTRATOR vars BEFORE ORCHESTRATOR_URL
         - name: ORCHESTRATOR_HOST
           valueFrom:
             configMapKeyRef:
@@ -94,6 +109,8 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: ORCHESTRATOR_PORT
+        - name: ORCHESTRATOR_URL
+          value: "http://$(ORCHESTRATOR_HOST):$(ORCHESTRATOR_PORT)"
         - name: API_PORT
           valueFrom:
             configMapKeyRef:
@@ -114,6 +131,13 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: LOG_LEVEL
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         resources:
           requests:
             cpu: "200m"

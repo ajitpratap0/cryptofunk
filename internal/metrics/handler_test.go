@@ -15,7 +15,7 @@ func TestHandler(t *testing.T) {
 	assert.NotNil(t, handler)
 
 	// Verify it's an http.Handler
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil)
 	rec := httptest.NewRecorder()
 
 	// Handler should not panic
@@ -66,7 +66,7 @@ func TestRegisterHandlers_MultipleCalls(t *testing.T) {
 
 func TestHandler_MetricsFormat(t *testing.T) {
 	handler := Handler()
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -85,7 +85,7 @@ func TestHandler_WithDifferentHTTPMethods(t *testing.T) {
 	for _, method := range methods {
 		t.Run(method, func(t *testing.T) {
 			handler := Handler()
-			req := httptest.NewRequest(method, "/metrics", nil)
+			req := httptest.NewRequestWithContext(context.Background(), method, "/metrics", nil)
 			rec := httptest.NewRecorder()
 
 			assert.NotPanics(t, func() {
@@ -141,7 +141,7 @@ func TestHandler_ReturnsValidPrometheusMetrics(t *testing.T) {
 	RecordError("test_error", "test_component")
 
 	handler := Handler()
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -162,7 +162,7 @@ func TestHandler_ConcurrentAccess(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
-			req := httptest.NewRequest("GET", "/metrics", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			assert.Equal(t, http.StatusOK, rec.Code)

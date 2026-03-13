@@ -35,12 +35,12 @@ func BinancePositionToUnified(p *db.Position) UnifiedPosition {
 	}
 
 	if p.ExitTime != nil {
-		u.Status = "CLOSED"
+		u.Status = PositionStatusClosed
 		if p.ExitPrice != nil {
 			u.CurrentPrice = *p.ExitPrice
 		}
 	} else {
-		u.Status = "OPEN"
+		u.Status = PositionStatusOpen
 		u.CurrentPrice = p.EntryPrice // best we have without live price
 	}
 
@@ -68,7 +68,7 @@ func PolymarketPositionToUnified(p *db.PolymarketPosition, market *db.Polymarket
 		EntryPrice: p.AvgPrice,
 		Quantity:   p.Shares,
 		CostBasis:  p.CostBasis,
-		Status:     p.Status,
+		Status:     PositionStatus(p.Status),
 		OpenedAt:   p.OpenedAt,
 		ClosedAt:   p.ClosedAt,
 	}
@@ -104,7 +104,7 @@ func BinanceTradeToUnified(t *db.Trade, order *db.Order) UnifiedTrade {
 		ID:        t.ID,
 		Platform:  PlatformBinance,
 		Symbol:    t.Symbol,
-		Side:      strings.ToUpper(string(t.Side)),
+		Side:      t.Side.ToDBSide(),
 		Price:     t.Price,
 		Quantity:  t.Quantity,
 		Amount:    t.QuoteQuantity,
@@ -158,7 +158,7 @@ func NewEmptyPortfolio() *UnifiedPortfolio {
 func (p *UnifiedPortfolio) AddPosition(pos UnifiedPosition) {
 	p.Positions = append(p.Positions, pos)
 
-	if pos.Status == "OPEN" {
+	if pos.Status == PositionStatusOpen {
 		p.OpenPositions++
 		p.UnrealizedPnL += pos.UnrealizedPnL
 	}

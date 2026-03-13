@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ func TestRateLimiterMiddlewareIntegration(t *testing.T) {
 	rateLimitedCount := 0
 
 	for i := 0; i < 15; i++ {
-		req := httptest.NewRequest("POST", "/api/v1/trade/pause", nil)
+		req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/pause", nil)
 		req.RemoteAddr = "192.168.1.1:12345" // Simulated IP
 		w := httptest.NewRecorder()
 
@@ -97,7 +98,7 @@ func TestUnauthorizedAccess(t *testing.T) {
 
 	for _, ep := range protectedEndpoints {
 		t.Run(ep.method+"_"+ep.endpoint, func(t *testing.T) {
-			req := httptest.NewRequest(ep.method, ep.endpoint, nil)
+			req := httptest.NewRequestWithContext(context.Background(), ep.method, ep.endpoint, nil)
 			// No Authorization header
 			w := httptest.NewRecorder()
 
@@ -130,7 +131,7 @@ func TestMalformedAuthHeader(t *testing.T) {
 			testName = testName[:15]
 		}
 		t.Run("Header_"+testName, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/v1/orders", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", nil)
 			req.Header.Set("Authorization", header)
 			w := httptest.NewRecorder()
 
@@ -155,7 +156,7 @@ func TestConcurrentRequests(t *testing.T) {
 	done := make(chan bool, 50)
 	for i := 0; i < 50; i++ {
 		go func() {
-			req := httptest.NewRequest("GET", "/api/v1/health", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/health", nil)
 			w := httptest.NewRecorder()
 
 			server.router.ServeHTTP(w, req)
@@ -183,7 +184,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 		panic("test panic")
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/panic", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/panic", nil)
 	w := httptest.NewRecorder()
 
 	// Should not crash the server
@@ -202,7 +203,7 @@ func TestRequestLogging(t *testing.T) {
 
 	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
-	req := httptest.NewRequest("GET", "/api/v1/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
 
 	// Should not panic during logging
@@ -220,7 +221,7 @@ func TestPrometheusMetricsEndpoint(t *testing.T) {
 
 	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -251,7 +252,7 @@ func TestRootEndpoint(t *testing.T) {
 
 	// setupTestAPIServer already calls setupRoutes(), don't call it again
 
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)

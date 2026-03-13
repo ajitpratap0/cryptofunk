@@ -227,7 +227,7 @@ func TestCalculateStatistics(t *testing.T) {
 	round.Responses["agent2"] = &Response{Value: 102.0, Confidence: 0.9}
 	round.Responses["agent3"] = &Response{Value: 98.0, Confidence: 0.85}
 
-	stats := cm.calculateStatistics(round)
+	stats := cm.calculateStatistics(round, 0.8)
 
 	assert.NotNil(t, stats)
 	assert.InDelta(t, 100.0, stats.Mean, 2.0)

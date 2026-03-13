@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cryptofunk-config
+  namespace: cryptofunk
+data:
+  POSTGRES_SSLMODE: "disable"
+  CRYPTOFUNK_DATABASE_SSL_MODE: "disable"
+  CRYPTOFUNK_REDIS_HOST: "redis-service"
+  CRYPTOFUNK_REDIS_PORT: "6379"
+  CRYPTOFUNK_REDIS_DB: "0"
+  CRYPTOFUNK_NATS_URL: "nats://nats-service:4222"
+  CRYPTOFUNK_RISK_AGENT_NATS_URL: "nats://nats-service:4222"
+  MCP_ALLOW_NO_AUTH: "true"

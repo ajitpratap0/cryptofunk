@@ -193,7 +193,7 @@ func (s *APIServer) setupRoutes() {
 		configGroup := v1.Group("/config")
 		{
 			configGroup.GET("", s.rateLimiter.ReadMiddleware(), s.handleGetConfig)
-			configGroup.PATCH("", s.rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
+			configGroup.PATCH("", s.rateLimiter.ControlMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig), s.handleUpdateConfig)
 		}
 
 		// Decision explainability routes (T307) with rate limiting and optional auth

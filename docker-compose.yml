@@ -328,6 +328,7 @@ services:
       NATS_URL: nats://nats:4222
       COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MCP_ALLOW_NO_AUTH: "true"
     deploy:
       resources:
         limits:
@@ -357,6 +358,7 @@ services:
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MCP_ALLOW_NO_AUTH: "true"
     deploy:
       resources:
         limits:
@@ -386,6 +388,7 @@ services:
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MCP_ALLOW_NO_AUTH: "true"
     deploy:
       resources:
         limits:
@@ -418,6 +421,7 @@ services:
       BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
       TRADING_MODE: ${TRADING_MODE:-PAPER}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MCP_ALLOW_NO_AUTH: "true"
     deploy:
       resources:
         limits:

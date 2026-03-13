@@ -2,10 +2,13 @@ package exchange
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
 
 // TestNewService tests creating service with different configurations
@@ -468,6 +471,79 @@ func TestGetSessionStats_ErrorPaths(t *testing.T) {
 		assert.Contains(t, err.Error(), "no active trading session")
 		assert.Nil(t, result)
 	})
+}
+
+// TestPlaceMarketOrder_SafetyGuardRejects verifies that SafetyGuard blocks orders
+// exceeding configured limits when safety guards are enabled.
+func TestPlaceMarketOrder_SafetyGuardRejects(t *testing.T) {
+	cfg := ServiceConfig{
+		Mode: TradingModePaper,
+		SafetyGuard: config.SafetyGuardConfig{
+			Enabled:       true,
+			MaxOrderValue: 100.0, // Very low limit: rejects anything > $100
+		},
+	}
+	service, err := NewService(nil, cfg)
+	require.NoError(t, err)
+
+	// Set a market price so orderValue = quantity * price = 1.0 * 50000 = 50000 >> 100
+	service.exchange.SetMarketPrice("BTCUSDT", 50000.0)
+
+	result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
+		"symbol":   "BTCUSDT",
+		"side":     "buy",
+		"quantity": 1.0,
+	})
+
+	assert.Error(t, err, "order should be rejected by safety guard")
+	assert.Contains(t, err.Error(), "safety guard", "error message should mention safety guard")
+	assert.Nil(t, result, "result should be nil when order is rejected")
+}
+
+// failingExchange is an Exchange implementation that always returns an error from PlaceOrder.
+// Used to trigger circuit breaker open state.
+type failingExchange struct {
+	MockExchange
+}
+
+func (f *failingExchange) PlaceOrder(_ context.Context, _ PlaceOrderRequest) (*PlaceOrderResponse, error) {
+	return nil, fmt.Errorf("simulated exchange failure")
+}
+
+// TestPlaceMarketOrder_CircuitBreakerOpen verifies that when the circuit breaker
+// opens after repeated exchange failures, PlaceMarketOrder returns an appropriate
+// error rather than a silent partial result.
+func TestPlaceMarketOrder_CircuitBreakerOpen(t *testing.T) {
+	service := NewServicePaper(nil)
+
+	// Replace the exchange with one that always fails
+	fe := &failingExchange{}
+	fe.marketPrices = make(map[string]float64)
+	fe.orders = make(map[string]*Order)
+	fe.fills = make(map[string][]Fill)
+	service.exchange = fe
+	fe.SetMarketPrice("BTCUSDT", 50000.0)
+
+	// Trip the circuit breaker by exhausting its failure threshold.
+	// ExchangeMinRequests=5, ExchangeFailureRatio=0.6 — we need at least 5 requests
+	// with >= 60% failures. We issue enough failing calls to guarantee it opens.
+	for i := 0; i < 10; i++ {
+		_, _ = service.PlaceMarketOrder(context.Background(), map[string]interface{}{
+			"symbol":   "BTCUSDT",
+			"side":     "buy",
+			"quantity": 0.001,
+		})
+	}
+
+	// Now the circuit breaker should be open; next call must return an error.
+	result, err := service.PlaceMarketOrder(context.Background(), map[string]interface{}{
+		"symbol":   "BTCUSDT",
+		"side":     "buy",
+		"quantity": 0.001,
+	})
+
+	assert.Error(t, err, "should return error when circuit breaker is open or exchange fails")
+	assert.Nil(t, result, "result should be nil when order placement fails")
 }
 
 // TestStartSession_ErrorPaths tests error handling in StartSession

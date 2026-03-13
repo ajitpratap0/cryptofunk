@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -247,37 +248,37 @@ func (l *Logger) Query(ctx context.Context, filters *QueryFilters) ([]Event, err
 
 	// Apply filters
 	if filters.EventType != "" {
-		query += ` AND event_type = $` + string(rune('0'+argPos))
+		query += ` AND event_type = $` + fmt.Sprintf("%d", argPos)
 		args = append(args, filters.EventType)
 		argPos++
 	}
 
 	if filters.UserID != "" {
-		query += ` AND user_id = $` + string(rune('0'+argPos))
+		query += ` AND user_id = $` + fmt.Sprintf("%d", argPos)
 		args = append(args, filters.UserID)
 		argPos++
 	}
 
 	if filters.IPAddress != "" {
-		query += ` AND ip_address = $` + string(rune('0'+argPos))
+		query += ` AND ip_address = $` + fmt.Sprintf("%d", argPos)
 		args = append(args, filters.IPAddress)
 		argPos++
 	}
 
 	if !filters.StartTime.IsZero() {
-		query += ` AND timestamp >= $` + string(rune('0'+argPos))
+		query += ` AND timestamp >= $` + fmt.Sprintf("%d", argPos)
 		args = append(args, filters.StartTime)
 		argPos++
 	}
 
 	if !filters.EndTime.IsZero() {
-		query += ` AND timestamp <= $` + string(rune('0'+argPos))
+		query += ` AND timestamp <= $` + fmt.Sprintf("%d", argPos)
 		args = append(args, filters.EndTime)
 		argPos++
 	}
 
 	if filters.Success != nil {
-		query += ` AND success = $` + string(rune('0'+argPos))
+		query += ` AND success = $` + fmt.Sprintf("%d", argPos)
 		args = append(args, *filters.Success)
 		argPos++
 	}
@@ -287,7 +288,7 @@ func (l *Logger) Query(ctx context.Context, filters *QueryFilters) ([]Event, err
 
 	// Apply limit
 	if filters.Limit > 0 {
-		query += ` LIMIT $` + string(rune('0'+argPos))
+		query += ` LIMIT $` + fmt.Sprintf("%d", argPos)
 		args = append(args, filters.Limit)
 	}
 
