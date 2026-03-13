@@ -219,7 +219,7 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 		natsTopic = "agents.analysis.technical" // Default
 	}
 
-	heartbeatTopic := viper.GetString("risk_agent.heartbeat_topic")
+	heartbeatTopic := viper.GetString("analysis_agents.technical.heartbeat_topic")
 	if heartbeatTopic == "" {
 		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
 	}
@@ -1289,7 +1289,17 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 		"interval":    interval,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("MCP tool call failed: %w", err)
+		// Fallback to market-data server if CoinGecko fails
+		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
+		result, err = a.CallMCPTool(ctx, "market_data", "get_market_chart", map[string]interface{}{
+			"id":          symbol,
+			"vs_currency": "usd",
+			"days":        days,
+			"interval":    interval,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("all market data sources failed: %w", err)
+		}
 	}
 
 	// Extract text content from MCP result
