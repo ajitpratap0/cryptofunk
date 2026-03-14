@@ -320,11 +320,9 @@ func (a *ArbitrageAgent) Step(ctx context.Context) error {
 	// Step 4: Generate decision based on best opportunity
 	signal := a.generateDecision(scoredOpportunities)
 
-	// Step 5: Publish signal if actionable
-	if signal.Signal != "HOLD" {
-		if err := a.publishSignal(signal); err != nil {
-			log.Error().Err(err).Msg("Failed to publish signal")
-		}
+	// Step 5: Always publish signal so orchestrator counts this agent in consensus
+	if err := a.publishSignal(signal); err != nil {
+		log.Error().Err(err).Msg("Failed to publish signal")
 	}
 
 	return nil

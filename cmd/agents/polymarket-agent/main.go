@@ -475,7 +475,7 @@ func (a *PolymarketAgent) Shutdown(ctx context.Context) error {
 func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, error) {
 	log.Debug().Msg("Fetching active Polymarket markets")
 
-	result, err := a.CallMCPTool(ctx, "polymarket", "list_markets", map[string]interface{}{
+	result, err := a.CallMCPTool(ctx, "polymarket", "get_markets", map[string]interface{}{
 		"active": true,
 		"limit":  50,
 	})
@@ -486,7 +486,7 @@ func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, erro
 	}
 
 	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from list_markets")
+		return nil, fmt.Errorf("empty result from get_markets")
 	}
 
 	// Parse text content
