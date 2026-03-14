@@ -1368,16 +1368,16 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 // coinGeckoIDToBinanceSymbol converts a CoinGecko ID to a Binance trading pair.
 func coinGeckoIDToBinanceSymbol(coinGeckoID string) string {
 	mapping := map[string]string{
-		"bitcoin":  "BTCUSDT",
-		"ethereum": "ETHUSDT",
-		"solana":   "SOLUSDT",
-		"cardano":  "ADAUSDT",
-		"ripple":   "XRPUSDT",
-		"dogecoin": "DOGEUSDT",
-		"polkadot": "DOTUSDT",
+		"bitcoin":   "BTCUSDT",
+		"ethereum":  "ETHUSDT",
+		"solana":    "SOLUSDT",
+		"cardano":   "ADAUSDT",
+		"ripple":    "XRPUSDT",
+		"dogecoin":  "DOGEUSDT",
+		"polkadot":  "DOTUSDT",
 		"avalanche": "AVAXUSDT",
 		"chainlink": "LINKUSDT",
-		"polygon":  "MATICUSDT",
+		"polygon":   "MATICUSDT",
 	}
 	if sym, ok := mapping[coinGeckoID]; ok {
 		return sym

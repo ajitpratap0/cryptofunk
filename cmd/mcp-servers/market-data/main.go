@@ -418,8 +418,8 @@ func (s *MarketDataServer) handleGetKlines(ctx context.Context, args map[string]
 		"symbol":        symbol,
 		"interval":      interval,
 		"candles":       candles,
-		"prices":        prices,        // CoinGecko-compatible format
-		"total_volumes": volumes,       // CoinGecko-compatible format
+		"prices":        prices,  // CoinGecko-compatible format
+		"total_volumes": volumes, // CoinGecko-compatible format
 		"count":         len(candles),
 		"timestamp":     time.Now().Unix(),
 	}, nil
