@@ -80,9 +80,10 @@ func TestStrategyAgentConfig(t *testing.T) {
 	assert.NotNil(t, symbols)
 
 	// Test MCP server connections
-	require.Len(t, trendAgent.MCPServers, 2)
+	require.Len(t, trendAgent.MCPServers, 3)
 	assert.Equal(t, "coingecko", trendAgent.MCPServers[0].Name)
 	assert.Equal(t, "technical_indicators", trendAgent.MCPServers[1].Name)
+	assert.Equal(t, "market_data", trendAgent.MCPServers[2].Name)
 
 	// Test mean reversion agent (now enabled for testing)
 	reversionAgent, ok := cfg.StrategyAgents["mean_reversion"]

@@ -133,6 +133,9 @@ data:
           - name: "technical_indicators"
             type: "http"
             url: "http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp"
+          - name: "market_data"
+            type: "http"
+            url: "http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp"
         step_interval: "5m"
         config:
           symbols: ["bitcoin", "ethereum"]
@@ -165,6 +168,9 @@ data:
           - name: "technical_indicators"
             type: "http"
             url: "http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp"
+          - name: "market_data"
+            type: "http"
+            url: "http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp"
         step_interval: "1m"
         config:
           strategy: "mean_reversion"

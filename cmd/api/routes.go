@@ -137,6 +137,14 @@ func (s *APIServer) setupRoutes() {
 			agents.GET("/:name/status", s.handleGetAgentStatus)
 		}
 
+		// Session routes (read-only, apply read rate limiter)
+		sessions := v1.Group("/sessions")
+		sessions.Use(s.rateLimiter.ReadMiddleware())
+		{
+			sessions.GET("", s.handleListSessions)
+			sessions.GET("/:id", s.handleGetSession)
+		}
+
 		// Position routes (read-only, apply read rate limiter)
 		positions := v1.Group("/positions")
 		positions.Use(s.rateLimiter.ReadMiddleware())

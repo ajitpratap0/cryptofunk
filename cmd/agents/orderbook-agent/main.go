@@ -908,6 +908,9 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 
 // publishSignal publishes an order book signal to NATS
 func (a *OrderBookAgent) publishSignal(ctx context.Context, signal *OrderBookSignal) error {
+	if signal == nil {
+		return fmt.Errorf("cannot publish nil signal")
+	}
 	// Wrap in orchestrator-compatible envelope; map Action → signal field
 	type envelope struct {
 		AgentName string `json:"agent_name"`

@@ -106,20 +106,34 @@ func (bb *BeliefBase) GetConfidence() float64 {
 // MARKET DOMAIN TYPES
 // ============================================================================
 
-// PolyMarket represents a single Polymarket prediction market
+// PolyMarket represents a single Polymarket prediction market.
+// The Polymarket API returns volume and liquidity as strings, so we use
+// json.Number for flexible parsing and convert in parseNumericFields().
 type PolyMarket struct {
-	ID             string    `json:"id"`
-	Question       string    `json:"question"`
-	Category       string    `json:"category"`        // politics, crypto, tech, sports, etc.
-	OutcomeType    string    `json:"outcome_type"`    // binary, multi
-	YesPrice       float64   `json:"yes_price"`       // 0.0 - 1.0
-	NoPrice        float64   `json:"no_price"`        // 0.0 - 1.0
-	Spread         float64   `json:"spread"`          // yes_price + no_price - 1.0 (overround)
-	Volume24h      float64   `json:"volume_24h"`      // USD volume last 24h
-	Liquidity      float64   `json:"liquidity"`       // Total liquidity in the market
-	ResolutionTime time.Time `json:"resolution_time"` // When the market resolves
-	CreatedAt      time.Time `json:"created_at"`
-	Active         bool      `json:"active"`
+	ID             string      `json:"id"`
+	Question       string      `json:"question"`
+	Category       string      `json:"category"`        // politics, crypto, tech, sports, etc.
+	OutcomeType    string      `json:"outcome_type"`    // binary, multi
+	YesPrice       float64     `json:"yes_price"`       // 0.0 - 1.0
+	NoPrice        float64     `json:"no_price"`        // 0.0 - 1.0
+	Spread         float64     `json:"spread"`          // yes_price + no_price - 1.0 (overround)
+	Volume24hRaw   json.Number `json:"volume_24h"`      // USD volume last 24h (API sends string)
+	LiquidityRaw   json.Number `json:"liquidity"`       // Total liquidity (API sends string)
+	Volume24h      float64     `json:"-"`               // Parsed volume
+	Liquidity      float64     `json:"-"`               // Parsed liquidity
+	ResolutionTime time.Time   `json:"resolution_time"` // When the market resolves
+	CreatedAt      time.Time   `json:"created_at"`
+	Active         bool        `json:"active"`
+}
+
+// parseNumericFields converts json.Number fields to float64
+func (m *PolyMarket) parseNumericFields() {
+	if v, err := m.Volume24hRaw.Float64(); err == nil {
+		m.Volume24h = v
+	}
+	if v, err := m.LiquidityRaw.Float64(); err == nil {
+		m.Liquidity = v
+	}
 }
 
 // Spread returns the bid-ask spread of the market
@@ -514,6 +528,10 @@ func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, erro
 	var markets []*PolyMarket
 	if err := json.Unmarshal([]byte(textContent), &markets); err != nil {
 		return nil, fmt.Errorf("failed to parse markets: %w", err)
+	}
+
+	for _, m := range markets {
+		m.parseNumericFields()
 	}
 
 	a.beliefs.UpdateBelief("markets_fetched", len(markets), 1.0, "polymarket_api")
@@ -1045,6 +1063,7 @@ func (a *PolymarketAgent) fetchMarketByID(ctx context.Context, marketID string) 
 	if err := json.Unmarshal([]byte(textContent), &market); err != nil {
 		return nil, fmt.Errorf("failed to parse market: %w", err)
 	}
+	market.parseNumericFields()
 
 	return &market, nil
 }
