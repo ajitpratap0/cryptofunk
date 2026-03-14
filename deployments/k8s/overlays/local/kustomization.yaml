@@ -82,11 +82,8 @@ patches:
   - path: secret-local.yaml
   - path: configmap-local.yaml
   - path: configmap-alertmanager-local.yaml
-  - path: patches/remove-storage-class.yaml
-    target:
-      kind: PersistentVolumeClaim
   - path: patches/agents-config-mount.yaml
     target:
       kind: Deployment
-      labelSelector: "component=agent"
+      labelSelector: "app.kubernetes.io/component=agent"
   - path: patches/prometheus-resources.yaml

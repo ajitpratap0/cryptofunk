@@ -13,7 +13,7 @@ spec:
   resources:
     requests:
       storage: 50Gi
-  storageClassName: standard  # Change to your storage class
+  # storageClassName: standard  # Omit to use cluster default (Docker Desktop: hostpath)
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -29,7 +29,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: standard
+  # storageClassName: standard  # Omit to use cluster default (Docker Desktop: hostpath)
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -45,7 +45,7 @@ spec:
   resources:
     requests:
       storage: 30Gi
-  storageClassName: standard
+  # storageClassName: standard  # Omit to use cluster default (Docker Desktop: hostpath)
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -61,7 +61,7 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  storageClassName: standard
+  # storageClassName: standard  # Omit to use cluster default (Docker Desktop: hostpath)
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -77,7 +77,7 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  storageClassName: standard
+  # storageClassName: standard  # Omit to use cluster default (Docker Desktop: hostpath)
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

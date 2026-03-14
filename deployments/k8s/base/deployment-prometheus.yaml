@@ -21,7 +21,6 @@ spec:
       - name: prometheus
         image: prom/prometheus:v2.51.1
         securityContext:
-          runAsNonRoot: true
           allowPrivilegeEscalation: false
         ports:
         - containerPort: 9090
