@@ -704,13 +704,46 @@ func max(a, b int64) int64 {
 	return b
 }
 
-// handleDecision processes orchestrator decisions and generates risk signals
-// This is called when the orchestrator makes a decision (after other agents vote)
+// handleDecision processes orchestrator decisions to update risk beliefs.
+// The risk agent votes BEFORE the orchestrator decides; this handler lets it
+// learn from the consensus outcome and adjust its internal state accordingly.
 func (a *RiskAgent) handleDecision(msg *nats.Msg) {
-	// For this implementation, we're listening to decisions to update our beliefs
-	// The risk agent actually sends signals BEFORE the orchestrator makes decisions
-	// This handler helps us learn from outcomes
-	log.Debug().Msg("Received orchestrator decision")
+	var decision orchestrator.TradingDecision
+	if err := json.Unmarshal(msg.Data, &decision); err != nil {
+		log.Warn().Err(err).Msg("Failed to unmarshal orchestrator decision")
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Update beliefs based on the decision: if the orchestrator consistently
+	// overrides a HOLD recommendation with BUY/SELL, it may signal the risk
+	// agent's thresholds are too conservative.
+	if a.beliefs != nil {
+		a.beliefs.mu.Lock()
+		// Track the market regime implied by repeated BUY/SELL decisions
+		switch decision.Action {
+		case orchestrator.SignalActionBuy:
+			if a.beliefs.marketRegime == "bearish" {
+				a.beliefs.marketRegime = "sideways" // soften bear view
+			}
+		case orchestrator.SignalActionSell:
+			if a.beliefs.marketRegime == "bullish" {
+				a.beliefs.marketRegime = "sideways" // soften bull view
+			}
+		}
+		a.beliefs.lastUpdate = decision.Timestamp
+		a.beliefs.mu.Unlock()
+	}
+
+	log.Debug().
+		Str("symbol", decision.Symbol).
+		Str("action", string(decision.Action)).
+		Float64("confidence", decision.Confidence).
+		Float64("consensus", decision.Consensus).
+		Int("agents", decision.ParticipatingAgents).
+		Msg("Processed orchestrator decision")
 }
 
 // ============================================================================

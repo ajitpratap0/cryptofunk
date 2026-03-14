@@ -137,6 +137,14 @@ func (s *APIServer) setupRoutes() {
 			agents.GET("/:name/status", s.handleGetAgentStatus)
 		}
 
+		// Session routes (read-only, apply read rate limiter)
+		sessions := v1.Group("/sessions")
+		sessions.Use(s.rateLimiter.ReadMiddleware())
+		{
+			sessions.GET("", s.handleListSessions)
+			sessions.GET("/:id", s.handleGetSession)
+		}
+
 		// Position routes (read-only, apply read rate limiter)
 		positions := v1.Group("/positions")
 		positions.Use(s.rateLimiter.ReadMiddleware())
@@ -197,14 +205,12 @@ func (s *APIServer) setupRoutes() {
 		}
 
 		// Decision explainability routes (T307) with rate limiting and optional auth
-		// Search uses dedicated rate limiter for expensive vector operations
-		// Auth is optional - allows both authenticated and anonymous access
-		// When auth is enabled, authenticated users get enhanced audit logging
-		optionalAuth := api.OptionalAuth(s.apiKeyStore, authConfig)
+		// Decision routes require authentication when auth is enabled
+		decisionsAuth := api.AuthMiddleware(s.apiKeyStore, authConfig)
 
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
-		decisionHandler.RegisterRoutesWithRateLimiterAndAuth(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware(), optionalAuth)
+		decisionHandler.RegisterRoutesWithRateLimiterAndAuth(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware(), decisionsAuth)
 
 		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())

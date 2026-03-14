@@ -22,12 +22,16 @@ data:
           - name: "coingecko"
             type: "sse"
             url: "https://mcp.api.coingecko.com/sse"
+            optional: true
             tools:
               - "get_price"
               - "get_market_chart"
           - name: "technical_indicators"
             type: "http"
             url: "http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp"
+          - name: "market_data"
+            type: "http"
+            url: "http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp"
         step_interval: "30s"
         config:
           indicators:
@@ -66,6 +70,7 @@ data:
           - name: "coingecko"
             type: "sse"
             url: "https://mcp.api.coingecko.com/sse"
+            optional: true
             tools:
               - "get_price"
           - name: "market_data"
@@ -86,6 +91,7 @@ data:
           - name: "coingecko"
             type: "sse"
             url: "https://mcp.api.coingecko.com/sse"
+            optional: true
             tools:
               - "get_trending"
               - "get_coin_info"
@@ -120,12 +126,16 @@ data:
           - name: "coingecko"
             type: "sse"
             url: "https://mcp.api.coingecko.com/sse"
+            optional: true
             tools:
               - "get_price"
               - "get_market_chart"
           - name: "technical_indicators"
             type: "http"
             url: "http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp"
+          - name: "market_data"
+            type: "http"
+            url: "http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp"
         step_interval: "5m"
         config:
           symbols: ["bitcoin", "ethereum"]
@@ -151,12 +161,16 @@ data:
           - name: "coingecko"
             type: "sse"
             url: "https://mcp.api.coingecko.com/sse"
+            optional: true
             tools:
               - "get_price"
               - "get_market_chart"
           - name: "technical_indicators"
             type: "http"
             url: "http://technical-indicators-server.cryptofunk.svc.cluster.local:8093/mcp"
+          - name: "market_data"
+            type: "http"
+            url: "http://market-data-server.cryptofunk.svc.cluster.local:8090/mcp"
         step_interval: "1m"
         config:
           strategy: "mean_reversion"
@@ -180,6 +194,7 @@ data:
           - name: "coingecko"
             type: "sse"
             url: "https://mcp.api.coingecko.com/sse"
+            optional: true
             tools:
               - "get_simple_price"
           - name: "market_data"
@@ -312,16 +327,17 @@ data:
     communication:
       nats:
         topics:
-          technical_signals: "agents.analysis.technical"
-          orderbook_signals: "agents.analysis.orderbook"
-          sentiment_signals: "agents.analysis.sentiment"
-          trend_signals: "agents.strategy.trend"
-          strategy_decisions: "agents.strategy.decisions"
-          polymarket_signals: "agents.strategy.polymarket"
+          technical_signals: "cryptofunk.agent.signals"
+          orderbook_signals: "cryptofunk.agent.signals"
+          sentiment_signals: "cryptofunk.agent.signals"
+          trend_signals: "cryptofunk.agent.signals"
+          strategy_decisions: "cryptofunk.agent.signals"
+          reversion_signals: "cryptofunk.agent.signals"
+          polymarket_signals: "cryptofunk.agent.signals"
           trade_proposals: "agents.strategy.proposals"
           risk_approvals: "agents.risk.approvals"
           risk_vetoes: "agents.risk.vetoes"
-          agent_heartbeat: "agents.system.heartbeat"
+          agent_heartbeat: "cryptofunk.agent.heartbeat"
           agent_errors: "agents.system.errors"
         retention:
           signals: "1h"

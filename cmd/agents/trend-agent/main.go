@@ -23,6 +23,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // TrendAgent performs trend following strategy using EMA crossovers and ADX
@@ -188,7 +189,7 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 
 	natsTopic := viper.GetString("communication.nats.topics.trend_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.strategy.trend"
+		natsTopic = "cryptofunk.agent.signals"
 	}
 
 	// Connect to NATS
@@ -1022,12 +1023,12 @@ func (a *TrendAgent) callCalculateADX(ctx context.Context, prices []float64) (fl
 	return value, nil
 }
 
-// fetchPriceData fetches historical price data from CoinGecko
+// fetchPriceData fetches historical price data from CoinGecko, falling back to market-data server.
 func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float64, float64, error) {
 	// Calculate days needed for lookback candles (using hourly data)
 	days := max(1, (a.lookbackCandles+23)/24)
 
-	// Call CoinGecko MCP tool
+	// Try CoinGecko first
 	result, err := a.CallMCPTool(ctx, "coingecko", "get_market_chart", map[string]interface{}{
 		"id":          symbol,
 		"vs_currency": "usd",
@@ -1035,19 +1036,32 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 		"interval":    "hourly",
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("MCP tool call failed: %w", err)
+		// Fall back to market-data server (Binance get_klines)
+		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
+		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
+			"symbol":   binanceSymbol,
+			"interval": "1h",
+			"limit":    a.lookbackCandles,
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to fetch market data: %w", err)
+		}
 	}
 
 	// Extract text content
 	if len(result.Content) == 0 {
-		return nil, 0, fmt.Errorf("empty result from CoinGecko")
+		return nil, 0, fmt.Errorf("empty result from market data source")
 	}
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		return nil, 0, fmt.Errorf("invalid content type")
 	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 
-	// Parse JSON - CoinGecko returns {prices: [[timestamp, price], ...]}
+	// Parse JSON - response has {prices: [[timestamp, price], ...]}
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
 		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
@@ -1087,7 +1101,16 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 
 // publishSignal publishes a trend signal to NATS
 func (a *TrendAgent) publishSignal(ctx context.Context, signal *TrendSignal) error {
-	data, err := json.Marshal(signal)
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*TrendSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:   a.GetName(),
+		AgentType:   a.GetType(),
+		TrendSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1265,6 +1288,9 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
+					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
 						continue
@@ -1317,6 +1343,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run agent
+	agent.SetStepFn(agent.Step)
+
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- agent.Run(ctx)

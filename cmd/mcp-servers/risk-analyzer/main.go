@@ -635,9 +635,23 @@ func calculateSharpe(_ context.Context, args map[string]interface{}) (interface{
 		interpretation = "Excellent - exceptional risk-adjusted returns"
 	}
 
+	// Sanitize Inf/NaN for JSON serialization
+	sanitize := func(v float64) interface{} {
+		if math.IsInf(v, 1) {
+			return "Infinity"
+		}
+		if math.IsInf(v, -1) {
+			return "-Infinity"
+		}
+		if math.IsNaN(v) {
+			return "NaN"
+		}
+		return v
+	}
+
 	return map[string]interface{}{
-		"sharpe_ratio":          annualizedSharpe,
-		"sharpe_ratio_period":   sharpeRatio,
+		"sharpe_ratio":          sanitize(annualizedSharpe),
+		"sharpe_ratio_period":   sanitize(sharpeRatio),
 		"mean_return":           meanReturn,
 		"annualized_return":     annualizedReturn,
 		"std_dev":               stdDev,

@@ -35,6 +35,7 @@ analysis_agents:
       - name: "coingecko"
         type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
+        optional: true
         tools:
           - "get_price"
           - "get_market_chart"
@@ -43,6 +44,11 @@ analysis_agents:
       - name: "technical_indicators"
         type: "http"
         url: "http://localhost:8093/mcp"
+
+      # Market Data server (fallback when CoinGecko is unavailable)
+      - name: "market_data"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     # Decision cycle timing
     step_interval: "30s"  # Analyze market every 30 seconds
@@ -88,6 +94,7 @@ analysis_agents:
       - name: "coingecko"
         type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
+        optional: true
         tools:
           - "get_price"
       - name: "market_data"
@@ -111,6 +118,7 @@ analysis_agents:
       - name: "coingecko"
         type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
+        optional: true
         tools:
           - "get_trending"
           - "get_coin_info"
@@ -170,12 +178,16 @@ strategy_agents:
       - name: "coingecko"
         type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
+        optional: true
         tools:
           - "get_price"
           - "get_market_chart"
       - name: "technical_indicators"
         type: "http"
         url: "http://localhost:8093/mcp"
+      - name: "market_data"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     step_interval: "5m"  # Analyze trend every 5 minutes
 
@@ -215,12 +227,16 @@ strategy_agents:
       - name: "coingecko"
         type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
+        optional: true
         tools:
           - "get_price"
           - "get_market_chart"
       - name: "technical_indicators"
         type: "http"
         url: "http://localhost:8093/mcp"
+      - name: "market_data"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     step_interval: "1m"
 
@@ -249,6 +265,7 @@ strategy_agents:
       - name: "coingecko"
         type: "sse"
         url: "https://mcp.api.coingecko.com/sse"
+        optional: true
         tools:
           - "get_simple_price"
       - name: "market_data"
@@ -430,15 +447,16 @@ orchestration:
 communication:
   nats:
     topics:
-      # Analysis signals
-      technical_signals: "agents.analysis.technical"
-      orderbook_signals: "agents.analysis.orderbook"
-      sentiment_signals: "agents.analysis.sentiment"
+      # Analysis signals — all agents publish to the unified topic the orchestrator subscribes to
+      technical_signals: "cryptofunk.agent.signals"
+      orderbook_signals: "cryptofunk.agent.signals"
+      sentiment_signals: "cryptofunk.agent.signals"
 
       # Strategy decisions
-      trend_signals: "agents.strategy.trend"
-      strategy_decisions: "agents.strategy.decisions"
-      polymarket_signals: "agents.strategy.polymarket"
+      trend_signals: "cryptofunk.agent.signals"
+      strategy_decisions: "cryptofunk.agent.signals"
+      polymarket_signals: "cryptofunk.agent.signals"
+      reversion_signals: "cryptofunk.agent.signals"
       trade_proposals: "agents.strategy.proposals"
 
       # Risk management
@@ -446,7 +464,7 @@ communication:
       risk_vetoes: "agents.risk.vetoes"
 
       # System events
-      agent_heartbeat: "agents.system.heartbeat"
+      agent_heartbeat: "cryptofunk.agent.heartbeat"
       agent_errors: "agents.system.errors"
 
     # Message retention

@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: api-server
 spec:
   replicas: 3  # Scale for high availability
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: api
@@ -79,6 +84,11 @@ spec:
               name: cryptofunk-config
               key: REDIS_DB
         - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: CRYPTOFUNK_REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
               name: cryptofunk-secrets

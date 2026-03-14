@@ -11,6 +11,49 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
+// Session handlers
+func (s *APIServer) handleListSessions(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	sessions, err := s.db.ListActiveSessions(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve sessions",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+func (s *APIServer) handleGetSession(c *gin.Context) {
+	idStr := c.Param("id")
+	sessionID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid session ID",
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "session not found",
+			"id":    idStr,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"session": session,
+	})
+}
+
 // Position handlers
 func (s *APIServer) handleListPositions(c *gin.Context) {
 	ctx := c.Request.Context()

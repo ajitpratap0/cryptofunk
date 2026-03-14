@@ -106,20 +106,34 @@ func (bb *BeliefBase) GetConfidence() float64 {
 // MARKET DOMAIN TYPES
 // ============================================================================
 
-// PolyMarket represents a single Polymarket prediction market
+// PolyMarket represents a single Polymarket prediction market.
+// The Polymarket API returns volume and liquidity as strings, so we use
+// json.Number for flexible parsing and convert in parseNumericFields().
 type PolyMarket struct {
-	ID             string    `json:"id"`
-	Question       string    `json:"question"`
-	Category       string    `json:"category"`        // politics, crypto, tech, sports, etc.
-	OutcomeType    string    `json:"outcome_type"`    // binary, multi
-	YesPrice       float64   `json:"yes_price"`       // 0.0 - 1.0
-	NoPrice        float64   `json:"no_price"`        // 0.0 - 1.0
-	Spread         float64   `json:"spread"`          // yes_price + no_price - 1.0 (overround)
-	Volume24h      float64   `json:"volume_24h"`      // USD volume last 24h
-	Liquidity      float64   `json:"liquidity"`       // Total liquidity in the market
-	ResolutionTime time.Time `json:"resolution_time"` // When the market resolves
-	CreatedAt      time.Time `json:"created_at"`
-	Active         bool      `json:"active"`
+	ID             string      `json:"id"`
+	Question       string      `json:"question"`
+	Category       string      `json:"category"`        // politics, crypto, tech, sports, etc.
+	OutcomeType    string      `json:"outcome_type"`    // binary, multi
+	YesPrice       float64     `json:"yes_price"`       // 0.0 - 1.0
+	NoPrice        float64     `json:"no_price"`        // 0.0 - 1.0
+	Spread         float64     `json:"spread"`          // yes_price + no_price - 1.0 (overround)
+	Volume24hRaw   json.Number `json:"volume_24h"`      // USD volume last 24h (API sends string)
+	LiquidityRaw   json.Number `json:"liquidity"`       // Total liquidity (API sends string)
+	Volume24h      float64     `json:"-"`               // Parsed volume
+	Liquidity      float64     `json:"-"`               // Parsed liquidity
+	ResolutionTime time.Time   `json:"resolution_time"` // When the market resolves
+	CreatedAt      time.Time   `json:"created_at"`
+	Active         bool        `json:"active"`
+}
+
+// parseNumericFields converts json.Number fields to float64
+func (m *PolyMarket) parseNumericFields() {
+	if v, err := m.Volume24hRaw.Float64(); err == nil {
+		m.Volume24h = v
+	}
+	if v, err := m.LiquidityRaw.Float64(); err == nil {
+		m.Liquidity = v
+	}
 }
 
 // Spread returns the bid-ask spread of the market
@@ -308,7 +322,7 @@ func (a *PolymarketAgent) Initialize(ctx context.Context) error {
 	a.natsConn = nc
 	a.natsTopic = viper.GetString("communication.nats.topics.polymarket_signals")
 	if a.natsTopic == "" {
-		a.natsTopic = "agents.strategy.polymarket"
+		a.natsTopic = "cryptofunk.agent.signals"
 	}
 
 	// Create heartbeat publisher
@@ -475,7 +489,7 @@ func (a *PolymarketAgent) Shutdown(ctx context.Context) error {
 func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, error) {
 	log.Debug().Msg("Fetching active Polymarket markets")
 
-	result, err := a.CallMCPTool(ctx, "polymarket", "list_markets", map[string]interface{}{
+	result, err := a.CallMCPTool(ctx, "polymarket", "get_markets", map[string]interface{}{
 		"active": true,
 		"limit":  50,
 	})
@@ -486,7 +500,7 @@ func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, erro
 	}
 
 	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from list_markets")
+		return nil, fmt.Errorf("empty result from get_markets")
 	}
 
 	// Parse text content
@@ -514,6 +528,10 @@ func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, erro
 	var markets []*PolyMarket
 	if err := json.Unmarshal([]byte(textContent), &markets); err != nil {
 		return nil, fmt.Errorf("failed to parse markets: %w", err)
+	}
+
+	for _, m := range markets {
+		m.parseNumericFields()
 	}
 
 	a.beliefs.UpdateBelief("markets_fetched", len(markets), 1.0, "polymarket_api")
@@ -1045,6 +1063,7 @@ func (a *PolymarketAgent) fetchMarketByID(ctx context.Context, marketID string) 
 	if err := json.Unmarshal([]byte(textContent), &market); err != nil {
 		return nil, fmt.Errorf("failed to parse market: %w", err)
 	}
+	market.parseNumericFields()
 
 	return &market, nil
 }
@@ -1055,7 +1074,31 @@ func (a *PolymarketAgent) fetchMarketByID(ctx context.Context, marketID string) 
 
 // publishSignal publishes a trade signal to NATS
 func (a *PolymarketAgent) publishSignal(signal *TradeSignal) error {
-	data, err := json.Marshal(signal)
+	// Map polymarket signals to orchestrator-compatible BUY/SELL/HOLD
+	orchestratorSignal := signal.Signal
+	switch orchestratorSignal {
+	case "BUY_YES", "BUY_NO":
+		orchestratorSignal = "BUY"
+	case "SELL_YES", "SELL_NO":
+		orchestratorSignal = "SELL"
+	default:
+		orchestratorSignal = "HOLD"
+	}
+
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Symbol    string `json:"symbol"` // use MarketID as symbol
+		Signal    string `json:"signal"` // orchestrator expects BUY/SELL/HOLD
+		*TradeSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:   a.GetName(),
+		AgentType:   a.GetType(),
+		Symbol:      signal.MarketID,
+		Signal:      orchestratorSignal,
+		TradeSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1188,6 +1231,9 @@ func main() {
 					}
 					if u, ok := server["url"].(string); ok {
 						sc.URL = u
+					}
+					if opt, ok := server["optional"].(bool); ok {
+						sc.Optional = opt
 					}
 					if sc.Name == "" {
 						log.Warn().Str("url", sc.URL).Msg("Skipping MCP server entry with empty name")

@@ -420,12 +420,14 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 	}
 
 	o.agentsMutex.Lock()
-	if session, exists := o.agents[heartbeat.AgentName]; exists {
-		session.LastHeartbeat = heartbeat.Timestamp
-		session.HealthStatus = heartbeat.Status
+	var session *AgentSession
+	if s, exists := o.agents[heartbeat.AgentName]; exists {
+		s.LastHeartbeat = heartbeat.Timestamp
+		s.HealthStatus = heartbeat.Status
+		session = s
 	} else {
 		// Register new agent
-		o.agents[heartbeat.AgentName] = &AgentSession{
+		session = &AgentSession{
 			Name:            heartbeat.AgentName,
 			Type:            heartbeat.AgentType,
 			Enabled:         true,
@@ -434,24 +436,50 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 			HealthStatus:    heartbeat.Status,
 			PerformanceData: make(map[string]interface{}),
 		}
+		o.agents[heartbeat.AgentName] = session
 		o.log.Info().
 			Str("agent", heartbeat.AgentName).
 			Str("type", heartbeat.AgentType).
 			Msg("Registered new agent")
 	}
+	signalCount := session.SignalCount
 	o.agentsMutex.Unlock()
 
 	o.updateActiveAgentsMetric()
+
+	// Persist agent status to database (non-blocking)
+	if o.db != nil {
+		go func() {
+			now := time.Now()
+			status := "RUNNING"
+			if heartbeat.Status != HealthStatusHealthy {
+				status = heartbeat.Status
+			}
+			agentStatus := &db.AgentStatus{
+				Name:          heartbeat.AgentName,
+				Type:          heartbeat.AgentType,
+				Status:        status,
+				LastHeartbeat: &now,
+				TotalSignals:  int(signalCount),
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := o.db.UpsertAgentStatus(ctx, agentStatus); err != nil {
+				o.log.Warn().Err(err).Str("agent", heartbeat.AgentName).Msg("Failed to persist agent status")
+			}
+		}()
+	}
 }
 
 // updateAgentSession updates or creates an agent session from a signal
 func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentSignal) {
 	o.agentsMutex.Lock()
-	defer o.agentsMutex.Unlock()
 
+	var signalCount int64
 	if session, exists := o.agents[name]; exists {
 		session.LastSignal = signal.Timestamp
 		session.SignalCount++
+		signalCount = session.SignalCount
 	} else {
 		// Register new agent from signal
 		o.agents[name] = &AgentSession{
@@ -464,6 +492,7 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 			HealthStatus:    HealthStatusUnknown,
 			PerformanceData: make(map[string]interface{}),
 		}
+		signalCount = 1
 		o.log.Info().
 			Str("agent", name).
 			Str("type", agentType).
@@ -471,6 +500,24 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 	}
 
 	o.updateActiveAgentsMetricLocked()
+	o.agentsMutex.Unlock()
+
+	// Persist agent status to database (non-blocking)
+	if o.db != nil {
+		go func() {
+			agentStatus := &db.AgentStatus{
+				Name:         name,
+				Type:         agentType,
+				Status:       "RUNNING",
+				TotalSignals: int(signalCount),
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := o.db.UpsertAgentStatus(ctx, agentStatus); err != nil {
+				o.log.Warn().Err(err).Str("agent", name).Msg("Failed to persist agent status from signal")
+			}
+		}()
+	}
 }
 
 // getDefaultWeight returns the default voting weight for an agent type
@@ -600,6 +647,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 
 	totalWeight := 0.0
 	participatingAgents := 0
+	agentVotes := map[string]string{} // agentName -> action voted for
 	var reasoning []string
 
 	o.agentsMutex.RLock()
@@ -617,6 +665,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 
 		votingScores[string(signal.Signal)] += vote
 		totalWeight += weight
+		agentVotes[signal.AgentName] = string(signal.Signal)
 
 		participatingAgents++
 		reasoning = append(reasoning, fmt.Sprintf("%s(%s): %.2f confidence",
@@ -634,13 +683,19 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		}
 	}
 
-	// Calculate consensus (agreement level)
+	// Calculate consensus: fraction of agents that voted for the winning action
 	consensus := 0.0
-	if totalWeight > 0 {
-		consensus = maxScore / totalWeight
+	if participatingAgents > 0 {
+		agreeCount := 0
+		for _, vote := range agentVotes {
+			if vote == string(winningAction) {
+				agreeCount++
+			}
+		}
+		consensus = float64(agreeCount) / float64(participatingAgents)
 	}
 
-	// Calculate final confidence
+	// Calculate confidence: weighted score ratio for the winning action
 	confidence := 0.0
 	if totalWeight > 0 {
 		confidence = maxScore / totalWeight
@@ -738,7 +793,7 @@ func (o *Orchestrator) checkAgentHealth() {
 		if timeSinceHeartbeat > 5*time.Minute {
 			session.HealthStatus = HealthStatusUnhealthy
 			session.Enabled = false
-		} else if timeSinceSignal > 10*time.Minute {
+		} else if timeSinceHeartbeat > 120*time.Second {
 			session.HealthStatus = HealthStatusDegraded
 		} else {
 			session.HealthStatus = HealthStatusHealthy
