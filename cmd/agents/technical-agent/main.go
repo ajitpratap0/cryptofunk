@@ -25,6 +25,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
@@ -1325,7 +1326,7 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 		// Fallback to market-data server (Binance get_klines) if CoinGecko fails
 		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
 		// Map CoinGecko coin ID to Binance trading pair (e.g., bitcoin → BTCUSDT)
-		binanceSymbol := coinGeckoIDToBinanceSymbol(symbol)
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
 		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
 			"symbol":   binanceSymbol,
 			"interval": interval,
@@ -1363,27 +1364,6 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 		Msg("Candlesticks fetched")
 
 	return candlesticks, nil
-}
-
-// coinGeckoIDToBinanceSymbol converts a CoinGecko ID to a Binance trading pair.
-func coinGeckoIDToBinanceSymbol(coinGeckoID string) string {
-	mapping := map[string]string{
-		"bitcoin":   "BTCUSDT",
-		"ethereum":  "ETHUSDT",
-		"solana":    "SOLUSDT",
-		"cardano":   "ADAUSDT",
-		"ripple":    "XRPUSDT",
-		"dogecoin":  "DOGEUSDT",
-		"polkadot":  "DOTUSDT",
-		"avalanche": "AVAXUSDT",
-		"chainlink": "LINKUSDT",
-		"polygon":   "MATICUSDT",
-	}
-	if sym, ok := mapping[coinGeckoID]; ok {
-		return sym
-	}
-	// Fallback: uppercase + USDT
-	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // calculateDaysForInterval determines how many days of data to request

@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // Helper function for float64 min
@@ -347,7 +348,7 @@ func (a *OrderBookAgent) Step(ctx context.Context) error {
 // fetchOrderBook fetches order book data from Market Data Server
 func (a *OrderBookAgent) fetchOrderBook(ctx context.Context, symbol string) (*OrderBook, error) {
 	// Convert CoinGecko symbol to Binance trading pair
-	binanceSymbol := coinGeckoIDToBinanceSymbolOB(symbol)
+	binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
 	log.Debug().Str("symbol", binanceSymbol).Msg("Fetching order book from Market Data Server")
 
 	result, err := a.CallMCPTool(ctx, "market_data", "get_order_book", map[string]interface{}{
@@ -403,26 +404,6 @@ func (a *OrderBookAgent) fetchOrderBook(ctx context.Context, symbol string) (*Or
 		Bids:   parseLevel(raw.Bids),
 		Asks:   parseLevel(raw.Asks),
 	}, nil
-}
-
-// coinGeckoIDToBinanceSymbolOB converts a CoinGecko coin ID to a Binance trading pair.
-func coinGeckoIDToBinanceSymbolOB(coinGeckoID string) string {
-	mapping := map[string]string{
-		"bitcoin":   "BTCUSDT",
-		"ethereum":  "ETHUSDT",
-		"solana":    "SOLUSDT",
-		"cardano":   "ADAUSDT",
-		"ripple":    "XRPUSDT",
-		"dogecoin":  "DOGEUSDT",
-		"polkadot":  "DOTUSDT",
-		"avalanche": "AVAXUSDT",
-		"chainlink": "LINKUSDT",
-		"polygon":   "MATICUSDT",
-	}
-	if sym, ok := mapping[coinGeckoID]; ok {
-		return sym
-	}
-	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // calculateImbalance calculates the bid-ask imbalance ratio

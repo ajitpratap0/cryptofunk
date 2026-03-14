@@ -82,9 +82,10 @@ type BaseAgent struct {
 	version   string
 
 	// MCP Client and Sessions (multiple servers supported)
-	mcpClient   *mcp.Client                   // Single client instance for creating connections
-	mcpSessions map[string]*mcp.ClientSession // One session per MCP server
-	config      *AgentConfig
+	mcpClient      *mcp.Client                   // Single client instance for creating connections
+	mcpSessions    map[string]*mcp.ClientSession  // One session per MCP server
+	mcpSessionsMu  sync.RWMutex                   // Protects mcpSessions map
+	config         *AgentConfig
 
 	// State
 	ctx    context.Context
@@ -279,7 +280,9 @@ func (a *BaseAgent) connectMCPServers() error {
 		}
 
 		// Store session in map
+		a.mcpSessionsMu.Lock()
 		a.mcpSessions[serverConfig.Name] = session
+		a.mcpSessionsMu.Unlock()
 
 		a.log.Info().Str("name", serverConfig.Name).Msg("MCP server connected")
 	}
@@ -312,6 +315,7 @@ func (a *BaseAgent) createSSEClient(ctx context.Context, config MCPServerConfig)
 func (a *BaseAgent) initializeMCPConnections() error {
 	a.log.Info().Msg("Verifying MCP connections")
 
+	a.mcpSessionsMu.RLock()
 	for name, session := range a.mcpSessions {
 		// Get initialization result from the session
 		initResult := session.InitializeResult()
@@ -322,6 +326,7 @@ func (a *BaseAgent) initializeMCPConnections() error {
 			Str("server_version", initResult.ServerInfo.Version).
 			Msg("MCP server connection verified")
 	}
+	a.mcpSessionsMu.RUnlock()
 
 	return nil
 }
@@ -454,6 +459,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 	}
 
 	// Step 4: Close all MCP sessions
+	a.mcpSessionsMu.Lock()
 	mcpSessionCount := len(a.mcpSessions)
 	if mcpSessionCount > 0 {
 		a.log.Debug().Int("session_count", mcpSessionCount).Msg("Shutdown: Closing MCP sessions")
@@ -466,6 +472,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 		}
 		a.log.Info().Int("session_count", mcpSessionCount).Msg("Shutdown: All MCP sessions closed")
 	}
+	a.mcpSessionsMu.Unlock()
 
 	// Step 5: Shutdown metrics server
 	if a.metricsServer != nil {
@@ -550,7 +557,9 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 	toolCtx, cancel := context.WithTimeout(ctx, mcpToolCallTimeout)
 	defer cancel()
 
+	a.mcpSessionsMu.RLock()
 	session := a.mcpSessions[serverName]
+	a.mcpSessionsMu.RUnlock()
 	if session == nil {
 		a.metrics.MCPErrorsTotal.Inc()
 		return nil, fmt.Errorf("MCP server %s not connected (session is nil)", serverName)
@@ -588,9 +597,11 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 // The stale session is not removed from the map until the new session is established,
 // so concurrent callers don't get nil from the map during reconnection.
 func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServerConfig) (*mcp.ClientSession, error) {
+	a.mcpSessionsMu.RLock()
 	old := a.mcpSessions[serverConfig.Name]
+	a.mcpSessionsMu.RUnlock()
 
-	// Re-establish connection
+	// Re-establish connection (outside lock — network I/O can be slow)
 	var session *mcp.ClientSession
 	var err error
 	switch serverConfig.Type {
@@ -600,8 +611,6 @@ func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServ
 		session, err = a.createHTTPClient(ctx, serverConfig)
 	}
 	if err != nil {
-		// Leave old (broken) session in place; callers will keep getting errors
-		// but at least won't panic on nil dereference.
 		return nil, err
 	}
 	// Close stale session only after the new one is ready
@@ -610,7 +619,9 @@ func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServ
 			a.log.Warn().Err(closeErr).Str("server", serverConfig.Name).Msg("Error closing stale MCP session (ignored)")
 		}
 	}
+	a.mcpSessionsMu.Lock()
 	a.mcpSessions[serverConfig.Name] = session
+	a.mcpSessionsMu.Unlock()
 	a.log.Info().Str("server", serverConfig.Name).Msg("MCP session reconnected")
 	return session, nil
 }
@@ -618,7 +629,9 @@ func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServ
 // ListMCPTools lists available tools from a specific MCP server
 func (a *BaseAgent) ListMCPTools(ctx context.Context, serverName string) (*mcp.ListToolsResult, error) {
 	// Get session for the specified server
+	a.mcpSessionsMu.RLock()
 	session, ok := a.mcpSessions[serverName]
+	a.mcpSessionsMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("MCP server %s not found", serverName)
 	}

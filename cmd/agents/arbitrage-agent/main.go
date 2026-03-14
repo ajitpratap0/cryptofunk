@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // ============================================================================
@@ -515,7 +515,7 @@ func (a *ArbitrageAgent) fetchPriceFromExchange(ctx context.Context, symbol, exc
 		if err != nil {
 			log.Warn().Err(err).Str("symbol", symbol).Str("exchange", exchange).Msg("CoinGecko failed, falling back to market-data server")
 		}
-		binanceSymbol := coinGeckoIDToBinanceSymbolArb(symbol)
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
 		mdResult, mdErr := a.CallMCPTool(ctx, "market_data", "get_price", map[string]interface{}{
 			"symbol": binanceSymbol,
 		})
@@ -560,26 +560,6 @@ func (a *ArbitrageAgent) fetchPriceFromExchange(ctx context.Context, symbol, exc
 	// Add small random variation to simulate different exchange prices
 	exchangePrice.Price = a.simulateExchangeVariation(price, exchange)
 	return exchangePrice, nil
-}
-
-// coinGeckoIDToBinanceSymbolArb converts a CoinGecko coin ID to a Binance trading pair.
-func coinGeckoIDToBinanceSymbolArb(coinGeckoID string) string {
-	mapping := map[string]string{
-		"bitcoin":   "BTCUSDT",
-		"ethereum":  "ETHUSDT",
-		"solana":    "SOLUSDT",
-		"cardano":   "ADAUSDT",
-		"ripple":    "XRPUSDT",
-		"dogecoin":  "DOGEUSDT",
-		"polkadot":  "DOTUSDT",
-		"avalanche": "AVAXUSDT",
-		"chainlink": "LINKUSDT",
-		"polygon":   "MATICUSDT",
-	}
-	if sym, ok := mapping[coinGeckoID]; ok {
-		return sym
-	}
-	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // simulateExchangeVariation adds realistic price variation for different exchanges
@@ -1255,10 +1235,13 @@ func (a *ArbitrageAgent) buildReasoning(topOpp *ArbitrageOpportunity, allOpps []
 
 // publishSignal publishes signal to NATS
 func (a *ArbitrageAgent) publishSignal(signal *ArbitrageSignal) error {
-	// Map internal "ARBITRAGE" signal to orchestrator-compatible BUY (buy low, sell high)
+	// Map internal "ARBITRAGE" signal to orchestrator-compatible HOLD.
+	// Arbitrage opportunities are cross-exchange (buy-low/sell-high) which the
+	// single-exchange orchestrator cannot execute. Sending HOLD ensures the agent
+	// participates in quorum without biasing consensus toward BUY.
 	orchestratorSignal := signal.Signal
 	if orchestratorSignal == "ARBITRAGE" {
-		orchestratorSignal = "BUY" // arbitrage = take the buy leg of the opportunity
+		orchestratorSignal = "HOLD"
 	}
 
 	type envelope struct {

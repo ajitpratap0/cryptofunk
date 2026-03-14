@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // ============================================================================
@@ -568,7 +568,7 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 	if err != nil {
 		// Fall back to market-data server (Binance get_klines)
 		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
-		binanceSymbol := coinGeckoIDToBinanceSymbolRev(symbol)
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
 		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
 			"symbol":   binanceSymbol,
 			"interval": "1h",
@@ -1326,26 +1326,6 @@ func (a *ReversionAgent) generateTradingSignal(
 		Msg("Trading signal generated")
 
 	return tradingSignal
-}
-
-// coinGeckoIDToBinanceSymbolRev converts a CoinGecko coin ID to a Binance trading pair.
-func coinGeckoIDToBinanceSymbolRev(coinGeckoID string) string {
-	mapping := map[string]string{
-		"bitcoin":   "BTCUSDT",
-		"ethereum":  "ETHUSDT",
-		"solana":    "SOLUSDT",
-		"cardano":   "ADAUSDT",
-		"ripple":    "XRPUSDT",
-		"dogecoin":  "DOGEUSDT",
-		"polkadot":  "DOTUSDT",
-		"avalanche": "AVAXUSDT",
-		"chainlink": "LINKUSDT",
-		"polygon":   "MATICUSDT",
-	}
-	if sym, ok := mapping[coinGeckoID]; ok {
-		return sym
-	}
-	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // publishSignal publishes a trading signal to NATS

@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // TrendAgent performs trend following strategy using EMA crossovers and ADX
@@ -1038,7 +1038,7 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 	if err != nil {
 		// Fall back to market-data server (Binance get_klines)
 		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
-		binanceSymbol := coinGeckoIDToBinanceSymbolTrend(symbol)
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
 		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
 			"symbol":   binanceSymbol,
 			"interval": "1h",
@@ -1126,26 +1126,6 @@ func (a *TrendAgent) publishSignal(ctx context.Context, signal *TrendSignal) err
 		Msg("Signal published to NATS")
 
 	return nil
-}
-
-// coinGeckoIDToBinanceSymbolTrend converts a CoinGecko coin ID to a Binance trading pair.
-func coinGeckoIDToBinanceSymbolTrend(coinGeckoID string) string {
-	mapping := map[string]string{
-		"bitcoin":   "BTCUSDT",
-		"ethereum":  "ETHUSDT",
-		"solana":    "SOLUSDT",
-		"cardano":   "ADAUSDT",
-		"ripple":    "XRPUSDT",
-		"dogecoin":  "DOGEUSDT",
-		"polkadot":  "DOTUSDT",
-		"avalanche": "AVAXUSDT",
-		"chainlink": "LINKUSDT",
-		"polygon":   "MATICUSDT",
-	}
-	if sym, ok := mapping[coinGeckoID]; ok {
-		return sym
-	}
-	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // getSymbolsToAnalyze returns symbols from config
