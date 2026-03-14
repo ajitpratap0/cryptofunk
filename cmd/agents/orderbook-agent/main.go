@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -345,18 +346,18 @@ func (a *OrderBookAgent) Step(ctx context.Context) error {
 
 // fetchOrderBook fetches order book data from Market Data Server
 func (a *OrderBookAgent) fetchOrderBook(ctx context.Context, symbol string) (*OrderBook, error) {
-	log.Debug().Str("symbol", symbol).Msg("Fetching order book from Market Data Server")
+	// Convert CoinGecko symbol to Binance trading pair
+	binanceSymbol := coinGeckoIDToBinanceSymbolOB(symbol)
+	log.Debug().Str("symbol", binanceSymbol).Msg("Fetching order book from Market Data Server")
 
-	// Call Market Data Server MCP tool
 	result, err := a.CallMCPTool(ctx, "market_data", "get_order_book", map[string]interface{}{
-		"symbol": symbol,
-		"depth":  a.depthLevels,
+		"symbol": binanceSymbol,
+		"limit":  a.depthLevels,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("MCP tool call failed: %w", err)
 	}
 
-	// Extract text content from MCP result
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty result from Market Data Server")
 	}
@@ -364,14 +365,64 @@ func (a *OrderBookAgent) fetchOrderBook(ctx context.Context, symbol string) (*Or
 	if !ok {
 		return nil, fmt.Errorf("invalid content type from Market Data Server")
 	}
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 
-	// Parse JSON result
-	var orderBook OrderBook
-	if err := json.Unmarshal([]byte(textContent.Text), &orderBook); err != nil {
+	// Binance returns PriceLevel with string Price/Quantity fields.
+	// Use an intermediate struct then convert to float64.
+	type binanceLevel struct {
+		Price    string `json:"Price"`
+		Quantity string `json:"Quantity"`
+	}
+	type binanceOrderBook struct {
+		Symbol string         `json:"symbol"`
+		Bids   []binanceLevel `json:"bids"`
+		Asks   []binanceLevel `json:"asks"`
+	}
+	var raw binanceOrderBook
+	if err := json.Unmarshal([]byte(textContent.Text), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse order book response: %w", err)
 	}
 
-	return &orderBook, nil
+	parseLevel := func(levels []binanceLevel) []OrderBookLevel {
+		out := make([]OrderBookLevel, 0, len(levels))
+		for _, l := range levels {
+			price, err1 := strconv.ParseFloat(l.Price, 64)
+			qty, err2 := strconv.ParseFloat(l.Quantity, 64)
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			out = append(out, OrderBookLevel{Price: price, Quantity: qty})
+		}
+		return out
+	}
+
+	return &OrderBook{
+		Symbol: raw.Symbol,
+		Bids:   parseLevel(raw.Bids),
+		Asks:   parseLevel(raw.Asks),
+	}, nil
+}
+
+// coinGeckoIDToBinanceSymbolOB converts a CoinGecko coin ID to a Binance trading pair.
+func coinGeckoIDToBinanceSymbolOB(coinGeckoID string) string {
+	mapping := map[string]string{
+		"bitcoin":   "BTCUSDT",
+		"ethereum":  "ETHUSDT",
+		"solana":    "SOLUSDT",
+		"cardano":   "ADAUSDT",
+		"ripple":    "XRPUSDT",
+		"dogecoin":  "DOGEUSDT",
+		"polkadot":  "DOTUSDT",
+		"avalanche": "AVAXUSDT",
+		"chainlink": "LINKUSDT",
+		"polygon":   "MATICUSDT",
+	}
+	if sym, ok := mapping[coinGeckoID]; ok {
+		return sym
+	}
+	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // calculateImbalance calculates the bid-ask imbalance ratio

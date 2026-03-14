@@ -185,6 +185,9 @@ strategy_agents:
       - name: "technical_indicators"
         type: "http"
         url: "http://localhost:8093/mcp"
+      - name: "market_data"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     step_interval: "5m"  # Analyze trend every 5 minutes
 
@@ -231,6 +234,9 @@ strategy_agents:
       - name: "technical_indicators"
         type: "http"
         url: "http://localhost:8093/mcp"
+      - name: "market_data"
+        type: "http"
+        url: "http://localhost:8090/mcp"
 
     step_interval: "1m"
 

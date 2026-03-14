@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -440,10 +441,11 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Msg("Mean reversion signal generated")
 
 	// Step 4.5: Detect market regime and filter signal (T087)
+	// ADX requires OHLCV data; if unavailable (close-only), assume ranging market.
 	adx, err := a.calculateADX(ctx, symbol, prices)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to calculate ADX")
-		return fmt.Errorf("ADX calculation failed: %w", err)
+		log.Warn().Err(err).Msg("ADX unavailable, assuming ranging market for mean reversion")
+		adx = 15.0 // Low ADX → ranging → mean reversion favored
 	}
 
 	log.Info().
@@ -551,12 +553,12 @@ func (a *ReversionAgent) getSymbolsToAnalyze() []string {
 	return a.symbols
 }
 
-// fetchPriceData fetches historical price data from CoinGecko
+// fetchPriceData fetches historical price data from CoinGecko, falling back to market-data server.
 func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]float64, float64, error) {
 	// Calculate days needed for lookback candles (using hourly data)
 	days := max(1, (a.lookbackCandles+23)/24)
 
-	// Call CoinGecko MCP tool
+	// Try CoinGecko first
 	result, err := a.CallMCPTool(ctx, "coingecko", "get_market_chart", map[string]interface{}{
 		"id":          symbol,
 		"vs_currency": "usd",
@@ -564,19 +566,32 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		"interval":    "hourly",
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("MCP tool call failed: %w", err)
+		// Fall back to market-data server (Binance get_klines)
+		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
+		binanceSymbol := coinGeckoIDToBinanceSymbolRev(symbol)
+		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
+			"symbol":   binanceSymbol,
+			"interval": "1h",
+			"limit":    a.lookbackCandles,
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to fetch market data: %w", err)
+		}
 	}
 
 	// Extract text content
 	if len(result.Content) == 0 {
-		return nil, 0, fmt.Errorf("empty result from CoinGecko")
+		return nil, 0, fmt.Errorf("empty result from market data source")
 	}
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		return nil, 0, fmt.Errorf("invalid content type")
 	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 
-	// Parse JSON - CoinGecko returns {prices: [[timestamp, price], ...]}
+	// Parse JSON - response has {prices: [[timestamp, price], ...]}
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
 		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
@@ -652,24 +667,23 @@ func (a *ReversionAgent) calculateBollingerBands(ctx context.Context, symbol str
 		return nil, fmt.Errorf("invalid content type")
 	}
 
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
 		return nil, fmt.Errorf("failed to parse Bollinger Bands result: %w", err)
 	}
 
-	// Extract band values (last value in each array)
-	upperBands := data["upper_band"].([]interface{})
-	middleBands := data["middle_band"].([]interface{})
-	lowerBands := data["lower_band"].([]interface{})
-
-	if len(upperBands) == 0 || len(middleBands) == 0 || len(lowerBands) == 0 {
-		return nil, fmt.Errorf("insufficient data for Bollinger Bands calculation")
+	// The technical-indicators server returns scalar values: "upper", "middle", "lower", "width"
+	// (not arrays). Extract them with safe type assertions.
+	upperBand, ok1 := data["upper"].(float64)
+	middleBand, ok2 := data["middle"].(float64)
+	lowerBand, ok3 := data["lower"].(float64)
+	if !ok1 || !ok2 || !ok3 {
+		return nil, fmt.Errorf("Bollinger Bands result missing upper/middle/lower fields")
 	}
-
-	// Get current (last) values
-	upperBand := upperBands[len(upperBands)-1].(float64)
-	middleBand := middleBands[len(middleBands)-1].(float64)
-	lowerBand := lowerBands[len(lowerBands)-1].(float64)
 
 	// Calculate bandwidth (volatility measure)
 	bandwidth := 0.0
@@ -831,19 +845,20 @@ func (a *ReversionAgent) calculateRSI(ctx context.Context, symbol string, priceD
 		return 0, fmt.Errorf("invalid content type")
 	}
 
+	if result.IsError {
+		return 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
 		return 0, fmt.Errorf("failed to parse RSI result: %w", err)
 	}
 
-	// Extract RSI values array
-	rsiValues, ok := data["values"].([]interface{})
-	if !ok || len(rsiValues) == 0 {
-		return 0, fmt.Errorf("RSI values not found in result")
+	// The technical-indicators server returns a scalar "value" field (not an array).
+	currentRSI, ok := data["value"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("RSI value not found in result")
 	}
-
-	// Get current (last) RSI value
-	currentRSI := rsiValues[len(rsiValues)-1].(float64)
 
 	log.Debug().
 		Float64("rsi", currentRSI).
@@ -1071,6 +1086,10 @@ func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, priceD
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		return 0, fmt.Errorf("invalid content type")
+	}
+
+	if result.IsError {
+		return 0, fmt.Errorf("tool error: %s", textContent.Text)
 	}
 
 	var data map[string]interface{}
@@ -1307,6 +1326,26 @@ func (a *ReversionAgent) generateTradingSignal(
 		Msg("Trading signal generated")
 
 	return tradingSignal
+}
+
+// coinGeckoIDToBinanceSymbolRev converts a CoinGecko coin ID to a Binance trading pair.
+func coinGeckoIDToBinanceSymbolRev(coinGeckoID string) string {
+	mapping := map[string]string{
+		"bitcoin":   "BTCUSDT",
+		"ethereum":  "ETHUSDT",
+		"solana":    "SOLUSDT",
+		"cardano":   "ADAUSDT",
+		"ripple":    "XRPUSDT",
+		"dogecoin":  "DOGEUSDT",
+		"polkadot":  "DOTUSDT",
+		"avalanche": "AVAXUSDT",
+		"chainlink": "LINKUSDT",
+		"polygon":   "MATICUSDT",
+	}
+	if sym, ok := mapping[coinGeckoID]; ok {
+		return sym
+	}
+	return strings.ToUpper(coinGeckoID) + "USDT"
 }
 
 // publishSignal publishes a trading signal to NATS

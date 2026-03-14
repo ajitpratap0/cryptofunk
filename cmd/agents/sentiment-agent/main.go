@@ -300,7 +300,14 @@ func (a *SentimentAgent) Step(ctx context.Context) error {
 		log.Error().Err(err).Msg("Failed to fetch news")
 		// Don't fail - continue with cached data if available
 		if len(a.cachedNews) == 0 {
-			return fmt.Errorf("no news data available: %w", err)
+			// No news data at all; emit a neutral HOLD signal so the orchestrator
+			// knows we're alive and can still reach consensus with other agents.
+			log.Warn().Msg("No news data available, emitting neutral HOLD signal")
+			neutralSignal := a.generateSignal(nil, nil, 0.0)
+			if pubErr := a.publishSignal(ctx, neutralSignal); pubErr != nil {
+				log.Error().Err(pubErr).Msg("Failed to publish neutral signal")
+			}
+			return nil
 		}
 		articles = a.cachedNews
 	}
