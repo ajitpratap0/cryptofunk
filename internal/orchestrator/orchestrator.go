@@ -600,6 +600,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 
 	totalWeight := 0.0
 	participatingAgents := 0
+	agentVotes := map[string]string{} // agentName -> action voted for
 	var reasoning []string
 
 	o.agentsMutex.RLock()
@@ -617,6 +618,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 
 		votingScores[string(signal.Signal)] += vote
 		totalWeight += weight
+		agentVotes[signal.AgentName] = string(signal.Signal)
 
 		participatingAgents++
 		reasoning = append(reasoning, fmt.Sprintf("%s(%s): %.2f confidence",
@@ -634,13 +636,19 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		}
 	}
 
-	// Calculate consensus (agreement level)
+	// Calculate consensus: fraction of agents that voted for the winning action
 	consensus := 0.0
-	if totalWeight > 0 {
-		consensus = maxScore / totalWeight
+	if participatingAgents > 0 {
+		agreeCount := 0
+		for _, vote := range agentVotes {
+			if vote == string(winningAction) {
+				agreeCount++
+			}
+		}
+		consensus = float64(agreeCount) / float64(participatingAgents)
 	}
 
-	// Calculate final confidence
+	// Calculate confidence: weighted score ratio for the winning action
 	confidence := 0.0
 	if totalWeight > 0 {
 		confidence = maxScore / totalWeight
