@@ -793,7 +793,7 @@ func (o *Orchestrator) checkAgentHealth() {
 		if timeSinceHeartbeat > 5*time.Minute {
 			session.HealthStatus = HealthStatusUnhealthy
 			session.Enabled = false
-		} else if timeSinceHeartbeat > 60*time.Second {
+		} else if timeSinceHeartbeat > 120*time.Second {
 			session.HealthStatus = HealthStatusDegraded
 		} else {
 			session.HealthStatus = HealthStatusHealthy

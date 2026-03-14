@@ -1338,17 +1338,17 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 
 	// Extract text content from MCP result
 	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from CoinGecko")
+		return nil, fmt.Errorf("empty result from market data source")
 	}
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
-		return nil, fmt.Errorf("invalid content type from CoinGecko")
+		return nil, fmt.Errorf("invalid content type from market data source")
 	}
 
-	// Parse JSON result - CoinGecko returns {prices: [[timestamp, price], ...], total_volumes: [[timestamp, volume], ...]}
+	// Parse JSON result
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
-		return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
+		return nil, fmt.Errorf("failed to parse market data response: %w", err)
 	}
 
 	// Convert to candlesticks
