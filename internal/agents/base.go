@@ -82,10 +82,10 @@ type BaseAgent struct {
 	version   string
 
 	// MCP Client and Sessions (multiple servers supported)
-	mcpClient      *mcp.Client                   // Single client instance for creating connections
-	mcpSessions    map[string]*mcp.ClientSession  // One session per MCP server
-	mcpSessionsMu  sync.RWMutex                   // Protects mcpSessions map
-	config         *AgentConfig
+	mcpClient     *mcp.Client                   // Single client instance for creating connections
+	mcpSessions   map[string]*mcp.ClientSession // One session per MCP server
+	mcpSessionsMu sync.RWMutex                  // Protects mcpSessions map
+	config        *AgentConfig
 
 	// State
 	ctx    context.Context
