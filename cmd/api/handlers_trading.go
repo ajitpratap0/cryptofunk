@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -251,6 +252,47 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
+	// Submit order to the order-executor MCP server for execution
+	execPrice := 0.0
+	if order.Price != nil {
+		execPrice = *order.Price
+	}
+	if err := s.executeOrder(ctx, order.Symbol, strings.ToUpper(string(order.Side)), strings.ToUpper(string(order.Type)), order.Quantity, execPrice); err != nil {
+		log.Error().Err(err).
+			Str("order_id", order.ID.String()).
+			Str("symbol", order.Symbol).
+			Msg("Order execution failed, marking as REJECTED")
+
+		// Mark the order as REJECTED with the error message
+		errMsg := err.Error()
+		now := time.Now()
+		if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusRejected, 0, 0, nil, &now, &errMsg); updateErr != nil {
+			log.Error().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update order status to REJECTED")
+		}
+		order.Status = db.OrderStatusRejected
+		order.ErrorMessage = &errMsg
+
+		// Broadcast rejection to WebSocket clients
+		if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
+			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"order":   order,
+			"error":   "order execution failed",
+			"details": errMsg,
+		})
+		return
+	}
+
+	log.Info().
+		Str("order_id", order.ID.String()).
+		Str("symbol", order.Symbol).
+		Str("side", string(order.Side)).
+		Str("type", string(order.Type)).
+		Float64("quantity", order.Quantity).
+		Msg("Order submitted to exchange for execution")
+
 	// Broadcast order update to WebSocket clients
 	if err := s.BroadcastOrderUpdate(order); err != nil {
 		log.Warn().Err(err).Msg("Failed to broadcast order update")
@@ -258,7 +300,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"order":   order,
-		"message": "Order created successfully",
+		"message": "Order submitted for execution",
 	})
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -68,6 +69,8 @@ func setupMinimalServer(t *testing.T) *APIServer {
 		hub:                hub,
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:8091/mcp",
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
 		// db is nil — tests for endpoints that don't need DB
 	}
 

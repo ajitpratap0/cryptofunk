@@ -371,11 +371,13 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 	log.Debug().Str("symbol", symbol).Msg("Analyzing symbol for mean reversion")
 
 	// Fetch price data (need enough candles for Bollinger Band calculations)
-	prices, currentPrice, err := a.fetchPriceData(ctx, symbol)
+	ohlcv, currentPrice, err := a.fetchPriceData(ctx, symbol)
 	if err != nil {
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch price data")
 		return fmt.Errorf("failed to fetch market data: %w", err)
 	}
+
+	prices := ohlcv.Close
 
 	log.Debug().
 		Str("symbol", symbol).
@@ -441,8 +443,7 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Msg("Mean reversion signal generated")
 
 	// Step 4.5: Detect market regime and filter signal (T087)
-	// ADX requires OHLCV data; if unavailable (close-only), assume ranging market.
-	adx, err := a.calculateADX(ctx, symbol, prices)
+	adx, err := a.calculateADX(ctx, symbol, ohlcv)
 	if err != nil {
 		log.Warn().Err(err).Msg("ADX unavailable, assuming ranging market for mean reversion")
 		adx = 15.0 // Low ADX → ranging → mean reversion favored
@@ -554,7 +555,7 @@ func (a *ReversionAgent) getSymbolsToAnalyze() []string {
 }
 
 // fetchPriceData fetches historical price data from CoinGecko, falling back to market-data server.
-func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]float64, float64, error) {
+func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) (*market.OHLCVData, float64, error) {
 	// Calculate days needed for lookback candles (using hourly data)
 	days := max(1, (a.lookbackCandles+23)/24)
 
@@ -566,7 +567,7 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		"interval":    "hourly",
 	})
 	if err != nil {
-		// Fall back to market-data server (Binance get_klines)
+		// Fall back to market-data server (Binance get_klines) which provides full OHLCV
 		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
 		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
 		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
@@ -577,9 +578,65 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to fetch market data: %w", err)
 		}
+
+		// Parse get_klines response which includes OHLCV candles
+		return a.parseKlinesResponse(result)
 	}
 
-	// Extract text content
+	// Parse CoinGecko response (close-only, estimate high/low)
+	return a.parseCoinGeckoResponse(result, symbol, days)
+}
+
+// parseKlinesResponse extracts OHLCV data from the market-data server's get_klines response.
+func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*market.OHLCVData, float64, error) {
+	if len(result.Content) == 0 {
+		return nil, 0, fmt.Errorf("empty result from market data server")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, 0, fmt.Errorf("invalid content type")
+	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse klines response: %w", err)
+	}
+
+	candles, ok := resultMap["candles"].([]interface{})
+	if !ok || len(candles) == 0 {
+		return nil, 0, fmt.Errorf("candles field not found or empty")
+	}
+
+	ohlcv := &market.OHLCVData{
+		High:  make([]float64, 0, len(candles)),
+		Low:   make([]float64, 0, len(candles)),
+		Close: make([]float64, 0, len(candles)),
+	}
+	var latestPrice float64
+
+	for _, c := range candles {
+		candle, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		high := market.ParseStringFloat(candle["high"])
+		low := market.ParseStringFloat(candle["low"])
+		closePrice := market.ParseStringFloat(candle["close"])
+
+		ohlcv.High = append(ohlcv.High, high)
+		ohlcv.Low = append(ohlcv.Low, low)
+		ohlcv.Close = append(ohlcv.Close, closePrice)
+		latestPrice = closePrice
+	}
+
+	return ohlcv, latestPrice, nil
+}
+
+// parseCoinGeckoResponse extracts close prices from CoinGecko and estimates high/low.
+func (a *ReversionAgent) parseCoinGeckoResponse(result *mcp.CallToolResult, symbol string, days int) (*market.OHLCVData, float64, error) {
 	if len(result.Content) == 0 {
 		return nil, 0, fmt.Errorf("empty result from market data source")
 	}
@@ -591,7 +648,6 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
 	}
 
-	// Parse JSON - response has {prices: [[timestamp, price], ...]}
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
 		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
@@ -602,8 +658,7 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		return nil, 0, fmt.Errorf("prices field not found")
 	}
 
-	// Extract close prices
-	prices := make([]float64, 0, len(pricesRaw))
+	closes := make([]float64, 0, len(pricesRaw))
 	var latestPrice float64
 
 	for _, p := range pricesRaw {
@@ -611,30 +666,31 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		if !ok || len(point) != 2 {
 			continue
 		}
-
 		price, ok := point[1].(float64)
 		if !ok {
 			continue
 		}
-
-		prices = append(prices, price)
-		latestPrice = price // Keep track of latest
+		closes = append(closes, price)
+		latestPrice = price
 	}
 
-	if len(prices) == 0 {
+	if len(closes) == 0 {
 		return nil, 0, fmt.Errorf("no price data available")
 	}
 
 	log.Debug().
 		Str("symbol", symbol).
 		Int("days", days).
-		Int("candles", len(prices)).
+		Int("candles", len(closes)).
 		Float64("latest_price", latestPrice).
 		Msg("Fetched price data from CoinGecko")
 
-	return prices, latestPrice, nil
+	// Estimate high/low from close prices for ADX calculation
+	ohlcv := market.EstimateOHLCV(closes)
+	return ohlcv, latestPrice, nil
 }
 
+// estimateOHLCV estimates high and low prices from close-only data.
 // ============================================================================
 // BOLLINGER BAND STRATEGY (T085)
 // ============================================================================
@@ -1063,16 +1119,17 @@ func (a *ReversionAgent) updateRSIBeliefs(rsi float64, signal string, confidence
 // ============================================================================
 
 // calculateADX calculates the Average Directional Index using MCP Technical Indicators server
-func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, priceData []float64) (float64, error) {
+func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, ohlcv *market.OHLCVData) (float64, error) {
 	log.Debug().
 		Str("symbol", symbol).
-		Int("data_points", len(priceData)).
+		Int("data_points", len(ohlcv.Close)).
 		Msg("Calculating ADX for regime detection")
 
-	// Call Technical Indicators MCP server for ADX
-	// Note: ADX typically requires high/low/close data, but we'll use a simplified version with close prices
+	// Call Technical Indicators MCP server for ADX with proper high/low/close data
 	result, err := a.CallMCPTool(ctx, "technical_indicators", "calculate_adx", map[string]interface{}{
-		"prices": priceData,
+		"high":   ohlcv.High,
+		"low":    ohlcv.Low,
+		"close":  ohlcv.Close,
 		"period": 14, // Standard ADX period
 	})
 	if err != nil {

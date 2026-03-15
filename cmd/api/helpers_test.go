@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -180,6 +181,128 @@ func TestCallOrchestratorWithRetry_NetworkFailure(t *testing.T) {
 	//nolint:bodyclose // Test expects error, no response body to close
 	_, err := server.callOrchestratorWithRetry("http://localhost:99999/test")
 	assert.Error(t, err)
+}
+
+// TestGetOrderExecutorURL_Default tests default order executor URL
+func TestGetOrderExecutorURL_Default(t *testing.T) {
+	t.Setenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL", "")
+
+	url := getOrderExecutorURL()
+	assert.Equal(t, "http://localhost:8091/mcp", url)
+}
+
+// TestGetOrderExecutorURL_EnvOverride tests CRYPTOFUNK env override
+func TestGetOrderExecutorURL_EnvOverride(t *testing.T) {
+	t.Setenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL", "http://k8s-executor:8091/mcp")
+
+	url := getOrderExecutorURL()
+	assert.Equal(t, "http://k8s-executor:8091/mcp", url)
+}
+
+// TestExecuteOrder_Success tests successful order execution via JSON-RPC
+func TestExecuteOrder_Success(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"order filled"}]}}`))
+	}))
+	defer mockServer.Close()
+
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+	assert.NoError(t, err)
+}
+
+// TestExecuteOrder_LimitOrder tests limit order execution sends price
+func TestExecuteOrder_LimitOrder(t *testing.T) {
+	var receivedBody map[string]interface{}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		receivedBody = req
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"limit order placed"}]}}`))
+	}))
+	defer mockServer.Close()
+
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "SELL", "LIMIT", 0.5, 50000.0)
+	assert.NoError(t, err)
+
+	// Verify the JSON-RPC request
+	params := receivedBody["params"].(map[string]interface{})
+	assert.Equal(t, "place_limit_order", params["name"])
+	args := params["arguments"].(map[string]interface{})
+	assert.Equal(t, "BTCUSDT", args["symbol"])
+	assert.Equal(t, "sell", args["side"])
+	assert.Equal(t, 0.5, args["quantity"])
+	assert.Equal(t, 50000.0, args["price"])
+}
+
+// TestExecuteOrder_RPCError tests order execution with JSON-RPC error response
+func TestExecuteOrder_RPCError(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"insufficient balance"}}`))
+	}))
+	defer mockServer.Close()
+
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 100.0, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "insufficient balance")
+}
+
+// TestExecuteOrder_HTTPError tests order execution with HTTP error
+func TestExecuteOrder_HTTPError(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer mockServer.Close()
+
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 503")
+}
+
+// TestExecuteOrder_NetworkFailure tests order execution with network failure
+func TestExecuteOrder_NetworkFailure(t *testing.T) {
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:99999/mcp",
+		orderExecClient:    &http.Client{Timeout: 100 * time.Millisecond},
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "order-executor request failed")
 }
 
 // TestRateLimiterMiddleware tests the rate limiter middleware

@@ -76,9 +76,10 @@ scrape_configs:
     static_configs:
       - targets: []  # Add redis-exporter:9121 if deployed
 
-  # NATS server metrics (via prometheus-nats-exporter)
-  - job_name: 'nats'
-    static_configs:
-      - targets: ['nats-exporter:7777']
-    metrics_path: '/metrics'
-    scrape_interval: 15s
+  # NATS server metrics
+  # Requires prometheus-nats-exporter sidecar (https://github.com/nats-io/prometheus-nats-exporter)
+  # NATS /varz returns JSON, NOT Prometheus exposition format — cannot scrape directly.
+  # Deploy the exporter and uncomment:
+  # - job_name: 'nats'
+  #   static_configs:
+  #     - targets: ['nats-exporter:7777']

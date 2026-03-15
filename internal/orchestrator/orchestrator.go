@@ -485,7 +485,8 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 		session.SignalCount++
 		signalCount = session.SignalCount
 	} else {
-		// Register new agent from signal
+		// Register new agent from signal. Use Unknown status until a health check
+		// verifies the agent — a single signal doesn't guarantee ongoing health.
 		o.agents[name] = &AgentSession{
 			Name:            name,
 			Type:            agentType,
@@ -1210,14 +1211,15 @@ func (o *Orchestrator) GetAgentSessions() map[string]*AgentSession {
 
 // OrchestratorStatus represents the current status of the orchestrator
 type OrchestratorStatus struct {
-	Status        string                 `json:"status"`
-	Version       string                 `json:"version"`
-	Uptime        float64                `json:"uptime_seconds"`
-	ActiveAgents  int                    `json:"active_agents"`
-	TotalSignals  int                    `json:"total_signals"`
-	Timestamp     time.Time              `json:"timestamp"`
-	Configuration map[string]interface{} `json:"configuration"`
-	AgentSummary  map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
+	Status           string                 `json:"status"`
+	Version          string                 `json:"version"`
+	Uptime           float64                `json:"uptime_seconds"`
+	ActiveAgents     int                    `json:"active_agents"`
+	RegisteredAgents int                    `json:"registered_agents"`
+	TotalSignals     int                    `json:"total_signals"`
+	Timestamp        time.Time              `json:"timestamp"`
+	Configuration    map[string]interface{} `json:"configuration"`
+	AgentSummary     map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
 }
 
 // GetStatus returns the current orchestrator status
@@ -1253,13 +1255,22 @@ func (o *Orchestrator) GetStatus() *OrchestratorStatus {
 		}
 	}
 
+	// Count active (enabled + not unhealthy) agents, consistent with GetActiveAgentCount()
+	activeCount := 0
+	for _, agent := range o.agents {
+		if agent.Enabled && agent.HealthStatus != HealthStatusUnhealthy {
+			activeCount++
+		}
+	}
+
 	return &OrchestratorStatus{
-		Status:       "running",
-		Version:      config.GetVersion(),
-		Uptime:       uptime,
-		ActiveAgents: len(o.agents),
-		TotalSignals: totalSignals,
-		Timestamp:    time.Now(),
+		Status:           "running",
+		Version:          config.GetVersion(),
+		Uptime:           uptime,
+		ActiveAgents:     activeCount,
+		RegisteredAgents: len(o.agents),
+		TotalSignals:     totalSignals,
+		Timestamp:        time.Now(),
 		Configuration: map[string]interface{}{
 			"min_consensus":  o.config.MinConsensus,
 			"min_confidence": o.config.MinConfidence,
@@ -1279,14 +1290,17 @@ func (o *Orchestrator) GetNATSConnection() *nats.Conn {
 	return o.natsConn
 }
 
-// GetActiveAgentCount returns the number of active agents
+// GetActiveAgentCount returns the number of active agents.
+// An agent is active if it is enabled and not unhealthy. Agents with Unknown
+// status (registered via signal but not yet health-checked) are counted as
+// active since they are demonstrably sending data.
 func (o *Orchestrator) GetActiveAgentCount() int {
 	o.agentsMutex.RLock()
 	defer o.agentsMutex.RUnlock()
 
 	activeCount := 0
 	for _, agent := range o.agents {
-		if agent.Enabled && agent.HealthStatus == HealthStatusHealthy {
+		if agent.Enabled && agent.HealthStatus != HealthStatusUnhealthy {
 			activeCount++
 		}
 	}
