@@ -64,8 +64,7 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
           - "-varz"
-          - "-connz"
-          - "-subsz"
+          - "-port=7777"
           - "http://localhost:8222"
         ports:
         - name: metrics
