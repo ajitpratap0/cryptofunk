@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
@@ -198,29 +199,41 @@ func TestGetOrderExecutorURL_EnvOverride(t *testing.T) {
 	assert.Equal(t, "http://k8s-executor:8091/mcp", url)
 }
 
-// TestExecuteOrder_NilSession tests that executeOrder returns error when MCP session is nil
-func TestExecuteOrder_NilSession(t *testing.T) {
+// TestExecuteOrder_NoMCPClient tests executeOrder with no MCP client (reconnect fails)
+func TestExecuteOrder_NoMCPClient(t *testing.T) {
 	server := &APIServer{
 		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   "http://localhost:8091/mcp",
-		// orderExecSession is nil (not initialized)
+		// mcpClient is nil — reconnect will fail
 	}
 
 	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "order-executor MCP session not initialized")
+	assert.Contains(t, err.Error(), "order-executor unavailable")
 }
 
-// TestExecuteOrder_NilSession_LimitOrder tests nil session error for limit orders
-func TestExecuteOrder_NilSession_LimitOrder(t *testing.T) {
+// TestExecuteOrder_ReconnectFailure tests reconnect to unreachable server
+func TestExecuteOrder_ReconnectFailure(t *testing.T) {
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0.1"}, nil)
 	server := &APIServer{
 		orchestratorClient: defaultOrchestratorClient,
-		orderExecutorURL:   "http://localhost:8091/mcp",
+		orderExecutorURL:   "http://localhost:99999/mcp", // unreachable
+		mcpClient:          mcpClient,
 	}
 
-	err := server.executeOrder(t.Context(), "BTCUSDT", "SELL", "LIMIT", 0.5, 50000.0)
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "order-executor MCP session not initialized")
+	assert.Contains(t, err.Error(), "order-executor unavailable")
+}
+
+// TestConnectOrderExecutor_NoClient tests connectOrderExecutor with nil MCP client
+func TestConnectOrderExecutor_NoClient(t *testing.T) {
+	server := &APIServer{
+		orderExecutorURL: "http://localhost:8091/mcp",
+	}
+	err := server.connectOrderExecutor(t.Context())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "MCP client not initialized")
 }
 
 // TestRateLimiterMiddleware tests the rate limiter middleware

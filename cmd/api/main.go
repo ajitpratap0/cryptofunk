@@ -37,6 +37,7 @@ type APIServer struct {
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
 	orderExecutorURL   string                  // MCP endpoint for order-executor server
 	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
+	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -118,23 +119,18 @@ func main() {
 		orderExecutorURL:   getOrderExecutorURL(),
 	}
 
-	// Initialize MCP client session to order-executor server
-	orderExecURL := server.orderExecutorURL
-	mcpClient := mcp.NewClient(
+	// Initialize MCP client for order-executor (session connects lazily on first order)
+	server.mcpClient = mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "cryptofunk-api",
 			Version: "1.0.0",
 		},
-		nil, // No custom client options needed
+		nil,
 	)
-	transport := &mcp.StreamableClientTransport{Endpoint: orderExecURL}
-	session, err := mcpClient.Connect(ctx, transport, nil)
-	if err != nil {
-		log.Warn().Err(err).Str("url", orderExecURL).
-			Msg("Failed to connect to order-executor MCP - order execution will be unavailable")
-	} else {
-		server.orderExecSession = session
-		log.Info().Str("url", orderExecURL).Msg("Connected to order-executor MCP server")
+	// Attempt initial connection (non-fatal if order-executor isn't ready yet)
+	if err := server.connectOrderExecutor(ctx); err != nil {
+		log.Warn().Err(err).Str("url", server.orderExecutorURL).
+			Msg("Order-executor not available at startup — will retry on first order")
 	}
 
 	// Setup middleware

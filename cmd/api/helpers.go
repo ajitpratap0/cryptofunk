@@ -41,11 +41,31 @@ func getOrderExecutorURL() string {
 	return "http://localhost:8091/mcp"
 }
 
+// connectOrderExecutor creates or reconnects the MCP session to the order-executor.
+func (s *APIServer) connectOrderExecutor(ctx context.Context) error {
+	if s.mcpClient == nil {
+		return fmt.Errorf("MCP client not initialized")
+	}
+	connCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	transport := &mcp.StreamableClientTransport{Endpoint: s.orderExecutorURL}
+	session, err := s.mcpClient.Connect(connCtx, transport, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to order-executor: %w", err)
+	}
+	s.orderExecSession = session
+	log.Info().Str("url", s.orderExecutorURL).Msg("Connected to order-executor MCP server")
+	return nil
+}
+
 // executeOrder sends an order to the order-executor MCP server via the MCP SDK session.
-// It returns an error description on failure; nil on success.
+// Reconnects automatically if the session is nil or broken.
 func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string, orderType string, quantity float64, price float64) error {
+	// Reconnect if session is nil (first call or after previous failure)
 	if s.orderExecSession == nil {
-		return fmt.Errorf("order-executor MCP session not initialized")
+		if err := s.connectOrderExecutor(ctx); err != nil {
+			return fmt.Errorf("order-executor unavailable: %w", err)
+		}
 	}
 
 	// Determine tool name and build arguments
@@ -68,10 +88,19 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 		Arguments: args,
 	})
 	if err != nil {
+		// Session may be stale — clear it so next call retries
+		s.orderExecSession = nil
 		return fmt.Errorf("order execution failed: %w", err)
 	}
+
+	// Extract error details from MCP tool response
 	if result.IsError {
-		return fmt.Errorf("order-executor error: tool returned error")
+		if len(result.Content) > 0 {
+			if textContent, ok := result.Content[0].(*mcp.TextContent); ok {
+				return fmt.Errorf("order-executor error: %s", textContent.Text)
+			}
+		}
+		return fmt.Errorf("order-executor error: tool returned error result")
 	}
 
 	return nil

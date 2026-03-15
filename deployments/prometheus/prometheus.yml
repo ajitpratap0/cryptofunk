@@ -79,5 +79,5 @@ scrape_configs:
   # NATS server metrics (via prometheus-nats-exporter sidecar)
   - job_name: 'nats'
     static_configs:
-      - targets: ['nats-exporter.cryptofunk.svc.cluster.local:7777']
+      - targets: ['nats-exporter:7777']
     scrape_interval: 15s
