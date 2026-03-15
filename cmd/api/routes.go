@@ -228,7 +228,11 @@ func (s *APIServer) setupRoutes() {
 
 		// Dashboard routes (TC-002) with rate limiting
 		// Provides user dashboard with trading control, positions, P&L, and system status
-		dashboardHandler := api.NewDashboardHandler(s.db)
+		// Use an HTTP client to the orchestrator so the dashboard can report agent counts
+		// even though the API and orchestrator run as separate processes.
+		orchestratorURL := s.getOrchestratorURL()
+		orchClient := api.NewOrchestratorClient(orchestratorURL)
+		dashboardHandler := api.NewDashboardHandlerWithOrchestrator(s.db, orchClient, config.Version)
 		dashboardHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.ControlMiddleware())
 
 		// TB-006: API Key Management routes
