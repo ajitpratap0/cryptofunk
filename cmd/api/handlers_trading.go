@@ -260,12 +260,16 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		// Mark as REJECTED
 		errMsg := err.Error()
 		now := time.Now()
-		_ = s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusRejected, 0, 0, nil, &now, &errMsg)
+		if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusRejected, 0, 0, nil, &now, &errMsg); updateErr != nil {
+			log.Error().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update order status to REJECTED")
+		}
 		order.Status = db.OrderStatusRejected
 		order.ErrorMessage = &errMsg
 
 		// Broadcast rejection to WebSocket clients
-		_ = s.BroadcastOrderUpdate(order)
+		if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
+			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
+		}
 
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"order":   order,
@@ -278,8 +282,17 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// Mark our tracking record as submitted (the executor has its own FILLED record)
 	log.Info().Str("order_id", order.ID.String()).Str("symbol", req.Symbol).Msg("Order executed")
 
+	// Update session stats if we have an active session
+	if s.activeSessionID != nil {
+		if err := s.db.AggregateSessionStats(ctx, *s.activeSessionID); err != nil {
+			log.Warn().Err(err).Str("session_id", s.activeSessionID.String()).Msg("Failed to aggregate session stats")
+		}
+	}
+
 	// Broadcast success to WebSocket clients
-	_ = s.BroadcastOrderUpdate(order)
+	if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
+		log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"order":   order,

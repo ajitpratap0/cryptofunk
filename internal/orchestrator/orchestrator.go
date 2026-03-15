@@ -90,7 +90,6 @@ type TradingDecision struct {
 	VotingResults       map[string]float64     `json:"voting_results"` // action -> weighted score
 	Reasoning           string                 `json:"reasoning"`
 	Timestamp           time.Time              `json:"timestamp"`
-	SessionID           string                 `json:"session_id,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 }
 

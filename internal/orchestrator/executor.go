@@ -27,16 +27,17 @@ type ExecutorConfig struct {
 // It subscribes to NATS decision topics and places orders through the
 // order-executor MCP server.
 type Executor struct {
-	config       ExecutorConfig
-	natsConn     *nats.Conn
-	mcpClient    *mcp.Client
-	session      *mcp.ClientSession
-	sessionMu    sync.Mutex
-	connecting   bool
-	connectReady chan struct{} // signals when a concurrent connect finishes
-	subscription *nats.Subscription
-	ctx          context.Context    // lifecycle context — cancelled on Stop()
-	cancel       context.CancelFunc // cancels ctx
+	config          ExecutorConfig
+	natsConn        *nats.Conn
+	mcpClient       *mcp.Client
+	session         *mcp.ClientSession
+	sessionMu       sync.Mutex
+	connecting      bool
+	connectReady    chan struct{} // signals when a concurrent connect finishes
+	subscription    *nats.Subscription
+	ctx             context.Context    // lifecycle context — cancelled on Stop()
+	cancel          context.CancelFunc // cancels ctx
+	lastConnectFail time.Time          // backoff: skip reconnect for 60s after failure
 }
 
 // NewExecutor creates a new decision-to-order executor.
@@ -194,7 +195,13 @@ func (e *Executor) connectMCP() error {
 		return fmt.Errorf("MCP client not initialized")
 	}
 
+	// Backoff: skip reconnect for 60s after a failed attempt
 	e.sessionMu.Lock()
+	if !e.lastConnectFail.IsZero() && time.Since(e.lastConnectFail) < 60*time.Second {
+		e.sessionMu.Unlock()
+		return fmt.Errorf("reconnect backoff: last failure was %s ago", time.Since(e.lastConnectFail).Truncate(time.Second))
+	}
+
 	if e.connecting {
 		// Another goroutine is already connecting — wait on its channel
 		ch := e.connectReady
@@ -242,6 +249,9 @@ func (e *Executor) connectMCP() error {
 	e.sessionMu.Lock()
 	if err == nil {
 		e.session = session
+		e.lastConnectFail = time.Time{} // clear backoff on success
+	} else {
+		e.lastConnectFail = time.Now()
 	}
 	e.sessionMu.Unlock()
 
