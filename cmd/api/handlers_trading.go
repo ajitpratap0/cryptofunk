@@ -294,7 +294,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		Str("symbol", req.Symbol).
 		Str("side", req.Side).
 		Float64("quantity", req.Quantity).
-		Msg("Order executed and filled")
+		Msg("Order submitted to executor")
 
 	// Update session stats if we have an active session (use snapshot from above)
 	if sessionID != nil {

@@ -107,7 +107,9 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", decisionTopic, err)
 	}
+	e.sessionMu.Lock()
 	e.subscription = sub
+	e.sessionMu.Unlock()
 
 	log.Info().
 		Str("topic", decisionTopic).
@@ -211,8 +213,9 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 				Str("side", side).
 				Float64("quantity", qty).
 				Msg("Failed to place order")
-			// Clear cooldown so next decision can retry
-			e.recentOrders.Delete(symbol)
+			// Set a 60s backoff cooldown instead of clearing immediately
+			// to prevent a retry storm from rapid-fire NATS redeliveries.
+			e.recentOrders.Store(symbol, time.Now().Add(60*time.Second-cooldown))
 			return
 		}
 		log.Info().

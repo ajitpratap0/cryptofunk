@@ -86,7 +86,7 @@ func main() {
 	// Initialize default market prices for paper trading so the safety guard
 	// can calculate order values. Without these, market orders fail with
 	// "Order value must be positive, got 0.00" because price * quantity = 0.
-	// Prices are configurable via CRYPTOFUNK_PAPER_PRICES_* env vars.
+	// Prices are configurable via CRYPTOFUNK_PAPER_PRICE_<SYMBOL> env vars.
 	// TODO: Replace with live price feed from market-data server on startup.
 	initPaperPrices(exchangeService, logger)
 
