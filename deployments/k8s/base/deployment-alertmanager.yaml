@@ -25,6 +25,7 @@ spec:
       containers:
       - name: alertmanager
         image: prom/alertmanager:v0.27.0
+        imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
         ports:

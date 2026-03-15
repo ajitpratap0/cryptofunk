@@ -20,6 +20,7 @@ spec:
       containers:
       - name: prometheus
         image: prom/prometheus:v2.51.1
+        imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
         ports:

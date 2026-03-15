@@ -15,7 +15,7 @@ spec:
   # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
   # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
   # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: market-data-server
@@ -160,7 +160,7 @@ spec:
   # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
   # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
   # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: technical-indicators-server
@@ -299,7 +299,7 @@ spec:
   # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
   # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
   # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: risk-analyzer-server
@@ -438,7 +438,7 @@ spec:
   # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
   # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
   # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: order-executor-server
@@ -594,7 +594,7 @@ spec:
   # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
   # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
   # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: polymarket-server

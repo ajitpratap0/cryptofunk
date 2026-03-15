@@ -48,11 +48,10 @@ data:
         metrics_path: '/metrics'
         scrape_interval: 10s
 
-      # NATS server metrics
+      # NATS server metrics (via prometheus-nats-exporter sidecar)
       - job_name: 'nats'
         static_configs:
-          - targets: ['nats-service:8222']
-        metrics_path: '/varz'
+          - targets: ['nats-exporter:7777']
         scrape_interval: 15s
 
       # MCP Server metrics

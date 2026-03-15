@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -35,7 +36,7 @@ type APIServer struct {
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
 	orderExecutorURL   string                  // MCP endpoint for order-executor server
-	orderExecClient    *http.Client            // Dedicated HTTP client for order-executor calls
+	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -115,9 +116,25 @@ func main() {
 		ctx:                ctx,
 		safetyGuard:        safetyGuard,
 		orderExecutorURL:   getOrderExecutorURL(),
-		orderExecClient: &http.Client{
-			Timeout: 30 * time.Second,
+	}
+
+	// Initialize MCP client session to order-executor server
+	orderExecURL := server.orderExecutorURL
+	mcpClient := mcp.NewClient(
+		&mcp.Implementation{
+			Name:    "cryptofunk-api",
+			Version: "1.0.0",
 		},
+		nil, // No custom client options needed
+	)
+	transport := &mcp.StreamableClientTransport{Endpoint: orderExecURL}
+	session, err := mcpClient.Connect(ctx, transport, nil)
+	if err != nil {
+		log.Warn().Err(err).Str("url", orderExecURL).
+			Msg("Failed to connect to order-executor MCP - order execution will be unavailable")
+	} else {
+		server.orderExecSession = session
+		log.Info().Str("url", orderExecURL).Msg("Connected to order-executor MCP server")
 	}
 
 	// Setup middleware
@@ -167,6 +184,13 @@ func (s *APIServer) start() {
 	// TB-006: Stop key manager cleanup worker
 	if s.keyManager != nil {
 		s.keyManager.StopCleanupWorker()
+	}
+
+	// Close MCP session
+	if s.orderExecSession != nil {
+		if err := s.orderExecSession.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close order-executor MCP session")
+		}
 	}
 
 	// Graceful shutdown with 5 second timeout

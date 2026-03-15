@@ -1,18 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,34 +41,13 @@ func getOrderExecutorURL() string {
 	return "http://localhost:8091/mcp"
 }
 
-// jsonRPCIDCounter provides unique IDs for JSON-RPC requests.
-var jsonRPCIDCounter atomic.Int64
-
-// jsonRPCRequest is a JSON-RPC 2.0 request envelope.
-type jsonRPCRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params"`
-}
-
-// jsonRPCResponse is a JSON-RPC 2.0 response envelope.
-type jsonRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *jsonRPCError   `json:"error,omitempty"`
-}
-
-// jsonRPCError is a JSON-RPC 2.0 error object.
-type jsonRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// executeOrder sends an order to the order-executor MCP server via JSON-RPC.
+// executeOrder sends an order to the order-executor MCP server via the MCP SDK session.
 // It returns an error description on failure; nil on success.
 func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string, orderType string, quantity float64, price float64) error {
+	if s.orderExecSession == nil {
+		return fmt.Errorf("order-executor MCP session not initialized")
+	}
+
 	// Determine tool name and build arguments
 	toolName := "place_market_order"
 	args := map[string]interface{}{
@@ -83,51 +60,18 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 		args["price"] = price
 	}
 
-	rpcReq := jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      int(jsonRPCIDCounter.Add(1)),
-		Method:  "tools/call",
-		Params: map[string]interface{}{
-			"name":      toolName,
-			"arguments": args,
-		},
-	}
-
-	body, err := json.Marshal(rpcReq)
-	if err != nil {
-		return fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", s.orderExecutorURL, bytes.NewReader(body))
+	result, err := s.orderExecSession.CallTool(callCtx, &mcp.CallToolParams{
+		Name:      toolName,
+		Arguments: args,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
+		return fmt.Errorf("order execution failed: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.orderExecClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("order-executor request failed: %w", err)
-	}
-	defer func() {
-		if cerr := resp.Body.Close(); cerr != nil {
-			log.Error().Err(cerr).Msg("Failed to close order-executor response body")
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("order-executor returned HTTP %d", resp.StatusCode)
-	}
-
-	var rpcResp jsonRPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
-		return fmt.Errorf("failed to decode order-executor response: %w", err)
-	}
-
-	if rpcResp.Error != nil {
-		return fmt.Errorf("order-executor error (code %d): %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	if result.IsError {
+		return fmt.Errorf("order-executor error: tool returned error")
 	}
 
 	return nil
