@@ -350,7 +350,7 @@ func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) er
 				SELECT COUNT(*) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL AND realized_pnl > 0
 			), 0),
 			losing_trades = COALESCE((
-				SELECT COUNT(*) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL AND realized_pnl <= 0
+				SELECT COUNT(*) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL AND realized_pnl < 0
 			), 0),
 			updated_at = NOW()
 		WHERE id = $1

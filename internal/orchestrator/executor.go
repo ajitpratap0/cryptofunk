@@ -25,12 +25,14 @@ type ExecutorConfig struct {
 // It subscribes to NATS decision topics and places orders through the
 // order-executor MCP server.
 type Executor struct {
-	config     ExecutorConfig
-	natsConn   *nats.Conn
-	mcpClient  *mcp.Client
-	session    *mcp.ClientSession
-	sessionMu  sync.Mutex
-	connecting bool
+	config       ExecutorConfig
+	natsConn     *nats.Conn
+	mcpClient    *mcp.Client
+	session      *mcp.ClientSession
+	sessionMu    sync.Mutex
+	connecting   bool
+	connectReady chan struct{} // signals when a concurrent connect finishes
+	subscription *nats.Subscription
 }
 
 // NewExecutor creates a new decision-to-order executor.
@@ -81,10 +83,11 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	}
 
 	// Subscribe to decision topic
-	_, err := natsConn.Subscribe(decisionTopic, e.handleDecision)
+	sub, err := natsConn.Subscribe(decisionTopic, e.handleDecision)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", decisionTopic, err)
 	}
+	e.subscription = sub
 
 	log.Info().
 		Str("topic", decisionTopic).
@@ -95,6 +98,29 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 		Msg("Decision executor started")
 
 	return nil
+}
+
+// Stop unsubscribes from NATS and closes the MCP session.
+func (e *Executor) Stop() {
+	if e.subscription != nil {
+		if err := e.subscription.Unsubscribe(); err != nil {
+			log.Warn().Err(err).Msg("Failed to unsubscribe decision executor from NATS")
+		}
+		e.subscription = nil
+	}
+
+	e.sessionMu.Lock()
+	session := e.session
+	e.session = nil
+	e.sessionMu.Unlock()
+
+	if session != nil {
+		if err := session.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close order-executor MCP session")
+		}
+	}
+
+	log.Info().Msg("Decision executor stopped")
 }
 
 // handleDecision processes a NATS message containing a TradingDecision.
@@ -124,7 +150,7 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 	}
 
 	side := strings.ToLower(string(decision.Action))
-	if err := e.placeOrder(decision.Symbol, side, e.config.DefaultQuantity); err != nil {
+	if err := e.placeOrder(decision.Symbol, side, e.config.DefaultQuantity, decision.SessionID); err != nil {
 		log.Error().Err(err).
 			Str("symbol", decision.Symbol).
 			Str("side", side).
@@ -149,20 +175,18 @@ func (e *Executor) connectMCP() error {
 
 	e.sessionMu.Lock()
 	if e.connecting {
+		// Another goroutine is already connecting — wait on its channel
+		ch := e.connectReady
 		e.sessionMu.Unlock()
-		// Wait for concurrent connect to finish
-		for i := 0; i < 100; i++ {
-			time.Sleep(100 * time.Millisecond)
-			e.sessionMu.Lock()
-			if !e.connecting {
-				e.sessionMu.Unlock()
-				return nil
-			}
-			e.sessionMu.Unlock()
+		select {
+		case <-ch:
+			return nil
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("timed out waiting for concurrent reconnect")
 		}
-		return fmt.Errorf("timed out waiting for concurrent reconnect")
 	}
 	e.connecting = true
+	e.connectReady = make(chan struct{})
 	old := e.session
 	e.session = nil
 	e.sessionMu.Unlock()
@@ -184,6 +208,7 @@ func (e *Executor) connectMCP() error {
 	if err == nil {
 		e.session = session
 	}
+	close(e.connectReady)
 	e.sessionMu.Unlock()
 
 	if err != nil {
@@ -195,7 +220,7 @@ func (e *Executor) connectMCP() error {
 }
 
 // placeOrder calls the place_market_order tool via MCP.
-func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
+func (e *Executor) placeOrder(symbol, side string, quantity float64, sessionID string) error {
 	// Ensure we have a session
 	e.sessionMu.Lock()
 	needsConnect := e.session == nil
@@ -218,13 +243,18 @@ func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	args := map[string]interface{}{
+		"symbol":   symbol,
+		"side":     side,
+		"quantity": quantity,
+	}
+	if sessionID != "" {
+		args["session_id"] = sessionID
+	}
+
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "place_market_order",
-		Arguments: map[string]interface{}{
-			"symbol":   symbol,
-			"side":     side,
-			"quantity": quantity,
-		},
+		Name:      "place_market_order",
+		Arguments: args,
 	})
 	if err != nil {
 		// Transport error — clear session so next call reconnects

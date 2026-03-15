@@ -243,7 +243,10 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	// Shutdown HTTP server first
+	// Stop decision executor (unsubscribes NATS, closes MCP session)
+	executor.Stop()
+
+	// Shutdown HTTP server
 	if err := httpServer.Stop(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during HTTP server shutdown")
 	} else {
