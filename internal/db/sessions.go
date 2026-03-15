@@ -340,6 +340,9 @@ func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*Tradin
 // Note: total_trades counts both FILLED and PARTIALLY_FILLED as one trade each.
 // winning_trades/losing_trades are derived from positions (not orders) so the
 // count bases differ intentionally — an order may produce multiple position entries.
+// TODO: Executor-placed orders (via NATS decisions) bypass the API and don't carry
+// session_id. Those orders won't be counted here until the order-executor MCP tool
+// accepts a session_id parameter.
 func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) error {
 	query := `
 		UPDATE trading_sessions SET

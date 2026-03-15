@@ -283,19 +283,11 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// Mark as FILLED optimistically. In paper trading the MCP call is synchronous
-	// and the mock exchange fills immediately. In live trading this should wait for
-	// exchange confirmation — gated by trading_mode check when live trading is added.
-	// Note: averagePrice is 0 here because executeOrder doesn't return fill price.
-	// The actual fill price is stored in the executor's own order/trade records.
-	// TODO: have executeOrder return fill details to populate this correctly.
-	now := time.Now()
-	if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, nil, &now, nil); updateErr != nil {
-		log.Warn().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update tracking order to FILLED")
-	} else {
-		order.Status = db.OrderStatusFilled
-		order.ExecutedQuantity = order.Quantity
-	}
+	// The order-executor MCP server creates its own FILLED order/trade records
+	// with the actual fill price. We don't mark this tracking record as FILLED
+	// because we don't have the fill price — storing averagePrice=0 would corrupt
+	// P&L calculations. The tracking record stays as NEW (submitted to executor).
+	// TODO: have executeOrder return fill details so we can update this record.
 
 	log.Info().
 		Str("order_id", order.ID.String()).

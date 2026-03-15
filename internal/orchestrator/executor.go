@@ -196,24 +196,31 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 		}
 	}
 
+	// Dispatch to goroutine so we don't block the NATS callback goroutine
+	// (placeOrder has a 30s timeout for MCP calls).
 	side := strings.ToLower(string(decision.Action))
-	if err := e.placeOrder(symbol, side, e.config.DefaultQuantity); err != nil {
-		log.Error().Err(err).
-			Str("symbol", symbol).
-			Str("side", side).
-			Float64("quantity", e.config.DefaultQuantity).
-			Msg("Failed to place order")
-		return
-	}
+	qty := e.config.DefaultQuantity
 
-	// Record successful order for cooldown tracking
+	// Record cooldown immediately (before goroutine) to prevent duplicate dispatch
 	e.recentOrders.Store(symbol, time.Now())
 
-	log.Info().
-		Str("symbol", symbol).
-		Str("side", side).
-		Float64("quantity", e.config.DefaultQuantity).
-		Msg("Order placed successfully")
+	go func() {
+		if err := e.placeOrder(symbol, side, qty); err != nil {
+			log.Error().Err(err).
+				Str("symbol", symbol).
+				Str("side", side).
+				Float64("quantity", qty).
+				Msg("Failed to place order")
+			// Clear cooldown so next decision can retry
+			e.recentOrders.Delete(symbol)
+			return
+		}
+		log.Info().
+			Str("symbol", symbol).
+			Str("side", side).
+			Float64("quantity", qty).
+			Msg("Order placed successfully")
+	}()
 }
 
 // connectMCP establishes or re-establishes the MCP session to the order-executor.
