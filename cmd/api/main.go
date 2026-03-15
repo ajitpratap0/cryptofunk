@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -41,6 +42,7 @@ type APIServer struct {
 	connecting         bool                    // Guard against concurrent reconnect
 	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
 	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
+	activeSessionID    *uuid.UUID              // Currently active trading session ID
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling

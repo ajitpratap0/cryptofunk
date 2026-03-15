@@ -232,6 +232,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 	order := &db.Order{
 		ID:        uuid.New(),
+		SessionID: s.activeSessionID,
 		Symbol:    req.Symbol,
 		Exchange:  "API", // Manual order via API
 		Side:      db.ConvertOrderSide(req.Side),
@@ -404,6 +405,9 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		return
 	}
 
+	// Track active session so subsequent orders are linked
+	s.activeSessionID = &session.ID
+
 	// Broadcast system status update
 	metadata := map[string]interface{}{
 		"session_id": session.ID.String(),
@@ -453,6 +457,9 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 		})
 		return
 	}
+
+	// Clear active session so new orders are no longer linked
+	s.activeSessionID = nil
 
 	// Get updated session
 	session, _ := s.db.GetSession(ctx, sessionID)
