@@ -226,9 +226,8 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// Submit order directly to the order-executor MCP server.
-	// The executor creates the order in the DB, simulates fills, and updates
-	// status — we don't pre-create a DB record to avoid duplicate orders.
+	// Submit order to the order-executor MCP server.
+	// The executor creates the order in the DB, simulates fills, and updates status.
 	execPrice := req.Price
 	if err := s.executeOrder(ctx, req.Symbol, strings.ToUpper(req.Side), strings.ToUpper(req.Type), req.Quantity, execPrice); err != nil {
 		log.Error().Err(err).
@@ -249,6 +248,22 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		Float64("quantity", req.Quantity).
 		Msg("Order executed successfully")
 
+	// Query the most recent order for this symbol to return the full order object.
+	// The executor created the DB record — fetch it so clients get the order ID.
+	orders, err := s.db.GetOrdersBySymbol(ctx, req.Symbol)
+	if err == nil && len(orders) > 0 {
+		// Broadcast to WebSocket clients
+		if broadcastErr := s.BroadcastOrderUpdate(orders[0]); broadcastErr != nil {
+			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"order":   orders[0],
+			"message": "Order executed successfully",
+		})
+		return
+	}
+
+	// Fallback if we can't fetch the order back
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "Order executed successfully",
 		"symbol":   req.Symbol,

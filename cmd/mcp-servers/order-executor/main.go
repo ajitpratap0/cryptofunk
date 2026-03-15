@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -238,8 +239,7 @@ func initPaperPrices(service *exchange.Service, logger zerolog.Logger) {
 		// Allow env var override: CRYPTOFUNK_PAPER_PRICE_BTCUSDT=90000
 		envKey := fmt.Sprintf("CRYPTOFUNK_PAPER_PRICE_%s", symbol)
 		if envVal := os.Getenv(envKey); envVal != "" {
-			var price float64
-			if _, err := fmt.Sscanf(envVal, "%f", &price); err == nil && price > 0 {
+			if price, err := strconv.ParseFloat(envVal, 64); err == nil && price > 0 {
 				service.SetMarketPrice(symbol, price)
 				count++
 				continue

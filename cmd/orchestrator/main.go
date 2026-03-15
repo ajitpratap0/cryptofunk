@@ -217,6 +217,7 @@ func main() {
 		MinConsensus:     viper.GetFloat64("executor.min_consensus"),
 		DefaultQuantity:  viper.GetFloat64("executor.default_quantity"),
 		PaperOnly:        viper.GetBool("executor.paper_only"),
+		TradingMode:      viper.GetString("trading.mode"),
 	}
 	executor := orchestrator.NewExecutor(execConfig)
 	if natsConn := orch.GetNATSConnection(); natsConn != nil {

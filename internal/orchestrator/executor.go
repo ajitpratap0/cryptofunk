@@ -11,7 +11,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/viper"
 )
 
 // ExecutorConfig holds configuration for the decision-to-order executor.
@@ -20,7 +19,8 @@ type ExecutorConfig struct {
 	MinConfidence    float64 // Minimum confidence to place an order
 	MinConsensus     float64 // Minimum consensus to place an order
 	DefaultQuantity  float64 // Default order quantity (e.g. 0.001 BTC)
-	PaperOnly        bool    // If true, only execute in PAPER mode (safety guard)
+	PaperOnly        bool    // If true, refuse to start when TradingMode is LIVE
+	TradingMode      string  // "PAPER" or "LIVE" — passed from config, not read from Viper
 }
 
 // Executor bridges orchestrator decisions to order execution via MCP.
@@ -71,12 +71,9 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	}
 	e.natsConn = natsConn
 
-	// Safety: check trading mode
-	if e.config.PaperOnly {
-		tradingMode := strings.ToUpper(viper.GetString("trading.mode"))
-		if tradingMode == "LIVE" {
-			return fmt.Errorf("executor refused to start: PaperOnly=true but trading_mode=LIVE")
-		}
+	// Safety: refuse to auto-trade in LIVE mode unless explicitly allowed
+	if e.config.PaperOnly && strings.ToUpper(e.config.TradingMode) == "LIVE" {
+		return fmt.Errorf("executor refused to start: PaperOnly=true but trading_mode=LIVE")
 	}
 
 	// Create MCP client for order-executor
@@ -214,6 +211,14 @@ func (e *Executor) connectMCP() error {
 	e.session = nil
 	e.sessionMu.Unlock()
 
+	// Ensure connecting flag is cleared and waiters are unblocked even on panic
+	defer func() {
+		e.sessionMu.Lock()
+		e.connecting = false
+		close(e.connectReady)
+		e.sessionMu.Unlock()
+	}()
+
 	if old != nil {
 		if err := old.Close(); err != nil {
 			log.Debug().Err(err).Msg("Error closing stale order-executor session")
@@ -227,11 +232,9 @@ func (e *Executor) connectMCP() error {
 	session, err := e.mcpClient.Connect(ctx, transport, nil)
 
 	e.sessionMu.Lock()
-	e.connecting = false
 	if err == nil {
 		e.session = session
 	}
-	close(e.connectReady)
 	e.sessionMu.Unlock()
 
 	if err != nil {
