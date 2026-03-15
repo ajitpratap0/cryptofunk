@@ -205,11 +205,18 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Start decision-to-order executor (bridges NATS decisions to MCP order execution)
+	// All values from config/env — no hardcoded defaults
+	viper.SetDefault("executor.min_confidence", 0.6)
+	viper.SetDefault("executor.min_consensus", 0.5)
+	viper.SetDefault("executor.default_quantity", 0.001)
+	viper.SetDefault("executor.paper_only", true)
+
 	execConfig := orchestrator.ExecutorConfig{
 		OrderExecutorURL: getOrderExecutorURL(),
-		MinConfidence:    0.6,
-		MinConsensus:     0.5,
-		DefaultQuantity:  0.001,
+		MinConfidence:    viper.GetFloat64("executor.min_confidence"),
+		MinConsensus:     viper.GetFloat64("executor.min_consensus"),
+		DefaultQuantity:  viper.GetFloat64("executor.default_quantity"),
+		PaperOnly:        viper.GetBool("executor.paper_only"),
 	}
 	executor := orchestrator.NewExecutor(execConfig)
 	if natsConn := orch.GetNATSConnection(); natsConn != nil {

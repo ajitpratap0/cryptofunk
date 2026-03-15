@@ -22,13 +22,6 @@ func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
 }
 
-// getActiveSessionID returns the current active trading session ID (thread-safe).
-func (s *APIServer) getActiveSessionID() *uuid.UUID {
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	return s.activeSessionID
-}
-
 // setActiveSessionID sets the active trading session ID (thread-safe).
 func (s *APIServer) setActiveSessionID(id *uuid.UUID) {
 	s.sessionMu.Lock()

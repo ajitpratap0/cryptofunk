@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/viper"
 )
 
 // ExecutorConfig holds configuration for the decision-to-order executor.
@@ -19,6 +20,7 @@ type ExecutorConfig struct {
 	MinConfidence    float64 // Minimum confidence to place an order
 	MinConsensus     float64 // Minimum consensus to place an order
 	DefaultQuantity  float64 // Default order quantity (e.g. 0.001 BTC)
+	PaperOnly        bool    // If true, only execute in PAPER mode (safety guard)
 }
 
 // Executor bridges orchestrator decisions to order execution via MCP.
@@ -69,6 +71,14 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	}
 	e.natsConn = natsConn
 
+	// Safety: check trading mode
+	if e.config.PaperOnly {
+		tradingMode := strings.ToUpper(viper.GetString("trading.mode"))
+		if tradingMode == "LIVE" {
+			return fmt.Errorf("executor refused to start: PaperOnly=true but trading_mode=LIVE")
+		}
+	}
+
 	// Create MCP client for order-executor
 	e.mcpClient = mcp.NewClient(&mcp.Implementation{
 		Name:    "decision-executor",
@@ -100,13 +110,18 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	return nil
 }
 
-// Stop unsubscribes from NATS and closes the MCP session.
+// Stop drains the NATS subscription and closes the MCP session.
 func (e *Executor) Stop() {
-	if e.subscription != nil {
-		if err := e.subscription.Unsubscribe(); err != nil {
-			log.Warn().Err(err).Msg("Failed to unsubscribe decision executor from NATS")
+	e.sessionMu.Lock()
+	sub := e.subscription
+	e.subscription = nil
+	e.sessionMu.Unlock()
+
+	// Drain allows in-flight handlers to finish before unsubscribing
+	if sub != nil {
+		if err := sub.Drain(); err != nil {
+			log.Warn().Err(err).Msg("Failed to drain decision executor NATS subscription")
 		}
-		e.subscription = nil
 	}
 
 	e.sessionMu.Lock()
@@ -149,8 +164,9 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 		return
 	}
 
-	side := strings.ToLower(string(decision.Action))
-	if err := e.placeOrder(decision.Symbol, side, e.config.DefaultQuantity, decision.SessionID); err != nil {
+	// Use uppercase side to match order-executor tool expectations
+	side := strings.ToUpper(string(decision.Action))
+	if err := e.placeOrder(decision.Symbol, side, e.config.DefaultQuantity); err != nil {
 		log.Error().Err(err).
 			Str("symbol", decision.Symbol).
 			Str("side", side).
@@ -180,6 +196,13 @@ func (e *Executor) connectMCP() error {
 		e.sessionMu.Unlock()
 		select {
 		case <-ch:
+			// Check if the other goroutine's connect actually succeeded
+			e.sessionMu.Lock()
+			ok := e.session != nil
+			e.sessionMu.Unlock()
+			if !ok {
+				return fmt.Errorf("concurrent connect attempt failed")
+			}
 			return nil
 		case <-time.After(10 * time.Second):
 			return fmt.Errorf("timed out waiting for concurrent reconnect")
@@ -220,7 +243,7 @@ func (e *Executor) connectMCP() error {
 }
 
 // placeOrder calls the place_market_order tool via MCP.
-func (e *Executor) placeOrder(symbol, side string, quantity float64, sessionID string) error {
+func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
 	// Ensure we have a session
 	e.sessionMu.Lock()
 	needsConnect := e.session == nil
@@ -243,18 +266,13 @@ func (e *Executor) placeOrder(symbol, side string, quantity float64, sessionID s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	args := map[string]interface{}{
-		"symbol":   symbol,
-		"side":     side,
-		"quantity": quantity,
-	}
-	if sessionID != "" {
-		args["session_id"] = sessionID
-	}
-
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "place_market_order",
-		Arguments: args,
+		Name: "place_market_order",
+		Arguments: map[string]interface{}{
+			"symbol":   symbol,
+			"side":     strings.ToLower(side),
+			"quantity": quantity,
+		},
 	})
 	if err != nil {
 		// Transport error — clear session so next call reconnects
