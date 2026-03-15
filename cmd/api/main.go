@@ -184,9 +184,13 @@ func (s *APIServer) start() {
 		s.keyManager.StopCleanupWorker()
 	}
 
-	// Close MCP session
-	if s.orderExecSession != nil {
-		if err := s.orderExecSession.Close(); err != nil {
+	// Close MCP session (capture under lock, close outside)
+	s.sessionMu.Lock()
+	session := s.orderExecSession
+	s.orderExecSession = nil
+	s.sessionMu.Unlock()
+	if session != nil {
+		if err := session.Close(); err != nil {
 			log.Warn().Err(err).Msg("Failed to close order-executor MCP session")
 		}
 	}

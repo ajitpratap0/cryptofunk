@@ -42,18 +42,25 @@ func getOrderExecutorURL() string {
 }
 
 // connectOrderExecutor creates or reconnects the MCP session to the order-executor.
-// Uses a background context so the session outlives any single request.
-// Caller must hold s.sessionMu.
+// Thread-safe: acquires sessionMu internally.
 func (s *APIServer) connectOrderExecutor() error {
 	if s.mcpClient == nil {
 		return fmt.Errorf("MCP client not initialized")
 	}
+
+	s.sessionMu.Lock()
 	// Close stale session if one exists
 	if s.orderExecSession != nil {
-		_ = s.orderExecSession.Close()
+		if err := s.orderExecSession.Close(); err != nil {
+			log.Debug().Err(err).Msg("Error closing stale order-executor session")
+		}
 		s.orderExecSession = nil
 	}
-	// Use background context — session must outlive the triggering request
+	s.sessionMu.Unlock()
+
+	// Connect outside the lock (network I/O can be slow).
+	// The SDK uses the context only for the handshake timeout, not the
+	// session lifetime — verified in mcp.StreamableClientTransport.Connect().
 	connCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	transport := &mcp.StreamableClientTransport{Endpoint: s.orderExecutorURL}
@@ -61,7 +68,11 @@ func (s *APIServer) connectOrderExecutor() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to order-executor: %w", err)
 	}
+
+	s.sessionMu.Lock()
 	s.orderExecSession = session
+	s.sessionMu.Unlock()
+
 	log.Info().Str("url", s.orderExecutorURL).Msg("Connected to order-executor MCP server")
 	return nil
 }
@@ -69,16 +80,23 @@ func (s *APIServer) connectOrderExecutor() error {
 // executeOrder sends an order to the order-executor MCP server via the MCP SDK session.
 // Thread-safe: uses sessionMu to protect session access and reconnect.
 func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string, orderType string, quantity float64, price float64) error {
-	s.sessionMu.Lock()
 	// Reconnect if session is nil (first call or after previous failure)
-	if s.orderExecSession == nil {
+	s.sessionMu.Lock()
+	needsConnect := s.orderExecSession == nil
+	s.sessionMu.Unlock()
+
+	if needsConnect {
 		if err := s.connectOrderExecutor(); err != nil {
-			s.sessionMu.Unlock()
 			return fmt.Errorf("order-executor unavailable: %w", err)
 		}
 	}
+
+	s.sessionMu.Lock()
 	session := s.orderExecSession
 	s.sessionMu.Unlock()
+	if session == nil {
+		return fmt.Errorf("order-executor session not available after connect")
+	}
 
 	// Determine tool name and build arguments
 	toolName := "place_market_order"
