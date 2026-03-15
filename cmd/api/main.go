@@ -37,7 +37,8 @@ type APIServer struct {
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
 	orderExecutorURL   string                  // MCP endpoint for order-executor server
-	sessionMu          sync.Mutex              // Protects orderExecSession
+	sessionMu          sync.Mutex              // Protects orderExecSession and connecting
+	connecting         bool                    // Guard against concurrent reconnect
 	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
 	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
 }

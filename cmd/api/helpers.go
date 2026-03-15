@@ -42,37 +42,62 @@ func getOrderExecutorURL() string {
 }
 
 // connectOrderExecutor creates or reconnects the MCP session to the order-executor.
-// Thread-safe: acquires sessionMu internally.
+// Thread-safe: acquires sessionMu internally. Uses a "connecting" guard to prevent
+// concurrent reconnect attempts from leaking sessions.
 func (s *APIServer) connectOrderExecutor() error {
 	if s.mcpClient == nil {
 		return fmt.Errorf("MCP client not initialized")
 	}
 
 	s.sessionMu.Lock()
-	// Close stale session if one exists
-	if s.orderExecSession != nil {
-		if err := s.orderExecSession.Close(); err != nil {
-			log.Debug().Err(err).Msg("Error closing stale order-executor session")
+	// Guard: if another goroutine is already connecting, wait and reuse its result
+	if s.connecting {
+		s.sessionMu.Unlock()
+		// Brief spin — concurrent connect is rare and fast (10s timeout)
+		for i := 0; i < 100; i++ {
+			time.Sleep(100 * time.Millisecond)
+			s.sessionMu.Lock()
+			if !s.connecting {
+				s.sessionMu.Unlock()
+				return nil // other goroutine finished
+			}
+			s.sessionMu.Unlock()
 		}
-		s.orderExecSession = nil
+		return fmt.Errorf("timed out waiting for concurrent reconnect")
 	}
+	s.connecting = true
+	// Close stale session if one exists
+	old := s.orderExecSession
+	s.orderExecSession = nil
 	s.sessionMu.Unlock()
 
+	if old != nil {
+		if err := old.Close(); err != nil {
+			log.Debug().Err(err).Msg("Error closing stale order-executor session")
+		}
+	}
+
 	// Connect outside the lock (network I/O can be slow).
-	// The SDK uses the context only for the handshake timeout, not the
-	// session lifetime — verified in mcp.StreamableClientTransport.Connect().
-	connCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Use s.ctx so reconnect respects server shutdown signals.
+	parentCtx := s.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	connCtx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
 	defer cancel()
 	transport := &mcp.StreamableClientTransport{Endpoint: s.orderExecutorURL}
 	session, err := s.mcpClient.Connect(connCtx, transport, nil)
+
+	s.sessionMu.Lock()
+	s.connecting = false
+	if err == nil {
+		s.orderExecSession = session
+	}
+	s.sessionMu.Unlock()
+
 	if err != nil {
 		return fmt.Errorf("failed to connect to order-executor: %w", err)
 	}
-
-	s.sessionMu.Lock()
-	s.orderExecSession = session
-	s.sessionMu.Unlock()
-
 	log.Info().Str("url", s.orderExecutorURL).Msg("Connected to order-executor MCP server")
 	return nil
 }

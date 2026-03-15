@@ -159,9 +159,11 @@ metadata:
     app.kubernetes.io/name: technical-indicators-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
   replicas: 1
   selector:
     matchLabels:
@@ -298,9 +300,11 @@ metadata:
     app.kubernetes.io/name: risk-analyzer-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
   replicas: 1
   selector:
     matchLabels:
@@ -437,9 +441,11 @@ metadata:
     app.kubernetes.io/name: order-executor-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
   replicas: 1
   selector:
     matchLabels:
@@ -593,9 +599,11 @@ metadata:
     app.kubernetes.io/name: polymarket-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
   replicas: 1
   selector:
     matchLabels:
