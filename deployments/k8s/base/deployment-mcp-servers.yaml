@@ -29,6 +29,7 @@ spec:
       - name: market-data-server
         image: cryptofunk/market-data-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9110"]
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -39,6 +40,9 @@ spec:
         ports:
         - name: mcp-http
           containerPort: 8090
+          protocol: TCP
+        - name: metrics
+          containerPort: 9110
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -170,6 +174,7 @@ spec:
       - name: technical-indicators-server
         image: cryptofunk/technical-indicators-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9113"]
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -180,6 +185,9 @@ spec:
         ports:
         - name: mcp-http
           containerPort: 8093
+          protocol: TCP
+        - name: metrics
+          containerPort: 9113
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -305,6 +313,7 @@ spec:
       - name: risk-analyzer-server
         image: cryptofunk/risk-analyzer-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9112"]
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -315,6 +324,9 @@ spec:
         ports:
         - name: mcp-http
           containerPort: 8092
+          protocol: TCP
+        - name: metrics
+          containerPort: 9112
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -440,6 +452,7 @@ spec:
       - name: order-executor-server
         image: cryptofunk/order-executor-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9111"]
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -450,6 +463,9 @@ spec:
         ports:
         - name: mcp-http
           containerPort: 8091
+          protocol: TCP
+        - name: metrics
+          containerPort: 9111
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -592,6 +608,7 @@ spec:
       - name: polymarket-server
         image: cryptofunk/polymarket-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9114"]
         securityContext:
           runAsNonRoot: true
           runAsUser: 1000
@@ -602,6 +619,9 @@ spec:
         ports:
         - name: mcp-http
           containerPort: 8094
+          protocol: TCP
+        - name: metrics
+          containerPort: 9114
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -721,6 +741,10 @@ spec:
     port: 8090
     targetPort: mcp-http
     protocol: TCP
+  - name: metrics
+    port: 9110
+    targetPort: metrics
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -740,6 +764,10 @@ spec:
   - name: mcp-http
     port: 8093
     targetPort: mcp-http
+    protocol: TCP
+  - name: metrics
+    port: 9113
+    targetPort: metrics
     protocol: TCP
 ---
 apiVersion: v1
@@ -761,6 +789,10 @@ spec:
     port: 8092
     targetPort: mcp-http
     protocol: TCP
+  - name: metrics
+    port: 9112
+    targetPort: metrics
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -781,6 +813,10 @@ spec:
     port: 8091
     targetPort: mcp-http
     protocol: TCP
+  - name: metrics
+    port: 9111
+    targetPort: metrics
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -800,4 +836,8 @@ spec:
   - name: mcp-http
     port: 8094
     targetPort: mcp-http
+    protocol: TCP
+  - name: metrics
+    port: 9114
+    targetPort: metrics
     protocol: TCP

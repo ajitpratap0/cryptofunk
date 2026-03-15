@@ -39,6 +39,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9101
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -180,6 +184,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9105
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -321,6 +329,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9104
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -462,6 +474,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9102
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -603,6 +619,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9106
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -744,6 +764,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9108
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -885,6 +909,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9107
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
@@ -1026,6 +1054,10 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        ports:
+        - name: metrics
+          containerPort: 9109
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: cryptofunk-config
