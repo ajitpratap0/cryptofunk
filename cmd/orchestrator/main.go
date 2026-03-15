@@ -204,6 +204,22 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	// Start decision-to-order executor (bridges NATS decisions to MCP order execution)
+	execConfig := orchestrator.ExecutorConfig{
+		OrderExecutorURL: getOrderExecutorURL(),
+		MinConfidence:    0.6,
+		MinConsensus:     0.5,
+		DefaultQuantity:  0.001,
+	}
+	executor := orchestrator.NewExecutor(execConfig)
+	if natsConn := orch.GetNATSConnection(); natsConn != nil {
+		if err := executor.Start(natsConn, "cryptofunk.orchestrator.decisions"); err != nil {
+			log.Warn().Err(err).Msg("Decision executor unavailable — orders won't be placed automatically")
+		}
+	} else {
+		log.Warn().Msg("No NATS connection available — decision executor not started")
+	}
+
 	// Start orchestrator in goroutine
 	errChan := make(chan error, 1)
 	go func() {
@@ -241,6 +257,14 @@ func main() {
 	}
 
 	log.Info().Msg("Orchestrator shutdown complete")
+}
+
+// getOrderExecutorURL returns the MCP endpoint for the order-executor server.
+func getOrderExecutorURL() string {
+	if url := os.Getenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL"); url != "" {
+		return url
+	}
+	return "http://localhost:8091/mcp"
 }
 
 // verifyAPIKeys verifies all configured API keys and secrets
