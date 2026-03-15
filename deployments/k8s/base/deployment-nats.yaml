@@ -62,6 +62,9 @@ spec:
       - name: nats-exporter
         image: natsio/prometheus-nats-exporter:0.15.0
         imagePullPolicy: IfNotPresent
+        # prometheus-nats-exporter: -varz enables /varz metrics, -port sets listen port.
+        # -connz/-subsz were removed because they caused the exporter to exit with
+        # "flag provided but not defined" on this image version (0.15.0).
         args:
           - "-varz"
           - "-port=7777"

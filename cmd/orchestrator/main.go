@@ -210,6 +210,7 @@ func main() {
 	viper.SetDefault("executor.min_consensus", 0.5)
 	viper.SetDefault("executor.default_quantity", 0.001) // 0.001 BTC ≈ $85 at current prices
 	viper.SetDefault("executor.paper_only", true)
+	viper.SetDefault("executor.order_cooldown", "5m")
 	viper.SetDefault("mcp.internal.order_executor.url", "http://localhost:8091/mcp")
 
 	execConfig := orchestrator.ExecutorConfig{
@@ -219,6 +220,7 @@ func main() {
 		DefaultQuantity:  viper.GetFloat64("executor.default_quantity"),
 		PaperOnly:        viper.GetBool("executor.paper_only"),
 		TradingMode:      viper.GetString("trading.mode"),
+		OrderCooldown:    viper.GetDuration("executor.order_cooldown"),
 	}
 	executor := orchestrator.NewExecutor(execConfig)
 	if natsConn := orch.GetNATSConnection(); natsConn != nil {

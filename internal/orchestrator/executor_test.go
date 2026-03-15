@@ -190,3 +190,24 @@ func TestStop_Idempotent(t *testing.T) {
 	exec.Stop()
 	exec.Stop()
 }
+
+func TestOrderCooldown(t *testing.T) {
+	exec := NewExecutor(ExecutorConfig{
+		MinConfidence: 0.5,
+		MinConsensus:  0.5,
+		OrderCooldown: 1 * time.Second,
+	})
+
+	// Simulate a recent order for BTCUSDT
+	exec.recentOrders.Store("BTCUSDT", time.Now())
+
+	// Should still be in cooldown
+	_, ok := exec.recentOrders.Load("BTCUSDT")
+	assert.True(t, ok, "BTCUSDT should have a recent order")
+
+	// Wait for cooldown to expire
+	time.Sleep(1100 * time.Millisecond)
+	lastOrder, _ := exec.recentOrders.Load("BTCUSDT")
+	elapsed := time.Since(lastOrder.(time.Time))
+	assert.True(t, elapsed >= 1*time.Second, "Cooldown should have expired")
+}

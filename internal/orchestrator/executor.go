@@ -24,6 +24,7 @@ type ExecutorConfig struct {
 	PaperOnly        bool          // If true, refuse to start when TradingMode is LIVE
 	TradingMode      string        // "PAPER" or "LIVE" — passed from config, not read from Viper
 	ReconnectBackoff time.Duration // Skip reconnect for this duration after failure (default 60s)
+	OrderCooldown    time.Duration // Min time between orders for same symbol (default 5m)
 }
 
 // Executor bridges orchestrator decisions to order execution via MCP.
@@ -40,14 +41,18 @@ type Executor struct {
 	subscription    *nats.Subscription
 	ctx             context.Context    // lifecycle context — cancelled on Stop()
 	cancel          context.CancelFunc // cancels ctx
-	lastConnectFail time.Time          // backoff: skip reconnect for 60s after failure
+	lastConnectFail time.Time          // backoff: skip reconnect after failure
+
+	// Deduplication + rate limiting
+	recentOrders sync.Map // symbol → time.Time of last order (per-symbol cooldown)
 }
 
 // NewExecutor creates a new decision-to-order executor.
 func NewExecutor(config ExecutorConfig) *Executor {
+	// connectReady starts nil — allocated fresh in connectMCP on each connect attempt.
+	// Callers entering the connecting==true branch check for nil before waiting.
 	return &Executor{
-		config:       config,
-		connectReady: make(chan struct{}),
+		config: config,
 	}
 }
 
@@ -175,20 +180,37 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 	}
 
 	// Convert symbol from CoinGecko ID (e.g. "bitcoin") to Binance pair ("BTCUSDT")
-	// so it matches the seeded market prices and the exchange service format.
 	symbol := market.CoinGeckoIDToBinanceSymbol(decision.Symbol)
+
+	// Per-symbol cooldown: skip if we placed an order for this symbol recently.
+	// Prevents duplicate orders from NATS redelivery and unbounded position accumulation.
+	cooldown := e.config.OrderCooldown
+	if cooldown == 0 {
+		cooldown = 5 * time.Minute
+	}
+	if lastOrder, ok := e.recentOrders.Load(symbol); ok {
+		if time.Since(lastOrder.(time.Time)) < cooldown {
+			log.Debug().Str("symbol", symbol).Dur("cooldown", cooldown).
+				Msg("Order cooldown active — skipping")
+			return
+		}
+	}
+
 	side := strings.ToLower(string(decision.Action))
 	if err := e.placeOrder(symbol, side, e.config.DefaultQuantity); err != nil {
 		log.Error().Err(err).
-			Str("symbol", decision.Symbol).
+			Str("symbol", symbol).
 			Str("side", side).
 			Float64("quantity", e.config.DefaultQuantity).
 			Msg("Failed to place order")
 		return
 	}
 
+	// Record successful order for cooldown tracking
+	e.recentOrders.Store(symbol, time.Now())
+
 	log.Info().
-		Str("symbol", decision.Symbol).
+		Str("symbol", symbol).
 		Str("side", side).
 		Float64("quantity", e.config.DefaultQuantity).
 		Msg("Order placed successfully")
@@ -216,6 +238,9 @@ func (e *Executor) connectMCP() error {
 		// Another goroutine is already connecting — wait on its channel
 		ch := e.connectReady
 		e.sessionMu.Unlock()
+		if ch == nil {
+			return fmt.Errorf("concurrent connect in progress but no ready channel")
+		}
 		select {
 		case <-ch:
 			// Check if the other goroutine's connect actually succeeded
