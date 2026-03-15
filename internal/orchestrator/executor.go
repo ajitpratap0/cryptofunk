@@ -216,6 +216,8 @@ func (e *Executor) connectMCP() error {
 				return fmt.Errorf("concurrent connect attempt failed")
 			}
 			return nil
+		case <-e.ctx.Done():
+			return fmt.Errorf("executor shutting down")
 		case <-time.After(10 * time.Second):
 			return fmt.Errorf("timed out waiting for concurrent reconnect")
 		}

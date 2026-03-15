@@ -226,16 +226,20 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// Snapshot the active session under lock to avoid a data race with
+	// handleStartTrading/handleStopTrading which also hold sessionMu.
+	s.sessionMu.Lock()
+	sessionID := s.activeSessionID
+	s.sessionMu.Unlock()
+
 	// Create a tracking record with a known UUID so we can return it to the caller.
-	// The order-executor will create its own DB record for the fill — this record
-	// tracks the API-initiated request and its outcome.
 	price := &req.Price
 	if req.Price == 0 {
 		price = nil
 	}
 	order := &db.Order{
 		ID:        uuid.New(),
-		SessionID: s.activeSessionID,
+		SessionID: sessionID,
 		Symbol:    req.Symbol,
 		Exchange:  "API",
 		Side:      db.ConvertOrderSide(req.Side),
@@ -282,10 +286,10 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// Mark our tracking record as submitted (the executor has its own FILLED record)
 	log.Info().Str("order_id", order.ID.String()).Str("symbol", req.Symbol).Msg("Order executed")
 
-	// Update session stats if we have an active session
-	if s.activeSessionID != nil {
-		if err := s.db.AggregateSessionStats(ctx, *s.activeSessionID); err != nil {
-			log.Warn().Err(err).Str("session_id", s.activeSessionID.String()).Msg("Failed to aggregate session stats")
+	// Update session stats if we have an active session (use snapshot from above)
+	if sessionID != nil {
+		if err := s.db.AggregateSessionStats(ctx, *sessionID); err != nil {
+			log.Warn().Err(err).Str("session_id", sessionID.String()).Msg("Failed to aggregate session stats")
 		}
 	}
 
