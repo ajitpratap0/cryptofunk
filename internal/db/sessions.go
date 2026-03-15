@@ -337,6 +337,9 @@ func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*Tradin
 
 // AggregateSessionStats recalculates session statistics from completed trades.
 // It counts total orders linked to the session and aggregates P&L from closed positions.
+// Note: total_trades counts both FILLED and PARTIALLY_FILLED as one trade each.
+// winning_trades/losing_trades are derived from positions (not orders) so the
+// count bases differ intentionally — an order may produce multiple position entries.
 func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) error {
 	query := `
 		UPDATE trading_sessions SET

@@ -153,7 +153,7 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 		return
 	}
 
-	log.Info().
+	log.Debug().
 		Str("symbol", decision.Symbol).
 		Str("action", string(decision.Action)).
 		Float64("confidence", decision.Confidence).
@@ -162,7 +162,7 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 		Msg("Received trading decision")
 
 	if !e.ShouldExecute(&decision) {
-		log.Info().
+		log.Debug().
 			Str("symbol", decision.Symbol).
 			Str("action", string(decision.Action)).
 			Float64("confidence", decision.Confidence).

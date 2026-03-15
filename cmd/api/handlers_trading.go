@@ -283,7 +283,9 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// Update our tracking record to FILLED so AggregateSessionStats counts it
+	// Mark as FILLED optimistically. In paper trading the MCP call is synchronous
+	// and the mock exchange fills immediately. In live trading this should wait for
+	// exchange confirmation — gated by trading_mode check when live trading is added.
 	now := time.Now()
 	if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, nil, &now, nil); updateErr != nil {
 		log.Warn().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update tracking order to FILLED")
@@ -470,7 +472,8 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 		return
 	}
 
-	// Clear active session so new orders are no longer linked
+	// Clear active session AFTER the DB stop completes, so any in-flight
+	// handlePlaceOrder that already snapshotted the session ID can still link.
 	s.setActiveSessionID(nil)
 
 	// Get updated session
