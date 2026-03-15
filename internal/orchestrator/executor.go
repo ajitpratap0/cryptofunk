@@ -11,6 +11,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // ExecutorConfig holds configuration for the decision-to-order executor.
@@ -44,7 +46,8 @@ type Executor struct {
 // NewExecutor creates a new decision-to-order executor.
 func NewExecutor(config ExecutorConfig) *Executor {
 	return &Executor{
-		config: config,
+		config:       config,
+		connectReady: make(chan struct{}),
 	}
 }
 
@@ -171,9 +174,11 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 		return
 	}
 
-	// The order-executor MCP tool expects lowercase side ("buy"/"sell")
+	// Convert symbol from CoinGecko ID (e.g. "bitcoin") to Binance pair ("BTCUSDT")
+	// so it matches the seeded market prices and the exchange service format.
+	symbol := market.CoinGeckoIDToBinanceSymbol(decision.Symbol)
 	side := strings.ToLower(string(decision.Action))
-	if err := e.placeOrder(decision.Symbol, side, e.config.DefaultQuantity); err != nil {
+	if err := e.placeOrder(symbol, side, e.config.DefaultQuantity); err != nil {
 		log.Error().Err(err).
 			Str("symbol", decision.Symbol).
 			Str("side", side).
@@ -271,6 +276,11 @@ func (e *Executor) connectMCP() error {
 }
 
 // placeOrder calls the place_market_order tool via MCP.
+// Note: the executor delegates persistence entirely to the order-executor MCP server,
+// which creates its own order/trade records. Unlike the API path (which pre-creates a
+// tracking order, calls the executor, then marks FILLED), this path has no separate
+// tracking record in the API's DB. This is intentional — the MCP server is the
+// single source of truth for executor-placed orders.
 func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
 	// Ensure we have a session
 	e.sessionMu.Lock()
