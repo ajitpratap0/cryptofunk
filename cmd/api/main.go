@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ type APIServer struct {
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
 	orderExecutorURL   string                  // MCP endpoint for order-executor server
+	sessionMu          sync.Mutex              // Protects orderExecSession
 	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
 	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
 }
@@ -128,7 +130,7 @@ func main() {
 		nil,
 	)
 	// Attempt initial connection (non-fatal if order-executor isn't ready yet)
-	if err := server.connectOrderExecutor(ctx); err != nil {
+	if err := server.connectOrderExecutor(); err != nil {
 		log.Warn().Err(err).Str("url", server.orderExecutorURL).
 			Msg("Order-executor not available at startup — will retry on first order")
 	}

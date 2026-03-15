@@ -42,11 +42,19 @@ func getOrderExecutorURL() string {
 }
 
 // connectOrderExecutor creates or reconnects the MCP session to the order-executor.
-func (s *APIServer) connectOrderExecutor(ctx context.Context) error {
+// Uses a background context so the session outlives any single request.
+// Caller must hold s.sessionMu.
+func (s *APIServer) connectOrderExecutor() error {
 	if s.mcpClient == nil {
 		return fmt.Errorf("MCP client not initialized")
 	}
-	connCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// Close stale session if one exists
+	if s.orderExecSession != nil {
+		_ = s.orderExecSession.Close()
+		s.orderExecSession = nil
+	}
+	// Use background context — session must outlive the triggering request
+	connCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	transport := &mcp.StreamableClientTransport{Endpoint: s.orderExecutorURL}
 	session, err := s.mcpClient.Connect(connCtx, transport, nil)
@@ -59,14 +67,18 @@ func (s *APIServer) connectOrderExecutor(ctx context.Context) error {
 }
 
 // executeOrder sends an order to the order-executor MCP server via the MCP SDK session.
-// Reconnects automatically if the session is nil or broken.
+// Thread-safe: uses sessionMu to protect session access and reconnect.
 func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string, orderType string, quantity float64, price float64) error {
+	s.sessionMu.Lock()
 	// Reconnect if session is nil (first call or after previous failure)
 	if s.orderExecSession == nil {
-		if err := s.connectOrderExecutor(ctx); err != nil {
+		if err := s.connectOrderExecutor(); err != nil {
+			s.sessionMu.Unlock()
 			return fmt.Errorf("order-executor unavailable: %w", err)
 		}
 	}
+	session := s.orderExecSession
+	s.sessionMu.Unlock()
 
 	// Determine tool name and build arguments
 	toolName := "place_market_order"
@@ -83,17 +95,19 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	result, err := s.orderExecSession.CallTool(callCtx, &mcp.CallToolParams{
+	result, err := session.CallTool(callCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
 	if err != nil {
-		// Session may be stale — clear it so next call retries
+		// Transport error — session is broken, clear it so next call reconnects
+		s.sessionMu.Lock()
 		s.orderExecSession = nil
+		s.sessionMu.Unlock()
 		return fmt.Errorf("order execution failed: %w", err)
 	}
 
-	// Extract error details from MCP tool response
+	// Tool-level error (session still valid — don't nil it out)
 	if result.IsError {
 		if len(result.Content) > 0 {
 			if textContent, ok := result.Content[0].(*mcp.TextContent); ok {

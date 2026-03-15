@@ -231,9 +231,31 @@ func TestConnectOrderExecutor_NoClient(t *testing.T) {
 	server := &APIServer{
 		orderExecutorURL: "http://localhost:8091/mcp",
 	}
-	err := server.connectOrderExecutor(t.Context())
+	err := server.connectOrderExecutor()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "MCP client not initialized")
+}
+
+// TestExecuteOrder_ConcurrentSafety verifies no race on concurrent executeOrder calls.
+// Both calls should fail (no server) but not panic from concurrent map/pointer access.
+func TestExecuteOrder_ConcurrentSafety(t *testing.T) {
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0.1"}, nil)
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:99999/mcp",
+		mcpClient:          mcpClient,
+	}
+
+	done := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			done <- server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		err := <-done
+		assert.Error(t, err) // both should error (unreachable), but not panic
+	}
 }
 
 // TestRateLimiterMiddleware tests the rate limiter middleware
