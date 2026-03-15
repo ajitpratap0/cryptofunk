@@ -471,8 +471,17 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 	// handlePlaceOrder that already snapshotted the session ID can still link.
 	s.setActiveSessionID(nil)
 
-	// Get updated session
-	session, _ := s.db.GetSession(ctx, sessionID)
+	// Get updated session — handle error gracefully to avoid nil dereference panic
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", sessionID.String()).Msg("Failed to retrieve session after stop")
+		c.JSON(http.StatusOK, gin.H{
+			"message":       "Trading stopped successfully",
+			"session_id":    sessionID.String(),
+			"final_capital": req.FinalCapital,
+		})
+		return
+	}
 
 	// Broadcast system status update
 	metadata := map[string]interface{}{

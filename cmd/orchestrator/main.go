@@ -212,6 +212,7 @@ func main() {
 	viper.SetDefault("executor.paper_only", true)
 	viper.SetDefault("executor.order_cooldown", "5m")
 	viper.SetDefault("mcp.internal.order_executor.url", "http://localhost:8091/mcp")
+	viper.SetDefault("trading.mode", "PAPER") // Ensure TradingMode is never empty
 
 	execConfig := orchestrator.ExecutorConfig{
 		OrderExecutorURL: viper.GetString("mcp.internal.order_executor.url"),

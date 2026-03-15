@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -54,7 +55,7 @@ func NewService(database *db.DB, config ServiceConfig) (*Service, error) {
 	var exchange Exchange
 	var err error
 
-	switch config.Mode {
+	switch TradingMode(strings.ToLower(string(config.Mode))) {
 	case TradingModeLive:
 		// Create Binance exchange for live trading
 		binanceConfig := BinanceConfig{

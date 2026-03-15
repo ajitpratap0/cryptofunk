@@ -360,9 +360,9 @@ func ConvertOrderType(orderType string) OrderType {
 // ConvertOrderStatus converts application order status to database enum
 func ConvertOrderStatus(status string) OrderStatus {
 	switch strings.ToUpper(status) {
-	case "PENDING", "NEW":
+	case "PENDING", "NEW", "OPEN":
 		return OrderStatusNew
-	case "OPEN", "PARTIALLY_FILLED":
+	case "PARTIALLY_FILLED":
 		return OrderStatusPartiallyFilled
 	case "FILLED":
 		return OrderStatusFilled

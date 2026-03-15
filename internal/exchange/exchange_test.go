@@ -710,8 +710,8 @@ func TestConvertToDBOrder(t *testing.T) {
 
 		assert.Nil(t, dbOrder.Price) // Price should be nil when zero
 		assert.Equal(t, db.OrderTypeLimit, dbOrder.Type)
-		// OrderStatusOpen maps to OrderStatusPartiallyFilled in db
-		assert.Equal(t, db.OrderStatusPartiallyFilled, dbOrder.Status)
+		// OrderStatusOpen maps to OrderStatusNew in db (resting limit orders are not partially filled)
+		assert.Equal(t, db.OrderStatusNew, dbOrder.Status)
 	})
 
 	t.Run("Convert order with empty ID", func(t *testing.T) {
