@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +31,106 @@ func getPort() string {
 
 	// Default port
 	return "8080"
+}
+
+func getOrderExecutorURL() string {
+	// Try environment variable first (highest priority)
+	if url := os.Getenv("ORDER_EXECUTOR_URL"); url != "" {
+		return url
+	}
+	// Try Viper-style env var
+	if url := os.Getenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL"); url != "" {
+		return url
+	}
+	// Default: order-executor MCP server on port 8091
+	return "http://localhost:8091/mcp"
+}
+
+// jsonRPCRequest is a JSON-RPC 2.0 request envelope.
+type jsonRPCRequest struct {
+	JSONRPC string      `json:"jsonrpc"`
+	ID      int         `json:"id"`
+	Method  string      `json:"method"`
+	Params  interface{} `json:"params"`
+}
+
+// jsonRPCResponse is a JSON-RPC 2.0 response envelope.
+type jsonRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      interface{}     `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *jsonRPCError   `json:"error,omitempty"`
+}
+
+// jsonRPCError is a JSON-RPC 2.0 error object.
+type jsonRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// executeOrder sends an order to the order-executor MCP server via JSON-RPC.
+// It returns an error description on failure; nil on success.
+func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string, orderType string, quantity float64, price float64) error {
+	// Determine tool name and build arguments
+	toolName := "place_market_order"
+	args := map[string]interface{}{
+		"symbol":   symbol,
+		"side":     strings.ToLower(side),
+		"quantity": quantity,
+	}
+	if strings.EqualFold(orderType, "LIMIT") {
+		toolName = "place_limit_order"
+		args["price"] = price
+	}
+
+	rpcReq := jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "tools/call",
+		Params: map[string]interface{}{
+			"name":      toolName,
+			"arguments": args,
+		},
+	}
+
+	body, err := json.Marshal(rpcReq)
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", s.orderExecutorURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.orchestratorClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("order-executor request failed: %w", err)
+	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Error().Err(cerr).Msg("Failed to close order-executor response body")
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("order-executor returned HTTP %d", resp.StatusCode)
+	}
+
+	var rpcResp jsonRPCResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		return fmt.Errorf("failed to decode order-executor response: %w", err)
+	}
+
+	if rpcResp.Error != nil {
+		return fmt.Errorf("order-executor error (code %d): %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+
+	return nil
 }
 
 func (s *APIServer) getOrchestratorURL() string {

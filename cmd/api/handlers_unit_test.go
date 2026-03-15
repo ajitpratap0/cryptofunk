@@ -68,6 +68,7 @@ func setupMinimalServer(t *testing.T) *APIServer {
 		hub:                hub,
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:8091/mcp",
 		// db is nil — tests for endpoints that don't need DB
 	}
 

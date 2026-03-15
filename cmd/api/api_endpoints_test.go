@@ -53,6 +53,7 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 		hub:                hub,
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:8091/mcp",
 		ctx:                ctx,
 		safetyGuard:        safety.NewGuard(safety.NewLimitsConfig(), safety.NewMonitor(0)),
 	}

@@ -34,6 +34,7 @@ type APIServer struct {
 	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
+	orderExecutorURL   string                  // MCP endpoint for order-executor server
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -112,6 +113,7 @@ func main() {
 		orchestratorClient: defaultOrchestratorClient,
 		ctx:                ctx,
 		safetyGuard:        safetyGuard,
+		orderExecutorURL:   getOrderExecutorURL(),
 	}
 
 	// Setup middleware
