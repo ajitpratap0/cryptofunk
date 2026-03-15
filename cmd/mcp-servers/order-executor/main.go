@@ -82,6 +82,26 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to create exchange service")
 	}
 
+	// Initialize default market prices for paper trading so the safety guard
+	// can calculate order values. Without these, market orders fail with
+	// "Order value must be positive, got 0.00" because price * quantity = 0.
+	defaultPrices := map[string]float64{
+		"BTCUSDT":   50000.0,
+		"ETHUSDT":   3000.0,
+		"SOLUSDT":   150.0,
+		"ADAUSDT":   0.50,
+		"XRPUSDT":   0.60,
+		"DOGEUSDT":  0.10,
+		"DOTUSDT":   7.0,
+		"AVAXUSDT":  35.0,
+		"LINKUSDT":  15.0,
+		"MATICUSDT": 0.90,
+	}
+	for symbol, price := range defaultPrices {
+		exchangeService.SetMarketPrice(symbol, price)
+	}
+	logger.Info().Int("pairs", len(defaultPrices)).Msg("Default market prices initialized for paper trading")
+
 	srv := mcpserver.New(mcpserver.Config{
 		Name:    serverName,
 		Version: serverVersion,
