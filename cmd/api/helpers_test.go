@@ -225,6 +225,7 @@ func TestExecuteOrder_Success(t *testing.T) {
 	server := &APIServer{
 		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
 	}
 
 	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
@@ -248,6 +249,7 @@ func TestExecuteOrder_LimitOrder(t *testing.T) {
 	server := &APIServer{
 		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
 	}
 
 	err := server.executeOrder(t.Context(), "BTCUSDT", "SELL", "LIMIT", 0.5, 50000.0)
@@ -275,6 +277,7 @@ func TestExecuteOrder_RPCError(t *testing.T) {
 	server := &APIServer{
 		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
 	}
 
 	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 100.0, 0)
@@ -292,6 +295,7 @@ func TestExecuteOrder_HTTPError(t *testing.T) {
 	server := &APIServer{
 		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   mockServer.URL,
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
 	}
 
 	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
@@ -302,8 +306,9 @@ func TestExecuteOrder_HTTPError(t *testing.T) {
 // TestExecuteOrder_NetworkFailure tests order execution with network failure
 func TestExecuteOrder_NetworkFailure(t *testing.T) {
 	server := &APIServer{
-		orchestratorClient: &http.Client{Timeout: 100 * time.Millisecond},
+		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   "http://localhost:99999/mcp",
+		orderExecClient:    &http.Client{Timeout: 100 * time.Millisecond},
 	}
 
 	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)

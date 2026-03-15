@@ -35,6 +35,7 @@ type APIServer struct {
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
 	orderExecutorURL   string                  // MCP endpoint for order-executor server
+	orderExecClient    *http.Client            // Dedicated HTTP client for order-executor calls
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -114,6 +115,9 @@ func main() {
 		ctx:                ctx,
 		safetyGuard:        safetyGuard,
 		orderExecutorURL:   getOrderExecutorURL(),
+		orderExecClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 
 	// Setup middleware

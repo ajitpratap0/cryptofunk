@@ -54,6 +54,7 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
 		orderExecutorURL:   "http://localhost:8091/mcp",
+		orderExecClient:    &http.Client{Timeout: 5 * time.Second},
 		ctx:                ctx,
 		safetyGuard:        safety.NewGuard(safety.NewLimitsConfig(), safety.NewMonitor(0)),
 	}

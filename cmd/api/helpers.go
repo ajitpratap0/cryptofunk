@@ -107,7 +107,7 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.orchestratorClient.Do(httpReq)
+	resp, err := s.orderExecClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("order-executor request failed: %w", err)
 	}

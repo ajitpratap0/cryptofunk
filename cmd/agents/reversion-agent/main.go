@@ -161,15 +161,6 @@ type BollingerIndicators struct {
 	Timestamp  time.Time `json:"timestamp"`
 }
 
-// OHLCVData holds high, low, close price arrays extracted from candlestick data.
-// When only close prices are available (e.g., CoinGecko), high and low are
-// estimated from adjacent close prices to allow ADX calculation.
-type OHLCVData struct {
-	High  []float64 `json:"high"`
-	Low   []float64 `json:"low"`
-	Close []float64 `json:"close"`
-}
-
 // MarketRegime represents the current market state
 type MarketRegime struct {
 	Type       string    `json:"type"`       // "ranging", "trending", "volatile"
@@ -564,7 +555,7 @@ func (a *ReversionAgent) getSymbolsToAnalyze() []string {
 }
 
 // fetchPriceData fetches historical price data from CoinGecko, falling back to market-data server.
-func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) (*OHLCVData, float64, error) {
+func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) (*market.OHLCVData, float64, error) {
 	// Calculate days needed for lookback candles (using hourly data)
 	days := max(1, (a.lookbackCandles+23)/24)
 
@@ -597,7 +588,7 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) (*OH
 }
 
 // parseKlinesResponse extracts OHLCV data from the market-data server's get_klines response.
-func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*OHLCVData, float64, error) {
+func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*market.OHLCVData, float64, error) {
 	if len(result.Content) == 0 {
 		return nil, 0, fmt.Errorf("empty result from market data server")
 	}
@@ -619,7 +610,7 @@ func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*OHLCV
 		return nil, 0, fmt.Errorf("candles field not found or empty")
 	}
 
-	ohlcv := &OHLCVData{
+	ohlcv := &market.OHLCVData{
 		High:  make([]float64, 0, len(candles)),
 		Low:   make([]float64, 0, len(candles)),
 		Close: make([]float64, 0, len(candles)),
@@ -631,9 +622,9 @@ func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*OHLCV
 		if !ok {
 			continue
 		}
-		high := parseStringFloat(candle["high"])
-		low := parseStringFloat(candle["low"])
-		closePrice := parseStringFloat(candle["close"])
+		high := market.ParseStringFloat(candle["high"])
+		low := market.ParseStringFloat(candle["low"])
+		closePrice := market.ParseStringFloat(candle["close"])
 
 		ohlcv.High = append(ohlcv.High, high)
 		ohlcv.Low = append(ohlcv.Low, low)
@@ -645,7 +636,7 @@ func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*OHLCV
 }
 
 // parseCoinGeckoResponse extracts close prices from CoinGecko and estimates high/low.
-func (a *ReversionAgent) parseCoinGeckoResponse(result *mcp.CallToolResult, symbol string, days int) (*OHLCVData, float64, error) {
+func (a *ReversionAgent) parseCoinGeckoResponse(result *mcp.CallToolResult, symbol string, days int) (*market.OHLCVData, float64, error) {
 	if len(result.Content) == 0 {
 		return nil, 0, fmt.Errorf("empty result from market data source")
 	}
@@ -695,61 +686,11 @@ func (a *ReversionAgent) parseCoinGeckoResponse(result *mcp.CallToolResult, symb
 		Msg("Fetched price data from CoinGecko")
 
 	// Estimate high/low from close prices for ADX calculation
-	ohlcv := estimateOHLCV(closes)
+	ohlcv := market.EstimateOHLCV(closes)
 	return ohlcv, latestPrice, nil
 }
 
 // estimateOHLCV estimates high and low prices from close-only data.
-// It uses the absolute change between adjacent closes as a proxy for
-// intra-period volatility, applying it symmetrically around the close.
-func estimateOHLCV(closes []float64) *OHLCVData {
-	n := len(closes)
-	ohlcv := &OHLCVData{
-		High:  make([]float64, n),
-		Low:   make([]float64, n),
-		Close: make([]float64, n),
-	}
-	copy(ohlcv.Close, closes)
-
-	for i := 0; i < n; i++ {
-		var halfRange float64
-		if i > 0 {
-			halfRange = math.Abs(closes[i] - closes[i-1])
-		}
-		if i < n-1 {
-			change := math.Abs(closes[i+1] - closes[i])
-			if change > halfRange {
-				halfRange = change
-			}
-		}
-		// Use at least 0.1% of price to avoid degenerate zero-range candles
-		minRange := closes[i] * 0.001
-		if halfRange < minRange {
-			halfRange = minRange
-		}
-		halfRange /= 2.0
-
-		ohlcv.High[i] = closes[i] + halfRange
-		ohlcv.Low[i] = closes[i] - halfRange
-	}
-
-	return ohlcv
-}
-
-// parseStringFloat parses a float64 from a value that may be a string or float64.
-func parseStringFloat(v interface{}) float64 {
-	switch val := v.(type) {
-	case float64:
-		return val
-	case string:
-		var f float64
-		fmt.Sscanf(val, "%f", &f)
-		return f
-	default:
-		return 0
-	}
-}
-
 // ============================================================================
 // BOLLINGER BAND STRATEGY (T085)
 // ============================================================================
@@ -1178,7 +1119,7 @@ func (a *ReversionAgent) updateRSIBeliefs(rsi float64, signal string, confidence
 // ============================================================================
 
 // calculateADX calculates the Average Directional Index using MCP Technical Indicators server
-func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, ohlcv *OHLCVData) (float64, error) {
+func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, ohlcv *market.OHLCVData) (float64, error) {
 	log.Debug().
 		Str("symbol", symbol).
 		Int("data_points", len(ohlcv.Close)).
