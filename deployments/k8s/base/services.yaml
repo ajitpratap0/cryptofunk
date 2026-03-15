@@ -66,6 +66,25 @@ spec:
   selector:
     app.kubernetes.io/name: nats
 ---
+# NATS Exporter Service (ClusterIP - Prometheus metrics for NATS)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-exporter
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: monitoring
+spec:
+  type: ClusterIP
+  ports:
+  - port: 7777
+    targetPort: 7777
+    protocol: TCP
+    name: metrics
+  selector:
+    app.kubernetes.io/name: nats
+---
 # Bifrost LLM Gateway Service (ClusterIP - internal only)
 apiVersion: v1
 kind: Service

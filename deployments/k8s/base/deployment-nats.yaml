@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: nats
-        image: nats:2-alpine
+        image: nats:2.10-alpine
         securityContext:
           allowPrivilegeEscalation: false
         ports:
@@ -59,6 +59,37 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 1
           failureThreshold: 3
+      - name: nats-exporter
+        image: natsio/prometheus-nats-exporter:0.15.0
+        imagePullPolicy: IfNotPresent
+        args:
+          - "-varz"
+          - "-connz"
+          - "-subsz"
+          - "http://localhost:8222"
+        ports:
+        - name: metrics
+          containerPort: 7777
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "32Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 7777
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 7777
+          initialDelaySeconds: 5
+          periodSeconds: 30
       volumes:
       - name: nats-data
         persistentVolumeClaim:

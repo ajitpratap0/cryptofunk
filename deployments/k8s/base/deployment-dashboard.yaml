@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: dashboard
-        image: cryptofunk/dashboard:latest
+        image: cryptofunk/dashboard:v0.10.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000

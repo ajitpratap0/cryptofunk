@@ -1,18 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,34 +41,88 @@ func getOrderExecutorURL() string {
 	return "http://localhost:8091/mcp"
 }
 
-// jsonRPCIDCounter provides unique IDs for JSON-RPC requests.
-var jsonRPCIDCounter atomic.Int64
+// connectOrderExecutor creates or reconnects the MCP session to the order-executor.
+// Thread-safe: acquires sessionMu internally. Uses a "connecting" guard to prevent
+// concurrent reconnect attempts from leaking sessions.
+func (s *APIServer) connectOrderExecutor() error {
+	if s.mcpClient == nil {
+		return fmt.Errorf("MCP client not initialized")
+	}
 
-// jsonRPCRequest is a JSON-RPC 2.0 request envelope.
-type jsonRPCRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params"`
+	s.sessionMu.Lock()
+	// Guard: if another goroutine is already connecting, wait and reuse its result
+	if s.connecting {
+		s.sessionMu.Unlock()
+		// Brief spin — concurrent connect is rare and fast (10s timeout)
+		for i := 0; i < 100; i++ {
+			time.Sleep(100 * time.Millisecond)
+			s.sessionMu.Lock()
+			if !s.connecting {
+				s.sessionMu.Unlock()
+				return nil // other goroutine finished
+			}
+			s.sessionMu.Unlock()
+		}
+		return fmt.Errorf("timed out waiting for concurrent reconnect")
+	}
+	s.connecting = true
+	// Close stale session if one exists
+	old := s.orderExecSession
+	s.orderExecSession = nil
+	s.sessionMu.Unlock()
+
+	if old != nil {
+		if err := old.Close(); err != nil {
+			log.Debug().Err(err).Msg("Error closing stale order-executor session")
+		}
+	}
+
+	// Connect outside the lock (network I/O can be slow).
+	// Use s.ctx so reconnect respects server shutdown signals.
+	parentCtx := s.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	connCtx, cancel := context.WithTimeout(parentCtx, 10*time.Second)
+	defer cancel()
+	transport := &mcp.StreamableClientTransport{Endpoint: s.orderExecutorURL}
+	session, err := s.mcpClient.Connect(connCtx, transport, nil)
+
+	s.sessionMu.Lock()
+	s.connecting = false
+	if err == nil {
+		s.orderExecSession = session
+	}
+	s.sessionMu.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("failed to connect to order-executor: %w", err)
+	}
+	log.Info().Str("url", s.orderExecutorURL).Msg("Connected to order-executor MCP server")
+	return nil
 }
 
-// jsonRPCResponse is a JSON-RPC 2.0 response envelope.
-type jsonRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *jsonRPCError   `json:"error,omitempty"`
-}
-
-// jsonRPCError is a JSON-RPC 2.0 error object.
-type jsonRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// executeOrder sends an order to the order-executor MCP server via JSON-RPC.
-// It returns an error description on failure; nil on success.
+// executeOrder sends an order to the order-executor MCP server via the MCP SDK session.
+// Thread-safe: uses sessionMu to protect session access and reconnect.
 func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string, orderType string, quantity float64, price float64) error {
+	// Reconnect if session is nil (first call or after previous failure)
+	s.sessionMu.Lock()
+	needsConnect := s.orderExecSession == nil
+	s.sessionMu.Unlock()
+
+	if needsConnect {
+		if err := s.connectOrderExecutor(); err != nil {
+			return fmt.Errorf("order-executor unavailable: %w", err)
+		}
+	}
+
+	s.sessionMu.Lock()
+	session := s.orderExecSession
+	s.sessionMu.Unlock()
+	if session == nil {
+		return fmt.Errorf("order-executor session not available after connect")
+	}
+
 	// Determine tool name and build arguments
 	toolName := "place_market_order"
 	args := map[string]interface{}{
@@ -83,51 +135,29 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 		args["price"] = price
 	}
 
-	rpcReq := jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      int(jsonRPCIDCounter.Add(1)),
-		Method:  "tools/call",
-		Params: map[string]interface{}{
-			"name":      toolName,
-			"arguments": args,
-		},
-	}
-
-	body, err := json.Marshal(rpcReq)
-	if err != nil {
-		return fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", s.orderExecutorURL, bytes.NewReader(body))
+	result, err := session.CallTool(callCtx, &mcp.CallToolParams{
+		Name:      toolName,
+		Arguments: args,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
+		// Transport error — session is broken, clear it so next call reconnects
+		s.sessionMu.Lock()
+		s.orderExecSession = nil
+		s.sessionMu.Unlock()
+		return fmt.Errorf("order execution failed: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := s.orderExecClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("order-executor request failed: %w", err)
-	}
-	defer func() {
-		if cerr := resp.Body.Close(); cerr != nil {
-			log.Error().Err(cerr).Msg("Failed to close order-executor response body")
+	// Tool-level error (session still valid — don't nil it out)
+	if result.IsError {
+		if len(result.Content) > 0 {
+			if textContent, ok := result.Content[0].(*mcp.TextContent); ok {
+				return fmt.Errorf("order-executor error: %s", textContent.Text)
+			}
 		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("order-executor returned HTTP %d", resp.StatusCode)
-	}
-
-	var rpcResp jsonRPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
-		return fmt.Errorf("failed to decode order-executor response: %w", err)
-	}
-
-	if rpcResp.Error != nil {
-		return fmt.Errorf("order-executor error (code %d): %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		return fmt.Errorf("order-executor error: tool returned error result")
 	}
 
 	return nil
