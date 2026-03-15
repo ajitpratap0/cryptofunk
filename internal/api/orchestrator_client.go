@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,7 +32,14 @@ func NewOrchestratorClient(baseURL string) *OrchestratorClient {
 // GetActiveAgentCount calls the orchestrator /health endpoint and returns
 // the active_agents count. Returns 0 on any error (graceful degradation).
 func (c *OrchestratorClient) GetActiveAgentCount() int {
-	resp, err := c.client.Get(c.baseURL + "/health")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		log.Debug().Err(err).Str("url", c.baseURL+"/health").Msg("Failed to reach orchestrator for agent count")
 		return 0
@@ -56,7 +64,15 @@ func (c *OrchestratorClient) GetActiveAgentCount() int {
 
 // Pause calls the orchestrator /pause endpoint.
 func (c *OrchestratorClient) Pause() error {
-	resp, err := c.client.Post(c.baseURL+"/pause", "application/json", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/pause", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create pause request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to call orchestrator pause: %w", err)
 	}
@@ -70,7 +86,15 @@ func (c *OrchestratorClient) Pause() error {
 
 // Resume calls the orchestrator /resume endpoint.
 func (c *OrchestratorClient) Resume() error {
-	resp, err := c.client.Post(c.baseURL+"/resume", "application/json", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/resume", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create resume request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to call orchestrator resume: %w", err)
 	}
@@ -85,7 +109,14 @@ func (c *OrchestratorClient) Resume() error {
 // IsPaused calls the orchestrator /api/v1/status endpoint and returns the paused state.
 // Returns false on any error (graceful degradation).
 func (c *OrchestratorClient) IsPaused() bool {
-	resp, err := c.client.Get(c.baseURL + "/api/v1/status")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/status", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		log.Debug().Err(err).Msg("Failed to reach orchestrator for pause state")
 		return false
