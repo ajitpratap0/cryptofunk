@@ -224,84 +224,37 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// Create order in database
-	price := &req.Price
-	if req.Price == 0 {
-		price = nil
-	}
-
-	order := &db.Order{
-		ID:        uuid.New(),
-		SessionID: s.getActiveSessionID(),
-		Symbol:    req.Symbol,
-		Exchange:  "API", // Manual order via API
-		Side:      db.ConvertOrderSide(req.Side),
-		Type:      db.ConvertOrderType(req.Type),
-		Quantity:  req.Quantity,
-		Price:     price,
-		Status:    db.OrderStatusNew,
-		PlacedAt:  time.Now(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
 	ctx := c.Request.Context()
-	if err := s.db.InsertOrder(ctx, order); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to create order",
-		})
-		return
-	}
 
-	// Submit order to the order-executor MCP server for execution
-	execPrice := 0.0
-	if order.Price != nil {
-		execPrice = *order.Price
-	}
-	if err := s.executeOrder(ctx, order.Symbol, strings.ToUpper(string(order.Side)), strings.ToUpper(string(order.Type)), order.Quantity, execPrice); err != nil {
+	// Submit order directly to the order-executor MCP server.
+	// The executor creates the order in the DB, simulates fills, and updates
+	// status — we don't pre-create a DB record to avoid duplicate orders.
+	execPrice := req.Price
+	if err := s.executeOrder(ctx, req.Symbol, strings.ToUpper(req.Side), strings.ToUpper(req.Type), req.Quantity, execPrice); err != nil {
 		log.Error().Err(err).
-			Str("order_id", order.ID.String()).
-			Str("symbol", order.Symbol).
-			Msg("Order execution failed, marking as REJECTED")
-
-		// Mark the order as REJECTED with the error message
-		errMsg := err.Error()
-		now := time.Now()
-		if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusRejected, 0, 0, nil, &now, &errMsg); updateErr != nil {
-			log.Error().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update order status to REJECTED")
-		}
-		order.Status = db.OrderStatusRejected
-		order.ErrorMessage = &errMsg
-
-		// Broadcast rejection to WebSocket clients
-		if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
-			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
-		}
+			Str("symbol", req.Symbol).
+			Msg("Order execution failed")
 
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"order":   order,
 			"error":   "order execution failed",
-			"details": errMsg,
+			"details": err.Error(),
 		})
 		return
 	}
 
 	log.Info().
-		Str("order_id", order.ID.String()).
-		Str("symbol", order.Symbol).
-		Str("side", string(order.Side)).
-		Str("type", string(order.Type)).
-		Float64("quantity", order.Quantity).
-		Msg("Order submitted to exchange for execution")
-
-	// Broadcast order update to WebSocket clients
-	if err := s.BroadcastOrderUpdate(order); err != nil {
-		log.Warn().Err(err).Msg("Failed to broadcast order update")
-	}
+		Str("symbol", req.Symbol).
+		Str("side", req.Side).
+		Str("type", req.Type).
+		Float64("quantity", req.Quantity).
+		Msg("Order executed successfully")
 
 	c.JSON(http.StatusCreated, gin.H{
-		"order":   order,
-		"message": "Order submitted for execution",
+		"message":  "Order executed successfully",
+		"symbol":   req.Symbol,
+		"side":     req.Side,
+		"type":     req.Type,
+		"quantity": req.Quantity,
 	})
 }
 
