@@ -451,9 +451,13 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 	if o.db != nil {
 		go func() {
 			now := time.Now()
+			// Map health status to valid DB enum (STARTING/RUNNING/STOPPED/ERROR)
 			status := "RUNNING"
-			if heartbeat.Status != HealthStatusHealthy {
-				status = heartbeat.Status
+			switch heartbeat.Status {
+			case HealthStatusUnhealthy:
+				status = "ERROR"
+			case HealthStatusDegraded:
+				status = "RUNNING" // degraded is still running
 			}
 			agentStatus := &db.AgentStatus{
 				Name:          heartbeat.AgentName,
