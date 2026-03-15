@@ -159,3 +159,34 @@ func TestShouldExecute_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestStart_RefusesLiveModeWhenPaperOnly(t *testing.T) {
+	exec := NewExecutor(ExecutorConfig{
+		OrderExecutorURL: "http://localhost:8091/mcp",
+		PaperOnly:        true,
+		TradingMode:      "LIVE",
+	})
+	err := exec.Start(nil, "test.decisions")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PaperOnly=true but trading_mode=LIVE")
+}
+
+func TestStart_AllowsPaperMode(t *testing.T) {
+	exec := NewExecutor(ExecutorConfig{
+		OrderExecutorURL: "http://localhost:8091/mcp",
+		PaperOnly:        true,
+		TradingMode:      "PAPER",
+	})
+	// Will fail on nil NATS, but should NOT fail on the PaperOnly check
+	err := exec.Start(nil, "test.decisions")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "NATS connection is nil")
+	assert.NotContains(t, err.Error(), "PaperOnly")
+}
+
+func TestStop_Idempotent(t *testing.T) {
+	exec := NewExecutor(ExecutorConfig{})
+	// Stop before Start should not panic
+	exec.Stop()
+	exec.Stop()
+}

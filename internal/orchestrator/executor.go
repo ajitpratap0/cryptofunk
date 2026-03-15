@@ -35,6 +35,8 @@ type Executor struct {
 	connecting   bool
 	connectReady chan struct{} // signals when a concurrent connect finishes
 	subscription *nats.Subscription
+	ctx          context.Context    // lifecycle context — cancelled on Stop()
+	cancel       context.CancelFunc // cancels ctx
 }
 
 // NewExecutor creates a new decision-to-order executor.
@@ -66,15 +68,16 @@ func (e *Executor) ShouldExecute(decision *TradingDecision) bool {
 // If the order-executor MCP server is unavailable, it logs a warning but still
 // subscribes (it will retry MCP connection on first order).
 func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
+	// Safety check first: refuse to auto-trade in LIVE mode unless explicitly allowed
+	if e.config.PaperOnly && strings.ToUpper(e.config.TradingMode) == "LIVE" {
+		return fmt.Errorf("executor refused to start: PaperOnly=true but trading_mode=LIVE")
+	}
+
 	if natsConn == nil {
 		return fmt.Errorf("NATS connection is nil")
 	}
 	e.natsConn = natsConn
-
-	// Safety: refuse to auto-trade in LIVE mode unless explicitly allowed
-	if e.config.PaperOnly && strings.ToUpper(e.config.TradingMode) == "LIVE" {
-		return fmt.Errorf("executor refused to start: PaperOnly=true but trading_mode=LIVE")
-	}
+	e.ctx, e.cancel = context.WithCancel(context.Background())
 
 	// Create MCP client for order-executor
 	e.mcpClient = mcp.NewClient(&mcp.Implementation{
@@ -107,8 +110,13 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	return nil
 }
 
-// Stop drains the NATS subscription and closes the MCP session.
+// Stop drains the NATS subscription, cancels the lifecycle context, and closes the MCP session.
 func (e *Executor) Stop() {
+	// Cancel lifecycle context to abort in-flight placeOrder/connectMCP calls
+	if e.cancel != nil {
+		e.cancel()
+	}
+
 	e.sessionMu.Lock()
 	sub := e.subscription
 	e.subscription = nil
@@ -161,8 +169,8 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 		return
 	}
 
-	// Use uppercase side to match order-executor tool expectations
-	side := strings.ToUpper(string(decision.Action))
+	// The order-executor MCP tool expects lowercase side ("buy"/"sell")
+	side := strings.ToLower(string(decision.Action))
 	if err := e.placeOrder(decision.Symbol, side, e.config.DefaultQuantity); err != nil {
 		log.Error().Err(err).
 			Str("symbol", decision.Symbol).
@@ -225,11 +233,11 @@ func (e *Executor) connectMCP() error {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	connCtx, connCancel := context.WithTimeout(e.ctx, 10*time.Second)
+	defer connCancel()
 
 	transport := &mcp.StreamableClientTransport{Endpoint: e.config.OrderExecutorURL}
-	session, err := e.mcpClient.Connect(ctx, transport, nil)
+	session, err := e.mcpClient.Connect(connCtx, transport, nil)
 
 	e.sessionMu.Lock()
 	if err == nil {
@@ -266,14 +274,14 @@ func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
 		return fmt.Errorf("order-executor session not available after connect")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	callCtx, callCancel := context.WithTimeout(e.ctx, 30*time.Second)
+	defer callCancel()
 
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+	result, err := session.CallTool(callCtx, &mcp.CallToolParams{
 		Name: "place_market_order",
 		Arguments: map[string]interface{}{
 			"symbol":   symbol,
-			"side":     strings.ToLower(side),
+			"side":     side,
 			"quantity": quantity,
 		},
 	})

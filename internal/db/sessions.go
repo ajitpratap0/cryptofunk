@@ -355,9 +355,12 @@ func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) er
 			updated_at = NOW()
 		WHERE id = $1
 	`
-	_, err := db.pool.Exec(ctx, query, sessionID)
+	result, err := db.pool.Exec(ctx, query, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to aggregate session stats: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("session %s not found", sessionID)
 	}
 	return nil
 }

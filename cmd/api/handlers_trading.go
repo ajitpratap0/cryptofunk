@@ -226,50 +226,64 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// Submit order to the order-executor MCP server.
-	// The executor creates the order in the DB, simulates fills, and updates status.
+	// Create a tracking record with a known UUID so we can return it to the caller.
+	// The order-executor will create its own DB record for the fill — this record
+	// tracks the API-initiated request and its outcome.
+	price := &req.Price
+	if req.Price == 0 {
+		price = nil
+	}
+	order := &db.Order{
+		ID:        uuid.New(),
+		SessionID: s.activeSessionID,
+		Symbol:    req.Symbol,
+		Exchange:  "API",
+		Side:      db.ConvertOrderSide(req.Side),
+		Type:      db.ConvertOrderType(req.Type),
+		Quantity:  req.Quantity,
+		Price:     price,
+		Status:    db.OrderStatusNew,
+		PlacedAt:  time.Now(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := s.db.InsertOrder(ctx, order); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
+		return
+	}
+
+	// Submit to the order-executor MCP server for execution
 	execPrice := req.Price
 	if err := s.executeOrder(ctx, req.Symbol, strings.ToUpper(req.Side), strings.ToUpper(req.Type), req.Quantity, execPrice); err != nil {
-		log.Error().Err(err).
-			Str("symbol", req.Symbol).
-			Msg("Order execution failed")
+		log.Error().Err(err).Str("order_id", order.ID.String()).Msg("Order execution failed")
+
+		// Mark as REJECTED
+		errMsg := err.Error()
+		now := time.Now()
+		_ = s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusRejected, 0, 0, nil, &now, &errMsg)
+		order.Status = db.OrderStatusRejected
+		order.ErrorMessage = &errMsg
+
+		// Broadcast rejection to WebSocket clients
+		_ = s.BroadcastOrderUpdate(order)
 
 		c.JSON(http.StatusInternalServerError, gin.H{
+			"order":   order,
 			"error":   "order execution failed",
-			"details": err.Error(),
+			"details": errMsg,
 		})
 		return
 	}
 
-	log.Info().
-		Str("symbol", req.Symbol).
-		Str("side", req.Side).
-		Str("type", req.Type).
-		Float64("quantity", req.Quantity).
-		Msg("Order executed successfully")
+	// Mark our tracking record as submitted (the executor has its own FILLED record)
+	log.Info().Str("order_id", order.ID.String()).Str("symbol", req.Symbol).Msg("Order executed")
 
-	// Query the most recent order for this symbol to return the full order object.
-	// The executor created the DB record — fetch it so clients get the order ID.
-	orders, err := s.db.GetOrdersBySymbol(ctx, req.Symbol)
-	if err == nil && len(orders) > 0 {
-		// Broadcast to WebSocket clients
-		if broadcastErr := s.BroadcastOrderUpdate(orders[0]); broadcastErr != nil {
-			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
-		}
-		c.JSON(http.StatusCreated, gin.H{
-			"order":   orders[0],
-			"message": "Order executed successfully",
-		})
-		return
-	}
+	// Broadcast success to WebSocket clients
+	_ = s.BroadcastOrderUpdate(order)
 
-	// Fallback if we can't fetch the order back
 	c.JSON(http.StatusCreated, gin.H{
-		"message":  "Order executed successfully",
-		"symbol":   req.Symbol,
-		"side":     req.Side,
-		"type":     req.Type,
-		"quantity": req.Quantity,
+		"order":   order,
+		"message": "Order executed successfully",
 	})
 }
 
