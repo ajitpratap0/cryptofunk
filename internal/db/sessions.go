@@ -335,6 +335,42 @@ func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*Tradin
 	return sessions, nil
 }
 
+// AggregateSessionStats recalculates session statistics from completed trades.
+// It counts total orders linked to the session and aggregates P&L from closed positions.
+// Note: total_trades counts both FILLED and PARTIALLY_FILLED as one trade each.
+// winning_trades/losing_trades are derived from positions (not orders) so the
+// count bases differ intentionally — an order may produce multiple position entries.
+// TODO: Executor-placed orders (via NATS decisions) bypass the API and don't carry
+// session_id. Those orders won't be counted here until the order-executor MCP tool
+// accepts a session_id parameter.
+func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) error {
+	query := `
+		UPDATE trading_sessions SET
+			total_trades = COALESCE((
+				SELECT COUNT(*) FROM orders WHERE session_id = $1 AND status IN ('FILLED', 'PARTIALLY_FILLED')
+			), 0),
+			total_pnl = COALESCE((
+				SELECT SUM(realized_pnl) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL
+			), 0),
+			winning_trades = COALESCE((
+				SELECT COUNT(*) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL AND realized_pnl > 0
+			), 0),
+			losing_trades = COALESCE((
+				SELECT COUNT(*) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL AND realized_pnl < 0
+			), 0),
+			updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := db.pool.Exec(ctx, query, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to aggregate session stats: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	return nil
+}
+
 // SessionStats holds session statistics
 type SessionStats struct {
 	TotalTrades   int

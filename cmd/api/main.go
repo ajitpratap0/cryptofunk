@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -37,10 +38,11 @@ type APIServer struct {
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
 	orderExecutorURL   string                  // MCP endpoint for order-executor server
-	sessionMu          sync.Mutex              // Protects orderExecSession and connecting
+	sessionMu          sync.Mutex              // Protects orderExecSession, connecting, and activeSessionID
 	connecting         bool                    // Guard against concurrent reconnect
 	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
 	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
+	activeSessionID    *uuid.UUID              // Currently active trading session ID (guarded by sessionMu)
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling

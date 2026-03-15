@@ -285,6 +285,45 @@ func TestStopSession(t *testing.T) {
 // 	assert.True(t, found, "BTC session should be in results")
 // }
 
+func TestAggregateSessionStats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test: requires database connection")
+	}
+
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a session
+	session := &TradingSession{
+		Mode:           TradingModePaper,
+		Symbol:         "BTC/USDT",
+		Exchange:       "binance",
+		StartedAt:      time.Now(),
+		InitialCapital: 10000.0,
+	}
+
+	err := db.CreateSession(ctx, session)
+	require.NoError(t, err)
+
+	// AggregateSessionStats recalculates session statistics from completed trades.
+	// It counts filled/partially-filled orders linked to the session and aggregates
+	// realized P&L from closed positions (those with a non-NULL exit_time).
+	//
+	// With no orders or positions, all stats should be zero.
+	err = db.AggregateSessionStats(ctx, session.ID)
+	require.NoError(t, err)
+
+	updated, err := db.GetSession(ctx, session.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, updated.TotalTrades, "no orders yet, total_trades should be 0")
+	assert.Equal(t, 0.0, updated.TotalPnL, "no positions yet, total_pnl should be 0")
+	assert.Equal(t, 0, updated.WinningTrades, "no positions yet, winning_trades should be 0")
+	assert.Equal(t, 0, updated.LosingTrades, "no positions yet, losing_trades should be 0")
+}
+
 func TestSessionModes(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
