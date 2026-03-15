@@ -283,8 +283,21 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// Mark our tracking record as submitted (the executor has its own FILLED record)
-	log.Info().Str("order_id", order.ID.String()).Str("symbol", req.Symbol).Msg("Order executed")
+	// Update our tracking record to FILLED so AggregateSessionStats counts it
+	now := time.Now()
+	if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, nil, &now, nil); updateErr != nil {
+		log.Warn().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update tracking order to FILLED")
+	} else {
+		order.Status = db.OrderStatusFilled
+		order.ExecutedQuantity = order.Quantity
+	}
+
+	log.Info().
+		Str("order_id", order.ID.String()).
+		Str("symbol", req.Symbol).
+		Str("side", req.Side).
+		Float64("quantity", req.Quantity).
+		Msg("Order executed and filled")
 
 	// Update session stats if we have an active session (use snapshot from above)
 	if sessionID != nil {

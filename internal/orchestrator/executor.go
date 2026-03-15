@@ -15,12 +15,13 @@ import (
 
 // ExecutorConfig holds configuration for the decision-to-order executor.
 type ExecutorConfig struct {
-	OrderExecutorURL string  // MCP endpoint for the order-executor server
-	MinConfidence    float64 // Minimum confidence to place an order
-	MinConsensus     float64 // Minimum consensus to place an order
-	DefaultQuantity  float64 // Default order quantity (e.g. 0.001 BTC)
-	PaperOnly        bool    // If true, refuse to start when TradingMode is LIVE
-	TradingMode      string  // "PAPER" or "LIVE" — passed from config, not read from Viper
+	OrderExecutorURL string        // MCP endpoint for the order-executor server
+	MinConfidence    float64       // Minimum confidence to place an order
+	MinConsensus     float64       // Minimum consensus to place an order
+	DefaultQuantity  float64       // Default order quantity (e.g. 0.001 BTC)
+	PaperOnly        bool          // If true, refuse to start when TradingMode is LIVE
+	TradingMode      string        // "PAPER" or "LIVE" — passed from config, not read from Viper
+	ReconnectBackoff time.Duration // Skip reconnect for this duration after failure (default 60s)
 }
 
 // Executor bridges orchestrator decisions to order execution via MCP.
@@ -195,9 +196,13 @@ func (e *Executor) connectMCP() error {
 		return fmt.Errorf("MCP client not initialized")
 	}
 
-	// Backoff: skip reconnect for 60s after a failed attempt
+	// Backoff: skip reconnect after a recent failure
+	backoff := e.config.ReconnectBackoff
+	if backoff == 0 {
+		backoff = 60 * time.Second
+	}
 	e.sessionMu.Lock()
-	if !e.lastConnectFail.IsZero() && time.Since(e.lastConnectFail) < 60*time.Second {
+	if !e.lastConnectFail.IsZero() && time.Since(e.lastConnectFail) < backoff {
 		e.sessionMu.Unlock()
 		return fmt.Errorf("reconnect backoff: last failure was %s ago", time.Since(e.lastConnectFail).Truncate(time.Second))
 	}

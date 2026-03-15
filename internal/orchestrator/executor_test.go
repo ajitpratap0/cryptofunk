@@ -171,7 +171,7 @@ func TestStart_RefusesLiveModeWhenPaperOnly(t *testing.T) {
 	assert.Contains(t, err.Error(), "PaperOnly=true but trading_mode=LIVE")
 }
 
-func TestStart_AllowsPaperMode(t *testing.T) {
+func TestStart_DoesNotRejectPaperModeWhenPaperOnly(t *testing.T) {
 	exec := NewExecutor(ExecutorConfig{
 		OrderExecutorURL: "http://localhost:8091/mcp",
 		PaperOnly:        true,
