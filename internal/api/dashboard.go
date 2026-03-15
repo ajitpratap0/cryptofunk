@@ -789,12 +789,26 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 		status.Components["database"] = "healthy"
 	}
 
-	// Get agent count
+	// Get agent count from orchestrator (or fall back to database)
 	if h.orchestrator != nil {
-		status.ActiveAgents = h.orchestrator.GetActiveAgentCount()
-		status.Components["orchestrator"] = "healthy"
+		count := h.orchestrator.GetActiveAgentCount()
+		if count >= 0 {
+			status.ActiveAgents = count
+			status.Components["orchestrator"] = "healthy"
+		} else {
+			// Orchestrator unreachable (-1 sentinel), fall back to DB
+			status.Components["orchestrator"] = "unavailable"
+			agents, err := h.repo.GetAllAgentStatuses(ctx)
+			if err == nil {
+				status.ActiveAgents = len(agents)
+				status.AgentSummary = make(map[string]int)
+				for _, agent := range agents {
+					status.AgentSummary[agent.Status]++
+				}
+			}
+		}
 	} else {
-		// Try to get agent status from database
+		// No orchestrator client configured, use database
 		agents, err := h.repo.GetAllAgentStatuses(ctx)
 		if err == nil {
 			status.ActiveAgents = len(agents)

@@ -30,25 +30,26 @@ func NewOrchestratorClient(baseURL string) *OrchestratorClient {
 }
 
 // GetActiveAgentCount calls the orchestrator /health endpoint and returns
-// the active_agents count. Returns 0 on any error (graceful degradation).
+// the active_agents count. Returns -1 when the orchestrator is unreachable,
+// allowing callers to distinguish "zero agents" from "orchestrator unavailable".
 func (c *OrchestratorClient) GetActiveAgentCount() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
 	if err != nil {
-		return 0
+		return -1
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		log.Debug().Err(err).Str("url", c.baseURL+"/health").Msg("Failed to reach orchestrator for agent count")
-		return 0
+		return -1
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Debug().Int("status", resp.StatusCode).Msg("Orchestrator health returned non-200")
-		return 0
+		return -1
 	}
 
 	var result struct {
@@ -56,7 +57,7 @@ func (c *OrchestratorClient) GetActiveAgentCount() int {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Debug().Err(err).Msg("Failed to decode orchestrator health response")
-		return 0
+		return -1
 	}
 
 	return result.ActiveAgents

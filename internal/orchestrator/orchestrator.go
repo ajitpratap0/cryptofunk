@@ -485,8 +485,8 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 		session.SignalCount++
 		signalCount = session.SignalCount
 	} else {
-		// Register new agent from signal — receiving a signal is evidence the agent is alive,
-		// so default to Healthy rather than Unknown to ensure it counts as active.
+		// Register new agent from signal. Use Unknown status until a health check
+		// verifies the agent — a single signal doesn't guarantee ongoing health.
 		o.agents[name] = &AgentSession{
 			Name:            name,
 			Type:            agentType,
@@ -494,7 +494,7 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 			Weight:          o.getDefaultWeight(agentType),
 			LastSignal:      signal.Timestamp,
 			SignalCount:     1,
-			HealthStatus:    HealthStatusHealthy,
+			HealthStatus:    HealthStatusUnknown,
 			PerformanceData: make(map[string]interface{}),
 		}
 		signalCount = 1
@@ -1255,10 +1255,10 @@ func (o *Orchestrator) GetStatus() *OrchestratorStatus {
 		}
 	}
 
-	// Count active (enabled + healthy) agents, consistent with GetActiveAgentCount()
+	// Count active (enabled + not unhealthy) agents, consistent with GetActiveAgentCount()
 	activeCount := 0
 	for _, agent := range o.agents {
-		if agent.Enabled && agent.HealthStatus == HealthStatusHealthy {
+		if agent.Enabled && agent.HealthStatus != HealthStatusUnhealthy {
 			activeCount++
 		}
 	}
@@ -1290,14 +1290,17 @@ func (o *Orchestrator) GetNATSConnection() *nats.Conn {
 	return o.natsConn
 }
 
-// GetActiveAgentCount returns the number of active agents
+// GetActiveAgentCount returns the number of active agents.
+// An agent is active if it is enabled and not unhealthy. Agents with Unknown
+// status (registered via signal but not yet health-checked) are counted as
+// active since they are demonstrably sending data.
 func (o *Orchestrator) GetActiveAgentCount() int {
 	o.agentsMutex.RLock()
 	defer o.agentsMutex.RUnlock()
 
 	activeCount := 0
 	for _, agent := range o.agents {
-		if agent.Enabled && agent.HealthStatus == HealthStatusHealthy {
+		if agent.Enabled && agent.HealthStatus != HealthStatusUnhealthy {
 			activeCount++
 		}
 	}

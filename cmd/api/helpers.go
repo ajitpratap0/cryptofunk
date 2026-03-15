@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,17 +35,16 @@ func getPort() string {
 }
 
 func getOrderExecutorURL() string {
-	// Try environment variable first (highest priority)
-	if url := os.Getenv("ORDER_EXECUTOR_URL"); url != "" {
-		return url
-	}
-	// Try Viper-style env var
+	// Use the standard CRYPTOFUNK_* env var prefix (per project convention in CLAUDE.md)
 	if url := os.Getenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL"); url != "" {
 		return url
 	}
 	// Default: order-executor MCP server on port 8091
 	return "http://localhost:8091/mcp"
 }
+
+// jsonRPCIDCounter provides unique IDs for JSON-RPC requests.
+var jsonRPCIDCounter atomic.Int64
 
 // jsonRPCRequest is a JSON-RPC 2.0 request envelope.
 type jsonRPCRequest struct {
@@ -85,7 +85,7 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 
 	rpcReq := jsonRPCRequest{
 		JSONRPC: "2.0",
-		ID:      1,
+		ID:      int(jsonRPCIDCounter.Add(1)),
 		Method:  "tools/call",
 		Params: map[string]interface{}{
 			"name":      toolName,

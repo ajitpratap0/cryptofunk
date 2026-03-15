@@ -185,25 +185,14 @@ func TestCallOrchestratorWithRetry_NetworkFailure(t *testing.T) {
 
 // TestGetOrderExecutorURL_Default tests default order executor URL
 func TestGetOrderExecutorURL_Default(t *testing.T) {
-	// Ensure env vars are not set
-	t.Setenv("ORDER_EXECUTOR_URL", "")
 	t.Setenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL", "")
 
 	url := getOrderExecutorURL()
 	assert.Equal(t, "http://localhost:8091/mcp", url)
 }
 
-// TestGetOrderExecutorURL_EnvOverride tests ORDER_EXECUTOR_URL env override
+// TestGetOrderExecutorURL_EnvOverride tests CRYPTOFUNK env override
 func TestGetOrderExecutorURL_EnvOverride(t *testing.T) {
-	t.Setenv("ORDER_EXECUTOR_URL", "http://custom-executor:9999/mcp")
-
-	url := getOrderExecutorURL()
-	assert.Equal(t, "http://custom-executor:9999/mcp", url)
-}
-
-// TestGetOrderExecutorURL_ViperEnvOverride tests CRYPTOFUNK env override
-func TestGetOrderExecutorURL_ViperEnvOverride(t *testing.T) {
-	t.Setenv("ORDER_EXECUTOR_URL", "")
 	t.Setenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL", "http://k8s-executor:8091/mcp")
 
 	url := getOrderExecutorURL()
