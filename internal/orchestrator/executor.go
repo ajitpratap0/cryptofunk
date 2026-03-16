@@ -213,9 +213,10 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 				Str("side", side).
 				Float64("quantity", qty).
 				Msg("Failed to place order")
-			// Set a 60s backoff cooldown instead of clearing immediately
-			// to prevent a retry storm from rapid-fire NATS redeliveries.
-			e.recentOrders.Store(symbol, time.Now().Add(60*time.Second-cooldown))
+			// Keep the cooldown active (don't delete) to prevent retry storm.
+			// The existing timestamp from before the goroutine launch ensures
+			// the standard cooldown period applies before the next attempt.
+			// No action needed — the pre-recorded time.Now() is still valid.
 			return
 		}
 		log.Info().
