@@ -462,3 +462,103 @@ func TestPlaceOrderWithDatabase(t *testing.T) {
 	assert.True(t, w.Code == http.StatusCreated || w.Code == http.StatusOK || w.Code == http.StatusInternalServerError,
 		"Expected status 200, 201, or 500, got %d", w.Code)
 }
+
+// TestPaperTrade_InvalidRequest tests POST /api/v1/trade with invalid body
+func TestPaperTrade_InvalidRequest(t *testing.T) {
+	server, tc := setupTestAPIServer(t)
+	_ = tc
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade", bytes.NewBufferString("invalid json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestPaperTrade_LimitOrderMissingPrice tests that limit orders without a price are rejected
+func TestPaperTrade_LimitOrderMissingPrice(t *testing.T) {
+	server, tc := setupTestAPIServer(t)
+	_ = tc
+
+	reqBody := map[string]interface{}{
+		"symbol":   "BTC/USDT",
+		"side":     "BUY",
+		"type":     "LIMIT",
+		"quantity": 0.001,
+		// price intentionally omitted
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response, "error")
+}
+
+// TestPaperTrade_MarketOrder tests a successful market paper trade
+func TestPaperTrade_MarketOrder(t *testing.T) {
+	server, tc := setupTestAPIServer(t)
+	_ = tc
+
+	reqBody := map[string]interface{}{
+		"symbol":   "BTC/USDT",
+		"side":     "BUY",
+		"type":     "MARKET",
+		"quantity": 0.001,
+		"price":    50000.0,
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response, "order")
+	assert.Equal(t, "paper", response["trading_mode"])
+}
+
+// TestPaperTrade_LimitOrder tests a successful limit paper trade
+func TestPaperTrade_LimitOrder(t *testing.T) {
+	server, tc := setupTestAPIServer(t)
+	_ = tc
+
+	reqBody := map[string]interface{}{
+		"symbol":   "ETH/USDT",
+		"side":     "SELL",
+		"type":     "LIMIT",
+		"quantity": 0.1,
+		"price":    3000.0,
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.Contains(t, response, "order")
+	assert.Equal(t, "paper", response["trading_mode"])
+}
