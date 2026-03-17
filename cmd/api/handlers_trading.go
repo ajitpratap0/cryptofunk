@@ -283,11 +283,20 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// The order-executor MCP server creates its own FILLED order/trade records
-	// with the actual fill price. We don't mark this tracking record as FILLED
-	// because we don't have the fill price — storing averagePrice=0 would corrupt
-	// P&L calculations. The tracking record stays as NEW (submitted to executor).
-	// TODO: have executeOrder return fill details so we can update this record.
+	// Mark tracking order as FILLED so AggregateSessionStats counts it.
+	// Fill price is 0 in this record — actual price is in executor's trade records.
+	now := time.Now()
+	if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, &now, nil, nil); err != nil {
+		log.Error().Err(err).Str("order_id", order.ID.String()).Msg("Failed to update order to FILLED")
+	}
+	// KNOWN LIMITATION: The tracking record stores price=0 and ExecutedQuoteQuantity=0.
+	// The real fill price lives in the executor's own trade records (inserted by order-executor MCP).
+	// AggregateSessionStats counts this order as a filled trade, but any P&L derived
+	// from this record's price fields will be incorrect. Do not use for price arithmetic.
+	order.Status = db.OrderStatusFilled
+	order.ExecutedQuantity = order.Quantity
+	filledAt := now
+	order.FilledAt = &filledAt
 
 	log.Info().
 		Str("order_id", order.ID.String()).
@@ -385,9 +394,11 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		return
 	}
 
-	// Default to paper trading if not specified
+	// Default to paper trading if not specified; normalize to uppercase for DB enum
 	if req.Mode == "" {
-		req.Mode = "paper"
+		req.Mode = "PAPER"
+	} else {
+		req.Mode = strings.ToUpper(req.Mode)
 	}
 
 	// Determine exchange from config (defaults to "binance" if not configured)
@@ -465,6 +476,13 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 			"error": "failed to stop trading session",
 		})
 		return
+	}
+
+	// Cleanup any stale NEW orders older than 5 minutes, scoped to this session only.
+	if cleaned, err := s.db.CleanupStaleOrders(ctx, sessionID, 5*time.Minute); err != nil {
+		log.Warn().Err(err).Msg("Failed to cleanup stale orders")
+	} else if cleaned > 0 {
+		log.Info().Int64("cleaned", cleaned).Msg("Cleaned up stale NEW orders")
 	}
 
 	// Clear active session AFTER the DB stop completes, so any in-flight

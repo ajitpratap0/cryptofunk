@@ -79,6 +79,7 @@ echo "==> Go services built successfully"
 # Tier 2: Dashboard (different build context)
 echo "==> Building dashboard"
 docker build -f deployments/docker/Dockerfile.dashboard \
+  --build-arg NEXT_PUBLIC_API_URL=http://localhost \
   -t cryptofunk/dashboard:local \
   web/dashboard/
 echo "==> Dashboard built"

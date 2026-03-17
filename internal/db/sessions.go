@@ -19,24 +19,24 @@ const (
 
 // TradingSession represents a database trading session record
 type TradingSession struct {
-	ID             uuid.UUID
-	Mode           TradingMode
-	Symbol         string
-	Exchange       string
-	StartedAt      time.Time
-	StoppedAt      *time.Time
-	InitialCapital float64
-	FinalCapital   *float64
-	TotalTrades    int
-	WinningTrades  int
-	LosingTrades   int
-	TotalPnL       float64
-	MaxDrawdown    float64
-	SharpeRatio    *float64
-	Config         map[string]interface{}
-	Metadata       map[string]interface{}
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID             uuid.UUID              `json:"id"`
+	Mode           TradingMode            `json:"mode"`
+	Symbol         string                 `json:"symbol"`
+	Exchange       string                 `json:"exchange"`
+	StartedAt      time.Time              `json:"started_at"`
+	StoppedAt      *time.Time             `json:"stopped_at"`
+	InitialCapital float64                `json:"initial_capital"`
+	FinalCapital   *float64               `json:"final_capital"`
+	TotalTrades    int                    `json:"total_trades"`
+	WinningTrades  int                    `json:"winning_trades"`
+	LosingTrades   int                    `json:"losing_trades"`
+	TotalPnL       float64                `json:"total_pnl"`
+	MaxDrawdown    float64                `json:"max_drawdown"`
+	SharpeRatio    *float64               `json:"sharpe_ratio"`
+	Config         map[string]interface{} `json:"config,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // CreateSession creates a new trading session
@@ -369,6 +369,29 @@ func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) er
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 	return nil
+}
+
+// CleanupStaleOrders marks old NEW orders as CANCELED if they've been stuck
+// for longer than the given duration. This handles orphaned tracking records
+// from the API handler that were never executed.
+// Only orders belonging to the given session are affected (session-scoped).
+func (db *DB) CleanupStaleOrders(ctx context.Context, sessionID uuid.UUID, olderThan time.Duration) (int64, error) {
+	query := `
+		UPDATE orders SET
+			status = 'CANCELED',
+			canceled_at = NOW(),
+			error_message = 'Cleaned up: stuck in NEW status',
+			updated_at = NOW()
+		WHERE status = 'NEW'
+		AND session_id = $1
+		AND placed_at < NOW() - $2
+	`
+	// pgx v5 natively maps time.Duration to PostgreSQL interval — no string conversion needed.
+	result, err := db.pool.Exec(ctx, query, sessionID, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup stale orders: %w", err)
+	}
+	return result.RowsAffected(), nil
 }
 
 // SessionStats holds session statistics

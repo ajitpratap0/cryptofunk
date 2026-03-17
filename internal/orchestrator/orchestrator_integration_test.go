@@ -223,6 +223,12 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 4: Split vote - no consensus
 	t.Run("split_vote_no_consensus", func(t *testing.T) {
+		// Drain any leftover decisions from previous subtests to avoid a stale
+		// decision being picked up by this subtest's select.
+		for len(decisionChan) > 0 {
+			<-decisionChan
+		}
+
 		// Half vote BUY, half vote SELL
 		buyAgents := []string{"technical-agent", "trend-agent"}
 		sellAgents := []string{"reversion-agent", "orderbook-agent"}
@@ -253,15 +259,19 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			sendSignal(t, nc, config.SignalTopic, signal)
 		}
 
-		// Wait for decision
+		// Wait for the orchestrator to emit a decision. With equal votes (2 BUY,
+		// 2 SELL) the consensus is 0.5 which is below MinConsensus (0.6), so the
+		// orchestrator should default to HOLD rather than skipping the decision
+		// entirely. We use a select instead of time.Sleep so the test is fast on
+		// success and only blocks for the full timeout on unexpected failure.
 		select {
 		case decision := <-decisionChan:
-			// With equal votes, consensus should be low
+			// With equal votes (2 BUY, 2 SELL), consensus should be 0.5 < MinConsensus (0.6)
 			assert.Less(t, decision.Consensus, config.MinConsensus)
 			// Should default to HOLD
 			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
 		case <-time.After(5 * time.Second):
-			t.Fatal("Timeout waiting for decision")
+			t.Fatal("Timeout waiting for split-vote HOLD decision")
 		}
 	})
 
