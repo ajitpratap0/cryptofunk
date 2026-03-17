@@ -283,11 +283,11 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// The order-executor MCP server creates its own FILLED order/trade records
-	// with the actual fill price. We don't mark this tracking record as FILLED
-	// because we don't have the fill price — storing averagePrice=0 would corrupt
-	// P&L calculations. The tracking record stays as NEW (submitted to executor).
-	// TODO: have executeOrder return fill details so we can update this record.
+	// Mark tracking order as FILLED so AggregateSessionStats counts it.
+	// Fill price is 0 in this record — actual price is in executor's trade records.
+	now := time.Now()
+	_ = s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, nil, &now, nil)
+	order.Status = db.OrderStatusFilled
 
 	log.Info().
 		Str("order_id", order.ID.String()).
