@@ -26,28 +26,37 @@ type APICreds struct {
 	Passphrase string `json:"passphrase"`
 }
 
-// Market from Gamma API
+// Market from Gamma API.
+// JSON tags use camelCase to match the Gamma API wire format
+// (e.g. GET /markets returns "conditionId", not "condition_id").
 type Market struct {
-	ConditionID      string   `json:"condition_id"`
-	QuestionID       string   `json:"question_id"`
+	ConditionID      string   `json:"conditionId"`
+	QuestionID       string   `json:"questionId"`
 	Question         string   `json:"question"`
 	Description      string   `json:"description"`
-	MarketSlug       string   `json:"market_slug"`
-	EndDateISO       string   `json:"end_date_iso"`
-	GameStartTime    string   `json:"game_start_time"`
+	MarketSlug       string   `json:"slug"`
+	EndDateISO       string   `json:"endDateIso"`
+	GameStartTime    string   `json:"gameStartTime"`
 	Active           bool     `json:"active"`
 	Closed           bool     `json:"closed"`
 	Funded           bool     `json:"funded"`
 	Tokens           []Token  `json:"tokens"`
-	MinimumOrderSize string   `json:"minimum_order_size"`
-	MinimumTickSize  string   `json:"minimum_tick_size"`
+	MinimumOrderSize string   `json:"orderMinSize"`
+	MinimumTickSize  string   `json:"orderPriceMinTickSize"`
 	Volume           string   `json:"volume"`
-	Volume24hr       float64  `json:"volume_24hr"`
+	Volume24hr       float64  `json:"volume24hr"`
 	Liquidity        string   `json:"liquidity"`
 	Tags             []string `json:"tags"`
-	NegRisk          bool     `json:"neg_risk"`
-	NegRiskMarketID  string   `json:"neg_risk_market_id"`
-	NegRiskRequestID string   `json:"neg_risk_request_id"`
+	NegRisk          bool     `json:"negRisk"`
+	NegRiskMarketID  string   `json:"negRiskMarketId"`
+	NegRiskRequestID string   `json:"negRiskRequestId"`
+	// Outcome data from Gamma API
+	OutcomePrices string `json:"outcomePrices"` // JSON-encoded string array e.g. '["0.6","0.4"]'
+	Outcomes      string `json:"outcomes"`      // JSON-encoded string array e.g. '["Yes","No"]'
+	Category      string `json:"category"`
+	// Numeric convenience fields — Gamma also provides *Num variants
+	VolumeNum    float64 `json:"volumeNum"`
+	LiquidityNum float64 `json:"liquidityNum"`
 }
 
 // Token represents a conditional token in a market

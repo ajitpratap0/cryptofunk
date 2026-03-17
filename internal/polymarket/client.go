@@ -188,6 +188,10 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body io.Read
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Set a browser-like User-Agent to avoid Cloudflare bot detection on
+	// long-running connections (the default Go UA triggers JS challenges
+	// after extended session time).
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; CryptoFunk/1.0; +https://github.com/ajitpratap0/cryptofunk)")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

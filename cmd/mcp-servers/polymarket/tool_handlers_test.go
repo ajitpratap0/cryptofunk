@@ -282,11 +282,15 @@ func TestHTTP_GetPrice_MissingArgs(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHTTP_GetMarkets_MultipleMarkets(t *testing.T) {
+	// Mock data uses camelCase field names matching the real Gamma API wire format.
+	// (The polymarket.Market struct JSON tags were updated from snake_case to camelCase
+	// to match the actual Gamma API response — see internal/polymarket/types.go.)
 	mockMarkets := `[
 		{
-			"condition_id": "cond-001",
+			"conditionId": "cond-001",
 			"question": "Will BTC exceed $100k by Q1 2026?",
 			"active": true,
+			"closed": false,
 			"tokens": [
 				{"token_id":"yes-001","outcome":"YES","price":0.65,"winner":false},
 				{"token_id":"no-001","outcome":"NO","price":0.35,"winner":false}
@@ -294,9 +298,10 @@ func TestHTTP_GetMarkets_MultipleMarkets(t *testing.T) {
 			"volume": "1500000"
 		},
 		{
-			"condition_id": "cond-002",
+			"conditionId": "cond-002",
 			"question": "Will ETH flip BTC by market cap in 2026?",
 			"active": true,
+			"closed": false,
 			"tokens": [
 				{"token_id":"yes-002","outcome":"YES","price":0.20,"winner":false},
 				{"token_id":"no-002","outcome":"NO","price":0.80,"winner":false}
@@ -304,9 +309,10 @@ func TestHTTP_GetMarkets_MultipleMarkets(t *testing.T) {
 			"volume": "800000"
 		},
 		{
-			"condition_id": "cond-003",
+			"conditionId": "cond-003",
 			"question": "Will the Federal Reserve cut rates in March 2026?",
 			"active": true,
+			"closed": false,
 			"tokens": [
 				{"token_id":"yes-003","outcome":"YES","price":0.70,"winner":false},
 				{"token_id":"no-003","outcome":"NO","price":0.30,"winner":false}
