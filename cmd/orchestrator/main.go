@@ -204,6 +204,34 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	// Start decision-to-order executor (bridges NATS decisions to MCP order execution)
+	// All values from config/env — no hardcoded defaults
+	viper.SetDefault("executor.min_confidence", 0.6)
+	viper.SetDefault("executor.min_consensus", 0.5)
+	viper.SetDefault("executor.default_quantity", 0.001) // 0.001 BTC ≈ $85 at current prices
+	viper.SetDefault("executor.paper_only", true)
+	viper.SetDefault("executor.order_cooldown", "5m")
+	viper.SetDefault("mcp.internal.order_executor.url", "http://localhost:8091/mcp")
+	viper.SetDefault("trading.mode", "PAPER") // Ensure TradingMode is never empty
+
+	execConfig := orchestrator.ExecutorConfig{
+		OrderExecutorURL: viper.GetString("mcp.internal.order_executor.url"),
+		MinConfidence:    viper.GetFloat64("executor.min_confidence"),
+		MinConsensus:     viper.GetFloat64("executor.min_consensus"),
+		DefaultQuantity:  viper.GetFloat64("executor.default_quantity"),
+		PaperOnly:        viper.GetBool("executor.paper_only"),
+		TradingMode:      viper.GetString("trading.mode"),
+		OrderCooldown:    viper.GetDuration("executor.order_cooldown"),
+	}
+	executor := orchestrator.NewExecutor(execConfig)
+	if natsConn := orch.GetNATSConnection(); natsConn != nil {
+		if err := executor.Start(natsConn, "cryptofunk.orchestrator.decisions"); err != nil {
+			log.Warn().Err(err).Msg("Decision executor unavailable — orders won't be placed automatically")
+		}
+	} else {
+		log.Warn().Msg("No NATS connection available — decision executor not started")
+	}
+
 	// Start orchestrator in goroutine
 	errChan := make(chan error, 1)
 	go func() {
@@ -227,7 +255,10 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	// Shutdown HTTP server first
+	// Stop decision executor (unsubscribes NATS, closes MCP session)
+	executor.Stop()
+
+	// Shutdown HTTP server
 	if err := httpServer.Stop(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during HTTP server shutdown")
 	} else {

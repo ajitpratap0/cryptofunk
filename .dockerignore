@@ -72,8 +72,10 @@ node_modules/
 # Web/Dashboard (not needed for Go builds)
 web/
 
-# Worktrees
+# Worktrees and Claude artifacts
 *-worktrees/
+.claude/
+market-data
 
 # Terraform state
 infra/terraform/.terraform/

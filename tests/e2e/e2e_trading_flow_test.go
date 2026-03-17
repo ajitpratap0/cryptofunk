@@ -194,7 +194,7 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 		case decision := <-decisionChan:
 			buyDecision = decision
 			assert.Equal(t, "BTC/USDT", decision.Symbol)
-			assert.Equal(t, "BUY", decision.Action)
+			assert.Equal(t, "BUY", string(decision.Action))
 			assert.Greater(t, decision.Confidence, 0.7)
 			assert.Greater(t, decision.Consensus, 0.6)
 			assert.Equal(t, 6, decision.ParticipatingAgents)
@@ -261,7 +261,7 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 		select {
 		case decision := <-decisionChan:
 			assert.Equal(t, "BTC/USDT", decision.Symbol)
-			assert.Equal(t, "SELL", decision.Action)
+			assert.Equal(t, "SELL", string(decision.Action))
 			assert.Greater(t, decision.Confidence, 0.6)
 			assert.Greater(t, decision.Consensus, 0.5)
 
@@ -327,19 +327,16 @@ func TestE2E_CompleteTradingFlow(t *testing.T) {
 			},
 		})
 
-		// Wait for decision (should be HOLD due to risk veto)
+		// Wait for decision (must be HOLD due to risk veto)
 		select {
 		case decision := <-decisionChan:
-			// Risk agent's high weight should prevent BUY
-			switch decision.Action {
-			case "HOLD":
-				t.Logf("Risk veto successful: Action=%s, Consensus=%.2f",
-					decision.Action, decision.Consensus)
-			case "BUY":
-				// BUY can still win if risk agent's weight isn't dominant enough
-				assert.Less(t, decision.Consensus, 0.9,
-					"If BUY wins despite risk HOLD, consensus should be lower")
-			}
+			// Risk agent (weight=1.0, confidence=0.95) holds a HOLD signal which
+			// dominates the BUY votes from technical (weight=0.25) and trend (weight=0.30).
+			// The HOLD vote score (0.95) exceeds BUY vote score (0.25*0.90 + 0.30*0.85 = 0.48),
+			// so consensus falls below MinConsensus threshold and the decision must be HOLD.
+			assert.Equal(t, "HOLD", string(decision.Action), "risk agent veto must override BUY consensus")
+			assert.Less(t, decision.Consensus, 0.8, "consensus must be suppressed by risk agent weight")
+			t.Logf("Risk veto confirmed: Action=%s, Consensus=%.2f", decision.Action, decision.Consensus)
 		case <-time.After(3 * time.Second):
 			t.Fatal("Timeout waiting for risk veto decision")
 		}

@@ -53,6 +53,7 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 		hub:                hub,
 		port:               "8081",
 		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:8091/mcp",
 		ctx:                ctx,
 		safetyGuard:        safety.NewGuard(safety.NewLimitsConfig(), safety.NewMonitor(0)),
 	}
@@ -68,7 +69,7 @@ func TestHealthEndpoint(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/health", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -89,7 +90,7 @@ func TestStatusEndpoint(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/status", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -148,7 +149,7 @@ func TestGetConfigEndpoint(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/config", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/config", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -170,7 +171,7 @@ func TestListAgents_Empty(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/agents", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/agents", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -193,7 +194,7 @@ func TestListPositions_Empty(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/positions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/positions", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -213,7 +214,7 @@ func TestListOrders_Empty(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/orders", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/orders", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -234,7 +235,7 @@ func TestPlaceOrder_InvalidRequest(t *testing.T) {
 	_ = tc // testcontainers handles cleanup automatically
 
 	// Invalid JSON
-	req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewBufferString("invalid json"))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewBufferString("invalid json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -254,7 +255,7 @@ func TestPlaceOrder_MissingFields(t *testing.T) {
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -272,7 +273,7 @@ func TestStartTrading_InvalidRequest(t *testing.T) {
 	reqBody := map[string]interface{}{}
 	body, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest("POST", "/api/v1/trade/start", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/start", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -291,7 +292,7 @@ func TestStopTrading_InvalidRequest(t *testing.T) {
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest("POST", "/api/v1/trade/stop", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/trade/stop", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -305,7 +306,7 @@ func TestCancelOrder_InvalidOrderID(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("DELETE", "/api/v1/orders/invalid-id", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "DELETE", "/api/v1/orders/invalid-id", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -360,7 +361,7 @@ func TestListAgentsWithDatabase(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/agents", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/agents", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -378,7 +379,7 @@ func TestListPositionsWithDatabase(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/positions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/positions", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -396,7 +397,7 @@ func TestListOrdersWithDatabase(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
 
-	req := httptest.NewRequest("GET", "/api/v1/orders", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/orders", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -415,7 +416,7 @@ func TestGetPositionWithDatabase(t *testing.T) {
 	_ = tc // testcontainers handles cleanup automatically
 
 	// Query for a symbol (may not exist, but should return 200 with empty result)
-	req := httptest.NewRequest("GET", "/api/v1/positions/BTC/USDT", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/v1/positions/BTC/USDT", nil)
 	w := httptest.NewRecorder()
 
 	server.router.ServeHTTP(w, req)
@@ -451,7 +452,7 @@ func TestPlaceOrderWithDatabase(t *testing.T) {
 	}
 	body, _ := json.Marshal(reqBody)
 
-	req := httptest.NewRequest("POST", "/api/v1/orders", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

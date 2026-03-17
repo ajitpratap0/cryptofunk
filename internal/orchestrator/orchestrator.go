@@ -1,13 +1,13 @@
 // Package orchestrator coordinates multiple trading agents via weighted voting and consensus
-//
-//nolint:goconst // Trading signals are domain-specific strings
 package orchestrator
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -19,6 +19,15 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
+)
+
+// SignalAction represents the typed set of valid trading signal actions.
+type SignalAction string
+
+const (
+	SignalActionBuy  SignalAction = "BUY"
+	SignalActionSell SignalAction = "SELL"
+	SignalActionHold SignalAction = "HOLD"
 )
 
 const (
@@ -41,7 +50,7 @@ type AgentSignal struct {
 	AgentName  string                 `json:"agent_name"`
 	AgentType  string                 `json:"agent_type"`
 	Symbol     string                 `json:"symbol"`
-	Signal     string                 `json:"signal"` // BUY, SELL, HOLD
+	Signal     SignalAction           `json:"signal"` // BUY, SELL, HOLD
 	Confidence float64                `json:"confidence"`
 	Reasoning  string                 `json:"reasoning"`
 	Timestamp  time.Time              `json:"timestamp"`
@@ -74,7 +83,7 @@ type DecisionContext struct {
 // TradingDecision represents the final orchestrator decision
 type TradingDecision struct {
 	Symbol              string                 `json:"symbol"`
-	Action              string                 `json:"action"` // BUY, SELL, HOLD
+	Action              SignalAction           `json:"action"` // BUY, SELL, HOLD
 	Confidence          float64                `json:"confidence"`
 	Consensus           float64                `json:"consensus"` // 0.0-1.0
 	ParticipatingAgents int                    `json:"participating_agents"`
@@ -96,6 +105,7 @@ type OrchestratorConfig struct {
 	MinConfidence       float64       `json:"min_confidence" yaml:"min_confidence"`   // Minimum confidence threshold
 	MaxSignalAge        time.Duration `json:"max_signal_age" yaml:"max_signal_age"`   // Discard signals older than this
 	HealthCheckInterval time.Duration `json:"health_check_interval" yaml:"health_check_interval"`
+	AllowedAgents       []string      `json:"allowed_agents" yaml:"allowed_agents"` // Allowlist of agent names; empty means allow all
 }
 
 // OrchestratorMetrics holds Prometheus metrics for orchestrator
@@ -237,7 +247,7 @@ func (o *Orchestrator) Initialize(ctx context.Context) error {
 	o.log.Info().Msg("Initializing orchestrator")
 
 	// Create cancellable context
-	o.ctx, o.cancel = context.WithCancel(ctx)
+	o.ctx, o.cancel = context.WithCancel(ctx) //nolint:gosec
 
 	// Load persisted pause state from database
 	if o.db != nil {
@@ -332,6 +342,27 @@ func (o *Orchestrator) handleSignal(msg *nats.Msg) {
 		return
 	}
 
+	if len(o.config.AllowedAgents) > 0 && !slices.Contains(o.config.AllowedAgents, signal.AgentName) {
+		o.log.Warn().Str("agent", signal.AgentName).Msg("rejected signal from unrecognized agent")
+		return
+	}
+
+	// Validate signal action
+	switch signal.Signal {
+	case SignalActionBuy, SignalActionSell, SignalActionHold:
+		// valid
+	default:
+		o.log.Warn().Str("signal", string(signal.Signal)).Msg("invalid signal action, ignoring")
+		o.metrics.SignalsDropped.Inc()
+		return
+	}
+
+	// Validate and clamp confidence bounds
+	if signal.Confidence < 0 || signal.Confidence > 1 {
+		o.log.Warn().Float64("confidence", signal.Confidence).Msg("invalid confidence value, clamping")
+		signal.Confidence = math.Max(0, math.Min(1, signal.Confidence))
+	}
+
 	// Validate signal age
 	if time.Since(signal.Timestamp) > o.config.MaxSignalAge {
 		o.log.Warn().
@@ -364,7 +395,7 @@ func (o *Orchestrator) handleSignal(msg *nats.Msg) {
 	o.log.Debug().
 		Str("agent", signal.AgentName).
 		Str("symbol", signal.Symbol).
-		Str("signal", signal.Signal).
+		Str("signal", string(signal.Signal)).
 		Float64("confidence", signal.Confidence).
 		Msg("Received agent signal")
 }
@@ -383,13 +414,20 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 		return
 	}
 
+	if len(o.config.AllowedAgents) > 0 && !slices.Contains(o.config.AllowedAgents, heartbeat.AgentName) {
+		o.log.Warn().Str("agent", heartbeat.AgentName).Msg("rejected unrecognized agent")
+		return
+	}
+
 	o.agentsMutex.Lock()
-	if session, exists := o.agents[heartbeat.AgentName]; exists {
-		session.LastHeartbeat = heartbeat.Timestamp
-		session.HealthStatus = heartbeat.Status
+	var session *AgentSession
+	if s, exists := o.agents[heartbeat.AgentName]; exists {
+		s.LastHeartbeat = heartbeat.Timestamp
+		s.HealthStatus = heartbeat.Status
+		session = s
 	} else {
 		// Register new agent
-		o.agents[heartbeat.AgentName] = &AgentSession{
+		session = &AgentSession{
 			Name:            heartbeat.AgentName,
 			Type:            heartbeat.AgentType,
 			Enabled:         true,
@@ -398,26 +436,57 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 			HealthStatus:    heartbeat.Status,
 			PerformanceData: make(map[string]interface{}),
 		}
+		o.agents[heartbeat.AgentName] = session
 		o.log.Info().
 			Str("agent", heartbeat.AgentName).
 			Str("type", heartbeat.AgentType).
 			Msg("Registered new agent")
 	}
+	signalCount := session.SignalCount
 	o.agentsMutex.Unlock()
 
 	o.updateActiveAgentsMetric()
+
+	// Persist agent status to database (non-blocking)
+	if o.db != nil {
+		go func() {
+			now := time.Now()
+			// Map health status to valid DB enum (STARTING/RUNNING/STOPPED/ERROR)
+			status := "RUNNING"
+			switch heartbeat.Status {
+			case HealthStatusUnhealthy:
+				status = "ERROR"
+			case HealthStatusDegraded:
+				status = "RUNNING" // degraded is still running
+			}
+			agentStatus := &db.AgentStatus{
+				Name:          heartbeat.AgentName,
+				Type:          heartbeat.AgentType,
+				Status:        status,
+				LastHeartbeat: &now,
+				TotalSignals:  int(signalCount),
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := o.db.UpsertAgentStatus(ctx, agentStatus); err != nil {
+				o.log.Warn().Err(err).Str("agent", heartbeat.AgentName).Msg("Failed to persist agent status")
+			}
+		}()
+	}
 }
 
 // updateAgentSession updates or creates an agent session from a signal
 func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentSignal) {
 	o.agentsMutex.Lock()
-	defer o.agentsMutex.Unlock()
 
+	var signalCount int64
 	if session, exists := o.agents[name]; exists {
 		session.LastSignal = signal.Timestamp
 		session.SignalCount++
+		signalCount = session.SignalCount
 	} else {
-		// Register new agent from signal
+		// Register new agent from signal. Use Unknown status until a health check
+		// verifies the agent — a single signal doesn't guarantee ongoing health.
 		o.agents[name] = &AgentSession{
 			Name:            name,
 			Type:            agentType,
@@ -428,6 +497,7 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 			HealthStatus:    HealthStatusUnknown,
 			PerformanceData: make(map[string]interface{}),
 		}
+		signalCount = 1
 		o.log.Info().
 			Str("agent", name).
 			Str("type", agentType).
@@ -435,6 +505,24 @@ func (o *Orchestrator) updateAgentSession(name, agentType string, signal *AgentS
 	}
 
 	o.updateActiveAgentsMetricLocked()
+	o.agentsMutex.Unlock()
+
+	// Persist agent status to database (non-blocking)
+	if o.db != nil {
+		go func() {
+			agentStatus := &db.AgentStatus{
+				Name:         name,
+				Type:         agentType,
+				Status:       "RUNNING",
+				TotalSignals: int(signalCount),
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := o.db.UpsertAgentStatus(ctx, agentStatus); err != nil {
+				o.log.Warn().Err(err).Str("agent", name).Msg("Failed to persist agent status from signal")
+			}
+		}()
+	}
 }
 
 // getDefaultWeight returns the default voting weight for an agent type
@@ -458,7 +546,7 @@ func (o *Orchestrator) getDefaultWeight(agentType string) float64 {
 }
 
 // makeDecision performs the decision-making cycle
-func (o *Orchestrator) makeDecision(ctx context.Context) error {
+func (o *Orchestrator) makeDecision(_ context.Context) error {
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
@@ -516,7 +604,7 @@ func (o *Orchestrator) makeDecision(ctx context.Context) error {
 
 		o.log.Info().
 			Str("symbol", decision.Symbol).
-			Str("action", decision.Action).
+			Str("action", string(decision.Action)).
 			Float64("confidence", decision.Confidence).
 			Float64("consensus", decision.Consensus).
 			Int("agents", decision.ParticipatingAgents).
@@ -557,13 +645,14 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 
 	// Initialize voting scores
 	votingScores := map[string]float64{
-		"BUY":  0.0,
-		"SELL": 0.0,
-		"HOLD": 0.0,
+		string(SignalActionBuy):  0.0,
+		string(SignalActionSell): 0.0,
+		string(SignalActionHold): 0.0,
 	}
 
 	totalWeight := 0.0
 	participatingAgents := 0
+	agentVotes := map[string]string{} // agentName -> action voted for
 	var reasoning []string
 
 	o.agentsMutex.RLock()
@@ -579,37 +668,50 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		confidence := signal.Confidence
 		vote := weight * confidence
 
-		votingScores[signal.Signal] += vote
+		votingScores[string(signal.Signal)] += vote
 		totalWeight += weight
+		agentVotes[signal.AgentName] = string(signal.Signal)
 
 		participatingAgents++
 		reasoning = append(reasoning, fmt.Sprintf("%s(%s): %.2f confidence",
-			signal.AgentName, signal.Signal, signal.Confidence))
+			signal.AgentName, string(signal.Signal), signal.Confidence))
 	}
 	o.agentsMutex.RUnlock()
 
 	// Find winning action
 	maxScore := 0.0
-	winningAction := "HOLD"
+	winningAction := SignalActionHold
 	for action, score := range votingScores {
 		if score > maxScore {
 			maxScore = score
-			winningAction = action
+			winningAction = SignalAction(action)
 		}
 	}
 
-	// Calculate consensus (agreement level)
+	// Calculate consensus: fraction of unique agents that voted for the winning action.
+	// Use len(agentVotes) instead of participatingAgents to avoid double-counting
+	// agents that sent multiple signals within the decision window.
 	consensus := 0.0
-	if totalWeight > 0 {
-		consensus = maxScore / totalWeight
+	uniqueAgents := len(agentVotes)
+	if uniqueAgents > 0 {
+		agreeCount := 0
+		for _, vote := range agentVotes {
+			if vote == string(winningAction) {
+				agreeCount++
+			}
+		}
+		consensus = float64(agreeCount) / float64(uniqueAgents)
 	}
 
-	// Calculate final confidence
-	confidence := maxScore / totalWeight
+	// Calculate confidence: weighted score ratio for the winning action
+	confidence := 0.0
+	if totalWeight > 0 {
+		confidence = maxScore / totalWeight
+	}
 
 	// Check thresholds
 	if consensus < ctx.MinConsensus || confidence < ctx.MinConfidence {
-		winningAction = "HOLD"
+		winningAction = SignalActionHold
 		reasoning = append(reasoning, fmt.Sprintf(
 			"Insufficient consensus (%.2f < %.2f) or confidence (%.2f < %.2f)",
 			consensus, ctx.MinConsensus, confidence, ctx.MinConfidence))
@@ -620,7 +722,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		Action:              winningAction,
 		Confidence:          confidence,
 		Consensus:           consensus,
-		ParticipatingAgents: participatingAgents,
+		ParticipatingAgents: uniqueAgents,
 		VotingResults:       votingScores,
 		Reasoning:           fmt.Sprintf("Weighted voting: %v", reasoning),
 		Timestamp:           ctx.Timestamp,
@@ -699,7 +801,7 @@ func (o *Orchestrator) checkAgentHealth() {
 		if timeSinceHeartbeat > 5*time.Minute {
 			session.HealthStatus = HealthStatusUnhealthy
 			session.Enabled = false
-		} else if timeSinceSignal > 10*time.Minute {
+		} else if timeSinceHeartbeat > 120*time.Second {
 			session.HealthStatus = HealthStatusDegraded
 		} else {
 			session.HealthStatus = HealthStatusHealthy
@@ -1112,14 +1214,15 @@ func (o *Orchestrator) GetAgentSessions() map[string]*AgentSession {
 
 // OrchestratorStatus represents the current status of the orchestrator
 type OrchestratorStatus struct {
-	Status        string                 `json:"status"`
-	Version       string                 `json:"version"`
-	Uptime        float64                `json:"uptime_seconds"`
-	ActiveAgents  int                    `json:"active_agents"`
-	TotalSignals  int                    `json:"total_signals"`
-	Timestamp     time.Time              `json:"timestamp"`
-	Configuration map[string]interface{} `json:"configuration"`
-	AgentSummary  map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
+	Status           string                 `json:"status"`
+	Version          string                 `json:"version"`
+	Uptime           float64                `json:"uptime_seconds"`
+	ActiveAgents     int                    `json:"active_agents"`
+	RegisteredAgents int                    `json:"registered_agents"`
+	TotalSignals     int                    `json:"total_signals"`
+	Timestamp        time.Time              `json:"timestamp"`
+	Configuration    map[string]interface{} `json:"configuration"`
+	AgentSummary     map[string]int         `json:"agent_summary"` // healthy/degraded/unhealthy counts
 }
 
 // GetStatus returns the current orchestrator status
@@ -1155,13 +1258,22 @@ func (o *Orchestrator) GetStatus() *OrchestratorStatus {
 		}
 	}
 
+	// Count active (enabled + not unhealthy) agents, consistent with GetActiveAgentCount()
+	activeCount := 0
+	for _, agent := range o.agents {
+		if agent.Enabled && agent.HealthStatus != HealthStatusUnhealthy {
+			activeCount++
+		}
+	}
+
 	return &OrchestratorStatus{
-		Status:       "running",
-		Version:      config.GetVersion(),
-		Uptime:       uptime,
-		ActiveAgents: len(o.agents),
-		TotalSignals: totalSignals,
-		Timestamp:    time.Now(),
+		Status:           "running",
+		Version:          config.GetVersion(),
+		Uptime:           uptime,
+		ActiveAgents:     activeCount,
+		RegisteredAgents: len(o.agents),
+		TotalSignals:     totalSignals,
+		Timestamp:        time.Now(),
 		Configuration: map[string]interface{}{
 			"min_consensus":  o.config.MinConsensus,
 			"min_confidence": o.config.MinConfidence,
@@ -1181,14 +1293,17 @@ func (o *Orchestrator) GetNATSConnection() *nats.Conn {
 	return o.natsConn
 }
 
-// GetActiveAgentCount returns the number of active agents
+// GetActiveAgentCount returns the number of active agents.
+// An agent is active if it is enabled and not unhealthy. Agents with Unknown
+// status (registered via signal but not yet health-checked) are counted as
+// active since they are demonstrably sending data.
 func (o *Orchestrator) GetActiveAgentCount() int {
 	o.agentsMutex.RLock()
 	defer o.agentsMutex.RUnlock()
 
 	activeCount := 0
 	for _, agent := range o.agents {
-		if agent.Enabled && agent.HealthStatus == HealthStatusHealthy {
+		if agent.Enabled && agent.HealthStatus != HealthStatusUnhealthy {
 			activeCount++
 		}
 	}

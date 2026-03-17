@@ -1,0 +1,16 @@
+# Patch to mount K8s-specific agents.yaml into all agent pods
+# This overrides the localhost URLs baked into the Docker image config
+
+- op: add
+  path: /spec/template/spec/volumes
+  value:
+    - name: agents-config
+      configMap:
+        name: agents-config
+
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts
+  value:
+    - name: agents-config
+      mountPath: /app/configs/agents.yaml
+      subPath: agents.yaml

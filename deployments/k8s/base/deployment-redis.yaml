@@ -21,19 +21,21 @@ spec:
     spec:
       containers:
       - name: redis
-        image: redis:7-alpine
+        image: redis:7.4-alpine
+        securityContext:
+          allowPrivilegeEscalation: false
         ports:
         - containerPort: 6379
           name: redis
           protocol: TCP
-        command:
-        - redis-server
-        - --appendonly
-        - "yes"
-        - --maxmemory
-        - "512mb"
-        - --maxmemory-policy
-        - allkeys-lru
+        command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb",
+                  "--maxmemory-policy", "allkeys-lru", "--requirepass", "$(REDIS_PASSWORD)"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
         volumeMounts:
         - name: redis-storage
           mountPath: /data

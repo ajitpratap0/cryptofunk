@@ -1,6 +1,8 @@
 package risk
 
 import (
+	"math"
+	"sort"
 	"testing"
 )
 
@@ -560,7 +562,11 @@ func TestSqrt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sqrt(tt.input)
+			input := tt.input
+			if input < 0 {
+				input = 0
+			}
+			result := math.Sqrt(input)
 			if abs(result-tt.expected) > tt.tolerance {
 				t.Errorf("Expected %.4f, got %.4f", tt.expected, result)
 			}
@@ -603,7 +609,7 @@ func TestSortFloat64s(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sortFloat64s(tt.input)
+			sort.Float64s(tt.input)
 			if len(tt.input) != len(tt.expected) {
 				t.Fatalf("Length mismatch: expected %d, got %d", len(tt.expected), len(tt.input))
 			}

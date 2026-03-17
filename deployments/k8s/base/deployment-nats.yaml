@@ -19,7 +19,9 @@ spec:
     spec:
       containers:
       - name: nats
-        image: nats:2-alpine
+        image: nats:2.10-alpine
+        securityContext:
+          allowPrivilegeEscalation: false
         ports:
         - containerPort: 4222
           name: client
@@ -30,11 +32,10 @@ spec:
         - containerPort: 6222
           name: cluster
           protocol: TCP
-        command:
-        - nats-server
-        - -js
-        - -m
-        - "8222"
+        command: ["nats-server", "-js", "-m", "8222"]
+        volumeMounts:
+        - name: nats-data
+          mountPath: /data/jetstream
         resources:
           requests:
             cpu: "100m"
@@ -58,3 +59,40 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 1
           failureThreshold: 3
+      - name: nats-exporter
+        image: natsio/prometheus-nats-exporter:0.15.0
+        imagePullPolicy: IfNotPresent
+        # prometheus-nats-exporter: -varz enables /varz metrics, -port sets listen port.
+        # -connz/-subsz were removed because they caused the exporter to exit with
+        # "flag provided but not defined" on this image version (0.15.0).
+        args:
+          - "-varz"
+          - "-port=7777"
+          - "http://localhost:8222"
+        ports:
+        - name: metrics
+          containerPort: 7777
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "32Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
+        readinessProbe:
+          tcpSocket:
+            port: 7777
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 6
+        livenessProbe:
+          tcpSocket:
+            port: 7777
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 3
+      volumes:
+      - name: nats-data
+        persistentVolumeClaim:
+          claimName: nats-data-pvc

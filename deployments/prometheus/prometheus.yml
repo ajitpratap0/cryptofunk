@@ -16,44 +16,38 @@ rule_files:
   - "alerts/*.yml"
 
 # Scrape configurations
-#
-# NOTE: host.docker.internal resolves to the Docker host on macOS/Windows.
-# On Linux (including Kubernetes nodes), use the host's actual IP address or
-# a NodePort/ClusterIP service instead. For K8s deployments, replace
-# host.docker.internal targets with in-cluster service addresses (e.g.,
-# orchestrator.cryptofunk.svc.cluster.local:8081).
 scrape_configs:
   # Prometheus itself
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
 
-  # CryptoFunk Orchestrator (host.docker.internal for Docker->host access)
+  # CryptoFunk Orchestrator
   - job_name: 'orchestrator'
     static_configs:
-      - targets: ['host.docker.internal:8081']
+      - targets: ['orchestrator-service.cryptofunk.svc.cluster.local:8081']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
   # CryptoFunk API Server
   - job_name: 'api'
     static_configs:
-      - targets: ['host.docker.internal:8080']
+      - targets: ['api-service.cryptofunk.svc.cluster.local:80']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
-  # MCP Servers (standalone HTTP services on ports 8090-8093)
+  # MCP Servers (standalone HTTP services on ports 8090-8094)
   # Metrics require starting each server with --metrics-port <port>
   # Default metric ports: market-data=9110, order-executor=9111,
   #                       risk-analyzer=9112, technical-indicators=9113, polymarket=9114
   - job_name: 'mcp-servers'
     static_configs:
       - targets:
-        - 'host.docker.internal:9110'  # market-data-server (--metrics-port 9110)
-        - 'host.docker.internal:9111'  # order-executor-server (--metrics-port 9111)
-        - 'host.docker.internal:9112'  # risk-analyzer-server (--metrics-port 9112)
-        - 'host.docker.internal:9113'  # technical-indicators-server (--metrics-port 9113)
-        - 'host.docker.internal:9114'  # polymarket-server (--metrics-port 9114)
+        - 'market-data-server.cryptofunk.svc.cluster.local:9110'       # market-data-server (--metrics-port 9110)
+        - 'order-executor-server.cryptofunk.svc.cluster.local:9111'    # order-executor-server (--metrics-port 9111)
+        - 'risk-analyzer-server.cryptofunk.svc.cluster.local:9112'     # risk-analyzer-server (--metrics-port 9112)
+        - 'technical-indicators-server.cryptofunk.svc.cluster.local:9113'  # technical-indicators-server (--metrics-port 9113)
+        - 'polymarket-server.cryptofunk.svc.cluster.local:9114'        # polymarket-server (--metrics-port 9114)
     metrics_path: '/metrics'
     scrape_interval: 10s
 
@@ -61,14 +55,14 @@ scrape_configs:
   - job_name: 'agents'
     static_configs:
       - targets:
-        - 'host.docker.internal:9101'  # technical-agent
-        - 'host.docker.internal:9102'  # trend-agent
-        - 'host.docker.internal:9104'  # sentiment-agent
-        - 'host.docker.internal:9105'  # orderbook-agent
-        - 'host.docker.internal:9106'  # reversion-agent
-        - 'host.docker.internal:9107'  # arbitrage-agent
-        - 'host.docker.internal:9108'  # risk-agent
-        - 'host.docker.internal:9109'  # polymarket-agent
+        - 'technical-agent.cryptofunk.svc.cluster.local:9101'   # technical-agent
+        - 'trend-agent.cryptofunk.svc.cluster.local:9102'       # trend-agent
+        - 'sentiment-agent.cryptofunk.svc.cluster.local:9104'   # sentiment-agent
+        - 'orderbook-agent.cryptofunk.svc.cluster.local:9105'   # orderbook-agent
+        - 'reversion-agent.cryptofunk.svc.cluster.local:9106'   # reversion-agent
+        - 'arbitrage-agent.cryptofunk.svc.cluster.local:9107'   # arbitrage-agent
+        - 'risk-agent.cryptofunk.svc.cluster.local:9108'        # risk-agent
+        - 'polymarket-agent.cryptofunk.svc.cluster.local:9109'  # polymarket-agent
     metrics_path: '/metrics'
     scrape_interval: 15s
 
@@ -82,9 +76,8 @@ scrape_configs:
     static_configs:
       - targets: []  # Add redis-exporter:9121 if deployed
 
-  # NATS server metrics (via prometheus-nats-exporter)
+  # NATS server metrics (via prometheus-nats-exporter sidecar)
   - job_name: 'nats'
     static_configs:
       - targets: ['nats-exporter:7777']
-    metrics_path: '/metrics'
     scrape_interval: 15s

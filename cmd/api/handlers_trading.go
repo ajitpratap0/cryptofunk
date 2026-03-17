@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,49 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
+
+// Session handlers
+func (s *APIServer) handleListSessions(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	sessions, err := s.db.ListActiveSessions(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve sessions",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+func (s *APIServer) handleGetSession(c *gin.Context) {
+	idStr := c.Param("id")
+	sessionID, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid session ID",
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "session not found",
+			"id":    idStr,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"session": session,
+	})
+}
 
 // Position handlers
 func (s *APIServer) handleListPositions(c *gin.Context) {
@@ -180,16 +224,24 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		return
 	}
 
-	// Create order in database
+	ctx := c.Request.Context()
+
+	// Snapshot the active session under lock to avoid a data race with
+	// handleStartTrading/handleStopTrading which also hold sessionMu.
+	s.sessionMu.Lock()
+	sessionID := s.activeSessionID
+	s.sessionMu.Unlock()
+
+	// Create a tracking record with a known UUID so we can return it to the caller.
 	price := &req.Price
 	if req.Price == 0 {
 		price = nil
 	}
-
 	order := &db.Order{
 		ID:        uuid.New(),
+		SessionID: sessionID,
 		Symbol:    req.Symbol,
-		Exchange:  "API", // Manual order via API
+		Exchange:  "API",
 		Side:      db.ConvertOrderSide(req.Side),
 		Type:      db.ConvertOrderType(req.Type),
 		Quantity:  req.Quantity,
@@ -199,23 +251,75 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-
-	ctx := c.Request.Context()
 	if err := s.db.InsertOrder(ctx, order); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create order"})
+		return
+	}
+
+	// Submit to the order-executor MCP server for execution
+	execPrice := req.Price
+	if err := s.executeOrder(ctx, req.Symbol, strings.ToUpper(req.Side), strings.ToUpper(req.Type), req.Quantity, execPrice); err != nil {
+		log.Error().Err(err).Str("order_id", order.ID.String()).Msg("Order execution failed")
+
+		// Mark as REJECTED
+		errMsg := err.Error()
+		now := time.Now()
+		if updateErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusRejected, 0, 0, nil, &now, &errMsg); updateErr != nil {
+			log.Error().Err(updateErr).Str("order_id", order.ID.String()).Msg("Failed to update order status to REJECTED")
+		}
+		order.Status = db.OrderStatusRejected
+		order.ErrorMessage = &errMsg
+
+		// Broadcast rejection to WebSocket clients
+		if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
+			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to create order",
+			"order":   order,
+			"error":   "order execution failed",
+			"details": errMsg,
 		})
 		return
 	}
 
-	// Broadcast order update to WebSocket clients
-	if err := s.BroadcastOrderUpdate(order); err != nil {
-		log.Warn().Err(err).Msg("Failed to broadcast order update")
+	// Mark tracking order as FILLED so AggregateSessionStats counts it.
+	// Fill price is 0 in this record — actual price is in executor's trade records.
+	now := time.Now()
+	if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, &now, nil, nil); err != nil {
+		log.Error().Err(err).Str("order_id", order.ID.String()).Msg("Failed to update order to FILLED")
+	}
+	// KNOWN LIMITATION: The tracking record stores price=0 and ExecutedQuoteQuantity=0.
+	// The real fill price lives in the executor's own trade records (inserted by order-executor MCP).
+	// AggregateSessionStats counts this order as a filled trade, but any P&L derived
+	// from this record's price fields will be incorrect. Do not use for price arithmetic.
+	order.Status = db.OrderStatusFilled
+	order.ExecutedQuantity = order.Quantity
+	filledAt := now
+	order.FilledAt = &filledAt
+
+	log.Info().
+		Str("order_id", order.ID.String()).
+		Str("symbol", req.Symbol).
+		Str("side", req.Side).
+		Float64("quantity", req.Quantity).
+		Msg("Order submitted to executor")
+
+	// Update session stats if we have an active session (use snapshot from above)
+	if sessionID != nil {
+		if err := s.db.AggregateSessionStats(ctx, *sessionID); err != nil {
+			log.Warn().Err(err).Str("session_id", sessionID.String()).Msg("Failed to aggregate session stats")
+		}
+	}
+
+	// Broadcast success to WebSocket clients
+	if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
+		log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"order":   order,
-		"message": "Order created successfully",
+		"message": "Order executed successfully",
 	})
 }
 
@@ -372,9 +476,11 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		return
 	}
 
-	// Default to paper trading if not specified
+	// Default to paper trading if not specified; normalize to uppercase for DB enum
 	if req.Mode == "" {
-		req.Mode = "paper"
+		req.Mode = "PAPER"
+	} else {
+		req.Mode = strings.ToUpper(req.Mode)
 	}
 
 	// Determine exchange from config (defaults to "binance" if not configured)
@@ -400,6 +506,9 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		})
 		return
 	}
+
+	// Track active session so subsequent orders are linked
+	s.setActiveSessionID(&session.ID)
 
 	// Broadcast system status update
 	metadata := map[string]interface{}{
@@ -451,8 +560,28 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 		return
 	}
 
-	// Get updated session
-	session, _ := s.db.GetSession(ctx, sessionID)
+	// Cleanup any stale NEW orders older than 5 minutes, scoped to this session only.
+	if cleaned, err := s.db.CleanupStaleOrders(ctx, sessionID, 5*time.Minute); err != nil {
+		log.Warn().Err(err).Msg("Failed to cleanup stale orders")
+	} else if cleaned > 0 {
+		log.Info().Int64("cleaned", cleaned).Msg("Cleaned up stale NEW orders")
+	}
+
+	// Clear active session AFTER the DB stop completes, so any in-flight
+	// handlePlaceOrder that already snapshotted the session ID can still link.
+	s.setActiveSessionID(nil)
+
+	// Get updated session — handle error gracefully to avoid nil dereference panic
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", sessionID.String()).Msg("Failed to retrieve session after stop")
+		c.JSON(http.StatusOK, gin.H{
+			"message":       "Trading stopped successfully",
+			"session_id":    sessionID.String(),
+			"final_capital": req.FinalCapital,
+		})
+		return
+	}
 
 	// Broadcast system status update
 	metadata := map[string]interface{}{

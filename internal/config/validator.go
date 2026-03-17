@@ -206,7 +206,7 @@ func (v *Validator) validateProductionRequirements() error {
 		errMsg.WriteString("==========================================================\n\n")
 		errMsg.WriteString("The following production security requirements must be addressed:\n\n")
 		for i, err := range errors {
-			errMsg.WriteString(fmt.Sprintf("  %d. %s\n", i+1, err))
+			fmt.Fprintf(&errMsg, "  %d. %s\n", i+1, err)
 		}
 		errMsg.WriteString("\n")
 		errMsg.WriteString("Production deployment cannot proceed until these issues are resolved.\n")
@@ -267,7 +267,7 @@ func (v *Validator) validateEnvironmentVariables() error {
 		var errMsg strings.Builder
 		errMsg.WriteString("Required environment variables are missing:\n\n")
 		for varName, description := range requiredVars {
-			errMsg.WriteString(fmt.Sprintf("  - %s: %s\n", varName, description))
+			fmt.Fprintf(&errMsg, "  - %s: %s\n", varName, description)
 		}
 		errMsg.WriteString("\nPlease set these environment variables and try again.\n")
 		return fmt.Errorf("%s", errMsg.String())
@@ -310,7 +310,7 @@ func (v *Validator) validateAPIKeysPresence() error {
 		var errMsg strings.Builder
 		errMsg.WriteString("API key validation failed:\n\n")
 		for _, err := range errors {
-			errMsg.WriteString(fmt.Sprintf("  - %s\n", err))
+			fmt.Fprintf(&errMsg, "  - %s\n", err)
 		}
 		errMsg.WriteString("\nPlease provide valid API keys and try again.\n")
 		return fmt.Errorf("%s", errMsg.String())
@@ -435,7 +435,7 @@ func (v *Validator) verifyAPIKeys(ctx context.Context) error {
 		var errMsg strings.Builder
 		errMsg.WriteString("API key verification failed:\n\n")
 		for _, err := range errors {
-			errMsg.WriteString(fmt.Sprintf("  - %s\n", err))
+			fmt.Fprintf(&errMsg, "  - %s\n", err)
 		}
 		errMsg.WriteString("\nPlease check your API keys and try again.\n")
 		errMsg.WriteString("Note: Use --verify-keys flag only when you want to test API connectivity.\n")

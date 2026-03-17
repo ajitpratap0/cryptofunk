@@ -972,8 +972,8 @@ func TestMCPServer_ListTools(t *testing.T) {
 		tools, ok := resultMap["tools"].([]map[string]interface{})
 		require.True(t, ok)
 
-		// Should have 3 tools without CoinGecko
-		assert.Equal(t, 3, len(tools))
+		// Should have 4 tools without CoinGecko (get_price, get_ticker_24h, get_order_book, get_klines)
+		assert.Equal(t, 4, len(tools))
 
 		// Verify tool names
 		toolNames := make([]string, len(tools))

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -194,7 +195,7 @@ func TestHTTPMiddleware(t *testing.T) {
 			wrappedHandler := HTTPMiddleware(handler)
 
 			// Create test request
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequestWithContext(context.Background(), tt.method, tt.path, nil)
 			rec := httptest.NewRecorder()
 
 			// Execute request
@@ -217,7 +218,7 @@ func TestHTTPMiddleware_MetricsRecorded(t *testing.T) {
 
 	wrappedHandler := HTTPMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/api/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/test", nil)
 	rec := httptest.NewRecorder()
 
 	assert.NotPanics(t, func() {
@@ -238,7 +239,7 @@ func TestHTTPMiddleware_PreservesHeaders(t *testing.T) {
 
 	wrappedHandler := HTTPMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/api/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/test", nil)
 	rec := httptest.NewRecorder()
 
 	wrappedHandler.ServeHTTP(rec, req)
@@ -257,7 +258,7 @@ func TestHTTPMiddleware_MultipleWrites(t *testing.T) {
 
 	wrappedHandler := HTTPMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/api/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/test", nil)
 	rec := httptest.NewRecorder()
 
 	wrappedHandler.ServeHTTP(rec, req)
@@ -274,7 +275,7 @@ func TestHTTPMiddleware_WithQueryParams(t *testing.T) {
 
 	wrappedHandler := HTTPMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/api/test?symbol=BTC&limit=10", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/api/test?symbol=BTC&limit=10", nil)
 	rec := httptest.NewRecorder()
 
 	wrappedHandler.ServeHTTP(rec, req)
@@ -293,7 +294,7 @@ func TestHTTPMiddleware_DifferentHTTPMethods(t *testing.T) {
 
 			wrappedHandler := HTTPMiddleware(handler)
 
-			req := httptest.NewRequest(method, "/api/test", nil)
+			req := httptest.NewRequestWithContext(context.Background(), method, "/api/test", nil)
 			rec := httptest.NewRecorder()
 
 			assert.NotPanics(t, func() {

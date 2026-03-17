@@ -655,8 +655,8 @@ func TestConversionFunctionsWithTestcontainers(t *testing.T) {
 			{"pending", db.OrderStatusNew},
 			{"PARTIALLY_FILLED", db.OrderStatusPartiallyFilled},
 			{"partially_filled", db.OrderStatusPartiallyFilled},
-			{"OPEN", db.OrderStatusPartiallyFilled},
-			{"open", db.OrderStatusPartiallyFilled},
+			{"OPEN", db.OrderStatusNew},
+			{"open", db.OrderStatusNew},
 			{"FILLED", db.OrderStatusFilled},
 			{"filled", db.OrderStatusFilled},
 			{"CANCELED", db.OrderStatusCanceled},
@@ -695,6 +695,147 @@ func TestConversionFunctionsWithTestcontainers(t *testing.T) {
 			assert.Equal(t, tc.expected, result, "Failed for input: %s", tc.input)
 		}
 	})
+}
+
+// TestAggregateSessionStatsWithData seeds a filled order and a closed position,
+// then verifies that AggregateSessionStats correctly computes the aggregation subqueries.
+func TestAggregateSessionStatsWithData(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("SKIP_TESTCONTAINER_TESTS") == "true" {
+		t.Skip("Skipping testcontainer test (SKIP_TESTCONTAINER_TESTS=true)")
+	}
+
+	tc := testhelpers.SetupTestDatabase(t)
+	err := tc.ApplyMigrations("../../migrations")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create a session
+	session := &db.TradingSession{
+		Mode:           db.TradingModePaper,
+		Symbol:         "BTC/USDT",
+		Exchange:       "binance",
+		StartedAt:      time.Now(),
+		InitialCapital: 10000.0,
+	}
+	err = tc.DB.CreateSession(ctx, session)
+	require.NoError(t, err)
+
+	// Insert a filled order linked to the session
+	filledOrder := &db.Order{
+		ID:        uuid.New(),
+		SessionID: &session.ID,
+		Symbol:    "BTC/USDT",
+		Exchange:  "binance",
+		Side:      db.OrderSideBuy,
+		Type:      db.OrderTypeMarket,
+		Quantity:  0.5,
+		Status:    db.OrderStatusFilled,
+		PlacedAt:  time.Now(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	err = tc.DB.InsertOrder(ctx, filledOrder)
+	require.NoError(t, err)
+
+	// Insert a second filled order
+	filledOrder2 := &db.Order{
+		ID:        uuid.New(),
+		SessionID: &session.ID,
+		Symbol:    "BTC/USDT",
+		Exchange:  "binance",
+		Side:      db.OrderSideSell,
+		Type:      db.OrderTypeMarket,
+		Quantity:  0.5,
+		Status:    db.OrderStatusFilled,
+		PlacedAt:  time.Now(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	err = tc.DB.InsertOrder(ctx, filledOrder2)
+	require.NoError(t, err)
+
+	// Insert an unfilled order (should NOT be counted in total_trades)
+	pendingOrder := &db.Order{
+		ID:        uuid.New(),
+		SessionID: &session.ID,
+		Symbol:    "BTC/USDT",
+		Exchange:  "binance",
+		Side:      db.OrderSideBuy,
+		Type:      db.OrderTypeLimit,
+		Quantity:  1.0,
+		Status:    db.OrderStatusNew,
+		PlacedAt:  time.Now(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	err = tc.DB.InsertOrder(ctx, pendingOrder)
+	require.NoError(t, err)
+
+	// Create a winning closed position (realized_pnl > 0)
+	winPos := &db.Position{
+		SessionID:  &session.ID,
+		Symbol:     "BTC/USDT",
+		Exchange:   "binance",
+		Side:       db.PositionSideLong,
+		Quantity:   0.5,
+		EntryPrice: 40000.0,
+		EntryTime:  time.Now().Add(-1 * time.Hour),
+	}
+	err = tc.DB.CreatePosition(ctx, winPos)
+	require.NoError(t, err)
+	// Close at higher price → positive P&L: (42000 - 40000) * 0.5 - 5 = 995
+	err = tc.DB.ClosePosition(ctx, winPos.ID, 42000.0, "take_profit", 5.0)
+	require.NoError(t, err)
+
+	// Create a losing closed position (realized_pnl < 0)
+	losePos := &db.Position{
+		SessionID:  &session.ID,
+		Symbol:     "BTC/USDT",
+		Exchange:   "binance",
+		Side:       db.PositionSideLong,
+		Quantity:   0.5,
+		EntryPrice: 40000.0,
+		EntryTime:  time.Now().Add(-30 * time.Minute),
+	}
+	err = tc.DB.CreatePosition(ctx, losePos)
+	require.NoError(t, err)
+	// Close at lower price → negative P&L: (39000 - 40000) * 0.5 - 5 = -505
+	err = tc.DB.ClosePosition(ctx, losePos.ID, 39000.0, "stop_loss", 5.0)
+	require.NoError(t, err)
+
+	// Create a break-even closed position (realized_pnl = 0)
+	evenPos := &db.Position{
+		SessionID:  &session.ID,
+		Symbol:     "BTC/USDT",
+		Exchange:   "binance",
+		Side:       db.PositionSideLong,
+		Quantity:   0.5,
+		EntryPrice: 40000.0,
+		EntryTime:  time.Now().Add(-15 * time.Minute),
+	}
+	err = tc.DB.CreatePosition(ctx, evenPos)
+	require.NoError(t, err)
+	// Close at same price with zero fees → P&L = 0
+	err = tc.DB.ClosePosition(ctx, evenPos.ID, 40000.0, "manual", 0.0)
+	require.NoError(t, err)
+
+	// Run aggregation
+	err = tc.DB.AggregateSessionStats(ctx, session.ID)
+	require.NoError(t, err)
+
+	// Verify
+	updated, err := tc.DB.GetSession(ctx, session.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, updated.TotalTrades, "should count only FILLED orders (2), not pending")
+	assert.Equal(t, 1, updated.WinningTrades, "should count 1 winning position (pnl > 0)")
+	assert.Equal(t, 1, updated.LosingTrades, "should count 1 losing position (pnl < 0), break-even excluded")
+	// Total P&L = 995 + (-505) + 0 = 490
+	assert.InDelta(t, 490.0, updated.TotalPnL, 0.01, "total_pnl should sum all closed position P&L")
 }
 
 // Helper function to create string pointer

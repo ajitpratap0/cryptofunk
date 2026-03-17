@@ -25,6 +25,8 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 )
 
 // TechnicalAgent performs technical analysis and generates trading signals
@@ -187,13 +189,14 @@ func (bb *BeliefBase) GetConfidence() float64 {
 
 // TechnicalSignal represents a trading signal generated from technical analysis
 type TechnicalSignal struct {
-	Timestamp  time.Time        `json:"timestamp"`
-	Symbol     string           `json:"symbol"`
-	Signal     string           `json:"signal"`     // "BUY", "SELL", "HOLD"
-	Confidence float64          `json:"confidence"` // 0.0 to 1.0
-	Indicators *IndicatorValues `json:"indicators"`
-	Reasoning  string           `json:"reasoning"` // Human-readable explanation
-	Price      float64          `json:"price"`     // Current price at signal generation
+	Timestamp  time.Time              `json:"timestamp"`
+	Symbol     string                 `json:"symbol"`
+	Signal     string                 `json:"signal"`     // "BUY", "SELL", "HOLD"
+	Confidence float64                `json:"confidence"` // 0.0 to 1.0
+	Indicators *IndicatorValues       `json:"indicators"`
+	Reasoning  string                 `json:"reasoning"` // Human-readable explanation
+	Price      float64                `json:"price"`     // Current price at signal generation
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // NewTechnicalAgent creates a new technical analysis agent
@@ -214,10 +217,10 @@ func NewTechnicalAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	natsTopic := viper.GetString("communication.nats.topics.technical_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.analysis.technical" // Default
+		natsTopic = "cryptofunk.agent.signals" // Default
 	}
 
-	heartbeatTopic := viper.GetString("risk_agent.heartbeat_topic")
+	heartbeatTopic := viper.GetString("analysis_agents.technical.heartbeat_topic")
 	if heartbeatTopic == "" {
 		heartbeatTopic = "cryptofunk.agent.heartbeat" // Default - matches orchestrator
 	}
@@ -575,6 +578,7 @@ func (a *TechnicalAgent) Step(ctx context.Context) error {
 	// Step 4: Publish signal to NATS
 	if err := a.publishSignal(ctx, signal); err != nil {
 		log.Error().Err(err).Msg("Failed to publish signal to NATS")
+		metrics.NATSPublishErrorsTotal.Inc()
 		// Don't fail the step - log and continue
 		// Signal was still generated successfully
 	}
@@ -655,8 +659,14 @@ func (a *TechnicalAgent) calculateRSI(ctx context.Context, prices []float64) (*R
 		return nil, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract RSI result: %w", err)
+	}
+
 	// Parse result
-	rsi, err := parseRSIResult(result)
+	rsi, err := parseRSIResult(resultMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse RSI result: %w", err)
 	}
@@ -686,8 +696,14 @@ func (a *TechnicalAgent) calculateMACD(ctx context.Context, prices []float64) (*
 		return nil, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract MACD result: %w", err)
+	}
+
 	// Parse result
-	macd, err := parseMACDResult(result)
+	macd, err := parseMACDResult(resultMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse MACD result: %w", err)
 	}
@@ -716,8 +732,14 @@ func (a *TechnicalAgent) calculateBollingerBands(ctx context.Context, prices []f
 		return nil, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract Bollinger result: %w", err)
+	}
+
 	// Parse result
-	bollinger, err := parseBollingerBandsResult(result)
+	bollinger, err := parseBollingerBandsResult(resultMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Bollinger Bands result: %w", err)
 	}
@@ -743,8 +765,14 @@ func (a *TechnicalAgent) calculateEMA(ctx context.Context, prices []float64, per
 		return 0, fmt.Errorf("MCP call failed: %w", err)
 	}
 
+	// Extract JSON map from MCP result before parsing
+	resultMap, err := extractMCPResultMap(result)
+	if err != nil {
+		return 0, fmt.Errorf("failed to extract EMA result: %w", err)
+	}
+
 	// Parse result - EMA returns a single float64 value
-	emaValue, err := parseEMAResult(result)
+	emaValue, err := parseEMAResult(resultMap)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse EMA result: %w", err)
 	}
@@ -755,6 +783,16 @@ func (a *TechnicalAgent) calculateEMA(ctx context.Context, prices []float64, per
 		Msg("EMA calculated")
 
 	return emaValue, nil
+}
+
+// applyFallbackMarkers marks a signal as rule-based fallback and updates metrics.
+func applyFallbackMarkers(signal *TechnicalSignal) {
+	signal.Confidence *= 0.7
+	if signal.Metadata == nil {
+		signal.Metadata = make(map[string]interface{})
+	}
+	signal.Metadata["source"] = "rule_based_fallback"
+	metrics.LLMFallbackTotal.Inc()
 }
 
 // generateSignalWithLLM uses LLM to analyze indicators and generate a trading signal
@@ -803,12 +841,22 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 	if err != nil {
 		log.Error().Err(err).Msg("LLM call failed")
 		// Fall back to rule-based signal generation
-		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		signal, rErr := a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		if rErr != nil {
+			return nil, rErr
+		}
+		applyFallbackMarkers(signal)
+		return signal, nil
 	}
 
 	if len(response.Choices) == 0 {
 		log.Warn().Msg("No choices in LLM response, falling back to rule-based")
-		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		signal, rErr := a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		if rErr != nil {
+			return nil, rErr
+		}
+		applyFallbackMarkers(signal)
+		return signal, nil
 	}
 
 	// Parse LLM response
@@ -817,7 +865,12 @@ func (a *TechnicalAgent) generateSignalWithLLM(ctx context.Context, symbol strin
 	if err := a.llmClient.ParseJSONResponse(content, &llmSignal); err != nil {
 		log.Error().Err(err).Str("content", content).Msg("Failed to parse LLM response")
 		// Fall back to rule-based signal generation
-		return a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		signal, rErr := a.generateSignalRuleBased(ctx, symbol, indicators, currentPrice)
+		if rErr != nil {
+			return nil, rErr
+		}
+		applyFallbackMarkers(signal)
+		return signal, nil
 	}
 
 	// Convert LLM signal to TechnicalSignal
@@ -1158,8 +1211,17 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 
 // publishSignal publishes a technical signal to NATS for other agents to consume
 func (a *TechnicalAgent) publishSignal(ctx context.Context, signal *TechnicalSignal) error {
-	// Marshal signal to JSON
-	data, err := json.Marshal(signal)
+	// Wrap signal in orchestrator-compatible envelope with agent identity fields
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*TechnicalSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		TechnicalSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1261,22 +1323,33 @@ func (a *TechnicalAgent) fetchCandlesticks(ctx context.Context, symbol string, i
 		"interval":    interval,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("MCP tool call failed: %w", err)
+		// Fallback to market-data server (Binance get_klines) if CoinGecko fails
+		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
+		// Map CoinGecko coin ID to Binance trading pair (e.g., bitcoin → BTCUSDT)
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
+		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
+			"symbol":   binanceSymbol,
+			"interval": interval,
+			"limit":    limit,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("all market data sources failed: %w", err)
+		}
 	}
 
 	// Extract text content from MCP result
 	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from CoinGecko")
+		return nil, fmt.Errorf("empty result from market data source")
 	}
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
-		return nil, fmt.Errorf("invalid content type from CoinGecko")
+		return nil, fmt.Errorf("invalid content type from market data source")
 	}
 
-	// Parse JSON result - CoinGecko returns {prices: [[timestamp, price], ...], total_volumes: [[timestamp, volume], ...]}
+	// Parse JSON result
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
-		return nil, fmt.Errorf("failed to parse CoinGecko response: %w", err)
+		return nil, fmt.Errorf("failed to parse market data response: %w", err)
 	}
 
 	// Convert to candlesticks
@@ -1442,6 +1515,27 @@ func max(a, b int) int {
 	return b
 }
 
+// extractMCPResultMap extracts a JSON map from an MCP CallToolResult.
+// The MCP SDK wraps results as TextContent JSON strings.
+func extractMCPResultMap(result *mcp.CallToolResult) (map[string]interface{}, error) {
+	if result == nil || len(result.Content) == 0 {
+		return nil, fmt.Errorf("empty MCP result")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, fmt.Errorf("unexpected MCP content type")
+	}
+	// If the tool reported an error, the text is a plain error message (not JSON)
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &m); err != nil {
+		return nil, fmt.Errorf("failed to parse MCP result JSON: %w", err)
+	}
+	return m, nil
+}
+
 // Result parser functions - convert MCP CallToolResult to typed indicator results
 
 // parseRSIResult parses RSI calculation result from MCP tool
@@ -1570,6 +1664,8 @@ func extractFloat64(m map[string]interface{}, key string) (float64, error) {
 	}
 
 	switch v := val.(type) {
+	case nil:
+		return 0, fmt.Errorf("key '%s' is null (insufficient data)", key)
 	case float64:
 		return v, nil
 	case float32:
@@ -1792,6 +1888,9 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
+					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
 						continue
@@ -1835,6 +1934,9 @@ func main() {
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Register the agent's Step method so BaseAgent.Run calls it correctly
+	agent.SetStepFn(agent.Step)
 
 	// Run agent in goroutine
 	errChan := make(chan error, 1)

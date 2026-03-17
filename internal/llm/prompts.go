@@ -67,7 +67,7 @@ Based on this technical analysis, provide your assessment in the following JSON 
     "concerns": ["any", "concerns", "or", "conflicting", "signals"]
   }
 }`,
-		ctx.Symbol,
+		sanitizeForPrompt(ctx.Symbol),
 		ctx.CurrentPrice,
 		ctx.PriceChange24h,
 		ctx.Volume24h,
@@ -101,7 +101,7 @@ Provide your trend-following assessment in JSON format:
     "entry_timing": "IMMEDIATE" | "WAIT" | "DO_NOT_ENTER"
   }
 }`,
-		ctx.Symbol,
+		sanitizeForPrompt(ctx.Symbol),
 		ctx.CurrentPrice,
 		ctx.PriceChange24h,
 		indicators,
@@ -137,7 +137,7 @@ Identify mean reversion opportunities and provide assessment in JSON format:
     "time_horizon": "SHORT" | "MEDIUM" | "LONG"
   }
 }`,
-		ctx.Symbol,
+		sanitizeForPrompt(ctx.Symbol),
 		ctx.CurrentPrice,
 		ctx.PriceChange24h,
 		indicators,
@@ -185,10 +185,10 @@ As the risk manager, evaluate this trade and provide your assessment in JSON for
   "concerns": ["list", "of", "risk", "concerns"],
   "recommendations": ["list", "of", "risk", "mitigation", "recommendations"]
 }`,
-		signal.Symbol,
-		signal.Side,
+		sanitizeForPrompt(signal.Symbol),
+		sanitizeForPrompt(signal.Side),
 		signal.Confidence,
-		signal.Reasoning,
+		sanitizeForPrompt(signal.Reasoning),
 		ctx.CurrentPrice,
 		ctx.PriceChange24h,
 		portfolioValue,
@@ -198,6 +198,17 @@ As the risk manager, evaluate this trade and provide your assessment in JSON for
 }
 
 // Helper functions
+
+func sanitizeForPrompt(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\x00", "")
+	runes := []rune(s)
+	if len(runes) > 200 {
+		return string(runes[:200])
+	}
+	return s
+}
 
 func formatIndicators(indicators map[string]float64) string {
 	if len(indicators) == 0 {

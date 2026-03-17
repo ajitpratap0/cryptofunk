@@ -18,6 +18,13 @@ const (
 	OrderSideSell OrderSide = "SELL"
 )
 
+// ToDBSide returns the uppercase string representation of the side suitable for
+// database storage. For db.OrderSide values this is already uppercase, but the
+// method provides a uniform API across OrderSide types.
+func (s OrderSide) ToDBSide() string {
+	return strings.ToUpper(string(s))
+}
+
 // OrderType represents order type (database enum)
 type OrderType string
 
@@ -39,28 +46,28 @@ const (
 
 // Order represents a database order record
 type Order struct {
-	ID                    uuid.UUID
-	SessionID             *uuid.UUID
-	PositionID            *uuid.UUID
-	ExchangeOrderID       *string
-	Symbol                string
-	Exchange              string
-	Side                  OrderSide
-	Type                  OrderType
-	Status                OrderStatus
-	Price                 *float64
-	StopPrice             *float64
-	Quantity              float64
-	ExecutedQuantity      float64
-	ExecutedQuoteQuantity float64
-	TimeInForce           *string
-	PlacedAt              time.Time
-	FilledAt              *time.Time
-	CanceledAt            *time.Time
-	ErrorMessage          *string
-	Metadata              map[string]interface{}
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID                    uuid.UUID              `json:"id"`
+	SessionID             *uuid.UUID             `json:"session_id"`
+	PositionID            *uuid.UUID             `json:"position_id"`
+	ExchangeOrderID       *string                `json:"exchange_order_id"`
+	Symbol                string                 `json:"symbol"`
+	Exchange              string                 `json:"exchange"`
+	Side                  OrderSide              `json:"side"`
+	Type                  OrderType              `json:"type"`
+	Status                OrderStatus            `json:"status"`
+	Price                 *float64               `json:"price"`
+	StopPrice             *float64               `json:"stop_price"`
+	Quantity              float64                `json:"quantity"`
+	ExecutedQuantity      float64                `json:"executed_quantity"`
+	ExecutedQuoteQuantity float64                `json:"executed_quote_quantity"`
+	TimeInForce           *string                `json:"time_in_force"`
+	PlacedAt              time.Time              `json:"placed_at"`
+	FilledAt              *time.Time             `json:"filled_at"`
+	CanceledAt            *time.Time             `json:"canceled_at"`
+	ErrorMessage          *string                `json:"error_message"`
+	Metadata              map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 }
 
 // Trade represents a database trade record (fill)
@@ -353,9 +360,9 @@ func ConvertOrderType(orderType string) OrderType {
 // ConvertOrderStatus converts application order status to database enum
 func ConvertOrderStatus(status string) OrderStatus {
 	switch strings.ToUpper(status) {
-	case "PENDING", "NEW":
+	case "PENDING", "NEW", "OPEN":
 		return OrderStatusNew
-	case "OPEN", "PARTIALLY_FILLED":
+	case "PARTIALLY_FILLED":
 		return OrderStatusPartiallyFilled
 	case "FILLED":
 		return OrderStatusFilled

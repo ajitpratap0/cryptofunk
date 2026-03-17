@@ -141,6 +141,9 @@ mcp:
       url: "http://localhost:8094/mcp"
       description: "Polymarket prediction market data and trading"
 
+orchestrator:
+  allowed_agents: []  # empty list means allow all agents
+
 trading:
   mode: "paper"  # paper or live
   symbols:
@@ -244,7 +247,7 @@ api:
   # Note: If auth is enabled but no valid keys exist, all authenticated endpoints will be inaccessible.
   #       Create at least one admin key before enabling authentication.
   auth:
-    enabled: true                # Enable API key authentication (default: false for development)
+    enabled: true                # Set to false only in local development
     header_name: "X-API-Key"     # Header name for API key (also supports Authorization: Bearer <key>)
     require_https: true          # Require HTTPS in production (localhost/127.0.0.1 are exempt)
 

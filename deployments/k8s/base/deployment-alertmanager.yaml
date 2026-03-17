@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: monitoring
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: alertmanager
@@ -20,6 +25,9 @@ spec:
       containers:
       - name: alertmanager
         image: prom/alertmanager:v0.27.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
         ports:
         - containerPort: 9093
           name: http
@@ -113,4 +121,3 @@ spec:
       - name: alertmanager-config
         configMap:
           name: alertmanager-config
-          optional: true

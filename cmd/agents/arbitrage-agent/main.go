@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // ============================================================================
@@ -228,7 +230,7 @@ func (a *ArbitrageAgent) Initialize(ctx context.Context) error {
 	a.natsConn = nc
 	a.natsTopic = viper.GetString("communication.nats.topics.strategy_decisions")
 	if a.natsTopic == "" {
-		a.natsTopic = "agents.strategy.decisions"
+		a.natsTopic = "cryptofunk.agent.signals"
 	}
 
 	log.Info().
@@ -318,11 +320,9 @@ func (a *ArbitrageAgent) Step(ctx context.Context) error {
 	// Step 4: Generate decision based on best opportunity
 	signal := a.generateDecision(scoredOpportunities)
 
-	// Step 5: Publish signal if actionable
-	if signal.Signal != "HOLD" {
-		if err := a.publishSignal(signal); err != nil {
-			log.Error().Err(err).Msg("Failed to publish signal")
-		}
+	// Step 5: Always publish signal so orchestrator counts this agent in consensus
+	if err := a.publishSignal(signal); err != nil {
+		log.Error().Err(err).Msg("Failed to publish signal")
 	}
 
 	return nil
@@ -481,58 +481,75 @@ func (a *ArbitrageAgent) fetchPrices(ctx context.Context) error {
 	return nil
 }
 
-// fetchPriceFromExchange fetches price for a single symbol from a single exchange
+// fetchPriceFromExchange fetches price for a single symbol from a single exchange.
+// First tries CoinGecko, then falls back to market-data server (Binance).
 func (a *ArbitrageAgent) fetchPriceFromExchange(ctx context.Context, symbol, exchange string) (*ExchangePrice, error) {
-	// For now, we'll use CoinGecko as the market data source
-	// In a real implementation, this would call exchange-specific APIs
+	var price float64
+	var volume float64
 
-	// Call MCP tool to get price
+	// Try CoinGecko first
 	result, err := a.CallMCPTool(ctx, "coingecko", "get_simple_price", map[string]interface{}{
 		"ids":                 symbol,
 		"vs_currencies":       "usd",
 		"include_24hr_vol":    true,
 		"include_24hr_change": true,
 	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to call get_simple_price: %w", err)
+	if err == nil && !result.IsError && len(result.Content) > 0 {
+		if textContent, ok := result.Content[0].(*mcp.TextContent); ok {
+			var priceData map[string]interface{}
+			if jsonErr := json.Unmarshal([]byte(textContent.Text), &priceData); jsonErr == nil {
+				if symbolData, ok := priceData[symbol].(map[string]interface{}); ok {
+					if p, ok := symbolData["usd"].(float64); ok {
+						price = p
+						if vol, ok := symbolData["usd_24h_vol"].(float64); ok {
+							volume = vol
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// Parse result
-	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty result from get_simple_price")
+	// Fall back to market-data server if CoinGecko failed or returned no price
+	if price == 0 {
+		if err != nil {
+			log.Warn().Err(err).Str("symbol", symbol).Str("exchange", exchange).Msg("CoinGecko failed, falling back to market-data server")
+		}
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
+		mdResult, mdErr := a.CallMCPTool(ctx, "market_data", "get_price", map[string]interface{}{
+			"symbol": binanceSymbol,
+		})
+		if mdErr != nil {
+			return nil, fmt.Errorf("failed to call get_simple_price: %w (market_data fallback also failed: %v)", err, mdErr)
+		}
+		if len(mdResult.Content) == 0 {
+			return nil, fmt.Errorf("empty result from market-data server")
+		}
+		mdText, ok := mdResult.Content[0].(*mcp.TextContent)
+		if !ok {
+			return nil, fmt.Errorf("invalid content type from market-data server")
+		}
+		if mdResult.IsError {
+			return nil, fmt.Errorf("market-data tool error: %s", mdText.Text)
+		}
+		var mdData map[string]interface{}
+		if jsonErr := json.Unmarshal([]byte(mdText.Text), &mdData); jsonErr != nil {
+			return nil, fmt.Errorf("failed to parse market-data response: %w", jsonErr)
+		}
+		// market_data get_price returns price as string
+		switch v := mdData["price"].(type) {
+		case float64:
+			price = v
+		case string:
+			if p, parseErr := strconv.ParseFloat(v, 64); parseErr == nil {
+				price = p
+			}
+		}
+		if price == 0 {
+			return nil, fmt.Errorf("no price data available from market-data server")
+		}
 	}
 
-	// Extract price data from MCP result
-	var priceData map[string]interface{}
-
-	textContent, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		return nil, fmt.Errorf("expected TextContent, got %T", result.Content[0])
-	}
-
-	if err := json.Unmarshal([]byte(textContent.Text), &priceData); err != nil {
-		return nil, fmt.Errorf("failed to parse price data: %w", err)
-	}
-
-	// Extract symbol data
-	symbolData, ok := priceData[symbol].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("symbol %s not found in response", symbol)
-	}
-
-	price, ok := symbolData["usd"].(float64)
-	if !ok {
-		return nil, fmt.Errorf("price not found for symbol %s", symbol)
-	}
-
-	// Extract volume if available
-	volume := 0.0
-	if vol, ok := symbolData["usd_24h_vol"].(float64); ok {
-		volume = vol
-	}
-
-	// Create exchange price
 	exchangePrice := &ExchangePrice{
 		Exchange:  exchange,
 		Symbol:    symbol,
@@ -540,11 +557,8 @@ func (a *ArbitrageAgent) fetchPriceFromExchange(ctx context.Context, symbol, exc
 		Volume24h: volume,
 		Timestamp: time.Now(),
 	}
-
-	// For realistic simulation, add small random variation based on exchange
-	// This simulates different prices on different exchanges
+	// Add small random variation to simulate different exchange prices
 	exchangePrice.Price = a.simulateExchangeVariation(price, exchange)
-
 	return exchangePrice, nil
 }
 
@@ -1221,7 +1235,27 @@ func (a *ArbitrageAgent) buildReasoning(topOpp *ArbitrageOpportunity, allOpps []
 
 // publishSignal publishes signal to NATS
 func (a *ArbitrageAgent) publishSignal(signal *ArbitrageSignal) error {
-	data, err := json.Marshal(signal)
+	// Map internal "ARBITRAGE" signal to orchestrator-compatible HOLD.
+	// Arbitrage opportunities are cross-exchange (buy-low/sell-high) which the
+	// single-exchange orchestrator cannot execute. Sending HOLD ensures the agent
+	// participates in quorum without biasing consensus toward BUY.
+	orchestratorSignal := signal.Signal
+	if orchestratorSignal == "ARBITRAGE" {
+		orchestratorSignal = "HOLD"
+	}
+
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Signal    string `json:"signal"` // orchestrator expects BUY/SELL/HOLD
+		*ArbitrageSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		Signal:          orchestratorSignal,
+		ArbitrageSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1321,6 +1355,9 @@ func main() {
 					}
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
+					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
 					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")

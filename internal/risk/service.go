@@ -2,6 +2,8 @@ package risk
 
 import (
 	"fmt"
+	"math"
+	"sort"
 
 	"github.com/rs/zerolog/log"
 )
@@ -130,7 +132,7 @@ func (s *Service) CalculateVaR(args map[string]interface{}) (interface{}, error)
 	// Sort returns in ascending order
 	sortedReturns := make([]float64, len(returns))
 	copy(sortedReturns, returns)
-	sortFloat64s(sortedReturns)
+	sort.Float64s(sortedReturns)
 
 	// Find the percentile corresponding to (1 - confidence_level)
 	// For 95% confidence, we look at the 5th percentile (worst 5% of returns)
@@ -190,6 +192,9 @@ func (s *Service) CheckPortfolioLimits(args map[string]interface{}) (interface{}
 
 	// Parse new trade
 	newTrade := parseTrade(newTradeRaw)
+	if newTrade.Size <= 0 {
+		return nil, fmt.Errorf("invalid trade size: %v (must be positive)", newTrade.Size)
+	}
 
 	// Calculate current portfolio metrics
 	totalExposure := calculateTotalExposure(positions)
@@ -286,7 +291,7 @@ func (s *Service) CalculateSharpe(args map[string]interface{}) (interface{}, err
 		varianceSum += diff * diff
 	}
 	variance := varianceSum / float64(len(returns))
-	stdDev := sqrt(variance)
+	stdDev := math.Sqrt(variance)
 
 	// Avoid division by zero
 	if stdDev == 0 {
@@ -299,7 +304,7 @@ func (s *Service) CalculateSharpe(args map[string]interface{}) (interface{}, err
 
 	// Annualize if needed (assuming daily returns)
 	// Multiply by sqrt(252) for daily to annual conversion
-	annualizedSharpe := sharpeRatio * sqrt(252)
+	annualizedSharpe := sharpeRatio * math.Sqrt(252)
 
 	return &SharpeResult{
 		SharpeRatio:      sharpeRatio,
@@ -561,23 +566,6 @@ func getDrawdownInterpretation(maxDrawdown float64) string {
 	}
 }
 
-// sqrt calculates the square root of a number using Newton's method
-func sqrt(x float64) float64 {
-	if x < 0 {
-		return 0 // Return 0 for negative numbers
-	}
-	if x == 0 {
-		return 0
-	}
-
-	// Newton's method for square root
-	z := x
-	for i := 0; i < 10; i++ {
-		z = z - (z*z-x)/(2*z)
-	}
-	return z
-}
-
 // PortfolioLimitsResult represents the result of portfolio limits check
 type PortfolioLimitsResult struct {
 	Approved         bool                   `json:"approved"`
@@ -723,17 +711,5 @@ func getProjectedMetrics(positions []Position, trade Trade, newTotalExposure flo
 		"open_positions":      newPositionCount,
 		"total_exposure":      newTotalExposure,
 		"utilization_percent": utilizationPercent,
-	}
-}
-
-// sortFloat64s sorts a float64 slice in ascending order (simple bubble sort for small arrays)
-func sortFloat64s(arr []float64) {
-	n := len(arr)
-	for i := 0; i < n-1; i++ {
-		for j := 0; j < n-i-1; j++ {
-			if arr[j] > arr[j+1] {
-				arr[j], arr[j+1] = arr[j+1], arr[j]
-			}
-		}
 	}
 }

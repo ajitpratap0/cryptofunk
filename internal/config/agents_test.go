@@ -36,12 +36,15 @@ func TestAnalysisAgentConfig(t *testing.T) {
 	assert.NotNil(t, technicalAgent.Config)
 
 	// Test MCP server connections
-	require.Len(t, technicalAgent.MCPServers, 2)
+	require.Len(t, technicalAgent.MCPServers, 3)
 	assert.Equal(t, "coingecko", technicalAgent.MCPServers[0].Name)
 	assert.Equal(t, "sse", technicalAgent.MCPServers[0].Type)
 	assert.Equal(t, "technical_indicators", technicalAgent.MCPServers[1].Name)
 	assert.Equal(t, "http", technicalAgent.MCPServers[1].Type)
 	assert.Equal(t, "http://localhost:8093/mcp", technicalAgent.MCPServers[1].URL)
+	assert.Equal(t, "market_data", technicalAgent.MCPServers[2].Name)
+	assert.Equal(t, "http", technicalAgent.MCPServers[2].Type)
+	assert.Equal(t, "http://localhost:8090/mcp", technicalAgent.MCPServers[2].URL)
 
 	// Test orderbook agent (now enabled for testing)
 	orderbookAgent, ok := cfg.AnalysisAgents["orderbook"]
@@ -77,9 +80,10 @@ func TestStrategyAgentConfig(t *testing.T) {
 	assert.NotNil(t, symbols)
 
 	// Test MCP server connections
-	require.Len(t, trendAgent.MCPServers, 2)
+	require.Len(t, trendAgent.MCPServers, 3)
 	assert.Equal(t, "coingecko", trendAgent.MCPServers[0].Name)
 	assert.Equal(t, "technical_indicators", trendAgent.MCPServers[1].Name)
+	assert.Equal(t, "market_data", trendAgent.MCPServers[2].Name)
 
 	// Test mean reversion agent (now enabled for testing)
 	reversionAgent, ok := cfg.StrategyAgents["mean_reversion"]
@@ -156,16 +160,16 @@ func TestCommunicationConfig(t *testing.T) {
 	cfg, err := LoadAgentConfig("../../configs/agents.yaml")
 	require.NoError(t, err)
 
-	// Test NATS topics
+	// Test NATS topics — all signal topics now unified to cryptofunk.agent.signals
 	topics := cfg.Communication.NATS.Topics
-	assert.Equal(t, "agents.analysis.technical", topics.TechnicalSignals)
-	assert.Equal(t, "agents.analysis.orderbook", topics.OrderbookSignals)
-	assert.Equal(t, "agents.analysis.sentiment", topics.SentimentSignals)
-	assert.Equal(t, "agents.strategy.decisions", topics.StrategyDecisions)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.TechnicalSignals)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.OrderbookSignals)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.SentimentSignals)
+	assert.Equal(t, "cryptofunk.agent.signals", topics.StrategyDecisions)
 	assert.Equal(t, "agents.strategy.proposals", topics.TradeProposals)
 	assert.Equal(t, "agents.risk.approvals", topics.RiskApprovals)
 	assert.Equal(t, "agents.risk.vetoes", topics.RiskVetoes)
-	assert.Equal(t, "agents.system.heartbeat", topics.AgentHeartbeat)
+	assert.Equal(t, "cryptofunk.agent.heartbeat", topics.AgentHeartbeat)
 	assert.Equal(t, "agents.system.errors", topics.AgentErrors)
 
 	// Test NATS retention

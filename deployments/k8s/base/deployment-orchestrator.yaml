@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: mcp-coordinator
 spec:
   replicas: 1  # Single orchestrator coordinates all agents
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: orchestrator
@@ -28,6 +33,9 @@ spec:
         - containerPort: 8081
           name: http
           protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
         # Vault Configuration (when VAULT_ENABLED=true, secrets come from Vault)
         - name: VAULT_ENABLED
@@ -66,8 +74,7 @@ spec:
               name: vault-config
               key: VAULT_NAMESPACE
               optional: true
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -93,8 +100,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -110,8 +123,19 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
-        - name: NATS_URL
-          value: "nats://$(NATS_HOST):$(NATS_PORT)"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: CRYPTOFUNK_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
         - name: NATS_HOST
           valueFrom:
             configMapKeyRef:
@@ -122,8 +146,9 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: NATS_PORT
-        - name: BIFROST_URL
-          value: "http://$(BIFROST_HOST):$(BIFROST_PORT)"
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
+        # BIFROST vars BEFORE BIFROST_URL
         - name: BIFROST_HOST
           valueFrom:
             configMapKeyRef:
@@ -134,6 +159,8 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: BIFROST_PORT
+        - name: BIFROST_URL
+          value: "http://$(BIFROST_HOST):$(BIFROST_PORT)"
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -141,6 +168,13 @@ spec:
               key: LOG_LEVEL
         - name: CRYPTOFUNK_ORCHESTRATOR_METRICS_PORT
           value: "8081"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         resources:
           requests:
             cpu: "200m"

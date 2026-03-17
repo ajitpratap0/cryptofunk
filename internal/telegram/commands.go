@@ -135,21 +135,21 @@ func handleStatus(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 	sb.WriteString("*Trading System Status* 📊\n\n")
 
 	// Orchestrator status
-	sb.WriteString(fmt.Sprintf("*Orchestrator:* %s\n", status.State))
+	fmt.Fprintf(&sb, "*Orchestrator:* %s\n", status.State)
 	if status.IsPaused {
 		sb.WriteString("⏸️ *Status:* PAUSED\n")
 	} else {
 		sb.WriteString("▶️ *Status:* RUNNING\n")
 	}
-	sb.WriteString(fmt.Sprintf("*Active Agents:* %d\n", status.ActiveAgents))
+	fmt.Fprintf(&sb, "*Active Agents:* %d\n", status.ActiveAgents)
 
 	// Uptime
 	uptime := time.Since(bot.GetStartTime())
-	sb.WriteString(fmt.Sprintf("*Bot Uptime:* %s\n", formatDuration(uptime)))
+	fmt.Fprintf(&sb, "*Bot Uptime:* %s\n", formatDuration(uptime))
 
 	// Last trade
 	if lastTrade != nil {
-		sb.WriteString(fmt.Sprintf("*Last Trade:* %s\n", lastTrade.Format("2006-01-02 15:04:05")))
+		fmt.Fprintf(&sb, "*Last Trade:* %s\n", lastTrade.Format("2006-01-02 15:04:05"))
 	}
 	sb.WriteString("\n")
 
@@ -157,11 +157,11 @@ func handleStatus(ctx context.Context, bot *Bot, message *tgbotapi.Message) erro
 	if len(sessions) == 0 {
 		sb.WriteString("No active trading sessions.\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("*Active Sessions:* %d\n\n", len(sessions)))
+		fmt.Fprintf(&sb, "*Active Sessions:* %d\n\n", len(sessions))
 		for i, session := range sessions {
-			sb.WriteString(fmt.Sprintf("%d. *%s* (%s)\n", i+1, session.Symbol, session.Mode))
-			sb.WriteString(fmt.Sprintf("   Started: %s\n", session.StartedAt.Format("2006-01-02 15:04")))
-			sb.WriteString(fmt.Sprintf("   Trades: %d | P&L: %.2f%%\n", session.TotalTrades, session.PnLPercent))
+			fmt.Fprintf(&sb, "%d. *%s* (%s)\n", i+1, session.Symbol, session.Mode)
+			fmt.Fprintf(&sb, "   Started: %s\n", session.StartedAt.Format("2006-01-02 15:04"))
+			fmt.Fprintf(&sb, "   Trades: %d | P&L: %.2f%%\n", session.TotalTrades, session.PnLPercent)
 			sb.WriteString("\n")
 		}
 	}
@@ -197,21 +197,21 @@ func handlePositions(ctx context.Context, bot *Bot, message *tgbotapi.Message) e
 	} else {
 		totalPnL := 0.0
 		for i, pos := range positions {
-			sb.WriteString(fmt.Sprintf("*%d. %s %s*\n", i+1, pos.Side, pos.Symbol))
-			sb.WriteString(fmt.Sprintf("   Entry: $%.2f | Current: $%.2f\n", pos.EntryPrice, pos.CurrentPrice))
-			sb.WriteString(fmt.Sprintf("   Quantity: %.6f\n", pos.Quantity))
-			sb.WriteString(fmt.Sprintf("   P&L: $%.2f (%.2f%%)\n", pos.UnrealizedPnL, pos.PnLPercent))
+			fmt.Fprintf(&sb, "*%d. %s %s*\n", i+1, pos.Side, pos.Symbol)
+			fmt.Fprintf(&sb, "   Entry: $%.2f | Current: $%.2f\n", pos.EntryPrice, pos.CurrentPrice)
+			fmt.Fprintf(&sb, "   Quantity: %.6f\n", pos.Quantity)
+			fmt.Fprintf(&sb, "   P&L: $%.2f (%.2f%%)\n", pos.UnrealizedPnL, pos.PnLPercent)
 			if pos.StopLoss > 0 {
-				sb.WriteString(fmt.Sprintf("   Stop Loss: $%.2f\n", pos.StopLoss))
+				fmt.Fprintf(&sb, "   Stop Loss: $%.2f\n", pos.StopLoss)
 			}
 			if pos.TakeProfit > 0 {
-				sb.WriteString(fmt.Sprintf("   Take Profit: $%.2f\n", pos.TakeProfit))
+				fmt.Fprintf(&sb, "   Take Profit: $%.2f\n", pos.TakeProfit)
 			}
 			sb.WriteString("\n")
 			totalPnL += pos.UnrealizedPnL
 		}
 
-		sb.WriteString(fmt.Sprintf("*Total Unrealized P&L:* $%.2f\n", totalPnL))
+		fmt.Fprintf(&sb, "*Total Unrealized P&L:* $%.2f\n", totalPnL)
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, sb.String())
@@ -240,23 +240,23 @@ func handlePL(ctx context.Context, bot *Bot, message *tgbotapi.Message) error {
 	var sb strings.Builder
 	sb.WriteString("*Profit & Loss Report* 💰\n\n")
 
-	sb.WriteString(fmt.Sprintf("*Realized P&L:* $%.2f\n", pnl.RealizedPnL))
-	sb.WriteString(fmt.Sprintf("*Unrealized P&L:* $%.2f\n", pnl.UnrealizedPnL))
-	sb.WriteString(fmt.Sprintf("*Total P&L:* $%.2f\n\n", pnl.TotalPnL))
+	fmt.Fprintf(&sb, "*Realized P&L:* $%.2f\n", pnl.RealizedPnL)
+	fmt.Fprintf(&sb, "*Unrealized P&L:* $%.2f\n", pnl.UnrealizedPnL)
+	fmt.Fprintf(&sb, "*Total P&L:* $%.2f\n\n", pnl.TotalPnL)
 
-	sb.WriteString(fmt.Sprintf("*Initial Capital:* $%.2f\n", pnl.InitialCapital))
-	sb.WriteString(fmt.Sprintf("*Current Value:* $%.2f\n", pnl.CurrentValue))
-	sb.WriteString(fmt.Sprintf("*Return:* %.2f%%\n\n", pnl.ReturnPercent))
+	fmt.Fprintf(&sb, "*Initial Capital:* $%.2f\n", pnl.InitialCapital)
+	fmt.Fprintf(&sb, "*Current Value:* $%.2f\n", pnl.CurrentValue)
+	fmt.Fprintf(&sb, "*Return:* %.2f%%\n\n", pnl.ReturnPercent)
 
-	sb.WriteString(fmt.Sprintf("*Total Trades:* %d\n", pnl.TotalTrades))
-	sb.WriteString(fmt.Sprintf("*Winning Trades:* %d (%.1f%%)\n", pnl.WinningTrades, pnl.WinRate))
-	sb.WriteString(fmt.Sprintf("*Losing Trades:* %d (%.1f%%)\n", pnl.LosingTrades, 100-pnl.WinRate))
+	fmt.Fprintf(&sb, "*Total Trades:* %d\n", pnl.TotalTrades)
+	fmt.Fprintf(&sb, "*Winning Trades:* %d (%.1f%%)\n", pnl.WinningTrades, pnl.WinRate)
+	fmt.Fprintf(&sb, "*Losing Trades:* %d (%.1f%%)\n", pnl.LosingTrades, 100-pnl.WinRate)
 
 	if pnl.TotalTrades > 0 {
-		sb.WriteString(fmt.Sprintf("\n*Average Win:* $%.2f\n", pnl.AvgWin))
-		sb.WriteString(fmt.Sprintf("*Average Loss:* $%.2f\n", pnl.AvgLoss))
+		fmt.Fprintf(&sb, "\n*Average Win:* $%.2f\n", pnl.AvgWin)
+		fmt.Fprintf(&sb, "*Average Loss:* $%.2f\n", pnl.AvgLoss)
 		if pnl.AvgLoss != 0 {
-			sb.WriteString(fmt.Sprintf("*Win/Loss Ratio:* %.2f\n", pnl.AvgWin/abs(pnl.AvgLoss)))
+			fmt.Fprintf(&sb, "*Win/Loss Ratio:* %.2f\n", pnl.AvgWin/abs(pnl.AvgLoss))
 		}
 	}
 
@@ -349,17 +349,17 @@ func handleDecisions(ctx context.Context, bot *Bot, message *tgbotapi.Message) e
 		sb.WriteString("No recent decisions found.\n")
 	} else {
 		for i, decision := range decisions {
-			sb.WriteString(fmt.Sprintf("*%d. %s - %s*\n", i+1, decision.AgentName, decision.Decision))
-			sb.WriteString(fmt.Sprintf("   Symbol: %s\n", decision.Symbol))
-			sb.WriteString(fmt.Sprintf("   Confidence: %.0f%%\n", decision.Confidence*100))
-			sb.WriteString(fmt.Sprintf("   Time: %s\n", decision.CreatedAt.Format("15:04:05")))
+			fmt.Fprintf(&sb, "*%d. %s - %s*\n", i+1, decision.AgentName, decision.Decision)
+			fmt.Fprintf(&sb, "   Symbol: %s\n", decision.Symbol)
+			fmt.Fprintf(&sb, "   Confidence: %.0f%%\n", decision.Confidence*100)
+			fmt.Fprintf(&sb, "   Time: %s\n", decision.CreatedAt.Format("15:04:05"))
 
 			// Truncate reasoning if too long
 			reasoning := decision.Reasoning
 			if len(reasoning) > 150 {
 				reasoning = reasoning[:150] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("   Reasoning: %s\n", reasoning))
+			fmt.Fprintf(&sb, "   Reasoning: %s\n", reasoning)
 			sb.WriteString("\n")
 		}
 	}
@@ -396,17 +396,17 @@ func handleSettings(ctx context.Context, bot *Bot, message *tgbotapi.Message) er
 	// System config
 	if sysConfig != nil {
 		sb.WriteString("*Risk Limits:*\n")
-		sb.WriteString(fmt.Sprintf("  Max Position Size: $%.2f\n", sysConfig.MaxPositionSize))
-		sb.WriteString(fmt.Sprintf("  Max Daily Loss: $%.2f\n", sysConfig.MaxDailyLoss))
-		sb.WriteString(fmt.Sprintf("  Max Open Positions: %d\n", sysConfig.MaxOpenPositions))
-		sb.WriteString(fmt.Sprintf("  Stop Loss %%: %.1f%%\n\n", sysConfig.StopLossPercent))
+		fmt.Fprintf(&sb, "  Max Position Size: $%.2f\n", sysConfig.MaxPositionSize)
+		fmt.Fprintf(&sb, "  Max Daily Loss: $%.2f\n", sysConfig.MaxDailyLoss)
+		fmt.Fprintf(&sb, "  Max Open Positions: %d\n", sysConfig.MaxOpenPositions)
+		fmt.Fprintf(&sb, "  Stop Loss %%: %.1f%%\n\n", sysConfig.StopLossPercent)
 	}
 
 	// Notification settings
 	sb.WriteString("*Notifications:*\n")
-	sb.WriteString(fmt.Sprintf("  Alerts: %s\n", boolToEmoji(settings.ReceiveAlerts)))
-	sb.WriteString(fmt.Sprintf("  Trade Notifications: %s\n", boolToEmoji(settings.ReceiveTradeNotifications)))
-	sb.WriteString(fmt.Sprintf("  Daily Summary: %s\n", boolToEmoji(settings.ReceiveDailySummary)))
+	fmt.Fprintf(&sb, "  Alerts: %s\n", boolToEmoji(settings.ReceiveAlerts))
+	fmt.Fprintf(&sb, "  Trade Notifications: %s\n", boolToEmoji(settings.ReceiveTradeNotifications))
+	fmt.Fprintf(&sb, "  Daily Summary: %s\n", boolToEmoji(settings.ReceiveDailySummary))
 
 	sb.WriteString("\nTo change settings, use the CryptoFunk dashboard.")
 
@@ -727,7 +727,7 @@ func handleStop(ctx context.Context, bot *Bot, message *tgbotapi.Message) error 
 
 		sb.WriteString("*Active Sessions:*\n")
 		for i, session := range sessions {
-			sb.WriteString(fmt.Sprintf("%d. %s (%s) - P&L: %.2f%%\n", i+1, session.Symbol, session.Mode, session.PnLPercent))
+			fmt.Fprintf(&sb, "%d. %s (%s) - P&L: %.2f%%\n", i+1, session.Symbol, session.Mode, session.PnLPercent)
 		}
 
 		sb.WriteString("\nTo confirm, type: `/stop CONFIRM`\n")
@@ -754,13 +754,13 @@ func handleStop(ctx context.Context, bot *Bot, message *tgbotapi.Message) error 
 
 	var sb strings.Builder
 	if stoppedCount > 0 {
-		sb.WriteString(fmt.Sprintf("*Trading Stopped*\n\nStopped %d session(s).\n", stoppedCount))
+		fmt.Fprintf(&sb, "*Trading Stopped*\n\nStopped %d session(s).\n", stoppedCount)
 	}
 
 	if len(stopErrors) > 0 {
 		sb.WriteString("\n*Errors:*\n")
 		for _, e := range stopErrors {
-			sb.WriteString(fmt.Sprintf("- %s\n", e))
+			fmt.Fprintf(&sb, "- %s\n", e)
 		}
 	}
 

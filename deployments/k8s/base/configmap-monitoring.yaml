@@ -37,22 +37,88 @@ data:
       # CryptoFunk Orchestrator
       - job_name: 'orchestrator'
         static_configs:
-          - targets: ['orchestrator-service:8080']
+          - targets: ['orchestrator-service:8081']
         metrics_path: '/metrics'
         scrape_interval: 10s
 
       # CryptoFunk API Server
       - job_name: 'api'
         static_configs:
-          - targets: ['api-service:8080']
+          - targets: ['api-service:80']
         metrics_path: '/metrics'
         scrape_interval: 10s
 
-      # NATS server metrics
+      # NATS server metrics (via prometheus-nats-exporter sidecar)
       - job_name: 'nats'
         static_configs:
-          - targets: ['nats-service:8222']
-        metrics_path: '/varz'
+          - targets: ['nats-exporter:7777']
+        scrape_interval: 15s
+
+      # MCP Server metrics
+      - job_name: 'market-data-server'
+        static_configs:
+          - targets: ['market-data-server:9110']
+        scrape_interval: 15s
+
+      - job_name: 'order-executor-server'
+        static_configs:
+          - targets: ['order-executor-server:9111']
+        scrape_interval: 15s
+
+      - job_name: 'risk-analyzer-server'
+        static_configs:
+          - targets: ['risk-analyzer-server:9112']
+        scrape_interval: 15s
+
+      - job_name: 'technical-indicators-server'
+        static_configs:
+          - targets: ['technical-indicators-server:9113']
+        scrape_interval: 15s
+
+      - job_name: 'polymarket-server'
+        static_configs:
+          - targets: ['polymarket-server:9114']
+        scrape_interval: 15s
+
+      # Agent metrics
+      - job_name: 'technical-agent'
+        static_configs:
+          - targets: ['technical-agent:9101']
+        scrape_interval: 15s
+
+      - job_name: 'trend-agent'
+        static_configs:
+          - targets: ['trend-agent:9102']
+        scrape_interval: 15s
+
+      - job_name: 'sentiment-agent'
+        static_configs:
+          - targets: ['sentiment-agent:9104']
+        scrape_interval: 15s
+
+      - job_name: 'orderbook-agent'
+        static_configs:
+          - targets: ['orderbook-agent:9105']
+        scrape_interval: 15s
+
+      - job_name: 'reversion-agent'
+        static_configs:
+          - targets: ['reversion-agent:9106']
+        scrape_interval: 15s
+
+      - job_name: 'arbitrage-agent'
+        static_configs:
+          - targets: ['arbitrage-agent:9107']
+        scrape_interval: 15s
+
+      - job_name: 'risk-agent'
+        static_configs:
+          - targets: ['risk-agent:9108']
+        scrape_interval: 15s
+
+      - job_name: 'polymarket-agent'
+        static_configs:
+          - targets: ['polymarket-agent:9109']
         scrape_interval: 15s
 ---
 # AlertManager Configuration

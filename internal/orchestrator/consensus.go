@@ -44,6 +44,7 @@ type ConsensusSession struct {
 	Rounds       []*ConsensusRound      `json:"rounds"`
 	Status       ConsensusStatus        `json:"status"`
 	Result       *ConsensusResult       `json:"result,omitempty"`
+	Config       ConsensusConfig        `json:"config"`
 	Metadata     map[string]interface{} `json:"metadata"`
 	CreatedAt    time.Time              `json:"created_at"`
 	UpdatedAt    time.Time              `json:"updated_at"`
@@ -183,12 +184,11 @@ func (cm *ConsensusManager) StartDelphiConsensus(ctx context.Context, topic, que
 		Participants: participants,
 		Rounds:       []*ConsensusRound{},
 		Status:       ConsensusStatusPending,
-		Metadata: map[string]interface{}{
-			"config": config,
-		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(config.SessionTTL),
+		Config:       config,
+		Metadata:     map[string]interface{}{},
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(config.SessionTTL),
 	}
 
 	cm.mu.Lock()
@@ -323,8 +323,7 @@ func (cm *ConsensusManager) SubmitDelphiResponse(ctx context.Context, sessionID 
 
 	// Check if all participants have responded
 	if len(currentRound.Responses) == len(session.Participants) {
-		config := session.Metadata["config"].(ConsensusConfig)
-		cm.completeDelphiRound(ctx, session, currentRound, config)
+		cm.completeDelphiRound(ctx, session, currentRound, session.Config)
 	}
 
 	return nil
@@ -335,8 +334,14 @@ func (cm *ConsensusManager) completeDelphiRound(ctx context.Context, session *Co
 	now := time.Now()
 	round.CompletedAt = &now
 
+	// Apply default convergence threshold if unset (zero value would make everything converge trivially)
+	threshold := config.ConvergenceThreshold
+	if threshold == 0 {
+		threshold = 0.8
+	}
+
 	// Calculate statistics
-	round.Statistics = cm.calculateStatistics(round)
+	round.Statistics = cm.calculateStatistics(round, threshold)
 
 	session.UpdatedAt = time.Now()
 
@@ -375,13 +380,15 @@ func (cm *ConsensusManager) finalizeDelphiConsensus(session *ConsensusSession, f
 	}
 	session.UpdatedAt = time.Now()
 
-	log.Info().
+	event := log.Info().
 		Str("session_id", session.ID.String()).
 		Int("rounds", session.Result.Rounds).
-		Float64("decision", session.Result.Decision.(float64)).
 		Float64("agreement", session.Result.Agreement).
-		Dur("duration", session.Result.Duration).
-		Msg("Delphi consensus reached")
+		Dur("duration", session.Result.Duration)
+	if f, ok := session.Result.Decision.(float64); ok {
+		event = event.Float64("decision", f)
+	}
+	event.Msg("Delphi consensus reached")
 
 	// Post result to blackboard
 	msg, _ := NewMessage(session.Topic, "orchestrator", session.Result)
@@ -398,7 +405,7 @@ func (cm *ConsensusManager) finalizeDelphiConsensus(session *ConsensusSession, f
 }
 
 // calculateStatistics computes statistical measures for a round
-func (cm *ConsensusManager) calculateStatistics(round *ConsensusRound) *RoundStatistics {
+func (cm *ConsensusManager) calculateStatistics(round *ConsensusRound, convergenceThreshold float64) *RoundStatistics {
 	values := make([]float64, 0, len(round.Responses))
 	for _, resp := range round.Responses {
 		if v, ok := resp.Value.(float64); ok {
@@ -445,7 +452,7 @@ func (cm *ConsensusManager) calculateStatistics(round *ConsensusRound) *RoundSta
 	}
 
 	// Check convergence (consensus above threshold)
-	convergence := consensus >= 0.8 // 80% threshold
+	convergence := consensus >= convergenceThreshold
 
 	return &RoundStatistics{
 		Mean:        mean,
@@ -517,9 +524,8 @@ func (cm *ConsensusManager) roundTimeoutHandler(ctx context.Context, sessionID u
 			Msg("Round timeout - proceeding with partial responses")
 
 		// Proceed with available responses if we have minimum
-		config := session.Metadata["config"].(ConsensusConfig)
-		if len(round.Responses) >= config.MinParticipants {
-			cm.completeDelphiRound(ctx, session, round, config)
+		if len(round.Responses) >= session.Config.MinParticipants {
+			cm.completeDelphiRound(ctx, session, round, session.Config)
 		} else {
 			session.Status = ConsensusStatusFailed
 			log.Error().
@@ -750,11 +756,18 @@ func (cm *ConsensusManager) collectBids(ctx context.Context, taskID uuid.UUID, t
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	var wg sync.WaitGroup
+	wg.Add(1)
+	done := make(chan struct{})
+
 	// Collect bids until timeout
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-done:
 				return
 			case msg := <-bidsMsgChan:
 				if msg == nil {
@@ -765,7 +778,11 @@ func (cm *ConsensusManager) collectBids(ctx context.Context, taskID uuid.UUID, t
 					log.Warn().Err(err).Msg("Failed to unmarshal bid")
 					continue
 				}
-				bidChan <- &bid
+				select {
+				case bidChan <- &bid:
+				case <-done:
+					return
+				}
 			}
 		}
 	}()
@@ -773,10 +790,19 @@ func (cm *ConsensusManager) collectBids(ctx context.Context, taskID uuid.UUID, t
 	for {
 		select {
 		case <-timer.C:
-			close(bidChan)
+			close(done)
+			wg.Wait() // wait for goroutine to finish before draining
 			// Drain remaining bids
-			for bid := range bidChan {
-				bids = append(bids, bid)
+		drainLoop:
+			for {
+				select {
+				case bid := <-bidChan:
+					if bid != nil {
+						bids = append(bids, bid)
+					}
+				default:
+					break drainLoop
+				}
 			}
 			return bids
 		case bid := <-bidChan:

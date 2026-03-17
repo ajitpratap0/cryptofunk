@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -81,6 +82,13 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create exchange service")
 	}
+
+	// Initialize default market prices for paper trading so the safety guard
+	// can calculate order values. Without these, market orders fail with
+	// "Order value must be positive, got 0.00" because price * quantity = 0.
+	// Prices are configurable via CRYPTOFUNK_PAPER_PRICE_<SYMBOL> env vars.
+	// TODO: Replace with live price feed from market-data server on startup.
+	initPaperPrices(exchangeService, logger)
 
 	srv := mcpserver.New(mcpserver.Config{
 		Name:    serverName,
@@ -209,3 +217,36 @@ func registerTools(srv *mcpserver.Server, service *exchange.Service) {
 
 // Suppress unused import warning for fmt
 var _ = fmt.Sprintf
+
+// initPaperPrices sets default market prices for paper trading.
+// Prices can be overridden via env vars: CRYPTOFUNK_PAPER_PRICE_BTCUSDT=85000
+func initPaperPrices(service *exchange.Service, logger zerolog.Logger) {
+	defaults := map[string]float64{
+		"BTCUSDT":   85000.0,
+		"ETHUSDT":   3200.0,
+		"SOLUSDT":   180.0,
+		"ADAUSDT":   0.45,
+		"XRPUSDT":   0.55,
+		"DOGEUSDT":  0.08,
+		"DOTUSDT":   6.0,
+		"AVAXUSDT":  30.0,
+		"LINKUSDT":  14.0,
+		"MATICUSDT": 0.85,
+	}
+
+	count := 0
+	for symbol, defaultPrice := range defaults {
+		// Allow env var override: CRYPTOFUNK_PAPER_PRICE_BTCUSDT=90000
+		envKey := fmt.Sprintf("CRYPTOFUNK_PAPER_PRICE_%s", symbol)
+		if envVal := os.Getenv(envKey); envVal != "" {
+			if price, err := strconv.ParseFloat(envVal, 64); err == nil && price > 0 {
+				service.SetMarketPrice(symbol, price)
+				count++
+				continue
+			}
+		}
+		service.SetMarketPrice(symbol, defaultPrice)
+		count++
+	}
+	logger.Info().Int("pairs", count).Msg("Paper trading prices initialized")
+}

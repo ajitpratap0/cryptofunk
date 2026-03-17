@@ -23,6 +23,7 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // TrendAgent performs trend following strategy using EMA crossovers and ADX
@@ -188,7 +189,7 @@ func NewTrendAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPort i
 
 	natsTopic := viper.GetString("communication.nats.topics.trend_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.strategy.trend"
+		natsTopic = "cryptofunk.agent.signals"
 	}
 
 	// Connect to NATS
@@ -357,7 +358,7 @@ func (a *TrendAgent) Step(ctx context.Context) error {
 	log.Debug().Str("symbol", symbol).Msg("Analyzing symbol for trend")
 
 	// Fetch price data (need enough candles for EMA calculations)
-	prices, currentPrice, err := a.fetchPriceData(ctx, symbol)
+	ohlcv, currentPrice, err := a.fetchPriceData(ctx, symbol)
 	if err != nil {
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch price data")
 		return fmt.Errorf("failed to fetch market data: %w", err)
@@ -365,12 +366,12 @@ func (a *TrendAgent) Step(ctx context.Context) error {
 
 	log.Debug().
 		Str("symbol", symbol).
-		Int("price_count", len(prices)).
+		Int("price_count", len(ohlcv.Close)).
 		Float64("current_price", currentPrice).
 		Msg("Retrieved price data")
 
 	// Step 2: Calculate trend indicators (EMA crossover, ADX)
-	indicators, err := a.calculateTrendIndicators(ctx, prices)
+	indicators, err := a.calculateTrendIndicators(ctx, ohlcv)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to calculate trend indicators")
 		return fmt.Errorf("indicator calculation failed: %w", err)
@@ -416,10 +417,12 @@ func (a *TrendAgent) Step(ctx context.Context) error {
 }
 
 // calculateTrendIndicators calculates EMA and ADX indicators
-func (a *TrendAgent) calculateTrendIndicators(ctx context.Context, prices []float64) (*TrendIndicators, error) {
+func (a *TrendAgent) calculateTrendIndicators(ctx context.Context, ohlcv *market.OHLCVData) (*TrendIndicators, error) {
 	indicators := &TrendIndicators{
 		Timestamp: time.Now(),
 	}
+
+	prices := ohlcv.Close
 
 	// Calculate Fast EMA
 	fastEMA, err := a.callCalculateEMA(ctx, prices, a.fastEMAPeriod)
@@ -435,10 +438,8 @@ func (a *TrendAgent) calculateTrendIndicators(ctx context.Context, prices []floa
 	}
 	indicators.SlowEMA = slowEMA
 
-	// Calculate ADX for trend strength
-	// Note: ADX requires high, low, close data, but for now we'll use a simplified version
-	// In production, fetch full OHLCV data and pass to ADX calculation
-	adx, err := a.callCalculateADX(ctx, prices)
+	// Calculate ADX for trend strength using high, low, close data
+	adx, err := a.callCalculateADX(ctx, ohlcv.High, ohlcv.Low, ohlcv.Close)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to calculate ADX, using default")
 		indicators.ADX = 0 // Default to 0 if ADX calculation fails
@@ -967,13 +968,11 @@ func (a *TrendAgent) callCalculateEMA(ctx context.Context, prices []float64, per
 }
 
 // callCalculateADX calls the Technical Indicators MCP server to calculate ADX
-func (a *TrendAgent) callCalculateADX(ctx context.Context, prices []float64) (float64, error) {
-	// Note: Full ADX requires high, low, close data
-	// For now, use a simplified version with close prices only
-	// In production, fetch OHLCV and pass proper data
-
+func (a *TrendAgent) callCalculateADX(ctx context.Context, high, low, close []float64) (float64, error) {
 	result, err := a.CallMCPTool(ctx, "technical_indicators", "calculate_adx", map[string]interface{}{
-		"prices": prices,
+		"high":   high,
+		"low":    low,
+		"close":  close,
 		"period": a.adxPeriod,
 	})
 	if err != nil {
@@ -1022,12 +1021,14 @@ func (a *TrendAgent) callCalculateADX(ctx context.Context, prices []float64) (fl
 	return value, nil
 }
 
-// fetchPriceData fetches historical price data from CoinGecko
-func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float64, float64, error) {
+// fetchPriceData fetches historical OHLCV price data. It tries CoinGecko first
+// (close-only, high/low estimated), then falls back to the market-data server
+// which provides full OHLCV candlestick data from Binance.
+func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) (*market.OHLCVData, float64, error) {
 	// Calculate days needed for lookback candles (using hourly data)
 	days := max(1, (a.lookbackCandles+23)/24)
 
-	// Call CoinGecko MCP tool
+	// Try CoinGecko first
 	result, err := a.CallMCPTool(ctx, "coingecko", "get_market_chart", map[string]interface{}{
 		"id":          symbol,
 		"vs_currency": "usd",
@@ -1035,19 +1036,95 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 		"interval":    "hourly",
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("MCP tool call failed: %w", err)
+		// Fall back to market-data server (Binance get_klines) which provides full OHLCV
+		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
+		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
+			"symbol":   binanceSymbol,
+			"interval": "1h",
+			"limit":    a.lookbackCandles,
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to fetch market data: %w", err)
+		}
+
+		// Parse get_klines response which includes OHLCV candles
+		return a.parseKlinesResponse(result)
 	}
 
-	// Extract text content
+	// Parse CoinGecko response (close-only, estimate high/low)
+	return a.parseCoinGeckoResponse(result)
+}
+
+// parseKlinesResponse extracts OHLCV data from the market-data server's get_klines response.
+func (a *TrendAgent) parseKlinesResponse(result *mcp.CallToolResult) (*market.OHLCVData, float64, error) {
 	if len(result.Content) == 0 {
-		return nil, 0, fmt.Errorf("empty result from CoinGecko")
+		return nil, 0, fmt.Errorf("empty result from market data server")
 	}
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		return nil, 0, fmt.Errorf("invalid content type")
 	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 
-	// Parse JSON - CoinGecko returns {prices: [[timestamp, price], ...]}
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse klines response: %w", err)
+	}
+
+	candles, ok := resultMap["candles"].([]interface{})
+	if !ok || len(candles) == 0 {
+		return nil, 0, fmt.Errorf("candles field not found or empty")
+	}
+
+	ohlcv := &market.OHLCVData{
+		High:  make([]float64, 0, len(candles)),
+		Low:   make([]float64, 0, len(candles)),
+		Close: make([]float64, 0, len(candles)),
+	}
+	var latestPrice float64
+
+	for _, c := range candles {
+		candle, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		high := market.ParseStringFloat(candle["high"])
+		low := market.ParseStringFloat(candle["low"])
+		closePrice := market.ParseStringFloat(candle["close"])
+
+		ohlcv.High = append(ohlcv.High, high)
+		ohlcv.Low = append(ohlcv.Low, low)
+		ohlcv.Close = append(ohlcv.Close, closePrice)
+		latestPrice = closePrice
+	}
+
+	// Limit to requested number of candles
+	if len(ohlcv.Close) > a.lookbackCandles {
+		n := len(ohlcv.Close)
+		ohlcv.High = ohlcv.High[n-a.lookbackCandles:]
+		ohlcv.Low = ohlcv.Low[n-a.lookbackCandles:]
+		ohlcv.Close = ohlcv.Close[n-a.lookbackCandles:]
+	}
+
+	return ohlcv, latestPrice, nil
+}
+
+// parseCoinGeckoResponse extracts close prices from CoinGecko and estimates high/low.
+func (a *TrendAgent) parseCoinGeckoResponse(result *mcp.CallToolResult) (*market.OHLCVData, float64, error) {
+	if len(result.Content) == 0 {
+		return nil, 0, fmt.Errorf("empty result from market data source")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, 0, fmt.Errorf("invalid content type")
+	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
 		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
@@ -1058,8 +1135,7 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 		return nil, 0, fmt.Errorf("prices field not found")
 	}
 
-	// Extract close prices
-	prices := make([]float64, 0, len(pricesRaw))
+	closes := make([]float64, 0, len(pricesRaw))
 	var latestPrice float64
 
 	for _, p := range pricesRaw {
@@ -1067,27 +1143,36 @@ func (a *TrendAgent) fetchPriceData(ctx context.Context, symbol string) ([]float
 		if !ok || len(point) != 2 {
 			continue
 		}
-
 		price, ok := point[1].(float64)
 		if !ok {
 			continue
 		}
-
-		prices = append(prices, price)
-		latestPrice = price // Last price is current
+		closes = append(closes, price)
+		latestPrice = price
 	}
 
 	// Limit to requested number of candles
-	if len(prices) > a.lookbackCandles {
-		prices = prices[len(prices)-a.lookbackCandles:]
+	if len(closes) > a.lookbackCandles {
+		closes = closes[len(closes)-a.lookbackCandles:]
 	}
 
-	return prices, latestPrice, nil
+	// Estimate high/low from close prices for ADX calculation
+	ohlcv := market.EstimateOHLCV(closes)
+	return ohlcv, latestPrice, nil
 }
 
 // publishSignal publishes a trend signal to NATS
 func (a *TrendAgent) publishSignal(ctx context.Context, signal *TrendSignal) error {
-	data, err := json.Marshal(signal)
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*TrendSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:   a.GetName(),
+		AgentType:   a.GetType(),
+		TrendSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1265,6 +1350,9 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
+					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
 						continue
@@ -1317,6 +1405,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run agent
+	agent.SetStepFn(agent.Step)
+
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- agent.Run(ctx)

@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agents-allow-external
+  namespace: cryptofunk
+spec:
+  podSelector:
+    matchLabels:
+      component: agent
+  policyTypes:
+  - Egress
+  egress:
+  # Allow HTTPS to external services (CoinGecko MCP, etc.)
+  - ports:
+    - protocol: TCP
+      port: 443
+  # Allow to internal MCP servers (ports 8090-8094)
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: mcp-server
+    ports:
+    - protocol: TCP
+      port: 8090
+    - protocol: TCP
+      port: 8091
+    - protocol: TCP
+      port: 8092
+    - protocol: TCP
+      port: 8093
+    - protocol: TCP
+      port: 8094

@@ -240,7 +240,7 @@ func TestConvertOrderStatus_EdgeCases(t *testing.T) {
 		{"NEW status", "NEW", OrderStatusNew},
 		{"PENDING to NEW", "PENDING", OrderStatusNew},
 		{"PARTIALLY_FILLED", "PARTIALLY_FILLED", OrderStatusPartiallyFilled},
-		{"OPEN to PARTIALLY_FILLED", "OPEN", OrderStatusPartiallyFilled},
+		{"OPEN to NEW", "OPEN", OrderStatusNew},
 		{"FILLED status", "FILLED", OrderStatusFilled},
 		{"CANCELED status", "CANCELED", OrderStatusCanceled},
 		{"CANCELLED to CANCELED", "CANCELLED", OrderStatusCanceled},

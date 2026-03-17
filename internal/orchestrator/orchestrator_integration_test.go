@@ -112,7 +112,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  agent.name,
 				AgentType:  agent.typ,
 				Symbol:     "BTC/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.85,
 				Reasoning:  "Strong bullish indicators",
 				Timestamp:  time.Now(),
@@ -123,7 +123,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		// Wait for decision
 		select {
 		case decision := <-decisionChan:
-			assert.Equal(t, "BUY", decision.Action)
+			assert.Equal(t, orchestrator.SignalActionBuy, decision.Action)
 			assert.Equal(t, "BTC/USDT", decision.Symbol)
 			assert.Greater(t, decision.Confidence, 0.7)
 			assert.Greater(t, decision.Consensus, 0.8)
@@ -142,7 +142,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  name,
 				AgentType:  "analysis",
 				Symbol:     "ETH/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.75,
 				Reasoning:  "Bullish signals",
 				Timestamp:  time.Now(),
@@ -155,7 +155,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			AgentName:  "risk-agent",
 			AgentType:  "risk",
 			Symbol:     "ETH/USDT",
-			Signal:     "HOLD",
+			Signal:     orchestrator.SignalActionHold,
 			Confidence: 0.90,
 			Reasoning:  "High risk - position limits exceeded",
 			Timestamp:  time.Now(),
@@ -166,7 +166,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		select {
 		case decision := <-decisionChan:
 			// Risk agent's high weight should influence decision
-			if decision.Action == "HOLD" {
+			if decision.Action == orchestrator.SignalActionHold {
 				// Risk veto worked
 				assert.Greater(t, decision.VotingResults["HOLD"], decision.VotingResults["BUY"])
 			} else {
@@ -203,7 +203,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  agent.name,
 				AgentType:  agent.typ,
 				Symbol:     "SOL/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.35, // Below threshold
 				Reasoning:  "Weak signals",
 				Timestamp:  time.Now(),
@@ -214,7 +214,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		// Wait for decision
 		select {
 		case decision := <-decisionChan:
-			assert.Equal(t, "HOLD", decision.Action)
+			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
 			assert.Less(t, decision.Confidence, config.MinConfidence)
 		case <-time.After(5 * time.Second):
 			t.Fatal("Timeout waiting for decision")
@@ -223,6 +223,12 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 4: Split vote - no consensus
 	t.Run("split_vote_no_consensus", func(t *testing.T) {
+		// Drain any leftover decisions from previous subtests to avoid a stale
+		// decision being picked up by this subtest's select.
+		for len(decisionChan) > 0 {
+			<-decisionChan
+		}
+
 		// Half vote BUY, half vote SELL
 		buyAgents := []string{"technical-agent", "trend-agent"}
 		sellAgents := []string{"reversion-agent", "orderbook-agent"}
@@ -232,7 +238,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  name,
 				AgentType:  "analysis",
 				Symbol:     "ADA/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.70,
 				Reasoning:  "Bullish",
 				Timestamp:  time.Now(),
@@ -245,7 +251,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 				AgentName:  name,
 				AgentType:  "analysis",
 				Symbol:     "ADA/USDT",
-				Signal:     "SELL",
+				Signal:     orchestrator.SignalActionSell,
 				Confidence: 0.70,
 				Reasoning:  "Bearish",
 				Timestamp:  time.Now(),
@@ -253,15 +259,19 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			sendSignal(t, nc, config.SignalTopic, signal)
 		}
 
-		// Wait for decision
+		// Wait for the orchestrator to emit a decision. With equal votes (2 BUY,
+		// 2 SELL) the consensus is 0.5 which is below MinConsensus (0.6), so the
+		// orchestrator should default to HOLD rather than skipping the decision
+		// entirely. We use a select instead of time.Sleep so the test is fast on
+		// success and only blocks for the full timeout on unexpected failure.
 		select {
 		case decision := <-decisionChan:
-			// With equal votes, consensus should be low
+			// With equal votes (2 BUY, 2 SELL), consensus should be 0.5 < MinConsensus (0.6)
 			assert.Less(t, decision.Consensus, config.MinConsensus)
 			// Should default to HOLD
-			assert.Equal(t, "HOLD", decision.Action)
+			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
 		case <-time.After(5 * time.Second):
-			t.Fatal("Timeout waiting for decision")
+			t.Fatal("Timeout waiting for split-vote HOLD decision")
 		}
 	})
 
@@ -328,7 +338,7 @@ func TestIntegration_AgentHealthMonitoring(t *testing.T) {
 			AgentName:  "test-agent",
 			AgentType:  "analysis",
 			Symbol:     "BTC/USDT",
-			Signal:     "BUY",
+			Signal:     orchestrator.SignalActionBuy,
 			Confidence: 0.8,
 			Reasoning:  "Test",
 			Timestamp:  time.Now(),
@@ -412,7 +422,7 @@ func TestIntegration_EventDrivenCoordination(t *testing.T) {
 				AgentName:  "agent-1",
 				AgentType:  "analysis",
 				Symbol:     "BTC/USDT",
-				Signal:     "BUY",
+				Signal:     orchestrator.SignalActionBuy,
 				Confidence: 0.8,
 				Reasoning:  "Rapid test",
 				Timestamp:  time.Now(),

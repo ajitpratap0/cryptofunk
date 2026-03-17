@@ -25,6 +25,7 @@ import (
 // and the given mock HTTP handler for the Polymarket API.
 func newHTTPPolyServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *mcpserver.Server) {
 	t.Helper()
+	t.Setenv("MCP_ALLOW_NO_AUTH", "true")
 
 	apiServer := httptest.NewServer(handler)
 	t.Cleanup(apiServer.Close)

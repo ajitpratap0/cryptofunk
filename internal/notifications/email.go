@@ -303,15 +303,15 @@ func (e *EmailBackend) buildMessage(recipients []string, subject, body string) s
 
 	// Headers
 	if e.config.FromName != "" {
-		msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", e.config.FromName, e.config.FromAddress))
+		fmt.Fprintf(&msg, "From: %s <%s>\r\n", e.config.FromName, e.config.FromAddress)
 	} else {
-		msg.WriteString(fmt.Sprintf("From: %s\r\n", e.config.FromAddress))
+		fmt.Fprintf(&msg, "From: %s\r\n", e.config.FromAddress)
 	}
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(recipients, ", ")))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	fmt.Fprintf(&msg, "To: %s\r\n", strings.Join(recipients, ", "))
+	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	msg.WriteString("Content-Type: text/html; charset=\"utf-8\"\r\n")
-	msg.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
+	fmt.Fprintf(&msg, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	msg.WriteString("\r\n")
 
 	// Body

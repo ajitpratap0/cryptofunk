@@ -19,15 +19,12 @@ spec:
     spec:
       containers:
       - name: dashboard
-        image: cryptofunk/dashboard:latest
+        image: cryptofunk/dashboard:v0.10.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
           name: http
           protocol: TCP
-        env:
-        - name: NEXT_PUBLIC_API_URL
-          value: "/api"
         resources:
           requests:
             cpu: "100m"

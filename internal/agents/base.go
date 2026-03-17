@@ -52,6 +52,8 @@ type MCPServerConfig struct {
 	// Type controls the client transport: "http" uses Streamable HTTP (default, for our servers);
 	// "sse" uses the legacy SSE transport (for external providers like CoinGecko).
 	Type string `json:"type" yaml:"type"`
+	// Optional, if true, connection failures are logged as warnings and the agent continues without this server.
+	Optional bool `json:"optional" yaml:"optional"`
 }
 
 // AgentConfig holds configuration for an agent
@@ -80,9 +82,10 @@ type BaseAgent struct {
 	version   string
 
 	// MCP Client and Sessions (multiple servers supported)
-	mcpClient   *mcp.Client                   // Single client instance for creating connections
-	mcpSessions map[string]*mcp.ClientSession // One session per MCP server
-	config      *AgentConfig
+	mcpClient     *mcp.Client                   // Single client instance for creating connections
+	mcpSessions   map[string]*mcp.ClientSession // One session per MCP server
+	mcpSessionsMu sync.RWMutex                  // Protects mcpSessions map
+	config        *AgentConfig
 
 	// State
 	ctx    context.Context
@@ -105,6 +108,10 @@ type BaseAgent struct {
 	// Metrics
 	metrics       *AgentMetrics
 	metricsServer *metrics.Server
+
+	// stepFn allows subagents to register their Step implementation.
+	// When set, BaseAgent.Run calls this instead of BaseAgent.Step.
+	stepFn func(ctx context.Context) error
 }
 
 // AgentMetrics holds Prometheus metrics for an agent
@@ -193,7 +200,7 @@ func (a *BaseAgent) Initialize(ctx context.Context) error {
 	a.log.Info().Msg("Initializing agent")
 
 	// Create cancellable context
-	a.ctx, a.cancel = context.WithCancel(ctx)
+	a.ctx, a.cancel = context.WithCancel(ctx) //nolint:gosec
 
 	// Connect to all configured MCP servers
 	if err := a.connectMCPServers(); err != nil {
@@ -253,11 +260,19 @@ func (a *BaseAgent) connectMCPServers() error {
 			// Legacy SSE transport for external providers (e.g., CoinGecko)
 			session, err = a.createSSEClient(a.ctx, serverConfig)
 			if err != nil {
+				if serverConfig.Optional {
+					a.log.Warn().Err(err).Str("name", serverConfig.Name).Msg("Optional MCP server unavailable, continuing without it")
+					continue
+				}
 				return fmt.Errorf("failed to create SSE session for %s: %w", serverConfig.Name, err)
 			}
 		case "http", "": // Streamable HTTP transport (our internal servers)
 			session, err = a.createHTTPClient(a.ctx, serverConfig)
 			if err != nil {
+				if serverConfig.Optional {
+					a.log.Warn().Err(err).Str("name", serverConfig.Name).Msg("Optional MCP server unavailable, continuing without it")
+					continue
+				}
 				return fmt.Errorf("failed to create HTTP session for %s: %w", serverConfig.Name, err)
 			}
 		default:
@@ -265,7 +280,9 @@ func (a *BaseAgent) connectMCPServers() error {
 		}
 
 		// Store session in map
+		a.mcpSessionsMu.Lock()
 		a.mcpSessions[serverConfig.Name] = session
+		a.mcpSessionsMu.Unlock()
 
 		a.log.Info().Str("name", serverConfig.Name).Msg("MCP server connected")
 	}
@@ -298,6 +315,7 @@ func (a *BaseAgent) createSSEClient(ctx context.Context, config MCPServerConfig)
 func (a *BaseAgent) initializeMCPConnections() error {
 	a.log.Info().Msg("Verifying MCP connections")
 
+	a.mcpSessionsMu.RLock()
 	for name, session := range a.mcpSessions {
 		// Get initialization result from the session
 		initResult := session.InitializeResult()
@@ -308,8 +326,15 @@ func (a *BaseAgent) initializeMCPConnections() error {
 			Str("server_version", initResult.ServerInfo.Version).
 			Msg("MCP server connection verified")
 	}
+	a.mcpSessionsMu.RUnlock()
 
 	return nil
+}
+
+// SetStepFn registers a step function that Run will call instead of BaseAgent.Step.
+// Use this in subagents to ensure their Step implementation is called correctly.
+func (a *BaseAgent) SetStepFn(fn func(ctx context.Context) error) {
+	a.stepFn = fn
 }
 
 // Run starts the agent's main loop
@@ -318,6 +343,14 @@ func (a *BaseAgent) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(a.config.StepInterval)
 	defer ticker.Stop()
+
+	// Use the registered step function if provided, otherwise fall back to BaseAgent.Step
+	stepFn := a.stepFn
+	if stepFn == nil {
+		stepFn = a.Step
+	}
+
+	consecutiveFailures := 0
 
 	for {
 		select {
@@ -328,9 +361,17 @@ func (a *BaseAgent) Run(ctx context.Context) error {
 			a.log.Info().Msg("Agent run loop stopped by internal context")
 			return a.ctx.Err()
 		case <-ticker.C:
-			if err := a.Step(ctx); err != nil {
+			if err := stepFn(ctx); err != nil {
 				a.log.Error().Err(err).Msg("Error in agent step")
+				consecutiveFailures++
+				metrics.AgentConsecutiveStepFailures.WithLabelValues(a.config.Name).Set(float64(consecutiveFailures))
+				if consecutiveFailures == 10 {
+					a.log.Warn().Int("failures", consecutiveFailures).Msg("agent entering degraded state")
+				}
 				// Continue running despite errors
+			} else {
+				consecutiveFailures = 0
+				metrics.AgentConsecutiveStepFailures.WithLabelValues(a.config.Name).Set(0)
 			}
 		}
 	}
@@ -418,6 +459,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 	}
 
 	// Step 4: Close all MCP sessions
+	a.mcpSessionsMu.Lock()
 	mcpSessionCount := len(a.mcpSessions)
 	if mcpSessionCount > 0 {
 		a.log.Debug().Int("session_count", mcpSessionCount).Msg("Shutdown: Closing MCP sessions")
@@ -430,6 +472,7 @@ func (a *BaseAgent) Shutdown(ctx context.Context) error {
 		}
 		a.log.Info().Int("session_count", mcpSessionCount).Msg("Shutdown: All MCP sessions closed")
 	}
+	a.mcpSessionsMu.Unlock()
 
 	// Step 5: Shutdown metrics server
 	if a.metricsServer != nil {
@@ -497,9 +540,15 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 		a.metrics.MCPCallsTotal.Inc()
 	}()
 
-	// Get session for the specified server
-	session, ok := a.mcpSessions[serverName]
-	if !ok {
+	// Get server config for reconnection
+	var serverConfig *MCPServerConfig
+	for i := range a.config.MCPServers {
+		if a.config.MCPServers[i].Name == serverName {
+			serverConfig = &a.config.MCPServers[i]
+			break
+		}
+	}
+	if serverConfig == nil {
 		a.metrics.MCPErrorsTotal.Inc()
 		return nil, fmt.Errorf("MCP server %s not found", serverName)
 	}
@@ -508,23 +557,81 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 	toolCtx, cancel := context.WithTimeout(ctx, mcpToolCallTimeout)
 	defer cancel()
 
-	// Call tool on session
+	a.mcpSessionsMu.RLock()
+	session := a.mcpSessions[serverName]
+	a.mcpSessionsMu.RUnlock()
+	if session == nil {
+		a.metrics.MCPErrorsTotal.Inc()
+		return nil, fmt.Errorf("MCP server %s not connected (session is nil)", serverName)
+	}
 	result, err := session.CallTool(toolCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
 	if err != nil {
-		a.metrics.MCPErrorsTotal.Inc()
-		return nil, fmt.Errorf("tool call failed: %w", err)
+		// Session may have been broken (connection reset, client closing).
+		// Attempt to reconnect once and retry.
+		a.log.Warn().Err(err).Str("server", serverName).Msg("MCP session failed, reconnecting")
+		newSession, reconnErr := a.reconnectMCPServer(ctx, *serverConfig)
+		if reconnErr != nil {
+			a.metrics.MCPErrorsTotal.Inc()
+			return nil, fmt.Errorf("tool call failed: %w (reconnect failed: %v)", err, reconnErr)
+		}
+		// Retry with fresh session
+		retryCtx, retryCancel := context.WithTimeout(ctx, mcpToolCallTimeout)
+		defer retryCancel()
+		result, err = newSession.CallTool(retryCtx, &mcp.CallToolParams{
+			Name:      toolName,
+			Arguments: arguments,
+		})
+		if err != nil {
+			a.metrics.MCPErrorsTotal.Inc()
+			return nil, fmt.Errorf("tool call failed: %w", err)
+		}
 	}
 
 	return result, nil
 }
 
+// reconnectMCPServer closes the existing session (if any) and creates a fresh one.
+// The stale session is not removed from the map until the new session is established,
+// so concurrent callers don't get nil from the map during reconnection.
+func (a *BaseAgent) reconnectMCPServer(ctx context.Context, serverConfig MCPServerConfig) (*mcp.ClientSession, error) {
+	a.mcpSessionsMu.RLock()
+	old := a.mcpSessions[serverConfig.Name]
+	a.mcpSessionsMu.RUnlock()
+
+	// Re-establish connection (outside lock — network I/O can be slow)
+	var session *mcp.ClientSession
+	var err error
+	switch serverConfig.Type {
+	case "sse":
+		session, err = a.createSSEClient(ctx, serverConfig)
+	default: // "http" or ""
+		session, err = a.createHTTPClient(ctx, serverConfig)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Close stale session only after the new one is ready
+	if old != nil {
+		if closeErr := old.Close(); closeErr != nil {
+			a.log.Warn().Err(closeErr).Str("server", serverConfig.Name).Msg("Error closing stale MCP session (ignored)")
+		}
+	}
+	a.mcpSessionsMu.Lock()
+	a.mcpSessions[serverConfig.Name] = session
+	a.mcpSessionsMu.Unlock()
+	a.log.Info().Str("server", serverConfig.Name).Msg("MCP session reconnected")
+	return session, nil
+}
+
 // ListMCPTools lists available tools from a specific MCP server
 func (a *BaseAgent) ListMCPTools(ctx context.Context, serverName string) (*mcp.ListToolsResult, error) {
 	// Get session for the specified server
+	a.mcpSessionsMu.RLock()
 	session, ok := a.mcpSessions[serverName]
+	a.mcpSessionsMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("MCP server %s not found", serverName)
 	}

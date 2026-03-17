@@ -24,6 +24,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/llm"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // ============================================================================
@@ -204,7 +205,7 @@ func NewReversionAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	natsTopic := viper.GetString("communication.nats.topics.reversion_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.strategy.reversion"
+		natsTopic = "cryptofunk.agent.signals"
 	}
 
 	// Connect to NATS
@@ -370,11 +371,13 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 	log.Debug().Str("symbol", symbol).Msg("Analyzing symbol for mean reversion")
 
 	// Fetch price data (need enough candles for Bollinger Band calculations)
-	prices, currentPrice, err := a.fetchPriceData(ctx, symbol)
+	ohlcv, currentPrice, err := a.fetchPriceData(ctx, symbol)
 	if err != nil {
 		log.Error().Err(err).Str("symbol", symbol).Msg("Failed to fetch price data")
 		return fmt.Errorf("failed to fetch market data: %w", err)
 	}
+
+	prices := ohlcv.Close
 
 	log.Debug().
 		Str("symbol", symbol).
@@ -440,10 +443,10 @@ func (a *ReversionAgent) Step(ctx context.Context) error {
 		Msg("Mean reversion signal generated")
 
 	// Step 4.5: Detect market regime and filter signal (T087)
-	adx, err := a.calculateADX(ctx, symbol, prices)
+	adx, err := a.calculateADX(ctx, symbol, ohlcv)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to calculate ADX")
-		return fmt.Errorf("ADX calculation failed: %w", err)
+		log.Warn().Err(err).Msg("ADX unavailable, assuming ranging market for mean reversion")
+		adx = 15.0 // Low ADX → ranging → mean reversion favored
 	}
 
 	log.Info().
@@ -551,12 +554,12 @@ func (a *ReversionAgent) getSymbolsToAnalyze() []string {
 	return a.symbols
 }
 
-// fetchPriceData fetches historical price data from CoinGecko
-func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]float64, float64, error) {
+// fetchPriceData fetches historical price data from CoinGecko, falling back to market-data server.
+func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) (*market.OHLCVData, float64, error) {
 	// Calculate days needed for lookback candles (using hourly data)
 	days := max(1, (a.lookbackCandles+23)/24)
 
-	// Call CoinGecko MCP tool
+	// Try CoinGecko first
 	result, err := a.CallMCPTool(ctx, "coingecko", "get_market_chart", map[string]interface{}{
 		"id":          symbol,
 		"vs_currency": "usd",
@@ -564,19 +567,87 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		"interval":    "hourly",
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("MCP tool call failed: %w", err)
+		// Fall back to market-data server (Binance get_klines) which provides full OHLCV
+		log.Warn().Err(err).Str("symbol", symbol).Msg("CoinGecko MCP failed, falling back to market-data server")
+		binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
+		result, err = a.CallMCPTool(ctx, "market_data", "get_klines", map[string]interface{}{
+			"symbol":   binanceSymbol,
+			"interval": "1h",
+			"limit":    a.lookbackCandles,
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to fetch market data: %w", err)
+		}
+
+		// Parse get_klines response which includes OHLCV candles
+		return a.parseKlinesResponse(result)
 	}
 
-	// Extract text content
+	// Parse CoinGecko response (close-only, estimate high/low)
+	return a.parseCoinGeckoResponse(result, symbol, days)
+}
+
+// parseKlinesResponse extracts OHLCV data from the market-data server's get_klines response.
+func (a *ReversionAgent) parseKlinesResponse(result *mcp.CallToolResult) (*market.OHLCVData, float64, error) {
 	if len(result.Content) == 0 {
-		return nil, 0, fmt.Errorf("empty result from CoinGecko")
+		return nil, 0, fmt.Errorf("empty result from market data server")
 	}
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		return nil, 0, fmt.Errorf("invalid content type")
 	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 
-	// Parse JSON - CoinGecko returns {prices: [[timestamp, price], ...]}
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse klines response: %w", err)
+	}
+
+	candles, ok := resultMap["candles"].([]interface{})
+	if !ok || len(candles) == 0 {
+		return nil, 0, fmt.Errorf("candles field not found or empty")
+	}
+
+	ohlcv := &market.OHLCVData{
+		High:  make([]float64, 0, len(candles)),
+		Low:   make([]float64, 0, len(candles)),
+		Close: make([]float64, 0, len(candles)),
+	}
+	var latestPrice float64
+
+	for _, c := range candles {
+		candle, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		high := market.ParseStringFloat(candle["high"])
+		low := market.ParseStringFloat(candle["low"])
+		closePrice := market.ParseStringFloat(candle["close"])
+
+		ohlcv.High = append(ohlcv.High, high)
+		ohlcv.Low = append(ohlcv.Low, low)
+		ohlcv.Close = append(ohlcv.Close, closePrice)
+		latestPrice = closePrice
+	}
+
+	return ohlcv, latestPrice, nil
+}
+
+// parseCoinGeckoResponse extracts close prices from CoinGecko and estimates high/low.
+func (a *ReversionAgent) parseCoinGeckoResponse(result *mcp.CallToolResult, symbol string, days int) (*market.OHLCVData, float64, error) {
+	if len(result.Content) == 0 {
+		return nil, 0, fmt.Errorf("empty result from market data source")
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, 0, fmt.Errorf("invalid content type")
+	}
+	if result.IsError {
+		return nil, 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &resultMap); err != nil {
 		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
@@ -587,8 +658,7 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		return nil, 0, fmt.Errorf("prices field not found")
 	}
 
-	// Extract close prices
-	prices := make([]float64, 0, len(pricesRaw))
+	closes := make([]float64, 0, len(pricesRaw))
 	var latestPrice float64
 
 	for _, p := range pricesRaw {
@@ -596,30 +666,31 @@ func (a *ReversionAgent) fetchPriceData(ctx context.Context, symbol string) ([]f
 		if !ok || len(point) != 2 {
 			continue
 		}
-
 		price, ok := point[1].(float64)
 		if !ok {
 			continue
 		}
-
-		prices = append(prices, price)
-		latestPrice = price // Keep track of latest
+		closes = append(closes, price)
+		latestPrice = price
 	}
 
-	if len(prices) == 0 {
+	if len(closes) == 0 {
 		return nil, 0, fmt.Errorf("no price data available")
 	}
 
 	log.Debug().
 		Str("symbol", symbol).
 		Int("days", days).
-		Int("candles", len(prices)).
+		Int("candles", len(closes)).
 		Float64("latest_price", latestPrice).
 		Msg("Fetched price data from CoinGecko")
 
-	return prices, latestPrice, nil
+	// Estimate high/low from close prices for ADX calculation
+	ohlcv := market.EstimateOHLCV(closes)
+	return ohlcv, latestPrice, nil
 }
 
+// estimateOHLCV estimates high and low prices from close-only data.
 // ============================================================================
 // BOLLINGER BAND STRATEGY (T085)
 // ============================================================================
@@ -652,24 +723,23 @@ func (a *ReversionAgent) calculateBollingerBands(ctx context.Context, symbol str
 		return nil, fmt.Errorf("invalid content type")
 	}
 
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
 		return nil, fmt.Errorf("failed to parse Bollinger Bands result: %w", err)
 	}
 
-	// Extract band values (last value in each array)
-	upperBands := data["upper_band"].([]interface{})
-	middleBands := data["middle_band"].([]interface{})
-	lowerBands := data["lower_band"].([]interface{})
-
-	if len(upperBands) == 0 || len(middleBands) == 0 || len(lowerBands) == 0 {
-		return nil, fmt.Errorf("insufficient data for Bollinger Bands calculation")
+	// The technical-indicators server returns scalar values: "upper", "middle", "lower", "width"
+	// (not arrays). Extract them with safe type assertions.
+	upperBand, ok1 := data["upper"].(float64)
+	middleBand, ok2 := data["middle"].(float64)
+	lowerBand, ok3 := data["lower"].(float64)
+	if !ok1 || !ok2 || !ok3 {
+		return nil, fmt.Errorf("Bollinger Bands result missing upper/middle/lower fields")
 	}
-
-	// Get current (last) values
-	upperBand := upperBands[len(upperBands)-1].(float64)
-	middleBand := middleBands[len(middleBands)-1].(float64)
-	lowerBand := lowerBands[len(lowerBands)-1].(float64)
 
 	// Calculate bandwidth (volatility measure)
 	bandwidth := 0.0
@@ -831,19 +901,20 @@ func (a *ReversionAgent) calculateRSI(ctx context.Context, symbol string, priceD
 		return 0, fmt.Errorf("invalid content type")
 	}
 
+	if result.IsError {
+		return 0, fmt.Errorf("tool error: %s", textContent.Text)
+	}
+
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(textContent.Text), &data); err != nil {
 		return 0, fmt.Errorf("failed to parse RSI result: %w", err)
 	}
 
-	// Extract RSI values array
-	rsiValues, ok := data["values"].([]interface{})
-	if !ok || len(rsiValues) == 0 {
-		return 0, fmt.Errorf("RSI values not found in result")
+	// The technical-indicators server returns a scalar "value" field (not an array).
+	currentRSI, ok := data["value"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("RSI value not found in result")
 	}
-
-	// Get current (last) RSI value
-	currentRSI := rsiValues[len(rsiValues)-1].(float64)
 
 	log.Debug().
 		Float64("rsi", currentRSI).
@@ -1048,16 +1119,17 @@ func (a *ReversionAgent) updateRSIBeliefs(rsi float64, signal string, confidence
 // ============================================================================
 
 // calculateADX calculates the Average Directional Index using MCP Technical Indicators server
-func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, priceData []float64) (float64, error) {
+func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, ohlcv *market.OHLCVData) (float64, error) {
 	log.Debug().
 		Str("symbol", symbol).
-		Int("data_points", len(priceData)).
+		Int("data_points", len(ohlcv.Close)).
 		Msg("Calculating ADX for regime detection")
 
-	// Call Technical Indicators MCP server for ADX
-	// Note: ADX typically requires high/low/close data, but we'll use a simplified version with close prices
+	// Call Technical Indicators MCP server for ADX with proper high/low/close data
 	result, err := a.CallMCPTool(ctx, "technical_indicators", "calculate_adx", map[string]interface{}{
-		"prices": priceData,
+		"high":   ohlcv.High,
+		"low":    ohlcv.Low,
+		"close":  ohlcv.Close,
 		"period": 14, // Standard ADX period
 	})
 	if err != nil {
@@ -1071,6 +1143,10 @@ func (a *ReversionAgent) calculateADX(ctx context.Context, symbol string, priceD
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		return 0, fmt.Errorf("invalid content type")
+	}
+
+	if result.IsError {
+		return 0, fmt.Errorf("tool error: %s", textContent.Text)
 	}
 
 	var data map[string]interface{}
@@ -1311,7 +1387,16 @@ func (a *ReversionAgent) generateTradingSignal(
 
 // publishSignal publishes a trading signal to NATS
 func (a *ReversionAgent) publishSignal(ctx context.Context, signal *ReversionSignal) error {
-	data, err := json.Marshal(signal)
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		*ReversionSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		ReversionSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1489,6 +1574,8 @@ func main() {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	agent.SetStepFn(agent.Step)
+
 	// Start agent run loop in background
 	go func() {
 		if err := agent.Run(runCtx); err != nil && err != context.Canceled {
@@ -1530,9 +1617,10 @@ func convertMCPServers(servers []config.MCPServerConnection) []agents.MCPServerC
 	result := make([]agents.MCPServerConfig, len(servers))
 	for i, server := range servers {
 		result[i] = agents.MCPServerConfig{
-			Name: server.Name,
-			Type: server.Type,
-			URL:  server.URL,
+			Name:     server.Name,
+			Type:     server.Type,
+			URL:      server.URL,
+			Optional: server.Optional,
 		}
 	}
 	return result

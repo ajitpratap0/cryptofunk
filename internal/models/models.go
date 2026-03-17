@@ -16,6 +16,14 @@ const (
 	PlatformPolymarket Platform = "polymarket"
 )
 
+// PositionStatus represents whether a position is open or closed.
+type PositionStatus string
+
+const (
+	PositionStatusOpen   PositionStatus = "OPEN"
+	PositionStatusClosed PositionStatus = "CLOSED"
+)
+
 // UnifiedPosition is a platform-agnostic position representation.
 type UnifiedPosition struct {
 	ID            uuid.UUID              `json:"id"`
@@ -30,12 +38,17 @@ type UnifiedPosition struct {
 	CostBasis     float64                `json:"cost_basis"`
 	UnrealizedPnL float64                `json:"unrealized_pnl"`
 	RealizedPnL   float64                `json:"realized_pnl"`
-	Status        string                 `json:"status"` // "OPEN", "CLOSED"
+	Status        PositionStatus         `json:"status"` // OPEN, CLOSED
 	OpenedAt      time.Time              `json:"opened_at"`
 	ClosedAt      *time.Time             `json:"closed_at,omitempty"`
 	Agent         string                 `json:"agent"`
 	Confidence    float64                `json:"confidence"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// IsOpen returns true if the position is currently open.
+func (p *UnifiedPosition) IsOpen() bool {
+	return p.Status == PositionStatusOpen
 }
 
 // UnifiedTrade is a platform-agnostic trade representation.

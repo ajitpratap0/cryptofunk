@@ -94,6 +94,7 @@ func initMCPSession(t *testing.T, ts *httptest.Server, extraHeaders ...string) s
 // newHTTPTestServer creates a test server with the given tools registered.
 func newHTTPTestServer(t *testing.T) (*httptest.Server, *Server) {
 	t.Helper()
+	t.Setenv("MCP_ALLOW_NO_AUTH", "true")
 	logger := zerolog.New(io.Discard)
 	srv := New(Config{Name: "test-http", Version: "0.0.1", Logger: logger})
 
@@ -500,6 +501,7 @@ func TestContentTypeEnforcement(t *testing.T) {
 // TestStreamableHTTP_MultipleTools verifies that multiple tools can be registered
 // and all appear in tools/list.
 func TestStreamableHTTP_MultipleTools(t *testing.T) {
+	t.Setenv("MCP_ALLOW_NO_AUTH", "true")
 	logger := zerolog.New(io.Discard)
 	srv := New(Config{Name: "multi-tool-test", Version: "0.0.1", Logger: logger})
 

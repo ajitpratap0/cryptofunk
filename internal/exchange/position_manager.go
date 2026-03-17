@@ -64,20 +64,22 @@ func (pm *PositionManager) SetSession(sessionID *uuid.UUID) {
 
 	// Load open positions for this session (only if database is available)
 	if sessionID != nil && pm.db != nil {
-		pm.loadOpenPositions(*sessionID)
+		if err := pm.loadOpenPositions(*sessionID); err != nil {
+			log.Error().Err(err).Msg("Session setup failed: could not load open positions")
+		}
 	} else {
 		pm.openPositions = make(map[string]*db.Position)
 	}
 }
 
 // loadOpenPositions loads open positions from database
-func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) {
+func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	positions, err := pm.db.GetOpenPositions(ctx, sessionID)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load open positions")
-		return
+		return err
 	}
 
 	pm.openPositions = make(map[string]*db.Position)
@@ -88,6 +90,7 @@ func (pm *PositionManager) loadOpenPositions(sessionID uuid.UUID) {
 	log.Info().
 		Int("count", len(positions)).
 		Msg("Loaded open positions from database")
+	return nil
 }
 
 // OnOrderFilled handles order fill events and updates positions
@@ -280,15 +283,15 @@ func (pm *PositionManager) closePosition(ctx context.Context, position *db.Posit
 
 // partialClosePosition partially closes a position
 func (pm *PositionManager) partialClosePosition(ctx context.Context, position *db.Position, closeQuantity, exitPrice float64, reason string, fees float64) error {
-	// Use database method for partial close
 	if pm.db != nil {
+		// Do DB write first; only update memory if DB succeeds
 		closedPos, err := pm.db.PartialClosePosition(ctx, position.ID, closeQuantity, exitPrice, reason, fees)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to partial close position in database")
 			return err
 		}
 
-		// Update in-memory position
+		// DB succeeded — now update memory
 		position.Quantity -= closeQuantity
 		position.Fees += fees
 
@@ -302,6 +305,11 @@ func (pm *PositionManager) partialClosePosition(ctx context.Context, position *d
 			Float64("exit_price", exitPrice).
 			Float64("realized_pnl", *closedPos.RealizedPnL).
 			Msg("Position partially closed")
+	} else {
+		// No DB: update memory directly
+		position.Quantity -= closeQuantity
+		position.Fees += fees
+		log.Warn().Msg("no database: position update is in-memory only")
 	}
 
 	return nil
@@ -351,8 +359,8 @@ func (pm *PositionManager) averagePosition(ctx context.Context, position *db.Pos
 
 // UpdateUnrealizedPnL updates unrealized P&L for all open positions
 func (pm *PositionManager) UpdateUnrealizedPnL(ctx context.Context, prices map[string]float64) error {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	for symbol, position := range pm.openPositions {
 		currentPrice, ok := prices[symbol]

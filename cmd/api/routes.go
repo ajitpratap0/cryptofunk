@@ -137,6 +137,14 @@ func (s *APIServer) setupRoutes() {
 			agents.GET("/:name/status", s.handleGetAgentStatus)
 		}
 
+		// Session routes (read-only, apply read rate limiter)
+		sessions := v1.Group("/sessions")
+		sessions.Use(s.rateLimiter.ReadMiddleware())
+		{
+			sessions.GET("", s.handleListSessions)
+			sessions.GET("/:id", s.handleGetSession)
+		}
+
 		// Position routes (read-only, apply read rate limiter)
 		positions := v1.Group("/positions")
 		positions.Use(s.rateLimiter.ReadMiddleware())
@@ -194,18 +202,16 @@ func (s *APIServer) setupRoutes() {
 		configGroup := v1.Group("/config")
 		{
 			configGroup.GET("", s.rateLimiter.ReadMiddleware(), s.handleGetConfig)
-			configGroup.PATCH("", s.rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
+			configGroup.PATCH("", s.rateLimiter.ControlMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig), s.handleUpdateConfig)
 		}
 
 		// Decision explainability routes (T307) with rate limiting and optional auth
-		// Search uses dedicated rate limiter for expensive vector operations
-		// Auth is optional - allows both authenticated and anonymous access
-		// When auth is enabled, authenticated users get enhanced audit logging
-		optionalAuth := api.OptionalAuth(s.apiKeyStore, authConfig)
+		// Decision routes require authentication when auth is enabled
+		decisionsAuth := api.AuthMiddleware(s.apiKeyStore, authConfig)
 
 		decisionRepo := api.NewDecisionRepository(s.db.Pool())
 		decisionHandler := api.NewDecisionHandler(decisionRepo)
-		decisionHandler.RegisterRoutesWithRateLimiterAndAuth(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware(), optionalAuth)
+		decisionHandler.RegisterRoutesWithRateLimiterAndAuth(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.SearchMiddleware(), decisionsAuth)
 
 		// Decision feedback routes (T309) with rate limiting
 		feedbackRepo := api.NewFeedbackRepository(s.db.Pool())
@@ -223,7 +229,11 @@ func (s *APIServer) setupRoutes() {
 
 		// Dashboard routes (TC-002) with rate limiting
 		// Provides user dashboard with trading control, positions, P&L, and system status
-		dashboardHandler := api.NewDashboardHandler(s.db)
+		// Use an HTTP client to the orchestrator so the dashboard can report agent counts
+		// even though the API and orchestrator run as separate processes.
+		orchestratorURL := s.getOrchestratorURL()
+		orchClient := api.NewOrchestratorClient(orchestratorURL)
+		dashboardHandler := api.NewDashboardHandlerWithOrchestrator(s.db, orchClient, config.Version)
 		dashboardHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.ControlMiddleware())
 
 		// TB-006: API Key Management routes

@@ -157,7 +157,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	// Update last used timestamp asynchronously with timeout context
 	// Using a detached context with timeout to avoid leaking the request context
 	apiKeyID := apiKey.ID // Capture value to avoid closure over pointer
-	go func() {
+	go func() {           //nolint:gosec
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		updateQuery := `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`

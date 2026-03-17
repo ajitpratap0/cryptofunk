@@ -57,7 +57,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 	tests := []struct {
 		name           string
 		signals        []AgentSignal
-		expectedAction string
+		expectedAction SignalAction
 		expectedScore  float64
 		shouldMeet     bool // Should meet consensus threshold
 	}{
@@ -68,7 +68,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "technical-agent",
 					AgentType:  "technical",
 					Timestamp:  time.Now(),
-					Signal:     "BUY",
+					Signal:     SignalActionBuy,
 					Confidence: 0.9,
 					Symbol:     "BTC/USD",
 				},
@@ -76,7 +76,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "trend-agent",
 					AgentType:  "trend",
 					Timestamp:  time.Now(),
-					Signal:     "BUY",
+					Signal:     SignalActionBuy,
 					Confidence: 0.85,
 					Symbol:     "BTC/USD",
 				},
@@ -84,12 +84,12 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "orderbook-agent",
 					AgentType:  "orderbook",
 					Timestamp:  time.Now(),
-					Signal:     "BUY",
+					Signal:     SignalActionBuy,
 					Confidence: 0.8,
 					Symbol:     "BTC/USD",
 				},
 			},
-			expectedAction: "BUY",
+			expectedAction: SignalActionBuy,
 			expectedScore:  0.85, // Approximate weighted average
 			shouldMeet:     true,
 		},
@@ -100,7 +100,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "technical-agent",
 					AgentType:  "technical",
 					Timestamp:  time.Now(),
-					Signal:     "BUY",
+					Signal:     SignalActionBuy,
 					Confidence: 0.7,
 					Symbol:     "BTC/USD",
 				},
@@ -108,7 +108,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "trend-agent",
 					AgentType:  "trend",
 					Timestamp:  time.Now(),
-					Signal:     "SELL",
+					Signal:     SignalActionSell,
 					Confidence: 0.8,
 					Symbol:     "BTC/USD",
 				},
@@ -116,7 +116,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "orderbook-agent",
 					AgentType:  "orderbook",
 					Timestamp:  time.Now(),
-					Signal:     "HOLD",
+					Signal:     SignalActionHold,
 					Confidence: 0.6,
 					Symbol:     "BTC/USD",
 				},
@@ -132,7 +132,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "technical-agent",
 					AgentType:  "technical",
 					Timestamp:  time.Now(),
-					Signal:     "SELL",
+					Signal:     SignalActionSell,
 					Confidence: 0.95,
 					Symbol:     "BTC/USD",
 				},
@@ -140,7 +140,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "trend-agent",
 					AgentType:  "trend",
 					Timestamp:  time.Now(),
-					Signal:     "SELL",
+					Signal:     SignalActionSell,
 					Confidence: 0.75,
 					Symbol:     "BTC/USD",
 				},
@@ -148,12 +148,12 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "sentiment-agent",
 					AgentType:  "sentiment",
 					Timestamp:  time.Now(),
-					Signal:     "SELL",
+					Signal:     SignalActionSell,
 					Confidence: 0.7,
 					Symbol:     "BTC/USD",
 				},
 			},
-			expectedAction: "SELL",
+			expectedAction: SignalActionSell,
 			expectedScore:  0.80, // Approximate weighted average
 			shouldMeet:     true,
 		},
@@ -164,7 +164,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "technical-agent",
 					AgentType:  "technical",
 					Timestamp:  time.Now(),
-					Signal:     "BUY",
+					Signal:     SignalActionBuy,
 					Confidence: 0.4,
 					Symbol:     "BTC/USD",
 				},
@@ -172,7 +172,7 @@ func TestCalculateWeightedScore(t *testing.T) {
 					AgentName:  "trend-agent",
 					AgentType:  "trend",
 					Timestamp:  time.Now(),
-					Signal:     "BUY",
+					Signal:     SignalActionBuy,
 					Confidence: 0.3,
 					Symbol:     "BTC/USD",
 				},
@@ -209,11 +209,11 @@ func TestCalculateWeightedScore(t *testing.T) {
 			decision := orch.calculateDecision(ctx)
 
 			if tt.shouldMeet {
-				assert.NotEqual(t, "HOLD", decision.Action, "Expected to meet consensus threshold")
+				assert.NotEqual(t, SignalActionHold, decision.Action, "Expected to meet consensus threshold")
 				assert.Equal(t, tt.expectedAction, decision.Action)
 				assert.InDelta(t, tt.expectedScore, decision.Confidence, 0.1, "Weighted score should be close to expected")
 			} else {
-				assert.Equal(t, "HOLD", decision.Action, "Expected NOT to meet consensus threshold")
+				assert.Equal(t, SignalActionHold, decision.Action, "Expected NOT to meet consensus threshold")
 			}
 		})
 	}
@@ -248,9 +248,9 @@ func TestCheckConsensus(t *testing.T) {
 		{
 			name: "meets consensus threshold without risk agent",
 			signals: []AgentSignal{
-				{AgentName: "agent1", Signal: "BUY", Confidence: 0.8, Timestamp: time.Now()},
-				{AgentName: "agent2", Signal: "BUY", Confidence: 0.7, Timestamp: time.Now()},
-				{AgentName: "agent3", Signal: "BUY", Confidence: 0.75, Timestamp: time.Now()},
+				{AgentName: "agent1", Signal: SignalActionBuy, Confidence: 0.8, Timestamp: time.Now()},
+				{AgentName: "agent2", Signal: SignalActionBuy, Confidence: 0.7, Timestamp: time.Now()},
+				{AgentName: "agent3", Signal: SignalActionBuy, Confidence: 0.75, Timestamp: time.Now()},
 			},
 			hasRisk:   false,
 			expected:  true,
@@ -259,9 +259,9 @@ func TestCheckConsensus(t *testing.T) {
 		{
 			name: "below consensus threshold",
 			signals: []AgentSignal{
-				{AgentName: "agent1", Signal: "BUY", Confidence: 0.8, Timestamp: time.Now()},
-				{AgentName: "agent2", Signal: "SELL", Confidence: 0.7, Timestamp: time.Now()},
-				{AgentName: "agent3", Signal: "HOLD", Confidence: 0.6, Timestamp: time.Now()},
+				{AgentName: "agent1", Signal: SignalActionBuy, Confidence: 0.8, Timestamp: time.Now()},
+				{AgentName: "agent2", Signal: SignalActionSell, Confidence: 0.7, Timestamp: time.Now()},
+				{AgentName: "agent3", Signal: SignalActionHold, Confidence: 0.6, Timestamp: time.Now()},
 			},
 			hasRisk:   false,
 			expected:  false,
@@ -270,9 +270,9 @@ func TestCheckConsensus(t *testing.T) {
 		{
 			name: "meets threshold but risk agent vetoes",
 			signals: []AgentSignal{
-				{AgentName: "agent1", Signal: "BUY", Confidence: 0.8, Timestamp: time.Now()},
-				{AgentName: "agent2", Signal: "BUY", Confidence: 0.7, Timestamp: time.Now()},
-				{AgentName: "risk-agent", AgentType: "risk", Signal: "HOLD", Confidence: 0.9, Timestamp: time.Now()},
+				{AgentName: "agent1", Signal: SignalActionBuy, Confidence: 0.8, Timestamp: time.Now()},
+				{AgentName: "agent2", Signal: SignalActionBuy, Confidence: 0.7, Timestamp: time.Now()},
+				{AgentName: "risk-agent", AgentType: "risk", Signal: SignalActionHold, Confidence: 0.9, Timestamp: time.Now()},
 			},
 			hasRisk:   true,
 			expected:  false,
@@ -281,9 +281,9 @@ func TestCheckConsensus(t *testing.T) {
 		{
 			name: "low average confidence",
 			signals: []AgentSignal{
-				{AgentName: "agent1", Signal: "BUY", Confidence: 0.3, Timestamp: time.Now()},
-				{AgentName: "agent2", Signal: "BUY", Confidence: 0.4, Timestamp: time.Now()},
-				{AgentName: "agent3", Signal: "BUY", Confidence: 0.35, Timestamp: time.Now()},
+				{AgentName: "agent1", Signal: SignalActionBuy, Confidence: 0.3, Timestamp: time.Now()},
+				{AgentName: "agent2", Signal: SignalActionBuy, Confidence: 0.4, Timestamp: time.Now()},
+				{AgentName: "agent3", Signal: SignalActionBuy, Confidence: 0.35, Timestamp: time.Now()},
 			},
 			hasRisk:   false,
 			expected:  false,
@@ -318,11 +318,11 @@ func TestCheckConsensus(t *testing.T) {
 
 			if tt.checkType == "confidence" {
 				// Test confidence threshold - low confidence should result in HOLD
-				assert.Equal(t, "HOLD", decision.Action, "Low confidence signals should result in HOLD action")
+				assert.Equal(t, SignalActionHold, decision.Action, "Low confidence signals should result in HOLD action")
 			} else {
 				// Test consensus threshold
 				if tt.expected {
-					assert.NotEqual(t, "HOLD", decision.Action, "Expected consensus to be met")
+					assert.NotEqual(t, SignalActionHold, decision.Action, "Expected consensus to be met")
 					assert.Greater(t, decision.Confidence, config.MinConfidence, "Confidence should exceed minimum")
 				} else {
 					// Either no consensus or vetoed by risk agent
@@ -330,7 +330,7 @@ func TestCheckConsensus(t *testing.T) {
 						// Check if risk agent signal exists and is HOLD
 						riskVeto := false
 						for _, sig := range tt.signals {
-							if sig.AgentType == "risk" && sig.Signal == "HOLD" {
+							if sig.AgentType == "risk" && sig.Signal == SignalActionHold {
 								riskVeto = true
 								break
 							}
@@ -338,7 +338,7 @@ func TestCheckConsensus(t *testing.T) {
 						assert.True(t, riskVeto, "Risk agent should veto the decision")
 					}
 					// Decision should be HOLD when consensus not met
-					assert.Equal(t, "HOLD", decision.Action, "Should default to HOLD without consensus")
+					assert.Equal(t, SignalActionHold, decision.Action, "Should default to HOLD without consensus")
 				}
 			}
 		})
@@ -375,24 +375,24 @@ func TestGenerateDecision(t *testing.T) {
 		name           string
 		signals        []AgentSignal
 		expectDecision bool
-		expectedAction string
+		expectedAction SignalAction
 	}{
 		{
 			name: "strong buy consensus",
 			signals: []AgentSignal{
-				{AgentName: "tech", AgentType: "technical", Signal: "BUY", Confidence: 0.9, Symbol: "BTC/USD", Timestamp: time.Now()},
-				{AgentName: "trend", AgentType: "trend", Signal: "BUY", Confidence: 0.85, Symbol: "BTC/USD", Timestamp: time.Now()},
-				{AgentName: "order", AgentType: "orderbook", Signal: "BUY", Confidence: 0.8, Symbol: "BTC/USD", Timestamp: time.Now()},
+				{AgentName: "tech", AgentType: "technical", Signal: SignalActionBuy, Confidence: 0.9, Symbol: "BTC/USD", Timestamp: time.Now()},
+				{AgentName: "trend", AgentType: "trend", Signal: SignalActionBuy, Confidence: 0.85, Symbol: "BTC/USD", Timestamp: time.Now()},
+				{AgentName: "order", AgentType: "orderbook", Signal: SignalActionBuy, Confidence: 0.8, Symbol: "BTC/USD", Timestamp: time.Now()},
 			},
 			expectDecision: true,
-			expectedAction: "BUY",
+			expectedAction: SignalActionBuy,
 		},
 		{
 			name: "no consensus - mixed signals",
 			signals: []AgentSignal{
-				{AgentName: "tech", AgentType: "technical", Signal: "BUY", Confidence: 0.7, Symbol: "BTC/USD", Timestamp: time.Now()},
-				{AgentName: "trend", AgentType: "trend", Signal: "SELL", Confidence: 0.7, Symbol: "BTC/USD", Timestamp: time.Now()},
-				{AgentName: "order", AgentType: "orderbook", Signal: "HOLD", Confidence: 0.6, Symbol: "BTC/USD", Timestamp: time.Now()},
+				{AgentName: "tech", AgentType: "technical", Signal: SignalActionBuy, Confidence: 0.7, Symbol: "BTC/USD", Timestamp: time.Now()},
+				{AgentName: "trend", AgentType: "trend", Signal: SignalActionSell, Confidence: 0.7, Symbol: "BTC/USD", Timestamp: time.Now()},
+				{AgentName: "order", AgentType: "orderbook", Signal: SignalActionHold, Confidence: 0.6, Symbol: "BTC/USD", Timestamp: time.Now()},
 			},
 			expectDecision: false,
 			expectedAction: "",
@@ -425,14 +425,72 @@ func TestGenerateDecision(t *testing.T) {
 			decision := orch.calculateDecision(ctx)
 
 			if tt.expectDecision {
-				assert.NotEqual(t, "HOLD", decision.Action, "Should meet consensus threshold")
+				assert.NotEqual(t, SignalActionHold, decision.Action, "Should meet consensus threshold")
 				assert.Equal(t, tt.expectedAction, decision.Action, "Action should match expected")
 				assert.Greater(t, decision.Confidence, config.MinConfidence, "Confidence should exceed minimum")
 			} else {
-				assert.Equal(t, "HOLD", decision.Action, "Should default to HOLD without consensus")
+				assert.Equal(t, SignalActionHold, decision.Action, "Should default to HOLD without consensus")
 			}
 		})
 	}
+}
+
+// TestCalculateDecision_ZeroTotalWeight verifies that when no registered agents
+// contribute signals (totalWeight == 0), the decision defaults to HOLD with
+// confidence 0.0 (not NaN) and consensus 0.0.
+func TestCalculateDecision_ZeroTotalWeight(t *testing.T) {
+	config := &OrchestratorConfig{
+		Name:                "test-orchestrator-zero-weight",
+		NATSUrl:             "nats://localhost:4222",
+		SignalTopic:         "test.signals",
+		DecisionTopic:       "test.decisions",
+		HeartbeatTopic:      "test.heartbeat",
+		StepInterval:        30 * time.Second,
+		MinConsensus:        0.6,
+		MinConfidence:       0.5,
+		MaxSignalAge:        5 * time.Minute,
+		HealthCheckInterval: 1 * time.Minute,
+	}
+
+	logger := zerolog.Nop()
+	orch, err := NewOrchestrator(config, logger, nil, 9100)
+	require.NoError(t, err)
+
+	// Deliberately do NOT call updateAgentSession, so no agents are registered.
+	// Signals from unknown agents are skipped during calculateDecision (no weight).
+	signals := []*AgentSignal{
+		{
+			AgentName:  "unknown-agent-1",
+			AgentType:  "unknown",
+			Signal:     SignalActionBuy,
+			Confidence: 0.95,
+			Symbol:     "BTC/USD",
+			Timestamp:  time.Now(),
+		},
+		{
+			AgentName:  "unknown-agent-2",
+			AgentType:  "unknown",
+			Signal:     SignalActionBuy,
+			Confidence: 0.90,
+			Symbol:     "BTC/USD",
+			Timestamp:  time.Now(),
+		},
+	}
+
+	ctx := &DecisionContext{
+		Signals:       signals,
+		Symbol:        "BTC/USD",
+		Timestamp:     time.Now(),
+		MinConsensus:  0.6,
+		MinConfidence: 0.5,
+	}
+
+	decision := orch.calculateDecision(ctx)
+
+	assert.Equal(t, SignalActionHold, decision.Action, "zero totalWeight must produce HOLD action")
+	assert.Equal(t, 0.0, decision.Confidence, "confidence must be 0.0 (not NaN) when totalWeight is zero")
+	assert.Equal(t, 0.0, decision.Consensus, "consensus must be 0.0 when totalWeight is zero")
+	assert.Equal(t, 0, decision.ParticipatingAgents, "no agents should participate when none are registered")
 }
 
 // TestMetricsIncrement verifies orchestrator creation with metrics enabled

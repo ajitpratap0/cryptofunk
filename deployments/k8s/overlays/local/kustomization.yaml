@@ -1,0 +1,497 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cryptofunk
+
+resources:
+  - ../../base
+  - agents-k8s.yaml
+  - netpol-agents-external.yaml
+
+images:
+  - name: cryptofunk/migrate
+    newName: cryptofunk/migrate
+    newTag: local
+  - name: cryptofunk/orchestrator
+    newName: cryptofunk/orchestrator
+    newTag: local
+  - name: cryptofunk/api
+    newName: cryptofunk/api
+    newTag: local
+  - name: cryptofunk/market-data-server
+    newName: cryptofunk/market-data-server
+    newTag: local
+  - name: cryptofunk/technical-indicators-server
+    newName: cryptofunk/technical-indicators-server
+    newTag: local
+  - name: cryptofunk/risk-analyzer-server
+    newName: cryptofunk/risk-analyzer-server
+    newTag: local
+  - name: cryptofunk/order-executor-server
+    newName: cryptofunk/order-executor-server
+    newTag: local
+  - name: cryptofunk/polymarket-server
+    newName: cryptofunk/polymarket-server
+    newTag: local
+  - name: cryptofunk/technical-agent
+    newName: cryptofunk/technical-agent
+    newTag: local
+  - name: cryptofunk/orderbook-agent
+    newName: cryptofunk/orderbook-agent
+    newTag: local
+  - name: cryptofunk/sentiment-agent
+    newName: cryptofunk/sentiment-agent
+    newTag: local
+  - name: cryptofunk/trend-agent
+    newName: cryptofunk/trend-agent
+    newTag: local
+  - name: cryptofunk/reversion-agent
+    newName: cryptofunk/reversion-agent
+    newTag: local
+  - name: cryptofunk/risk-agent
+    newName: cryptofunk/risk-agent
+    newTag: local
+  - name: cryptofunk/arbitrage-agent
+    newName: cryptofunk/arbitrage-agent
+    newTag: local
+  - name: cryptofunk/polymarket-agent
+    newName: cryptofunk/polymarket-agent
+    newTag: local
+  - name: cryptofunk/dashboard
+    newName: cryptofunk/dashboard
+    newTag: local
+
+replicas:
+  - name: api
+    count: 1
+  - name: bifrost
+    count: 1
+  - name: dashboard
+    count: 1
+  - name: market-data-server
+    count: 1
+  - name: order-executor-server
+    count: 1
+  - name: polymarket-server
+    count: 1
+  - name: risk-analyzer-server
+    count: 1
+  - name: technical-indicators-server
+    count: 1
+
+patches:
+  - path: secret-local.yaml
+  - path: configmap-local.yaml
+  - path: configmap-alertmanager-local.yaml
+  - path: patches/agents-config-mount.yaml
+    target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/component=agent"
+  - path: patches/prometheus-resources.yaml
+  # ── Local resource limits (fit in Docker Desktop 8GB RAM / 10 CPU) ──
+  # postgres: heaviest service
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: postgres
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: postgres
+              resources:
+                requests:
+                  cpu: "250m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "1000m"
+                  memory: "1Gi"
+  # redis
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: redis
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: redis
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  # nats
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nats
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: nats
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  # orchestrator
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: orchestrator
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: orchestrator
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+  # api
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: api
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: api
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+  # bifrost
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: bifrost
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: bifrost
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+  # grafana
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: grafana
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: grafana
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  # alertmanager
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: alertmanager
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: alertmanager
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  # dashboard
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: dashboard
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: dashboard
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "128m"
+                  memory: "128Mi"
+  # MCP servers (5x): 64Mi/50m requests, 256Mi/250m limits
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: market-data-server
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: market-data-server
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: technical-indicators-server
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: technical-indicators-server
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: risk-analyzer-server
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: risk-analyzer-server
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: order-executor-server
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: order-executor-server
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: polymarket-server
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: polymarket-server
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+  # Agents (8x): 64Mi/50m requests, 128Mi/250m limits
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: technical-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: technical-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: orderbook-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: orderbook-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sentiment-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: sentiment-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: trend-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: trend-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: reversion-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: reversion-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: risk-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: risk-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: arbitrage-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: arbitrage-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: polymarket-agent
+        namespace: cryptofunk
+      spec:
+        template:
+          spec:
+            containers:
+            - name: polymarket-agent
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "128Mi"

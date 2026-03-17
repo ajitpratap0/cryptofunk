@@ -103,3 +103,6 @@ order-executor
 web/dashboard/node_modules/
 node_modules/
 .next/
+
+# Local K8s secret manifests (contain generated passwords)
+deployments/k8s/overlays/local/secret-local.yaml

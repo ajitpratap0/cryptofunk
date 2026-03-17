@@ -57,7 +57,7 @@ func TestHealthEndpoint(t *testing.T) {
 	orch := createTestOrchestrator(t, false, false)
 	server := NewHTTPServer(8080, orch)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
 	server.handleHealth(w, req)
@@ -91,7 +91,7 @@ func TestHealthEndpointMethodNotAllowed(t *testing.T) {
 
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	for _, method := range methods {
-		req := httptest.NewRequest(method, "/health", nil)
+		req := httptest.NewRequestWithContext(context.Background(), method, "/health", nil)
 		w := httptest.NewRecorder()
 
 		server.handleHealth(w, req)
@@ -107,7 +107,7 @@ func TestLivenessEndpoint(t *testing.T) {
 	orch := createTestOrchestrator(t, false, false)
 	server := NewHTTPServer(8080, orch)
 
-	req := httptest.NewRequest(http.MethodGet, "/liveness", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/liveness", nil)
 	w := httptest.NewRecorder()
 
 	server.handleLiveness(w, req)
@@ -130,7 +130,7 @@ func TestLivenessEndpoint(t *testing.T) {
 func TestReadinessEndpointOrchestratorNil(t *testing.T) {
 	server := NewHTTPServer(8080, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/readiness", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readiness", nil)
 	w := httptest.NewRecorder()
 
 	server.handleReadiness(w, req)
@@ -145,7 +145,7 @@ func TestReadinessEndpointHealthy(t *testing.T) {
 	orch := createTestOrchestrator(t, true, false)
 	server := NewHTTPServer(8080, orch)
 
-	req := httptest.NewRequest(http.MethodGet, "/readiness", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readiness", nil)
 	w := httptest.NewRecorder()
 
 	server.handleReadiness(w, req)
@@ -234,7 +234,7 @@ func TestStatusEndpoint(t *testing.T) {
 	orch := createTestOrchestrator(t, false, false)
 	server := NewHTTPServer(8080, orch)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/status", nil)
 	w := httptest.NewRecorder()
 
 	server.handleStatus(w, req)
@@ -281,7 +281,7 @@ func TestStatusEndpoint(t *testing.T) {
 func TestStatusEndpointOrchestratorNil(t *testing.T) {
 	server := NewHTTPServer(8080, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/status", nil)
 	w := httptest.NewRecorder()
 
 	server.handleStatus(w, req)
@@ -300,7 +300,7 @@ func TestConcurrentHealthChecks(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
-			req := httptest.NewRequest(http.MethodGet, "/health", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 			w := httptest.NewRecorder()
 			server.handleHealth(w, req)
 
@@ -409,7 +409,7 @@ func BenchmarkHealthEndpoint(b *testing.B) {
 	orch := createTestOrchestrator(&testing.T{}, false, false)
 	server := NewHTTPServer(8080, orch)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -423,7 +423,7 @@ func BenchmarkReadinessEndpoint(b *testing.B) {
 	orch := createTestOrchestrator(&testing.T{}, false, false)
 	server := NewHTTPServer(8080, orch)
 
-	req := httptest.NewRequest(http.MethodGet, "/readiness", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readiness", nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

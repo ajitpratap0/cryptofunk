@@ -5,10 +5,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -34,6 +37,12 @@ type APIServer struct {
 	keyManager         api.KeyManagerInterface // TB-006: API key lifecycle management
 	ctx                context.Context         // Server lifecycle context for background workers
 	safetyGuard        *safety.Guard           // TC-003: Safety guard
+	orderExecutorURL   string                  // MCP endpoint for order-executor server
+	sessionMu          sync.Mutex              // Protects orderExecSession, connecting, and activeSessionID
+	connecting         bool                    // Guard against concurrent reconnect
+	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
+	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
+	activeSessionID    *uuid.UUID              // Currently active trading session ID (guarded by sessionMu)
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -112,6 +121,21 @@ func main() {
 		orchestratorClient: defaultOrchestratorClient,
 		ctx:                ctx,
 		safetyGuard:        safetyGuard,
+		orderExecutorURL:   getOrderExecutorURL(),
+	}
+
+	// Initialize MCP client for order-executor (session connects lazily on first order)
+	server.mcpClient = mcp.NewClient(
+		&mcp.Implementation{
+			Name:    "cryptofunk-api",
+			Version: "1.0.0",
+		},
+		nil,
+	)
+	// Attempt initial connection (non-fatal if order-executor isn't ready yet)
+	if err := server.connectOrderExecutor(); err != nil {
+		log.Warn().Err(err).Str("url", server.orderExecutorURL).
+			Msg("Order-executor not available at startup — will retry on first order")
 	}
 
 	// Setup middleware
@@ -161,6 +185,17 @@ func (s *APIServer) start() {
 	// TB-006: Stop key manager cleanup worker
 	if s.keyManager != nil {
 		s.keyManager.StopCleanupWorker()
+	}
+
+	// Close MCP session (capture under lock, close outside)
+	s.sessionMu.Lock()
+	session := s.orderExecSession
+	s.orderExecSession = nil
+	s.sessionMu.Unlock()
+	if session != nil {
+		if err := session.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close order-executor MCP session")
+		}
 	}
 
 	// Graceful shutdown with 5 second timeout

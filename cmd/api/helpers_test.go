@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
@@ -180,6 +181,81 @@ func TestCallOrchestratorWithRetry_NetworkFailure(t *testing.T) {
 	//nolint:bodyclose // Test expects error, no response body to close
 	_, err := server.callOrchestratorWithRetry("http://localhost:99999/test")
 	assert.Error(t, err)
+}
+
+// TestGetOrderExecutorURL_Default tests default order executor URL
+func TestGetOrderExecutorURL_Default(t *testing.T) {
+	t.Setenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL", "")
+
+	url := getOrderExecutorURL()
+	assert.Equal(t, "http://localhost:8091/mcp", url)
+}
+
+// TestGetOrderExecutorURL_EnvOverride tests CRYPTOFUNK env override
+func TestGetOrderExecutorURL_EnvOverride(t *testing.T) {
+	t.Setenv("CRYPTOFUNK_MCP_INTERNAL_ORDER_EXECUTOR_URL", "http://k8s-executor:8091/mcp")
+
+	url := getOrderExecutorURL()
+	assert.Equal(t, "http://k8s-executor:8091/mcp", url)
+}
+
+// TestExecuteOrder_NoMCPClient tests executeOrder with no MCP client (reconnect fails)
+func TestExecuteOrder_NoMCPClient(t *testing.T) {
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:8091/mcp",
+		// mcpClient is nil — reconnect will fail
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "order-executor unavailable")
+}
+
+// TestExecuteOrder_ReconnectFailure tests reconnect to unreachable server
+func TestExecuteOrder_ReconnectFailure(t *testing.T) {
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0.1"}, nil)
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:99999/mcp", // unreachable
+		mcpClient:          mcpClient,
+	}
+
+	err := server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "order-executor unavailable")
+}
+
+// TestConnectOrderExecutor_NoClient tests connectOrderExecutor with nil MCP client
+func TestConnectOrderExecutor_NoClient(t *testing.T) {
+	server := &APIServer{
+		orderExecutorURL: "http://localhost:8091/mcp",
+	}
+	err := server.connectOrderExecutor()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "MCP client not initialized")
+}
+
+// TestExecuteOrder_ConcurrentSafety verifies no race on concurrent executeOrder calls.
+// Both calls should fail (no server) but not panic from concurrent map/pointer access.
+func TestExecuteOrder_ConcurrentSafety(t *testing.T) {
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0.1"}, nil)
+	server := &APIServer{
+		orchestratorClient: defaultOrchestratorClient,
+		orderExecutorURL:   "http://localhost:99999/mcp",
+		mcpClient:          mcpClient,
+	}
+
+	done := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			done <- server.executeOrder(t.Context(), "BTCUSDT", "BUY", "MARKET", 0.01, 0)
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		err := <-done
+		assert.Error(t, err) // both should error (unreachable), but not panic
+	}
 }
 
 // TestRateLimiterMiddleware tests the rate limiter middleware

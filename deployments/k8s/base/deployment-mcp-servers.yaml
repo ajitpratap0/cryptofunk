@@ -12,10 +12,12 @@ metadata:
     app.kubernetes.io/name: market-data-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: market-data-server
@@ -29,9 +31,20 @@ spec:
       - name: market-data-server
         image: cryptofunk/market-data-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9110"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - name: mcp-http
           containerPort: 8090
+          protocol: TCP
+        - name: metrics
+          containerPort: 9110
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -45,9 +58,11 @@ spec:
             port: mcp-http
           initialDelaySeconds: 10
           periodSeconds: 30
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -73,8 +88,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -90,11 +111,26 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
-        - name: NATS_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
+        - name: NATS_HOST
           valueFrom:
             configMapKeyRef:
               name: cryptofunk-config
-              key: NATS_URL
+              key: NATS_HOST
+        - name: NATS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_PORT
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
         - name: COINGECKO_API_KEY
           valueFrom:
             secretKeyRef:
@@ -123,10 +159,12 @@ metadata:
     app.kubernetes.io/name: technical-indicators-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: technical-indicators-server
@@ -140,9 +178,20 @@ spec:
       - name: technical-indicators-server
         image: cryptofunk/technical-indicators-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9113"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - name: mcp-http
           containerPort: 8093
+          protocol: TCP
+        - name: metrics
+          containerPort: 9113
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -156,9 +205,11 @@ spec:
             port: mcp-http
           initialDelaySeconds: 10
           periodSeconds: 30
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -184,8 +235,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -201,11 +258,26 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
-        - name: NATS_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
+        - name: NATS_HOST
           valueFrom:
             configMapKeyRef:
               name: cryptofunk-config
-              key: NATS_URL
+              key: NATS_HOST
+        - name: NATS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_PORT
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -228,10 +300,12 @@ metadata:
     app.kubernetes.io/name: risk-analyzer-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: risk-analyzer-server
@@ -245,9 +319,20 @@ spec:
       - name: risk-analyzer-server
         image: cryptofunk/risk-analyzer-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9112"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - name: mcp-http
           containerPort: 8092
+          protocol: TCP
+        - name: metrics
+          containerPort: 9112
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -261,9 +346,11 @@ spec:
             port: mcp-http
           initialDelaySeconds: 10
           periodSeconds: 30
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -289,8 +376,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -306,11 +399,26 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
-        - name: NATS_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
+        - name: NATS_HOST
           valueFrom:
             configMapKeyRef:
               name: cryptofunk-config
-              key: NATS_URL
+              key: NATS_HOST
+        - name: NATS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_PORT
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -333,10 +441,12 @@ metadata:
     app.kubernetes.io/name: order-executor-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: order-executor-server
@@ -350,9 +460,20 @@ spec:
       - name: order-executor-server
         image: cryptofunk/order-executor-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9111"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - name: mcp-http
           containerPort: 8091
+          protocol: TCP
+        - name: metrics
+          containerPort: 9111
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -366,9 +487,11 @@ spec:
             port: mcp-http
           initialDelaySeconds: 10
           periodSeconds: 30
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
-        - name: DATABASE_URL
-          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
         - name: POSTGRES_USER
           valueFrom:
             configMapKeyRef:
@@ -394,8 +517,14 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: POSTGRES_DB
-        - name: REDIS_URL
-          value: "redis://$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
         - name: REDIS_HOST
           valueFrom:
             configMapKeyRef:
@@ -411,11 +540,26 @@ spec:
             configMapKeyRef:
               name: cryptofunk-config
               key: REDIS_DB
-        - name: NATS_URL
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
+        - name: NATS_HOST
           valueFrom:
             configMapKeyRef:
               name: cryptofunk-config
-              key: NATS_URL
+              key: NATS_HOST
+        - name: NATS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_PORT
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
         - name: BINANCE_API_KEY
           valueFrom:
             secretKeyRef:
@@ -455,10 +599,12 @@ metadata:
     app.kubernetes.io/name: polymarket-server
     app.kubernetes.io/component: mcp-server
 spec:
-  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id). With
-  # replicas > 1, enable sticky sessions (sessionAffinity: ClientIP on the Service)
-  # so each client is routed to the same pod. Reduce to replicas: 1 for simplicity.
-  replicas: 2
+  # NOTE: Streamable HTTP sessions are stateful (keyed by Mcp-Session-Id).
+  # Set to 1 because multi-replica requires sessionAffinity: ClientIP on the
+  # Service, which is configured but not tested in production yet.
+  # TODO(production): Create a production overlay that sets replicas: 2 with
+  # sessionAffinity: ClientIP verified, or use a session-aware load balancer.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: polymarket-server
@@ -472,9 +618,20 @@ spec:
       - name: polymarket-server
         image: cryptofunk/polymarket-server:v0.10.0
         imagePullPolicy: IfNotPresent
+        args: ["--metrics-port", "9114"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - name: mcp-http
           containerPort: 8094
+          protocol: TCP
+        - name: metrics
+          containerPort: 9114
           protocol: TCP
         readinessProbe:
           httpGet:
@@ -488,7 +645,79 @@ spec:
             port: mcp-http
           initialDelaySeconds: 10
           periodSeconds: 30
+        envFrom:
+        - configMapRef:
+            name: cryptofunk-config
         env:
+        # POSTGRES vars BEFORE DATABASE_URL (K8s $(VAR) substitution requires prior definition)
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_PORT
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_DB
+        - name: POSTGRES_SSLMODE
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: POSTGRES_SSLMODE
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSLMODE)"
+        # REDIS vars BEFORE REDIS_URL
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: REDIS_PORT
+        - name: REDIS_DB
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: REDIS_DB
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cryptofunk-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/$(REDIS_DB)"
+        # NATS vars BEFORE NATS_URL
+        - name: NATS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_HOST
+        - name: NATS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cryptofunk-config
+              key: NATS_PORT
+        - name: NATS_URL
+          value: "nats://$(NATS_HOST):$(NATS_PORT)"
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:
@@ -522,6 +751,10 @@ spec:
     port: 8090
     targetPort: mcp-http
     protocol: TCP
+  - name: metrics
+    port: 9110
+    targetPort: metrics
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -541,6 +774,10 @@ spec:
   - name: mcp-http
     port: 8093
     targetPort: mcp-http
+    protocol: TCP
+  - name: metrics
+    port: 9113
+    targetPort: metrics
     protocol: TCP
 ---
 apiVersion: v1
@@ -562,6 +799,10 @@ spec:
     port: 8092
     targetPort: mcp-http
     protocol: TCP
+  - name: metrics
+    port: 9112
+    targetPort: metrics
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -582,6 +823,10 @@ spec:
     port: 8091
     targetPort: mcp-http
     protocol: TCP
+  - name: metrics
+    port: 9111
+    targetPort: metrics
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -601,4 +846,8 @@ spec:
   - name: mcp-http
     port: 8094
     targetPort: mcp-http
+    protocol: TCP
+  - name: metrics
+    port: 9114
+    targetPort: metrics
     protocol: TCP

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
+	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
 // Helper function for float64 min
@@ -197,7 +199,7 @@ func NewOrderBookAgent(config *agents.AgentConfig, log zerolog.Logger, metricsPo
 
 	natsTopic := viper.GetString("communication.nats.topics.orderbook_signals")
 	if natsTopic == "" {
-		natsTopic = "agents.analysis.orderbook" // Default
+		natsTopic = "cryptofunk.agent.signals" // Default
 	}
 
 	// Connect to NATS
@@ -345,18 +347,18 @@ func (a *OrderBookAgent) Step(ctx context.Context) error {
 
 // fetchOrderBook fetches order book data from Market Data Server
 func (a *OrderBookAgent) fetchOrderBook(ctx context.Context, symbol string) (*OrderBook, error) {
-	log.Debug().Str("symbol", symbol).Msg("Fetching order book from Market Data Server")
+	// Convert CoinGecko symbol to Binance trading pair
+	binanceSymbol := market.CoinGeckoIDToBinanceSymbol(symbol)
+	log.Debug().Str("symbol", binanceSymbol).Msg("Fetching order book from Market Data Server")
 
-	// Call Market Data Server MCP tool
 	result, err := a.CallMCPTool(ctx, "market_data", "get_order_book", map[string]interface{}{
-		"symbol": symbol,
-		"depth":  a.depthLevels,
+		"symbol": binanceSymbol,
+		"limit":  a.depthLevels,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("MCP tool call failed: %w", err)
 	}
 
-	// Extract text content from MCP result
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty result from Market Data Server")
 	}
@@ -364,14 +366,44 @@ func (a *OrderBookAgent) fetchOrderBook(ctx context.Context, symbol string) (*Or
 	if !ok {
 		return nil, fmt.Errorf("invalid content type from Market Data Server")
 	}
+	if result.IsError {
+		return nil, fmt.Errorf("tool error: %s", textContent.Text)
+	}
 
-	// Parse JSON result
-	var orderBook OrderBook
-	if err := json.Unmarshal([]byte(textContent.Text), &orderBook); err != nil {
+	// Binance returns PriceLevel with string Price/Quantity fields.
+	// Use an intermediate struct then convert to float64.
+	type binanceLevel struct {
+		Price    string `json:"Price"`
+		Quantity string `json:"Quantity"`
+	}
+	type binanceOrderBook struct {
+		Symbol string         `json:"symbol"`
+		Bids   []binanceLevel `json:"bids"`
+		Asks   []binanceLevel `json:"asks"`
+	}
+	var raw binanceOrderBook
+	if err := json.Unmarshal([]byte(textContent.Text), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse order book response: %w", err)
 	}
 
-	return &orderBook, nil
+	parseLevel := func(levels []binanceLevel) []OrderBookLevel {
+		out := make([]OrderBookLevel, 0, len(levels))
+		for _, l := range levels {
+			price, err1 := strconv.ParseFloat(l.Price, 64)
+			qty, err2 := strconv.ParseFloat(l.Quantity, 64)
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			out = append(out, OrderBookLevel{Price: price, Quantity: qty})
+		}
+		return out
+	}
+
+	return &OrderBook{
+		Symbol: raw.Symbol,
+		Bids:   parseLevel(raw.Bids),
+		Asks:   parseLevel(raw.Asks),
+	}, nil
 }
 
 // calculateImbalance calculates the bid-ask imbalance ratio
@@ -857,7 +889,22 @@ func combineSignals(signals []string, confidences []float64, weights []float64) 
 
 // publishSignal publishes an order book signal to NATS
 func (a *OrderBookAgent) publishSignal(ctx context.Context, signal *OrderBookSignal) error {
-	data, err := json.Marshal(signal)
+	if signal == nil {
+		return fmt.Errorf("cannot publish nil signal")
+	}
+	// Wrap in orchestrator-compatible envelope; map Action → signal field
+	type envelope struct {
+		AgentName string `json:"agent_name"`
+		AgentType string `json:"agent_type"`
+		Signal    string `json:"signal"` // orchestrator expects "signal" not "action"
+		*OrderBookSignal
+	}
+	data, err := json.Marshal(envelope{
+		AgentName:       a.GetName(),
+		AgentType:       a.GetType(),
+		Signal:          signal.Action,
+		OrderBookSignal: signal,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal signal: %w", err)
 	}
@@ -1028,6 +1075,9 @@ func main() {
 					if u, ok := server["url"].(string); ok {
 						serverConfig.URL = u
 					}
+					if opt, ok := server["optional"].(bool); ok {
+						serverConfig.Optional = opt
+					}
 					if serverConfig.Name == "" {
 						log.Warn().Str("url", serverConfig.URL).Msg("Skipping MCP server entry with empty name")
 						continue
@@ -1071,6 +1121,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run agent in goroutine
+	agent.SetStepFn(agent.Step)
+
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- agent.Run(ctx)
