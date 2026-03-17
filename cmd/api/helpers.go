@@ -150,11 +150,37 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 		Arguments: args,
 	})
 	if err != nil {
-		// Transport error — session is broken, clear it so next call reconnects
+		// Transport error — session is stale/broken. Reconnect and retry once
+		// instead of failing this call and only succeeding on the next one.
 		s.sessionMu.Lock()
 		s.orderExecSession = nil
 		s.sessionMu.Unlock()
-		return fmt.Errorf("order execution failed: %w", err)
+
+		log.Warn().Err(err).Msg("MCP session broken, reconnecting and retrying")
+		if reconnErr := s.connectOrderExecutor(); reconnErr != nil {
+			return fmt.Errorf("order execution failed (reconnect also failed): %w", err)
+		}
+
+		// Retry with fresh session
+		s.sessionMu.Lock()
+		session = s.orderExecSession
+		s.sessionMu.Unlock()
+		if session == nil {
+			return fmt.Errorf("order execution failed: session nil after reconnect")
+		}
+
+		retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer retryCancel()
+		result, err = session.CallTool(retryCtx, &mcp.CallToolParams{
+			Name:      toolName,
+			Arguments: args,
+		})
+		if err != nil {
+			s.sessionMu.Lock()
+			s.orderExecSession = nil
+			s.sessionMu.Unlock()
+			return fmt.Errorf("order execution failed after retry: %w", err)
+		}
 	}
 
 	// Tool-level error (session still valid — don't nil it out)
