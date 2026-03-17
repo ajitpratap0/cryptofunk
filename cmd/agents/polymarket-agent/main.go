@@ -107,34 +107,21 @@ func (bb *BeliefBase) GetConfidence() float64 {
 // MARKET DOMAIN TYPES
 // ============================================================================
 
-// PolyMarket represents a single Polymarket prediction market.
-// The Polymarket API returns volume and liquidity as strings, so we use
-// json.Number for flexible parsing and convert in parseNumericFields().
+// PolyMarket represents a single Polymarket prediction market as used by this agent.
+// Fields are populated via convertGammaMarket from the polymarket.Market Gamma API type.
 type PolyMarket struct {
-	ID             string      `json:"id"`
-	Question       string      `json:"question"`
-	Category       string      `json:"category"`        // politics, crypto, tech, sports, etc.
-	OutcomeType    string      `json:"outcome_type"`    // binary, multi
-	YesPrice       float64     `json:"yes_price"`       // 0.0 - 1.0
-	NoPrice        float64     `json:"no_price"`        // 0.0 - 1.0
-	Spread         float64     `json:"spread"`          // yes_price + no_price - 1.0 (overround)
-	Volume24hRaw   json.Number `json:"volume_24h"`      // USD volume last 24h (API sends string)
-	LiquidityRaw   json.Number `json:"liquidity"`       // Total liquidity (API sends string)
-	Volume24h      float64     `json:"-"`               // Parsed volume
-	Liquidity      float64     `json:"-"`               // Parsed liquidity
-	ResolutionTime time.Time   `json:"resolution_time"` // When the market resolves
-	CreatedAt      time.Time   `json:"created_at"`
-	Active         bool        `json:"active"`
-}
-
-// parseNumericFields converts json.Number fields to float64
-func (m *PolyMarket) parseNumericFields() {
-	if v, err := m.Volume24hRaw.Float64(); err == nil {
-		m.Volume24h = v
-	}
-	if v, err := m.LiquidityRaw.Float64(); err == nil {
-		m.Liquidity = v
-	}
+	ID             string    `json:"id"`
+	Question       string    `json:"question"`
+	Category       string    `json:"category"`        // politics, crypto, tech, sports, etc.
+	OutcomeType    string    `json:"outcome_type"`    // binary, multi
+	YesPrice       float64   `json:"yes_price"`       // 0.0 - 1.0
+	NoPrice        float64   `json:"no_price"`        // 0.0 - 1.0
+	Spread         float64   `json:"spread"`          // yes_price + no_price - 1.0 (overround)
+	Volume24h      float64   `json:"volume_24h"`      // USD volume last 24h
+	Liquidity      float64   `json:"liquidity"`       // Total liquidity
+	ResolutionTime time.Time `json:"resolution_time"` // When the market resolves
+	CreatedAt      time.Time `json:"created_at"`
+	Active         bool      `json:"active"`
 }
 
 // Spread returns the bid-ask spread of the market
@@ -608,19 +595,12 @@ func convertGammaMarket(m *polymarket.Market) *PolyMarket {
 	}
 
 	return &PolyMarket{
-		ID:          m.ConditionID,
-		Question:    m.Question,
-		Category:    m.Category,
-		OutcomeType: outcomeType,
-		YesPrice:    yesPrice,
-		NoPrice:     noPrice,
-		LiquidityRaw: func() json.Number {
-			if m.LiquidityNum != 0 {
-				return json.Number(fmt.Sprintf("%g", m.LiquidityNum))
-			}
-			return json.Number(m.Liquidity)
-		}(),
-		Volume24hRaw:   json.Number(fmt.Sprintf("%g", volume24h)),
+		ID:             m.ConditionID,
+		Question:       m.Question,
+		Category:       m.Category,
+		OutcomeType:    outcomeType,
+		YesPrice:       yesPrice,
+		NoPrice:        noPrice,
 		Liquidity:      liquidity,
 		Volume24h:      volume24h,
 		Active:         m.Active && !m.Closed,
