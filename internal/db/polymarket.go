@@ -45,12 +45,14 @@ type PolymarketTrade struct {
 	ID         uuid.UUID `db:"id" json:"id"`
 	PositionID uuid.UUID `db:"position_id" json:"position_id"`
 	MarketID   string    `db:"market_id" json:"market_id"`
+	Question   string    `db:"question" json:"question"`
 	Action     string    `db:"action" json:"action"`
 	Side       string    `db:"side" json:"side"`
 	Amount     float64   `db:"amount" json:"amount"`
 	Price      float64   `db:"price" json:"price"`
 	Shares     float64   `db:"shares" json:"shares"`
 	Timestamp  time.Time `db:"timestamp" json:"timestamp"`
+	CreatedAt  time.Time `db:"created_at" json:"created_at"`
 }
 
 // PolymarketPrediction represents a prediction record.
@@ -281,7 +283,13 @@ func (db *DB) InsertPolymarketTrade(ctx context.Context, t *PolymarketTrade) err
 }
 
 func (db *DB) GetPolymarketTrades(ctx context.Context, limit int) ([]*PolymarketTrade, error) {
-	query := `SELECT id, position_id, market_id, action, side, amount, price, shares, timestamp FROM polymarket_trades ORDER BY timestamp DESC LIMIT $1`
+	query := `
+		SELECT t.id, t.position_id, t.market_id, COALESCE(m.question, '') as question,
+		       t.action, t.side, t.amount, t.price, t.shares, t.timestamp, t.timestamp as created_at
+		FROM polymarket_trades t
+		LEFT JOIN polymarket_markets m ON m.id = t.market_id
+		ORDER BY t.timestamp DESC
+		LIMIT $1`
 	rows, err := db.pool.Query(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query polymarket trades: %w", err)
@@ -291,7 +299,7 @@ func (db *DB) GetPolymarketTrades(ctx context.Context, limit int) ([]*Polymarket
 	var trades []*PolymarketTrade
 	for rows.Next() {
 		var t PolymarketTrade
-		if err := rows.Scan(&t.ID, &t.PositionID, &t.MarketID, &t.Action, &t.Side, &t.Amount, &t.Price, &t.Shares, &t.Timestamp); err != nil {
+		if err := rows.Scan(&t.ID, &t.PositionID, &t.MarketID, &t.Question, &t.Action, &t.Side, &t.Amount, &t.Price, &t.Shares, &t.Timestamp, &t.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan polymarket trade: %w", err)
 		}
 		trades = append(trades, &t)
@@ -302,9 +310,11 @@ func (db *DB) GetPolymarketTrades(ctx context.Context, limit int) ([]*Polymarket
 // GetPolymarketTradesBySession returns trades whose position belongs to the given session.
 func (db *DB) GetPolymarketTradesBySession(ctx context.Context, sessionID uuid.UUID, limit int) ([]*PolymarketTrade, error) {
 	query := `
-		SELECT t.id, t.position_id, t.market_id, t.action, t.side, t.amount, t.price, t.shares, t.timestamp
+		SELECT t.id, t.position_id, t.market_id, COALESCE(m.question, '') as question,
+		       t.action, t.side, t.amount, t.price, t.shares, t.timestamp, t.timestamp as created_at
 		FROM polymarket_trades t
 		JOIN polymarket_positions p ON p.id = t.position_id
+		LEFT JOIN polymarket_markets m ON m.id = t.market_id
 		WHERE p.session_id = $1
 		ORDER BY t.timestamp DESC
 		LIMIT $2`
@@ -317,7 +327,7 @@ func (db *DB) GetPolymarketTradesBySession(ctx context.Context, sessionID uuid.U
 	var trades []*PolymarketTrade
 	for rows.Next() {
 		var t PolymarketTrade
-		if err := rows.Scan(&t.ID, &t.PositionID, &t.MarketID, &t.Action, &t.Side, &t.Amount, &t.Price, &t.Shares, &t.Timestamp); err != nil {
+		if err := rows.Scan(&t.ID, &t.PositionID, &t.MarketID, &t.Question, &t.Action, &t.Side, &t.Amount, &t.Price, &t.Shares, &t.Timestamp, &t.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan polymarket trade: %w", err)
 		}
 		trades = append(trades, &t)
@@ -384,6 +394,23 @@ func (db *DB) GetPolymarketPredictions(ctx context.Context, resolvedOnly bool) (
 // ---------------------------------------------------------------------------
 // Portfolio Summary
 // ---------------------------------------------------------------------------
+
+// GetPolymarketPortfolioSummaryBySession returns the portfolio summary scoped to a single session.
+func (db *DB) GetPolymarketPortfolioSummaryBySession(ctx context.Context, sessionID uuid.UUID) (*PolymarketPortfolioSummary, error) {
+	query := `
+		SELECT
+			COUNT(*) as position_count,
+			COALESCE(SUM(cost_basis), 0) as total_cost_basis
+		FROM polymarket_positions
+		WHERE session_id = $1 AND status = 'OPEN'
+	`
+	row := db.pool.QueryRow(ctx, query, sessionID)
+	var s PolymarketPortfolioSummary
+	if err := row.Scan(&s.PositionCount, &s.TotalCostBasis); err != nil {
+		return nil, fmt.Errorf("GetPolymarketPortfolioSummaryBySession: %w", err)
+	}
+	return &s, nil
+}
 
 func (db *DB) GetPolymarketPortfolioSummary(ctx context.Context) (*PolymarketPortfolioSummary, error) {
 	positions, err := db.GetOpenPolymarketPositions(ctx)

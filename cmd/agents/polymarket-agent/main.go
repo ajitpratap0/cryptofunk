@@ -27,6 +27,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/agents"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
+	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
 )
 
 // ============================================================================
@@ -106,34 +107,21 @@ func (bb *BeliefBase) GetConfidence() float64 {
 // MARKET DOMAIN TYPES
 // ============================================================================
 
-// PolyMarket represents a single Polymarket prediction market.
-// The Polymarket API returns volume and liquidity as strings, so we use
-// json.Number for flexible parsing and convert in parseNumericFields().
+// PolyMarket represents a single Polymarket prediction market as used by this agent.
+// Fields are populated via convertGammaMarket from the polymarket.Market Gamma API type.
 type PolyMarket struct {
-	ID             string      `json:"id"`
-	Question       string      `json:"question"`
-	Category       string      `json:"category"`        // politics, crypto, tech, sports, etc.
-	OutcomeType    string      `json:"outcome_type"`    // binary, multi
-	YesPrice       float64     `json:"yes_price"`       // 0.0 - 1.0
-	NoPrice        float64     `json:"no_price"`        // 0.0 - 1.0
-	Spread         float64     `json:"spread"`          // yes_price + no_price - 1.0 (overround)
-	Volume24hRaw   json.Number `json:"volume_24h"`      // USD volume last 24h (API sends string)
-	LiquidityRaw   json.Number `json:"liquidity"`       // Total liquidity (API sends string)
-	Volume24h      float64     `json:"-"`               // Parsed volume
-	Liquidity      float64     `json:"-"`               // Parsed liquidity
-	ResolutionTime time.Time   `json:"resolution_time"` // When the market resolves
-	CreatedAt      time.Time   `json:"created_at"`
-	Active         bool        `json:"active"`
-}
-
-// parseNumericFields converts json.Number fields to float64
-func (m *PolyMarket) parseNumericFields() {
-	if v, err := m.Volume24hRaw.Float64(); err == nil {
-		m.Volume24h = v
-	}
-	if v, err := m.LiquidityRaw.Float64(); err == nil {
-		m.Liquidity = v
-	}
+	ID             string    `json:"id"`
+	Question       string    `json:"question"`
+	Category       string    `json:"category"`        // politics, crypto, tech, sports, etc.
+	OutcomeType    string    `json:"outcome_type"`    // binary, multi
+	YesPrice       float64   `json:"yes_price"`       // 0.0 - 1.0
+	NoPrice        float64   `json:"no_price"`        // 0.0 - 1.0
+	Spread         float64   `json:"spread"`          // yes_price + no_price - 1.0 (overround)
+	Volume24h      float64   `json:"volume_24h"`      // USD volume last 24h
+	Liquidity      float64   `json:"liquidity"`       // Total liquidity
+	ResolutionTime time.Time `json:"resolution_time"` // When the market resolves
+	CreatedAt      time.Time `json:"created_at"`
+	Active         bool      `json:"active"`
 }
 
 // Spread returns the bid-ask spread of the market
@@ -485,32 +473,26 @@ func (a *PolymarketAgent) Shutdown(ctx context.Context) error {
 // MARKET FETCHING & FILTERING
 // ============================================================================
 
-// fetchMarkets retrieves active markets from Polymarket via MCP tool
+// fetchMarkets retrieves active markets from Polymarket via MCP tool.
+// The MCP server returns []polymarket.Market JSON (Gamma API camelCase fields).
+// We convert those into the agent's []*PolyMarket view.
 func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, error) {
 	log.Debug().Msg("Fetching active Polymarket markets")
 
-	result, err := a.CallMCPTool(ctx, "polymarket", "get_markets", map[string]interface{}{
-		"active": true,
-		"limit":  50,
-	})
+	result, err := a.CallMCPTool(ctx, "polymarket", "get_markets", map[string]interface{}{})
 	if err != nil {
-		// If MCP tool not available, return empty (agent is resilient)
-		log.Warn().Err(err).Msg("Failed to fetch markets via MCP, using empty list")
-		return nil, err
+		log.Warn().Err(err).Msg("MCP get_markets transport error")
+		return nil, fmt.Errorf("get_markets MCP call failed: %w", err)
 	}
 
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty result from get_markets")
 	}
 
-	// Parse text content
+	// Extract text from the first content item.
+	// *mcp.TextContent does not expose GetText(); marshal→unmarshal via JSON.
 	var textContent string
 	for _, c := range result.Content {
-		if tc, ok := c.(interface{ GetText() string }); ok {
-			textContent = tc.GetText()
-			break
-		}
-		// Try JSON marshal/unmarshal to extract text
 		raw, _ := json.Marshal(c)
 		var obj map[string]interface{}
 		if json.Unmarshal(raw, &obj) == nil {
@@ -525,17 +507,105 @@ func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, erro
 		return nil, fmt.Errorf("no text content in MCP result")
 	}
 
-	var markets []*PolyMarket
-	if err := json.Unmarshal([]byte(textContent), &markets); err != nil {
+	// Check for tool-level errors BEFORE attempting JSON parse so we get a
+	// clean error message (not a confusing "invalid character" JSON error).
+	if result.IsError {
+		log.Error().Str("tool_error", textContent).Msg("get_markets tool returned IsError=true")
+		return nil, fmt.Errorf("get_markets tool returned error: %s", textContent)
+	}
+
+	// The MCP server marshals []polymarket.Market (Gamma API struct).
+	// Unmarshal into that concrete type so field names align correctly.
+	var rawMarkets []polymarket.Market
+	if err := json.Unmarshal([]byte(textContent), &rawMarkets); err != nil {
+		// Log the first 200 bytes of the bad payload to aid diagnostics.
+		preview := textContent
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		log.Error().
+			Str("payload_preview", preview).
+			Err(err).
+			Msg("failed to JSON-decode get_markets response")
 		return nil, fmt.Errorf("failed to parse markets: %w", err)
 	}
 
-	for _, m := range markets {
-		m.parseNumericFields()
+	// Convert []polymarket.Market → []*PolyMarket understood by the agent.
+	markets := make([]*PolyMarket, 0, len(rawMarkets))
+	for i := range rawMarkets {
+		m := &rawMarkets[i]
+		pm := convertGammaMarket(m)
+		if pm != nil {
+			markets = append(markets, pm)
+		}
 	}
 
 	a.beliefs.UpdateBelief("markets_fetched", len(markets), 1.0, "polymarket_api")
+	log.Debug().Int("total", len(rawMarkets)).Int("converted", len(markets)).Msg("Markets fetched from Polymarket")
 	return markets, nil
+}
+
+// convertGammaMarket maps a polymarket.Market (Gamma API response) to the
+// agent's PolyMarket view model.  Returns nil when the market cannot be
+// adequately represented (e.g. missing outcome prices).
+func convertGammaMarket(m *polymarket.Market) *PolyMarket {
+	// Parse outcome prices — Gamma returns a JSON-encoded string array.
+	// e.g. outcomePrices = `["0.65","0.35"]`
+	var prices []string
+	var yesPrice, noPrice float64
+	if m.OutcomePrices != "" {
+		if err := json.Unmarshal([]byte(m.OutcomePrices), &prices); err == nil {
+			if len(prices) >= 1 {
+				fmt.Sscanf(prices[0], "%f", &yesPrice)
+			}
+			if len(prices) >= 2 {
+				fmt.Sscanf(prices[1], "%f", &noPrice)
+			}
+		}
+	}
+
+	// Determine outcome type: binary when exactly 2 outcomes.
+	outcomeType := "multi"
+	var outcomes []string
+	if m.Outcomes != "" {
+		if err := json.Unmarshal([]byte(m.Outcomes), &outcomes); err == nil && len(outcomes) == 2 {
+			outcomeType = "binary"
+		}
+	}
+
+	// Use the numeric liquidity/volume if available, otherwise parse the string.
+	liquidity := m.LiquidityNum
+	if liquidity == 0 && m.Liquidity != "" {
+		fmt.Sscanf(m.Liquidity, "%f", &liquidity)
+	}
+	volume24h := m.Volume24hr
+	if volume24h == 0 && m.Volume != "" {
+		fmt.Sscanf(m.Volume, "%f", &volume24h)
+	}
+
+	// Parse resolution time from EndDateISO (e.g. "2026-03-31" or RFC3339).
+	var resolutionTime time.Time
+	if m.EndDateISO != "" {
+		for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02"} {
+			if t, err := time.Parse(layout, m.EndDateISO); err == nil {
+				resolutionTime = t
+				break
+			}
+		}
+	}
+
+	return &PolyMarket{
+		ID:             m.ConditionID,
+		Question:       m.Question,
+		Category:       m.Category,
+		OutcomeType:    outcomeType,
+		YesPrice:       yesPrice,
+		NoPrice:        noPrice,
+		Liquidity:      liquidity,
+		Volume24h:      volume24h,
+		Active:         m.Active && !m.Closed,
+		ResolutionTime: resolutionTime,
+	}
 }
 
 // filterMarkets applies selection heuristics to find tradeable markets
@@ -1030,10 +1100,12 @@ func (a *PolymarketAgent) managePositions(ctx context.Context) []*TradeSignal {
 	return exitSignals
 }
 
-// fetchMarketByID fetches a single market by ID
+// fetchMarketByID fetches a single market by condition ID via the MCP tool.
+// The MCP server uses GetMarket which queries the Gamma API and returns a
+// *polymarket.Market; we convert to *PolyMarket for the agent.
 func (a *PolymarketAgent) fetchMarketByID(ctx context.Context, marketID string) (*PolyMarket, error) {
 	result, err := a.CallMCPTool(ctx, "polymarket", "get_market", map[string]interface{}{
-		"market_id": marketID,
+		"condition_id": marketID,
 	})
 	if err != nil {
 		return nil, err
@@ -1059,13 +1131,26 @@ func (a *PolymarketAgent) fetchMarketByID(ctx context.Context, marketID string) 
 		return nil, fmt.Errorf("no text content in MCP result")
 	}
 
-	var market PolyMarket
-	if err := json.Unmarshal([]byte(textContent), &market); err != nil {
+	if result.IsError {
+		return nil, fmt.Errorf("get_market tool returned error: %s", textContent)
+	}
+
+	// MCP server marshals *polymarket.Market — unmarshal into that type first.
+	var raw polymarket.Market
+	if err := json.Unmarshal([]byte(textContent), &raw); err != nil {
+		preview := textContent
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		log.Error().Str("payload_preview", preview).Err(err).Msg("failed to JSON-decode get_market response")
 		return nil, fmt.Errorf("failed to parse market: %w", err)
 	}
-	market.parseNumericFields()
 
-	return &market, nil
+	pm := convertGammaMarket(&raw)
+	if pm == nil {
+		return nil, fmt.Errorf("market %s could not be converted", marketID)
+	}
+	return pm, nil
 }
 
 // ============================================================================

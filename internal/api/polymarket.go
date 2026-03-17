@@ -241,21 +241,50 @@ func (h *PolymarketHandler) ExecuteTrade(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"trade":   trade,
-		"balance": engine.GetBalance(),
-		"message": "Trade executed successfully",
+		"trade":      trade,
+		"balance":    engine.GetBalance(),
+		"session_id": engine.SessionID().String(),
+		"message":    "Trade executed successfully",
 	})
 }
 
 // GetPortfolio returns the portfolio summary.
+// Accepts an optional ?session_id=<uuid> query parameter to scope the summary
+// to a single paper trading session. Without it, the global aggregate is returned.
 func (h *PolymarketHandler) GetPortfolio(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	summary, err := h.db.GetPolymarketPortfolioSummary(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get portfolio summary")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve portfolio"})
-		return
+	sessionIDStr := c.Query("session_id")
+
+	var summary *db.PolymarketPortfolioSummary
+	var err error
+
+	if sessionIDStr != "" {
+		sessionID, parseErr := uuid.Parse(sessionIDStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session_id format"})
+			return
+		}
+		summary, err = h.db.GetPolymarketPortfolioSummaryBySession(ctx, sessionID)
+		if err != nil {
+			log.Error().Err(err).Str("session_id", sessionIDStr).Msg("Failed to get session portfolio summary")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve portfolio"})
+			return
+		}
+		// GetPolymarketPortfolioSummaryBySession does not populate OpenPositions; fetch them separately.
+		summary.OpenPositions, err = h.db.GetOpenPolymarketPositionsBySession(ctx, sessionID)
+		if err != nil {
+			log.Error().Err(err).Str("session_id", sessionIDStr).Msg("Failed to get session positions")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve portfolio positions"})
+			return
+		}
+	} else {
+		summary, err = h.db.GetPolymarketPortfolioSummary(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get portfolio summary")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve portfolio"})
+			return
+		}
 	}
 
 	// Calculate total value with current prices
