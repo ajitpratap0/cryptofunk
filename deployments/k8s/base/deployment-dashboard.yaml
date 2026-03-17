@@ -25,9 +25,10 @@ spec:
         - containerPort: 3000
           name: http
           protocol: TCP
-        env:
-        - name: NEXT_PUBLIC_API_URL
-          value: "/api"
+        # Note: NEXT_PUBLIC_* vars are baked at build time in Next.js standalone output.
+        # The API URL is set via --build-arg NEXT_PUBLIC_API_URL in Dockerfile.dashboard.
+        # For Docker Desktop local: http://localhost (LoadBalancer port 80)
+        env: []
         resources:
           requests:
             cpu: "100m"
