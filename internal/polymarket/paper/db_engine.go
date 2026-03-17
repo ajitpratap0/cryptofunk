@@ -297,6 +297,7 @@ func (e *DBPaperEngine) SessionID() uuid.UUID {
 	return e.sessionID
 }
 
+
 // findOpenPosition finds an open position by market ID and side within this session.
 func (e *DBPaperEngine) findOpenPosition(ctx context.Context, marketID, side string) (*db.PolymarketPosition, error) {
 	positions, err := e.db.GetOpenPolymarketPositionsBySession(ctx, e.sessionID)
