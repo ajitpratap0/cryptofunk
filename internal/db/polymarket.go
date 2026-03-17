@@ -209,6 +209,26 @@ func (db *DB) GetPolymarketPosition(ctx context.Context, id uuid.UUID) (*Polymar
 	return &p, nil
 }
 
+// GetOpenPolymarketPositionsBySession returns open positions belonging to a specific session.
+func (db *DB) GetOpenPolymarketPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*PolymarketPosition, error) {
+	query := `SELECT id, session_id, market_id, side, shares, avg_price, cost_basis, status, opened_at, closed_at, realized_pnl, metadata, created_at, updated_at FROM polymarket_positions WHERE status = 'OPEN' AND session_id = $1 ORDER BY opened_at DESC`
+	rows, err := db.pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query open polymarket positions by session: %w", err)
+	}
+	defer rows.Close()
+
+	var positions []*PolymarketPosition
+	for rows.Next() {
+		var p PolymarketPosition
+		if err := rows.Scan(&p.ID, &p.SessionID, &p.MarketID, &p.Side, &p.Shares, &p.AvgPrice, &p.CostBasis, &p.Status, &p.OpenedAt, &p.ClosedAt, &p.RealizedPnl, &p.Metadata, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan polymarket position: %w", err)
+		}
+		positions = append(positions, &p)
+	}
+	return positions, rows.Err()
+}
+
 func (db *DB) GetOpenPolymarketPositions(ctx context.Context) ([]*PolymarketPosition, error) {
 	query := `SELECT id, session_id, market_id, side, shares, avg_price, cost_basis, status, opened_at, closed_at, realized_pnl, metadata, created_at, updated_at FROM polymarket_positions WHERE status = 'OPEN' ORDER BY opened_at DESC`
 	rows, err := db.pool.Query(ctx, query)
@@ -265,6 +285,32 @@ func (db *DB) GetPolymarketTrades(ctx context.Context, limit int) ([]*Polymarket
 	rows, err := db.pool.Query(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query polymarket trades: %w", err)
+	}
+	defer rows.Close()
+
+	var trades []*PolymarketTrade
+	for rows.Next() {
+		var t PolymarketTrade
+		if err := rows.Scan(&t.ID, &t.PositionID, &t.MarketID, &t.Action, &t.Side, &t.Amount, &t.Price, &t.Shares, &t.Timestamp); err != nil {
+			return nil, fmt.Errorf("failed to scan polymarket trade: %w", err)
+		}
+		trades = append(trades, &t)
+	}
+	return trades, rows.Err()
+}
+
+// GetPolymarketTradesBySession returns trades whose position belongs to the given session.
+func (db *DB) GetPolymarketTradesBySession(ctx context.Context, sessionID uuid.UUID, limit int) ([]*PolymarketTrade, error) {
+	query := `
+		SELECT t.id, t.position_id, t.market_id, t.action, t.side, t.amount, t.price, t.shares, t.timestamp
+		FROM polymarket_trades t
+		JOIN polymarket_positions p ON p.id = t.position_id
+		WHERE p.session_id = $1
+		ORDER BY t.timestamp DESC
+		LIMIT $2`
+	rows, err := db.pool.Query(ctx, query, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query polymarket trades by session: %w", err)
 	}
 	defer rows.Close()
 

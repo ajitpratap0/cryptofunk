@@ -211,10 +211,12 @@ func (e *DBPaperEngine) Sell(marketID string, side Side, shares, price float64) 
 }
 
 // GetPortfolio returns a Portfolio compatible with the file-based engine.
+// Only positions and trades belonging to this engine's session are returned,
+// ensuring isolation between concurrent paper trading sessions.
 func (e *DBPaperEngine) GetPortfolio() *Portfolio {
 	ctx := context.Background()
-	positions, _ := e.db.GetOpenPolymarketPositions(ctx)
-	trades, _ := e.db.GetPolymarketTrades(ctx, 1000)
+	positions, _ := e.db.GetOpenPolymarketPositionsBySession(ctx, e.sessionID)
+	trades, _ := e.db.GetPolymarketTradesBySession(ctx, e.sessionID, 1000)
 
 	posMap := make(map[string]*Position)
 	for _, p := range positions {
@@ -258,8 +260,8 @@ func (e *DBPaperEngine) GetBalance() float64 {
 func (e *DBPaperEngine) Reset() error {
 	ctx := context.Background()
 
-	// Close all open positions with zero PnL
-	positions, err := e.db.GetOpenPolymarketPositions(ctx)
+	// Close all open positions for this session with zero PnL
+	positions, err := e.db.GetOpenPolymarketPositionsBySession(ctx, e.sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get open positions: %w", err)
 	}
@@ -290,14 +292,14 @@ func (e *DBPaperEngine) Reset() error {
 	return nil
 }
 
-// findOpenPosition finds an open position by market ID and side.
+// findOpenPosition finds an open position by market ID and side within this session.
 func (e *DBPaperEngine) findOpenPosition(ctx context.Context, marketID, side string) (*db.PolymarketPosition, error) {
-	positions, err := e.db.GetOpenPolymarketPositions(ctx)
+	positions, err := e.db.GetOpenPolymarketPositionsBySession(ctx, e.sessionID)
 	if err != nil {
 		return nil, err
 	}
 	for _, p := range positions {
-		if p.MarketID == marketID && p.Side == side && p.SessionID == e.sessionID {
+		if p.MarketID == marketID && p.Side == side {
 			return p, nil
 		}
 	}
