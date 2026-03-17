@@ -301,17 +301,30 @@ func (h *PolymarketHandler) GetPortfolio(c *gin.Context) {
 		}
 	}
 
-	// Balance = initial capital - cost basis
-	balance := paper.DefaultBalance - summary.TotalCostBasis
 	unrealizedPnl := totalValue - summary.TotalCostBasis
 
-	c.JSON(http.StatusOK, gin.H{
-		"balance":        balance,
-		"total_value":    totalValue,
-		"cost_basis":     summary.TotalCostBasis,
-		"unrealized_pnl": unrealizedPnl,
-		"position_count": summary.PositionCount,
-	})
+	if sessionIDStr != "" {
+		// Session-scoped: balance is meaningful (initial capital minus cost basis for this session).
+		balance := paper.DefaultBalance - summary.TotalCostBasis
+		c.JSON(http.StatusOK, gin.H{
+			"balance":        balance,
+			"total_value":    totalValue,
+			"cost_basis":     summary.TotalCostBasis,
+			"unrealized_pnl": unrealizedPnl,
+			"position_count": summary.PositionCount,
+		})
+	} else {
+		// Global view: balance is not meaningful across multiple sessions (each starts with its own
+		// $100), so we omit it and surface a note instead.
+		c.JSON(http.StatusOK, gin.H{
+			"balance":        nil,
+			"total_value":    totalValue,
+			"cost_basis":     summary.TotalCostBasis,
+			"unrealized_pnl": unrealizedPnl,
+			"position_count": summary.PositionCount,
+			"note":           "Global view — use ?session_id=<uuid> for accurate per-session balance",
+		})
+	}
 }
 
 // ListTrades returns trade history.

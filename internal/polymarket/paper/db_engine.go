@@ -80,12 +80,21 @@ func (e *DBPaperEngine) Buy(marketID, question string, side Side, amount, price 
 	ctx := context.Background()
 	shares := amount / price
 
-	// Upsert market data
-	if err := e.db.UpsertPolymarketMarket(ctx, &db.PolymarketMarket{
+	// Upsert market data, seeding the trade price as a baseline so that
+	// positions always have a non-zero current_price.  COALESCE in the DB
+	// preserves any real price that was already seeded by the market-data
+	// fetcher; we only fill in the side we traded on.
+	mkt := &db.PolymarketMarket{
 		ID:       marketID,
 		Question: question,
 		Active:   true,
-	}); err != nil {
+	}
+	if side == YES {
+		mkt.YesPrice = &price
+	} else {
+		mkt.NoPrice = &price
+	}
+	if err := e.db.UpsertPolymarketMarket(ctx, mkt); err != nil {
 		return nil, fmt.Errorf("failed to upsert market: %w", err)
 	}
 
