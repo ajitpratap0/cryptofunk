@@ -688,16 +688,19 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		}
 	}
 
-	// Calculate consensus: fraction of agents that voted for the winning action
+	// Calculate consensus: fraction of unique agents that voted for the winning action.
+	// Use len(agentVotes) instead of participatingAgents to avoid double-counting
+	// agents that sent multiple signals within the decision window.
 	consensus := 0.0
-	if participatingAgents > 0 {
+	uniqueAgents := len(agentVotes)
+	if uniqueAgents > 0 {
 		agreeCount := 0
 		for _, vote := range agentVotes {
 			if vote == string(winningAction) {
 				agreeCount++
 			}
 		}
-		consensus = float64(agreeCount) / float64(participatingAgents)
+		consensus = float64(agreeCount) / float64(uniqueAgents)
 	}
 
 	// Calculate confidence: weighted score ratio for the winning action
@@ -719,7 +722,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 		Action:              winningAction,
 		Confidence:          confidence,
 		Consensus:           consensus,
-		ParticipatingAgents: participatingAgents,
+		ParticipatingAgents: uniqueAgents,
 		VotingResults:       votingScores,
 		Reasoning:           fmt.Sprintf("Weighted voting: %v", reasoning),
 		Timestamp:           ctx.Timestamp,

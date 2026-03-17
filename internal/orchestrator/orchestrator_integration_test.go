@@ -223,6 +223,12 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 4: Split vote - no consensus
 	t.Run("split_vote_no_consensus", func(t *testing.T) {
+		// Drain any leftover decisions from previous subtests to avoid a stale
+		// decision being picked up by this subtest's select.
+		for len(decisionChan) > 0 {
+			<-decisionChan
+		}
+
 		// Half vote BUY, half vote SELL
 		buyAgents := []string{"technical-agent", "trend-agent"}
 		sellAgents := []string{"reversion-agent", "orderbook-agent"}
@@ -253,10 +259,15 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			sendSignal(t, nc, config.SignalTopic, signal)
 		}
 
+		// Wait briefly to ensure all 4 signals are buffered before the next
+		// decision tick fires, reducing the window for the race condition where
+		// only 3/4 signals are visible when the orchestrator samples the buffer.
+		time.Sleep(200 * time.Millisecond)
+
 		// Wait for decision
 		select {
 		case decision := <-decisionChan:
-			// With equal votes, consensus should be low
+			// With equal votes (2 BUY, 2 SELL), consensus should be 0.5 < MinConsensus (0.6)
 			assert.Less(t, decision.Consensus, config.MinConsensus)
 			// Should default to HOLD
 			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
