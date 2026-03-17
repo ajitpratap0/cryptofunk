@@ -678,3 +678,73 @@ tasks:
       - go vet ./...
       - go build ./...
       - echo "SUCCESS - Code validation passed"
+
+  # ===========================================
+  # Local Kubernetes Tasks (Docker Desktop)
+  # ===========================================
+
+  k8s-build:
+    desc: "Build all Docker images for local K8s deployment (cryptofunk/*:local)"
+    cmds:
+      - ./scripts/build-local-images.sh
+    preconditions:
+      - sh: "which docker"
+        msg: "docker not found"
+
+  k8s-build-infra:
+    desc: "Build images + pre-pull infrastructure images (postgres, redis, nats, etc.)"
+    cmds:
+      - ./scripts/build-local-images.sh --pull-infra
+
+  k8s-deploy:
+    desc: "Deploy CryptoFunk to Docker Desktop Kubernetes (generates secrets if needed)"
+    cmds:
+      - ./scripts/deploy-local-k8s.sh --gen-secrets
+    preconditions:
+      - sh: "kubectl config current-context | grep -q docker-desktop"
+        msg: "kubectl context must be docker-desktop"
+
+  k8s-deploy-with-key:
+    desc: "Deploy with explicit Anthropic API key: task k8s-deploy-with-key -- --api-key sk-ant-..."
+    cmds:
+      - ./scripts/deploy-local-k8s.sh --gen-secrets {{.CLI_ARGS}}
+
+  k8s-status:
+    desc: "Show pod status in cryptofunk namespace"
+    cmds:
+      - ./scripts/deploy-local-k8s.sh --status
+
+  k8s-test:
+    desc: "Run smoke tests against local K8s deployment (starts port-forwards)"
+    cmds:
+      - ./scripts/test-local-k8s.sh --port-forward
+
+  k8s-teardown:
+    desc: "Remove all CryptoFunk resources from local K8s cluster"
+    cmds:
+      - ./scripts/deploy-local-k8s.sh --teardown
+    prompt: "This will delete ALL CryptoFunk resources including data. Continue?"
+
+  k8s-validate:
+    desc: "Dry-run validate K8s manifests without applying (no cluster needed)"
+    cmds:
+      - kubectl kustomize deployments/k8s/overlays/local
+      - echo "SUCCESS - Manifests are valid"
+
+  k8s-port-forward:
+    desc: "Start port-forwards for all local K8s services (runs in foreground)"
+    cmds:
+      - |
+        echo "Starting port-forwards (Ctrl+C to stop all)..."
+        kubectl port-forward svc/orchestrator-service 8081:8081 -n cryptofunk &
+        kubectl port-forward svc/api-service          8082:80   -n cryptofunk &
+        kubectl port-forward svc/prometheus-service   9090:9090 -n cryptofunk &
+        kubectl port-forward svc/grafana-service      3000:3000 -n cryptofunk &
+        kubectl port-forward svc/alertmanager-service 9093:9093 -n cryptofunk &
+        echo "Port-forwards active:"
+        echo "  Orchestrator:  http://localhost:8081"
+        echo "  API:           http://localhost:8082"
+        echo "  Prometheus:    http://localhost:9090"
+        echo "  Grafana:       http://localhost:3000"
+        echo "  AlertManager:  http://localhost:9093"
+        wait

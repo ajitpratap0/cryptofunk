@@ -1,0 +1,4 @@
+# Secret files must never be committed
+secret-local.yaml
+secrets-*.yaml
+*.secret.yaml
