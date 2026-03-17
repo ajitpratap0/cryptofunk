@@ -378,6 +378,88 @@ func (s *APIServer) handleCancelOrder(c *gin.Context) {
 	})
 }
 
+// handlePaperTrade executes a paper (simulated) trade order.
+// Market orders are immediately filled; limit orders remain open (NEW status).
+// POST /api/v1/trade
+func (s *APIServer) handlePaperTrade(c *gin.Context) {
+	var req struct {
+		Symbol   string  `json:"symbol" binding:"required"`
+		Side     string  `json:"side" binding:"required,oneof=buy sell BUY SELL"`
+		Type     string  `json:"type" binding:"required,oneof=market limit MARKET LIMIT"`
+		Quantity float64 `json:"quantity" binding:"required,gt=0"`
+		Price    float64 `json:"price"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request body",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if (req.Type == "limit" || req.Type == "LIMIT") && req.Price <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "price is required for limit orders",
+		})
+		return
+	}
+
+	var price *float64
+	if req.Price > 0 {
+		price = &req.Price
+	}
+
+	order := &db.Order{
+		ID:        uuid.New(),
+		Symbol:    req.Symbol,
+		Exchange:  "paper",
+		Side:      db.ConvertOrderSide(req.Side),
+		Type:      db.ConvertOrderType(req.Type),
+		Quantity:  req.Quantity,
+		Price:     price,
+		Status:    db.OrderStatusNew,
+		PlacedAt:  time.Now(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	ctx := c.Request.Context()
+	if err := s.db.InsertOrder(ctx, order); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to create paper trade order",
+		})
+		return
+	}
+
+	// Simulate immediate fill for market orders
+	if order.Type == db.OrderTypeMarket {
+		now := time.Now()
+		execPrice := req.Price
+		execQuoteQty := execPrice * req.Quantity
+
+		if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, req.Quantity, execQuoteQty, &now, nil, nil); err != nil {
+			log.Warn().Err(err).Str("order_id", order.ID.String()).Msg("Failed to mark paper trade order as filled")
+		} else {
+			order.Status = db.OrderStatusFilled
+			order.ExecutedQuantity = req.Quantity
+			order.ExecutedQuoteQuantity = execQuoteQty
+			order.FilledAt = &now
+			order.UpdatedAt = now
+		}
+	}
+
+	if err := s.BroadcastOrderUpdate(order); err != nil {
+		log.Warn().Err(err).Msg("Failed to broadcast paper trade order update")
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"order":        order,
+		"message":      "Paper trade order executed successfully",
+		"trading_mode": "paper",
+	})
+}
+
 // Trading control handlers
 func (s *APIServer) handleStartTrading(c *gin.Context) {
 	var req struct {
