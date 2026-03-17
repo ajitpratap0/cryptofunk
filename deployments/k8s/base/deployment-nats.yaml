@@ -84,14 +84,16 @@ spec:
           httpGet:
             path: /metrics
             port: 7777
-          initialDelaySeconds: 3
+          initialDelaySeconds: 10
           periodSeconds: 10
+          failureThreshold: 6
         livenessProbe:
           httpGet:
             path: /metrics
             port: 7777
-          initialDelaySeconds: 5
+          initialDelaySeconds: 20
           periodSeconds: 30
+          failureThreshold: 3
       volumes:
       - name: nats-data
         persistentVolumeClaim:
