@@ -467,6 +467,13 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 		return
 	}
 
+	// Cleanup any stale NEW orders older than 5 minutes
+	if cleaned, err := s.db.CleanupStaleOrders(ctx, 5*time.Minute); err != nil {
+		log.Warn().Err(err).Msg("Failed to cleanup stale orders")
+	} else if cleaned > 0 {
+		log.Info().Int64("cleaned", cleaned).Msg("Cleaned up stale NEW orders")
+	}
+
 	// Clear active session AFTER the DB stop completes, so any in-flight
 	// handlePlaceOrder that already snapshotted the session ID can still link.
 	s.setActiveSessionID(nil)

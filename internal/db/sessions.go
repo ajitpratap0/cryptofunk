@@ -371,6 +371,26 @@ func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) er
 	return nil
 }
 
+// CleanupStaleOrders marks old NEW orders as CANCELED if they've been stuck
+// for longer than the given duration. This handles orphaned tracking records
+// from the API handler that were never executed.
+func (db *DB) CleanupStaleOrders(ctx context.Context, olderThan time.Duration) (int64, error) {
+	query := `
+		UPDATE orders SET
+			status = 'CANCELED',
+			canceled_at = NOW(),
+			error_message = 'Cleaned up: stuck in NEW status',
+			updated_at = NOW()
+		WHERE status = 'NEW'
+		AND placed_at < NOW() - $1::interval
+	`
+	result, err := db.pool.Exec(ctx, query, olderThan.String())
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup stale orders: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
+
 // SessionStats holds session statistics
 type SessionStats struct {
 	TotalTrades   int
