@@ -51,9 +51,9 @@ func NewDBPaperEngineWithSession(database *db.DB, sessionID uuid.UUID) (*DBPaper
 	}
 
 	// Calculate current balance from session initial capital minus open position costs
-	summary, err := database.GetPolymarketPortfolioSummary(ctx)
+	summary, err := database.GetPolymarketPortfolioSummaryBySession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get portfolio summary: %w", err)
+		return nil, fmt.Errorf("failed to get session portfolio summary: %w", err)
 	}
 
 	balance := session.InitialCapital - summary.TotalCostBasis
@@ -290,6 +290,11 @@ func (e *DBPaperEngine) Reset() error {
 	e.sessionID = session.ID
 	e.balance = DefaultBalance
 	return nil
+}
+
+// SessionID returns the session UUID for this engine instance.
+func (e *DBPaperEngine) SessionID() uuid.UUID {
+	return e.sessionID
 }
 
 // findOpenPosition finds an open position by market ID and side within this session.

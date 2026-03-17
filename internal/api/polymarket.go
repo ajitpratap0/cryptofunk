@@ -241,9 +241,10 @@ func (h *PolymarketHandler) ExecuteTrade(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"trade":   trade,
-		"balance": engine.GetBalance(),
-		"message": "Trade executed successfully",
+		"trade":      trade,
+		"balance":    engine.GetBalance(),
+		"session_id": engine.SessionID().String(),
+		"message":    "Trade executed successfully",
 	})
 }
 

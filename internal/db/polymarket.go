@@ -385,6 +385,23 @@ func (db *DB) GetPolymarketPredictions(ctx context.Context, resolvedOnly bool) (
 // Portfolio Summary
 // ---------------------------------------------------------------------------
 
+// GetPolymarketPortfolioSummaryBySession returns the portfolio summary scoped to a single session.
+func (db *DB) GetPolymarketPortfolioSummaryBySession(ctx context.Context, sessionID uuid.UUID) (*PolymarketPortfolioSummary, error) {
+	query := `
+		SELECT
+			COUNT(*) as position_count,
+			COALESCE(SUM(cost_basis), 0) as total_cost_basis
+		FROM polymarket_positions
+		WHERE session_id = $1 AND status = 'OPEN'
+	`
+	row := db.pool.QueryRow(ctx, query, sessionID)
+	var s PolymarketPortfolioSummary
+	if err := row.Scan(&s.PositionCount, &s.TotalCostBasis); err != nil {
+		return nil, fmt.Errorf("GetPolymarketPortfolioSummaryBySession: %w", err)
+	}
+	return &s, nil
+}
+
 func (db *DB) GetPolymarketPortfolioSummary(ctx context.Context) (*PolymarketPortfolioSummary, error) {
 	positions, err := db.GetOpenPolymarketPositions(ctx)
 	if err != nil {
