@@ -294,7 +294,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		Str("symbol", req.Symbol).
 		Str("side", req.Side).
 		Float64("quantity", req.Quantity).
-		Msg("Order executed and filled")
+		Msg("Order submitted to executor")
 
 	// Update session stats if we have an active session (use snapshot from above)
 	if sessionID != nil {
@@ -471,8 +471,17 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 	// handlePlaceOrder that already snapshotted the session ID can still link.
 	s.setActiveSessionID(nil)
 
-	// Get updated session
-	session, _ := s.db.GetSession(ctx, sessionID)
+	// Get updated session — handle error gracefully to avoid nil dereference panic
+	session, err := s.db.GetSession(ctx, sessionID)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", sessionID.String()).Msg("Failed to retrieve session after stop")
+		c.JSON(http.StatusOK, gin.H{
+			"message":       "Trading stopped successfully",
+			"session_id":    sessionID.String(),
+			"final_capital": req.FinalCapital,
+		})
+		return
+	}
 
 	// Broadcast system status update
 	metadata := map[string]interface{}{

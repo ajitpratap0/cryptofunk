@@ -107,7 +107,9 @@ func (e *Executor) Start(natsConn *nats.Conn, decisionTopic string) error {
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", decisionTopic, err)
 	}
+	e.sessionMu.Lock()
 	e.subscription = sub
+	e.sessionMu.Unlock()
 
 	log.Info().
 		Str("topic", decisionTopic).
@@ -211,8 +213,10 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 				Str("side", side).
 				Float64("quantity", qty).
 				Msg("Failed to place order")
-			// Clear cooldown so next decision can retry
-			e.recentOrders.Delete(symbol)
+			// Keep the cooldown active (don't delete) to prevent retry storm.
+			// The existing timestamp from before the goroutine launch ensures
+			// the standard cooldown period applies before the next attempt.
+			// No action needed — the pre-recorded time.Now() is still valid.
 			return
 		}
 		log.Info().

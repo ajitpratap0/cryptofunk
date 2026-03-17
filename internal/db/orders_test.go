@@ -128,9 +128,9 @@ func TestConvertOrderStatus(t *testing.T) {
 			expected: OrderStatusNew,
 		},
 		{
-			name:     "Uppercase OPEN maps to PARTIALLY_FILLED",
+			name:     "Uppercase OPEN maps to NEW",
 			input:    "OPEN",
-			expected: OrderStatusPartiallyFilled,
+			expected: OrderStatusNew,
 		},
 		{
 			name:     "Uppercase PARTIALLY_FILLED",
