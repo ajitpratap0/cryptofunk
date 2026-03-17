@@ -836,11 +836,11 @@ func (h *StrategyHandler) ImportStrategy(c *gin.Context) {
 
 		// Check for apply_now form field (accepts "true", "1", "yes")
 		applyNowField := c.PostForm("apply_now")
-		applyNow = applyNowField == "true" || applyNowField == "1" || applyNowField == "yes"
+		applyNow = applyNowField == queryParamTrue || applyNowField == "1" || applyNowField == "yes"
 
 		// Check for validate_strict form field
 		validateStrictField := c.PostForm("validate_strict")
-		opts.ValidateStrict = validateStrictField == "true" || validateStrictField == "1" || validateStrictField == "yes"
+		opts.ValidateStrict = validateStrictField == queryParamTrue || validateStrictField == "1" || validateStrictField == "yes"
 	} else if strings.Contains(contentType, "application/json") || contentType == "" {
 		// Handle JSON request body
 		var req ImportRequest

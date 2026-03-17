@@ -15,8 +15,9 @@ import (
 
 // Environment name constants
 const (
-	envProduction = "production"
-	envProd       = "prod"
+	envProduction   = "production"
+	envProd         = "prod"
+	tradingModeLive = "live"
 )
 
 // ValidatorOptions contains options for configuration validation
@@ -184,7 +185,7 @@ func (v *Validator) validateProductionRequirements() error {
 
 	// 6. Trading mode should be PAPER initially (warning, not error)
 	tradingMode := strings.ToLower(os.Getenv("TRADING_MODE"))
-	if tradingMode == "live" {
+	if tradingMode == tradingModeLive {
 		log.Warn().Msg("WARNING: Live trading is enabled in production. Ensure this is intentional and all testing is complete.")
 	}
 
@@ -244,7 +245,7 @@ func (v *Validator) validateEnvironmentVariables() error {
 	}
 
 	// Exchange API keys (only for live trading)
-	if strings.ToLower(v.config.Trading.Mode) == "live" {
+	if strings.ToLower(v.config.Trading.Mode) == tradingModeLive {
 		for exchangeName, exchangeConfig := range v.config.Exchanges {
 			if exchangeConfig.APIKey == "" {
 				requiredVars[fmt.Sprintf("%s_API_KEY", strings.ToUpper(exchangeName))] =
@@ -283,7 +284,7 @@ func (v *Validator) validateAPIKeysPresence() error {
 
 	// Check exchange API keys
 	for exchangeName, exchangeConfig := range v.config.Exchanges {
-		if strings.ToLower(v.config.Trading.Mode) == "live" {
+		if strings.ToLower(v.config.Trading.Mode) == tradingModeLive {
 			if exchangeConfig.APIKey == "" {
 				errors = append(errors, fmt.Sprintf("%s API key is empty", exchangeName))
 			} else if len(exchangeConfig.APIKey) < 16 {
