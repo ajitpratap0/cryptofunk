@@ -423,17 +423,19 @@ func (o *Orchestrator) handleHeartbeat(msg *nats.Msg) {
 	var session *AgentSession
 	if s, exists := o.agents[heartbeat.AgentName]; exists {
 		s.LastHeartbeat = heartbeat.Timestamp
-		s.HealthStatus = heartbeat.Status
+		// Re-enable agent if it was previously disabled (recovered from UNHEALTHY).
+		// HealthStatus is managed by checkAgentHealth, not set directly from heartbeat.
+		s.Enabled = true
 		session = s
 	} else {
-		// Register new agent
+		// Register new agent. HealthStatus is left as zero-value ("") so that
+		// checkAgentHealth sets the authoritative status on the next cycle.
 		session = &AgentSession{
 			Name:            heartbeat.AgentName,
 			Type:            heartbeat.AgentType,
 			Enabled:         true,
 			Weight:          o.getDefaultWeight(heartbeat.AgentType),
 			LastHeartbeat:   heartbeat.Timestamp,
-			HealthStatus:    heartbeat.Status,
 			PerformanceData: make(map[string]interface{}),
 		}
 		o.agents[heartbeat.AgentName] = session
@@ -803,8 +805,14 @@ func (o *Orchestrator) checkAgentHealth() {
 			session.Enabled = false
 		} else if timeSinceHeartbeat > 120*time.Second {
 			session.HealthStatus = HealthStatusDegraded
+		} else if !session.LastSignal.IsZero() && timeSinceSignal > 10*time.Minute {
+			// Only degrade on stale signals if the agent has sent at least one signal.
+			// A zero LastSignal means the agent registered via heartbeat but hasn't
+			// produced a trading signal yet (e.g., waiting for market conditions).
+			session.HealthStatus = HealthStatusDegraded
 		} else {
 			session.HealthStatus = HealthStatusHealthy
+			session.Enabled = true // Re-enable agents recovered from UNHEALTHY
 			healthyCount++
 		}
 
