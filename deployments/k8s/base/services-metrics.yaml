@@ -1,0 +1,251 @@
+# Metrics Services for Prometheus scraping
+# These headless services expose the /metrics endpoints on agent metrics ports
+# (9101-9109) and MCP server metrics ports (9110-9114).
+#
+# NOTE: Agents expose metrics ports only when started with --metrics-port <port>.
+# MCP servers expose metrics only when started with --metrics-port <port>.
+# Port numbers follow the CLAUDE.md port allocation table.
+
+---
+# technical-agent metrics (port 9101)
+apiVersion: v1
+kind: Service
+metadata:
+  name: technical-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: technical-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None  # Headless — Prometheus discovers by pod IP
+  selector:
+    app.kubernetes.io/name: technical-agent
+  ports:
+  - name: metrics
+    port: 9101
+    targetPort: 9101
+    protocol: TCP
+---
+# trend-agent metrics (port 9102)
+apiVersion: v1
+kind: Service
+metadata:
+  name: trend-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: trend-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: trend-agent
+  ports:
+  - name: metrics
+    port: 9102
+    targetPort: 9102
+    protocol: TCP
+---
+# sentiment-agent metrics (port 9104)
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentiment-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: sentiment-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: sentiment-agent
+  ports:
+  - name: metrics
+    port: 9104
+    targetPort: 9104
+    protocol: TCP
+---
+# orderbook-agent metrics (port 9105)
+apiVersion: v1
+kind: Service
+metadata:
+  name: orderbook-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: orderbook-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: orderbook-agent
+  ports:
+  - name: metrics
+    port: 9105
+    targetPort: 9105
+    protocol: TCP
+---
+# reversion-agent metrics (port 9106)
+apiVersion: v1
+kind: Service
+metadata:
+  name: reversion-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: reversion-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: reversion-agent
+  ports:
+  - name: metrics
+    port: 9106
+    targetPort: 9106
+    protocol: TCP
+---
+# arbitrage-agent metrics (port 9107) — deployment not yet added, service pre-created
+apiVersion: v1
+kind: Service
+metadata:
+  name: arbitrage-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: arbitrage-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: arbitrage-agent
+  ports:
+  - name: metrics
+    port: 9107
+    targetPort: 9107
+    protocol: TCP
+---
+# risk-agent metrics (port 9108)
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: risk-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: risk-agent
+  ports:
+  - name: metrics
+    port: 9108
+    targetPort: 9108
+    protocol: TCP
+---
+# polymarket-agent metrics (port 9109) — deployment not yet added, service pre-created
+apiVersion: v1
+kind: Service
+metadata:
+  name: polymarket-agent
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: polymarket-agent
+    app.kubernetes.io/component: trading-agent
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: polymarket-agent
+  ports:
+  - name: metrics
+    port: 9109
+    targetPort: 9109
+    protocol: TCP
+---
+# market-data-server metrics (port 9110)
+# Enable with: --metrics-port 9110 in the container args
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-data-server-metrics
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: market-data-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: market-data-server
+  ports:
+  - name: metrics
+    port: 9110
+    targetPort: 9110
+    protocol: TCP
+---
+# order-executor-server metrics (port 9111)
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-executor-server-metrics
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: order-executor-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: order-executor-server
+  ports:
+  - name: metrics
+    port: 9111
+    targetPort: 9111
+    protocol: TCP
+---
+# risk-analyzer-server metrics (port 9112)
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-analyzer-server-metrics
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: risk-analyzer-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: risk-analyzer-server
+  ports:
+  - name: metrics
+    port: 9112
+    targetPort: 9112
+    protocol: TCP
+---
+# technical-indicators-server metrics (port 9113)
+apiVersion: v1
+kind: Service
+metadata:
+  name: technical-indicators-server-metrics
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: technical-indicators-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: technical-indicators-server
+  ports:
+  - name: metrics
+    port: 9113
+    targetPort: 9113
+    protocol: TCP
+---
+# polymarket-server metrics (port 9114)
+apiVersion: v1
+kind: Service
+metadata:
+  name: polymarket-server-metrics
+  namespace: cryptofunk
+  labels:
+    app.kubernetes.io/name: polymarket-server
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: polymarket-server
+  ports:
+  - name: metrics
+    port: 9114
+    targetPort: 9114
+    protocol: TCP
