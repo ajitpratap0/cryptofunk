@@ -169,6 +169,10 @@ func (s *APIServer) executeOrder(ctx context.Context, symbol string, side string
 			return fmt.Errorf("order execution failed: session nil after reconnect")
 		}
 
+		// NOTE: We retry on any error, including tool-level failures that a reconnect
+		// cannot fix (e.g. invalid arguments, exchange rejection). For paper trading
+		// this is acceptable — worst case is a duplicate order. Before enabling LIVE
+		// mode, classify transport vs. tool errors and only retry transient ones.
 		retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer retryCancel()
 		result, err = session.CallTool(retryCtx, &mcp.CallToolParams{

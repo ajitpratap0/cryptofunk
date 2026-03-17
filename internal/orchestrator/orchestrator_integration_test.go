@@ -259,12 +259,11 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			sendSignal(t, nc, config.SignalTopic, signal)
 		}
 
-		// Wait briefly to ensure all 4 signals are buffered before the next
-		// decision tick fires, reducing the window for the race condition where
-		// only 3/4 signals are visible when the orchestrator samples the buffer.
-		time.Sleep(200 * time.Millisecond)
-
-		// Wait for decision
+		// Wait for the orchestrator to emit a decision. With equal votes (2 BUY,
+		// 2 SELL) the consensus is 0.5 which is below MinConsensus (0.6), so the
+		// orchestrator should default to HOLD rather than skipping the decision
+		// entirely. We use a select instead of time.Sleep so the test is fast on
+		// success and only blocks for the full timeout on unexpected failure.
 		select {
 		case decision := <-decisionChan:
 			// With equal votes (2 BUY, 2 SELL), consensus should be 0.5 < MinConsensus (0.6)
@@ -272,7 +271,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			// Should default to HOLD
 			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
 		case <-time.After(5 * time.Second):
-			t.Fatal("Timeout waiting for decision")
+			t.Fatal("Timeout waiting for split-vote HOLD decision")
 		}
 	})
 

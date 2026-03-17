@@ -81,18 +81,16 @@ spec:
             cpu: "100m"
             memory: "64Mi"
         readinessProbe:
-          httpGet:
-            path: /metrics
+          tcpSocket:
             port: 7777
           initialDelaySeconds: 10
           periodSeconds: 10
           failureThreshold: 6
         livenessProbe:
-          httpGet:
-            path: /metrics
+          tcpSocket:
             port: 7777
           initialDelaySeconds: 20
-          periodSeconds: 30
+          periodSeconds: 10
           failureThreshold: 3
       volumes:
       - name: nats-data
