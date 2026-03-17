@@ -684,3 +684,42 @@ func TestRateLimiterCheck(t *testing.T) {
 	assert.False(t, info4.Allowed)
 	assert.Equal(t, 0, info4.Remaining)
 }
+
+// TestHandlePaperTrade_InvalidBody tests that handlePaperTrade rejects invalid JSON
+func TestHandlePaperTrade_InvalidBody(t *testing.T) {
+	server := setupMinimalServer(t)
+	server.router.POST("/api/v1/trade", server.handlePaperTrade)
+
+	req := httptest.NewRequest("POST", "/api/v1/trade", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]interface{}
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, "invalid request body", resp["error"])
+}
+
+// TestHandlePaperTrade_LimitMissingPrice tests that limit orders without a price are rejected
+func TestHandlePaperTrade_LimitMissingPrice(t *testing.T) {
+	server := setupMinimalServer(t)
+	server.router.POST("/api/v1/trade", server.handlePaperTrade)
+
+	body := `{"symbol":"BTC/USDT","side":"BUY","type":"LIMIT","quantity":0.01}`
+	req := httptest.NewRequest("POST", "/api/v1/trade", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]interface{}
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, "price is required for limit orders", resp["error"])
+}
