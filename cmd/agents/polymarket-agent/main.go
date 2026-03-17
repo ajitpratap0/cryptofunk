@@ -525,6 +525,10 @@ func (a *PolymarketAgent) fetchMarkets(ctx context.Context) ([]*PolyMarket, erro
 		return nil, fmt.Errorf("no text content in MCP result")
 	}
 
+	if result.IsError {
+		return nil, fmt.Errorf("get_markets tool returned error: %s", textContent)
+	}
+
 	var markets []*PolyMarket
 	if err := json.Unmarshal([]byte(textContent), &markets); err != nil {
 		return nil, fmt.Errorf("failed to parse markets: %w", err)
