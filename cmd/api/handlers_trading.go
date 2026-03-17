@@ -286,8 +286,13 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// Mark tracking order as FILLED so AggregateSessionStats counts it.
 	// Fill price is 0 in this record — actual price is in executor's trade records.
 	now := time.Now()
-	_ = s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, nil, &now, nil)
+	if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, order.Quantity, 0, &now, nil, nil); err != nil {
+		log.Error().Err(err).Str("order_id", order.ID.String()).Msg("Failed to update order to FILLED")
+	}
 	order.Status = db.OrderStatusFilled
+	order.ExecutedQuantity = order.Quantity
+	filledAt := now
+	order.FilledAt = &filledAt
 
 	log.Info().
 		Str("order_id", order.ID.String()).
@@ -385,9 +390,11 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		return
 	}
 
-	// Default to paper trading if not specified
+	// Default to paper trading if not specified; normalize to uppercase for DB enum
 	if req.Mode == "" {
-		req.Mode = "paper"
+		req.Mode = "PAPER"
+	} else {
+		req.Mode = strings.ToUpper(req.Mode)
 	}
 
 	// Determine exchange from config (defaults to "binance" if not configured)
