@@ -135,6 +135,18 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 2: Split vote with risk veto
 	t.Run("risk_agent_veto", func(t *testing.T) {
+		// Drain any stale BTC/USDT decisions left over from the previous subtest.
+		// BTC/USDT signals remain valid for MaxSignalAge (5 min), so the orchestrator
+		// may keep generating decisions for them; we must skip those here.
+	drainLoop:
+		for {
+			select {
+			case <-decisionChan:
+			default:
+				break drainLoop
+			}
+		}
+
 		// 4 agents vote BUY
 		buyAgents := []string{"technical-agent", "orderbook-agent", "trend-agent", "arbitrage-agent"}
 		for _, name := range buyAgents {
@@ -162,19 +174,27 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 		}
 		sendSignal(t, nc, config.SignalTopic, riskSignal)
 
-		// Wait for decision
-		select {
-		case decision := <-decisionChan:
-			// Risk agent's high weight should influence decision
-			if decision.Action == orchestrator.SignalActionHold {
-				// Risk veto worked
-				assert.Greater(t, decision.VotingResults["HOLD"], decision.VotingResults["BUY"])
-			} else {
-				// BUY still won, but check consensus is reasonable
-				assert.Greater(t, decision.Consensus, config.MinConsensus)
+		// Wait for an ETH/USDT decision. Under -race on CI the orchestrator tick
+		// can be delayed, and BTC/USDT decisions may still arrive; skip them.
+		deadline := time.After(30 * time.Second)
+		for {
+			select {
+			case decision := <-decisionChan:
+				if decision.Symbol != "ETH/USDT" {
+					continue
+				}
+				// Risk agent's high weight should influence decision
+				if decision.Action == orchestrator.SignalActionHold {
+					// Risk veto worked
+					assert.Greater(t, decision.VotingResults["HOLD"], decision.VotingResults["BUY"])
+				} else {
+					// BUY still won, but check consensus is reasonable
+					assert.Greater(t, decision.Consensus, config.MinConsensus)
+				}
+				return
+			case <-deadline:
+				t.Fatal("Timeout waiting for ETH/USDT decision")
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("Timeout waiting for decision")
 		}
 	})
 

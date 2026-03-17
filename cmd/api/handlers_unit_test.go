@@ -690,7 +690,7 @@ func TestHandlePaperTrade_InvalidBody(t *testing.T) {
 	server := setupMinimalServer(t)
 	server.router.POST("/api/v1/trade", server.handlePaperTrade)
 
-	req := httptest.NewRequest("POST", "/api/v1/trade", strings.NewReader("not-json"))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/trade", strings.NewReader("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -710,7 +710,7 @@ func TestHandlePaperTrade_LimitMissingPrice(t *testing.T) {
 	server.router.POST("/api/v1/trade", server.handlePaperTrade)
 
 	body := `{"symbol":"BTC/USDT","side":"BUY","type":"LIMIT","quantity":0.01}`
-	req := httptest.NewRequest("POST", "/api/v1/trade", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/trade", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
