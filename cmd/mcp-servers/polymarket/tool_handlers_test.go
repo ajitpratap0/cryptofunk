@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ajitpratap0/cryptofunk/internal/testhelpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ajitpratap0/cryptofunk/internal/testhelpers"
 )
 
 // ---------------------------------------------------------------------------

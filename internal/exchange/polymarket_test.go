@@ -561,5 +561,3 @@ func TestPolymarketExchange_Close(t *testing.T) {
 	ex := newTestPolymarketExchange(t)
 	assert.NotPanics(t, func() { ex.Close() })
 }
-
-

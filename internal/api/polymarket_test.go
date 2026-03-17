@@ -75,7 +75,7 @@ func (s *polymarketTestSuite) do(t *testing.T, method, path string, body any) *h
 	} else {
 		reqBody = bytes.NewReader(nil)
 	}
-	req := httptest.NewRequest(method, path, reqBody)
+	req := httptest.NewRequestWithContext(t.Context(), method, path, reqBody)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -896,7 +896,7 @@ func TestPolymarketHandler_Routes(t *testing.T) {
 			} else {
 				body = bytes.NewReader(nil)
 			}
-			req := httptest.NewRequest(rt.method, rt.path, body)
+			req := httptest.NewRequestWithContext(t.Context(), rt.method, rt.path, body)
 			if rt.method == http.MethodPost {
 				req.Header.Set("Content-Type", "application/json")
 			}
