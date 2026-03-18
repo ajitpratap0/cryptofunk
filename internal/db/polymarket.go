@@ -101,13 +101,13 @@ func (db *DB) UpsertPolymarketMarket(ctx context.Context, m *PolymarketMarket) e
 		INSERT INTO polymarket_markets (id, question, category, yes_price, no_price, volume, end_date, active, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO UPDATE SET
-			question = EXCLUDED.question,
-			category = EXCLUDED.category,
-			yes_price = EXCLUDED.yes_price,
-			no_price = EXCLUDED.no_price,
-			volume = EXCLUDED.volume,
-			end_date = EXCLUDED.end_date,
-			active = EXCLUDED.active,
+			question   = EXCLUDED.question,
+			category   = COALESCE(EXCLUDED.category,  polymarket_markets.category),
+			yes_price  = COALESCE(EXCLUDED.yes_price, polymarket_markets.yes_price),
+			no_price   = COALESCE(EXCLUDED.no_price,  polymarket_markets.no_price),
+			volume     = COALESCE(EXCLUDED.volume,     polymarket_markets.volume),
+			end_date   = COALESCE(EXCLUDED.end_date,   polymarket_markets.end_date),
+			active     = EXCLUDED.active,
 			updated_at = EXCLUDED.updated_at
 	`
 	m.UpdatedAt = time.Now()
@@ -136,7 +136,7 @@ func (db *DB) ListPolymarketMarkets(ctx context.Context, activeOnly bool) ([]*Po
 	if activeOnly {
 		query += ` WHERE active = TRUE`
 	}
-	query += ` ORDER BY volume DESC`
+	query += ` ORDER BY updated_at DESC`
 
 	rows, err := db.pool.Query(ctx, query)
 	if err != nil {
