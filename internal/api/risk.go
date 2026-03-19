@@ -176,23 +176,17 @@ func (h *RiskHandler) GetExposure(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"exposure": result, "count": len(result)})
 }
 
-// collectClosedReturns gathers RealizedPnL from closed positions across active sessions.
+// collectClosedReturns gathers RealizedPnL from all closed positions in a single query.
 func (h *RiskHandler) collectClosedReturns(ctx context.Context) ([]float64, error) {
-	sessions, err := h.db.ListActiveSessions(ctx)
+	positions, err := h.db.GetAllClosedPositions(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var returns []float64
-	for _, s := range sessions {
-		positions, err := h.db.GetPositionsBySession(ctx, s.ID)
-		if err != nil {
-			continue
-		}
-		for _, p := range positions {
-			if p.ExitTime != nil && p.RealizedPnL != nil {
-				returns = append(returns, *p.RealizedPnL)
-			}
+	for _, p := range positions {
+		if p.RealizedPnL != nil {
+			returns = append(returns, *p.RealizedPnL)
 		}
 	}
 	return returns, nil

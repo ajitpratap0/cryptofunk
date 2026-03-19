@@ -434,11 +434,27 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			UpdatedAt:      time.Now(),
 		}
 		if err := s.db.CreateSession(ctx, newSession); err != nil {
-			log.Error().Err(err).Msg("Failed to create paper session")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trading session"})
-			return
+			// Another concurrent request may have created a paper session between the
+			// ListActiveSessions call above and this insert (TOCTOU). Try to look it up.
+			log.Warn().Err(err).Msg("Failed to create paper session; retrying lookup for concurrent session")
+			sessions2, err2 := s.db.ListActiveSessions(ctx)
+			if err2 == nil {
+				for i := range sessions2 {
+					if sessions2[i].Mode == db.TradingModePaper {
+						id := sessions2[i].ID
+						sessionID = &id
+						break
+					}
+				}
+			}
+			if sessionID == nil {
+				log.Error().Err(err).Msg("Failed to create or find paper session")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trading session"})
+				return
+			}
+		} else {
+			sessionID = &newSession.ID
 		}
-		sessionID = &newSession.ID
 	}
 
 	// 2. Determine execution price
@@ -537,6 +553,19 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		posSide := db.PositionSideLong
 		if orderSide == db.OrderSideSell {
 			posSide = db.PositionSideShort
+		}
+
+		if existingPos != nil && existingPos.Side != posSide {
+			// Opposite-side trade on an existing open position. Proper close/reduce
+			// logic (netting, realized PnL calculation) is not yet implemented.
+			// For now we average into the opposite direction, which is incorrect for
+			// a long→short flip. This is a known limitation.
+			// TODO: implement position close/reduce logic.
+			log.Warn().
+				Str("symbol", req.Symbol).
+				Str("existing_side", string(existingPos.Side)).
+				Str("order_side", string(posSide)).
+				Msg("Opposite-side trade on existing position; position close logic not yet implemented")
 		}
 
 		if existingPos == nil {

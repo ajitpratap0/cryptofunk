@@ -353,6 +353,29 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
+// GetAllClosedPositions returns all positions that have been closed (exit_time IS NOT NULL)
+// across all sessions. Use this instead of iterating sessions + GetPositionsBySession to avoid N+1.
+func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE exit_time IS NOT NULL AND realized_pnl IS NOT NULL
+		ORDER BY exit_time DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query closed positions: %w", err)
+	}
+	defer rows.Close()
+
+	return scanPositions(rows)
+}
+
 // GetPositionsBySession retrieves all positions (including closed) for a session
 func (db *DB) GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*Position, error) {
 	query := `

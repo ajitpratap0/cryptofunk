@@ -40,7 +40,8 @@ func (h *TradesHandler) ListTrades(c *gin.Context) {
 		}
 	}
 
-	trades, err := h.db.ListAllTrades(c.Request.Context(), limit, offset)
+	ctx := c.Request.Context()
+	trades, err := h.db.ListAllTrades(ctx, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch trades"})
 		return
@@ -48,9 +49,17 @@ func (h *TradesHandler) ListTrades(c *gin.Context) {
 	if trades == nil {
 		trades = []*db.Trade{}
 	}
+
+	total, err := h.db.CountAllTrades(ctx)
+	if err != nil {
+		// Non-fatal: return the page without total rather than failing the request.
+		total = -1
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"trades": trades,
 		"count":  len(trades),
+		"total":  total,
 		"limit":  limit,
 		"offset": offset,
 	})

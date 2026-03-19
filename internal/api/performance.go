@@ -48,7 +48,8 @@ type pairPerf struct {
 }
 
 func (h *PerformanceHandler) aggregatePairPerformance(ctx context.Context) ([]pairPerf, error) {
-	sessions, err := h.db.ListActiveSessions(ctx)
+	// Fetch all closed positions in one query to avoid N+1 per session.
+	positions, err := h.db.GetAllClosedPositions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -59,19 +60,13 @@ func (h *PerformanceHandler) aggregatePairPerformance(ctx context.Context) ([]pa
 	}
 	bySymbol := make(map[string]*agg)
 
-	for _, s := range sessions {
-		positions, err := h.db.GetPositionsBySession(ctx, s.ID)
-		if err != nil {
-			continue
-		}
-		for _, p := range positions {
-			if p.ExitTime != nil && p.RealizedPnL != nil {
-				if _, ok := bySymbol[p.Symbol]; !ok {
-					bySymbol[p.Symbol] = &agg{}
-				}
-				bySymbol[p.Symbol].pnl += *p.RealizedPnL
-				bySymbol[p.Symbol].count++
+	for _, p := range positions {
+		if p.RealizedPnL != nil {
+			if _, ok := bySymbol[p.Symbol]; !ok {
+				bySymbol[p.Symbol] = &agg{}
 			}
+			bySymbol[p.Symbol].pnl += *p.RealizedPnL
+			bySymbol[p.Symbol].count++
 		}
 	}
 

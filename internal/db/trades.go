@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 )
 
 // ListAllTrades returns recent trade fills across all orders, newest first.
@@ -33,4 +34,13 @@ func (db *DB) ListAllTrades(ctx context.Context, limit, offset int) ([]*Trade, e
 		trades = append(trades, t)
 	}
 	return trades, rows.Err()
+}
+
+// CountAllTrades returns the total number of trade fill records in the database.
+func (db *DB) CountAllTrades(ctx context.Context) (int, error) {
+	var count int
+	if err := db.pool.QueryRow(ctx, "SELECT COUNT(*) FROM trades").Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count trades: %w", err)
+	}
+	return count, nil
 }
