@@ -803,6 +803,8 @@ func (db *DB) GetPairPerformance(ctx context.Context) ([]PairPerformance, error)
 		WHERE exit_time IS NOT NULL AND realized_pnl IS NOT NULL
 		GROUP BY symbol
 		ORDER BY realized_pnl DESC
+		-- Cap at 200 rows — sufficient for dashboard display; a full paginated API is a follow-up.
+		LIMIT 200
 	`
 
 	rows, err := db.pool.Query(ctx, query)
@@ -840,6 +842,8 @@ func (db *DB) GetExposureBySymbol(ctx context.Context) ([]SymbolExposure, error)
 		WHERE exit_time IS NULL
 		GROUP BY symbol
 		ORDER BY exposure DESC
+		-- Cap at 200 rows — sufficient for dashboard display; a full paginated API is a follow-up.
+		LIMIT 200
 	`
 
 	rows, err := db.pool.Query(ctx, query)

@@ -1,3 +1,7 @@
+-- This migration supersedes 018_positions_symbol_index.sql which added a non-unique
+-- partial index. The two are kept as separate migrations (rather than collapsing into
+-- one) to safely handle environments where 018 was already applied — the DROP here
+-- is idempotent (IF EXISTS) and the CREATE is idempotent (IF NOT EXISTS).
 -- Replace the non-unique partial index from migration 018 with a UNIQUE partial index.
 -- FOR UPDATE only locks existing rows; without a unique constraint two concurrent
 -- transactions can each observe existingPos == nil and INSERT duplicate positions for

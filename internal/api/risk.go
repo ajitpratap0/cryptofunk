@@ -108,48 +108,34 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 				portfolioValue += s.InitialCapital
 			}
 		} else {
-			log.Warn().Err(sessErr).Msg("ListActiveSessions failed; VaR will be fractional (not dollar-scaled)")
+			log.Warn().Err(sessErr).Msg("ListActiveSessions failed; skipping VaR calculation")
 		}
 
-		// Set var_unit once so the frontend knows how to interpret var_95/var_99.
+		// Skip VaR entirely when there is no portfolio to compute it for.
+		// var_95, var_99, and expected_shortfall remain nil in the response.
 		if portfolioValue > 0 {
-			response["var_unit"] = "dollar"
-		} else {
-			response["var_unit"] = "fractional"
-		}
-
-		res95, err := h.riskService.CalculateVaR(map[string]interface{}{
-			"returns":          returnsIface,
-			"confidence_level": 0.95,
-		})
-		if err != nil {
-			log.Debug().Err(err).Msg("VaR calculation failed (95%)")
-		} else {
-			if varResult, ok := res95.(*risk.VaRResult); ok {
-				// Convert fractional VaR to dollar VaR by scaling by total portfolio value.
-				if portfolioValue > 0 {
+			res95, err := h.riskService.CalculateVaR(map[string]interface{}{
+				"returns":          returnsIface,
+				"confidence_level": 0.95,
+			})
+			if err != nil {
+				log.Debug().Err(err).Msg("VaR calculation failed (95%)")
+			} else {
+				if varResult, ok := res95.(*risk.VaRResult); ok {
 					response["var_95"] = varResult.VaR * portfolioValue
-				} else {
-					response["var_95"] = varResult.VaR
 				}
 			}
-		}
 
-		res99, err := h.riskService.CalculateVaR(map[string]interface{}{
-			"returns":          returnsIface,
-			"confidence_level": 0.99,
-		})
-		if err != nil {
-			log.Debug().Err(err).Msg("VaR calculation failed (99%)")
-		} else {
-			if varResult, ok := res99.(*risk.VaRResult); ok {
-				// Convert fractional VaR to dollar VaR by scaling by total portfolio value.
-				if portfolioValue > 0 {
+			res99, err := h.riskService.CalculateVaR(map[string]interface{}{
+				"returns":          returnsIface,
+				"confidence_level": 0.99,
+			})
+			if err != nil {
+				log.Debug().Err(err).Msg("VaR calculation failed (99%)")
+			} else {
+				if varResult, ok := res99.(*risk.VaRResult); ok {
 					response["var_99"] = varResult.VaR * portfolioValue
 					response["expected_shortfall"] = varResult.CVaR * portfolioValue
-				} else {
-					response["var_99"] = varResult.VaR
-					response["expected_shortfall"] = varResult.CVaR
 				}
 			}
 		}

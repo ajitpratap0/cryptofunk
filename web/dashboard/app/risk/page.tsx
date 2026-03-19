@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useMemo, useEffect } from 'react'
 import {
   Shield,
   TrendingDown,
@@ -10,26 +10,14 @@ import {
   Zap
 } from 'lucide-react'
 import { ExposurePie } from '@/components/charts/ExposurePie'
-import { DrawdownChart } from '@/components/charts/DrawdownChart'
+
 import { CircuitBreakerStatus } from '@/components/risk/CircuitBreakerStatus'
 import { StatCard } from '@/components/ui/StatCard'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
 import { useRiskMetrics, useCircuitBreakers, useRiskExposure } from '@/hooks/usePerformance'
 import type { CircuitBreaker } from '@/lib/types'
 
 // ── Static Mock Data (no API equivalent yet) ───────────────────────
-
-const mockDrawdown = Array.from({ length: 90 }, (_, i) => {
-  const now = Date.now()
-  const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
-  const base = Math.sin(i / 15) * 4 + Math.random() * 2
-  const drawdownPercent = -Math.abs(base)
-  return {
-    timestamp,
-    drawdown: drawdownPercent,
-    equity: 100000 + (drawdownPercent / 100) * 100000,
-  }
-})
 
 const mockAlerts = [
   { id: '1', severity: 'warning' as const, message: 'Max drawdown approaching threshold (78%)', timestamp: '2 min ago', asset: 'Portfolio' },
@@ -47,6 +35,7 @@ type RawRiskMetrics = {
   expected_shortfall: number | null
   open_positions: number
   total_exposure: number
+  var_unit?: 'dollar' | 'fractional'
 }
 
 type RawCircuitBreakers = {
@@ -90,8 +79,6 @@ const VAR_WARNING_THRESHOLD = 500
 // ── Page Component ─────────────────────────────────────────────────
 
 export default function RiskPage() {
-  const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
-
   const { data: metricsResponse, isError: metricsError, isLoading: metricsLoading, refetch: refetchMetrics } = useRiskMetrics()
   const { data: breakersResponse, isError: breakersError, isLoading: breakersLoading, refetch: refetchBreakers } = useCircuitBreakers()
   const { data: exposureResponse, isError: exposureError, isLoading: exposureLoading, refetch: refetchExposure } = useRiskExposure()
@@ -130,6 +117,11 @@ export default function RiskPage() {
   // Map API risk metrics — guarded so unexpected shapes surface as undefined
   const rawMetrics: unknown = metricsResponse?.data
   const apiMetrics: RawRiskMetrics | undefined = isRiskMetrics(rawMetrics) ? rawMetrics : undefined
+
+  // var_unit: 'dollar' when VaR is scaled by portfolio value; 'fractional' when
+  // no active sessions exist and the backend returns a raw fractional value (e.g. 0.023).
+  const varUnit = isRiskMetrics(rawMetrics) ? (rawMetrics.var_unit ?? 'dollar') : 'dollar'
+  const formatVar = (v: number) => varUnit === 'dollar' ? formatCurrency(v) : formatPercentage(v * 100)
 
   // Map API circuit breakers to component shape — guarded
   const circuitBreakers: CircuitBreaker[] = useMemo(() => {
@@ -232,20 +224,24 @@ export default function RiskPage() {
           icon={<Shield className="h-5 w-5" />}
           valueClassName={riskColor}
         />
-        {/* Issue #1 fix: var95/var99 are dollar PnL values, not fractional
-            percentages — use formatCurrency instead of formatPercentage.
-            Threshold comparison updated to dollar-based (>$500 = warning). */}
+        {/* var_unit from API controls formatting: 'dollar' → formatCurrency,
+            'fractional' → formatPercentage. Threshold warning uses dollar-equivalent
+            (>$500) for dollar mode; for fractional >2.3% is roughly equivalent. */}
         <StatCard
           title="Value at Risk (95%)"
-          value={var95 != null ? formatCurrency(var95) : '—'}
-          subtitle={var99 != null ? `99%: ${formatCurrency(var99)}` : 'Insufficient data'}
+          value={var95 != null ? formatVar(var95) : '—'}
+          subtitle={var99 != null ? `99%: ${formatVar(var99)}` : 'Insufficient data'}
           icon={<TrendingDown className="h-5 w-5" />}
           valueClassName={var95 != null && Math.abs(var95) > VAR_WARNING_THRESHOLD ? 'text-warning' : 'text-foreground'}
         />
         <StatCard
           title="Open Positions"
           value={apiMetrics?.open_positions?.toString() ?? '—'}
-          subtitle={`Exposure: ${apiMetrics?.total_exposure != null ? formatCurrency(apiMetrics.total_exposure) : '—'}`}
+          subtitle={
+            apiMetrics?.open_positions != null && apiMetrics.open_positions > 0 && apiMetrics?.total_exposure != null
+              ? `Avg size: ${formatCurrency(apiMetrics.total_exposure / apiMetrics.open_positions)}`
+              : 'No open positions'
+          }
           icon={<Activity className="h-5 w-5" />}
         />
         <StatCard
@@ -317,31 +313,11 @@ export default function RiskPage() {
           <div className="bg-card border border-border rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">Drawdown History</h3>
-              <div className="flex gap-1 bg-muted/50 rounded-lg p-1">
-                {(['1w', '1m', '3m'] as const).map(range => (
-                  <button
-                    key={range}
-                    onClick={() => setTimeRange(range)}
-                    className={cn(
-                      'px-3 py-1 text-xs rounded-md transition-colors',
-                      timeRange === range
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {range.toUpperCase()}
-                  </button>
-                ))}
-              </div>
             </div>
-            <DrawdownChart
-              data={
-                timeRange === '1w' ? mockDrawdown.slice(-7)
-                  : timeRange === '1m' ? mockDrawdown.slice(-30)
-                  : mockDrawdown
-              }
-              height={300}
-            />
+            {/* TODO: Replace with real drawdown data from /api/v1/performance/drawdown once available */}
+            <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-500">
+              Drawdown chart — historical data not yet available
+            </div>
           </div>
 
           {/* Position Sizing */}
