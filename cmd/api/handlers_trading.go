@@ -15,7 +15,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
 
-func ptrStr(s string) *string  { return &s }
+func ptrStr(s string) *string   { return &s }
 func ptrF64(f float64) *float64 { return &f }
 
 // Session handlers
