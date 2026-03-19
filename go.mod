@@ -1,6 +1,6 @@
 module github.com/ajitpratap0/cryptofunk
 
-go 1.24.0
+go 1.25
 
 require (
 	firebase.google.com/go/v4 v4.18.0
