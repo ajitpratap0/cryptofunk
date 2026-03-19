@@ -1,13 +1,11 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { 
-  Shield, 
-  AlertTriangle, 
-  TrendingDown, 
-  Activity, 
+import {
+  Shield,
+  TrendingDown,
+  Activity,
   RefreshCw,
-  ChevronDown,
   BarChart3,
   Zap
 } from 'lucide-react'
@@ -16,80 +14,21 @@ import { DrawdownChart } from '@/components/charts/DrawdownChart'
 import { CircuitBreakerStatus } from '@/components/risk/CircuitBreakerStatus'
 import { StatCard } from '@/components/ui/StatCard'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
-import { COLORS, RISK_THRESHOLDS } from '@/lib/constants'
-import type { CircuitBreaker, RiskMetrics } from '@/lib/types'
+import { RISK_THRESHOLDS } from '@/lib/constants'
+import { useRiskMetrics, useCircuitBreakers, useRiskExposure } from '@/hooks/usePerformance'
+import type { CircuitBreaker } from '@/lib/types'
 
-// ── Mock Data ──────────────────────────────────────────────────────
-
-const mockRiskMetrics: RiskMetrics = {
-  var95: 0.023,
-  var99: 0.041,
-  expectedShortfall: 0.052,
-  betaToMarket: 0.87,
-  correlation: {
-    'BTC/USDT': 1.0,
-    'ETH/USDT': 0.89,
-    'SOL/USDT': 0.76,
-    'XRP/USDT': 0.64,
-    'ADA/USDT': 0.58,
-  },
-  concentration: {
-    'BTC/USDT': 0.35,
-    'ETH/USDT': 0.25,
-    'SOL/USDT': 0.18,
-    'XRP/USDT': 0.12,
-    'ADA/USDT': 0.10,
-  },
-}
-
-const mockCircuitBreakers: CircuitBreaker[] = [
-  {
-    name: 'Max Daily Loss',
-    status: 'normal',
-    threshold: 0.05,
-    currentValue: 0.018,
-    description: 'Maximum allowed daily portfolio loss',
-  },
-  {
-    name: 'Max Drawdown',
-    status: 'warning',
-    threshold: 0.10,
-    currentValue: 0.078,
-    description: 'Maximum peak-to-trough drawdown',
-  },
-  {
-    name: 'Position Concentration',
-    status: 'normal',
-    threshold: 0.50,
-    currentValue: 0.35,
-    description: 'Maximum single-asset concentration',
-  },
-  {
-    name: 'Leverage Limit',
-    status: 'normal',
-    threshold: 10,
-    currentValue: 3.2,
-    description: 'Maximum portfolio leverage ratio',
-  },
-]
-
-const mockExposure = [
-  { symbol: 'BTC/USDT', exposure: 35000, percentage: 35, value: 35000, side: 'long' as const },
-  { symbol: 'ETH/USDT', exposure: 25000, percentage: 25, value: 25000, side: 'long' as const },
-  { symbol: 'SOL/USDT', exposure: 18000, percentage: 18, value: 18000, side: 'long' as const },
-  { symbol: 'XRP/USDT', exposure: 12000, percentage: 12, value: 12000, side: 'short' as const },
-  { symbol: 'ADA/USDT', exposure: 10000, percentage: 10, value: 10000, side: 'long' as const },
-]
+// ── Static Mock Data (no API equivalent yet) ───────────────────────
 
 const mockDrawdown = Array.from({ length: 90 }, (_, i) => {
   const now = Date.now()
   const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
-  const base = Math.sin(i / 15) * 4 + Math.random() * 2 // Generate percentage values (0-6%)
-  const drawdownPercent = -Math.abs(base) // Negative percentage value (-6% to 0%)
+  const base = Math.sin(i / 15) * 4 + Math.random() * 2
+  const drawdownPercent = -Math.abs(base)
   return {
     timestamp,
     drawdown: drawdownPercent,
-    equity: 100000 + (drawdownPercent / 100) * 100000, // Convert percentage to equity change
+    equity: 100000 + (drawdownPercent / 100) * 100000,
   }
 })
 
@@ -106,16 +45,70 @@ const mockAlerts = [
 export default function RiskPage() {
   const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
+  const { data: metricsResponse, refetch: refetchMetrics } = useRiskMetrics()
+  const { data: breakersResponse, refetch: refetchBreakers } = useCircuitBreakers()
+  const { data: exposureResponse, refetch: refetchExposure } = useRiskExposure()
+
+  const handleRefresh = () => {
+    refetchMetrics()
+    refetchBreakers()
+    refetchExposure()
+  }
+
+  // Map API risk metrics
+  const apiMetrics = metricsResponse?.data as {
+    var_95: number | null
+    var_99: number | null
+    expected_shortfall: number | null
+    open_positions: number
+    total_exposure: number
+  } | undefined
+
+  // Map API circuit breakers to component shape
+  const circuitBreakers: CircuitBreaker[] = useMemo(() => {
+    const raw = breakersResponse?.data as
+      | { circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }> }
+      | undefined
+    if (!raw?.circuit_breakers?.length) return []
+    return raw.circuit_breakers.map(cb => ({
+      name: cb.name,
+      status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : 'normal',
+      threshold: cb.threshold,
+      currentValue: cb.current,
+      description: cb.name,
+    } as CircuitBreaker))
+  }, [breakersResponse])
+
+  // Map API exposure data
+  const exposureData = useMemo(() => {
+    const raw = exposureResponse?.data as
+      | { exposure: Array<{ symbol: string; exposure: number }> }
+      | undefined
+    if (!raw?.exposure?.length) return []
+    const total = raw.exposure.reduce((sum, e) => sum + e.exposure, 0)
+    return raw.exposure.map(e => ({
+      symbol: e.symbol,
+      exposure: e.exposure,
+      percentage: total > 0 ? Math.round((e.exposure / total) * 100) : 0,
+      value: e.exposure,
+      side: 'long' as const,
+    }))
+  }, [exposureResponse])
+
+  const var95 = apiMetrics?.var_95 ?? null
+  const var99 = apiMetrics?.var_99 ?? null
+
   const riskScore = useMemo(() => {
+    if (!circuitBreakers.length) return 100
     let score = 100
-    mockCircuitBreakers.forEach(cb => {
-      const usage = Math.abs(cb.currentValue) / Math.abs(cb.threshold)
+    circuitBreakers.forEach(cb => {
+      const usage = cb.threshold > 0 ? Math.abs(cb.currentValue) / Math.abs(cb.threshold) : 0
       if (cb.status === 'triggered') score -= 30
       else if (cb.status === 'warning') score -= 15
       else if (usage > 0.5) score -= 5
     })
     return Math.max(0, Math.min(100, score))
-  }, [])
+  }, [circuitBreakers])
 
   const riskLevel = riskScore >= 80 ? 'Low' : riskScore >= 50 ? 'Medium' : 'High'
   const riskColor = riskScore >= 80 ? 'text-profit' : riskScore >= 50 ? 'text-warning' : 'text-loss'
@@ -130,7 +123,10 @@ export default function RiskPage() {
             Portfolio risk monitoring & circuit breaker status
           </p>
         </div>
-        <button className="flex items-center gap-2 px-3 py-2 bg-card border border-border rounded-lg hover:bg-muted/50 transition-colors text-sm">
+        <button
+          onClick={handleRefresh}
+          className="flex items-center gap-2 px-3 py-2 bg-card border border-border rounded-lg hover:bg-muted/50 transition-colors text-sm"
+        >
           <RefreshCw className="h-4 w-4" />
           Refresh
         </button>
@@ -147,22 +143,21 @@ export default function RiskPage() {
         />
         <StatCard
           title="Value at Risk (95%)"
-          value={formatPercentage(mockRiskMetrics.var95)}
-          subtitle={`99%: ${formatPercentage(mockRiskMetrics.var99)}`}
+          value={var95 != null ? formatPercentage(var95) : '—'}
+          subtitle={var99 != null ? `99%: ${formatPercentage(var99)}` : 'Insufficient data'}
           icon={<TrendingDown className="h-5 w-5" />}
-          valueClassName={mockRiskMetrics.var95 > RISK_THRESHOLDS.var.warning ? 'text-warning' : 'text-foreground'}
+          valueClassName={var95 != null && var95 > RISK_THRESHOLDS.var.warning ? 'text-warning' : 'text-foreground'}
         />
         <StatCard
-          title="Max Drawdown"
-          value={formatPercentage(0.078)}
-          subtitle={`Threshold: ${formatPercentage(RISK_THRESHOLDS.drawdown.critical)}`}
+          title="Open Positions"
+          value={apiMetrics?.open_positions?.toString() ?? '—'}
+          subtitle={`Exposure: ${apiMetrics?.total_exposure != null ? formatCurrency(apiMetrics.total_exposure) : '—'}`}
           icon={<Activity className="h-5 w-5" />}
-          valueClassName="text-warning"
         />
         <StatCard
-          title="Beta to Market"
-          value={mockRiskMetrics.betaToMarket.toFixed(2)}
-          subtitle="vs BTC benchmark"
+          title="Total Exposure"
+          value={apiMetrics?.total_exposure != null ? formatCurrency(apiMetrics.total_exposure) : '—'}
+          subtitle="Across all open positions"
           icon={<BarChart3 className="h-5 w-5" />}
         />
       </div>
@@ -171,7 +166,7 @@ export default function RiskPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Circuit Breakers + Alerts */}
         <div className="lg:col-span-1 space-y-6">
-          <CircuitBreakerStatus circuitBreakers={mockCircuitBreakers} />
+          <CircuitBreakerStatus circuitBreakers={circuitBreakers} />
 
           {/* Risk Alerts */}
           <div className="bg-card border border-border rounded-lg p-6">
@@ -216,7 +211,7 @@ export default function RiskPage() {
           {/* Exposure Pie */}
           <div className="bg-card border border-border rounded-lg p-6">
             <ExposurePie
-              data={mockExposure}
+              data={exposureData}
               title="Portfolio Exposure by Asset"
               height={350}
               showLegend
@@ -255,83 +250,29 @@ export default function RiskPage() {
             />
           </div>
 
-          {/* Correlation Matrix */}
-          <div className="bg-card border border-border rounded-lg p-6">
-            <h3 className="font-semibold mb-4">Asset Correlation Matrix</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className="text-left p-2 text-muted-foreground">Asset</th>
-                    {Object.keys(mockRiskMetrics.correlation).map(asset => (
-                      <th key={asset} className="p-2 text-muted-foreground text-center">
-                        {asset.replace('/USDT', '')}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(mockRiskMetrics.correlation).map(([asset, _]) => (
-                    <tr key={asset} className="border-t border-border">
-                      <td className="p-2 font-medium">{asset.replace('/USDT', '')}</td>
-                      {Object.keys(mockRiskMetrics.correlation).map(otherAsset => {
-                        const corr = asset === otherAsset
-                          ? 1.0
-                          : Math.min(
-                              (mockRiskMetrics.correlation[asset] || 0.5) *
-                              (mockRiskMetrics.correlation[otherAsset] || 0.5),
-                              0.99
-                            )
-                        const intensity = Math.abs(corr)
-                        return (
-                          <td
-                            key={otherAsset}
-                            className="p-2 text-center font-mono text-xs"
-                            style={{
-                              backgroundColor: `rgba(${corr > 0 ? '34,197,94' : '239,68,68'}, ${intensity * 0.3})`,
-                            }}
-                          >
-                            {corr.toFixed(2)}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
           {/* Position Sizing */}
-          <div className="bg-card border border-border rounded-lg p-6">
-            <h3 className="font-semibold mb-4">Position Sizing Breakdown</h3>
-            <div className="space-y-3">
-              {mockExposure.map(pos => (
-                <div key={pos.symbol} className="flex items-center gap-4">
-                  <div className="w-24 text-sm font-medium">{pos.symbol.replace('/USDT', '')}</div>
-                  <div className="flex-1">
-                    <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={cn(
-                          'h-full rounded-full transition-all',
-                          pos.side === 'long' ? 'bg-profit' : 'bg-loss'
-                        )}
-                        style={{ width: `${pos.percentage}%` }}
-                      />
+          {exposureData.length > 0 && (
+            <div className="bg-card border border-border rounded-lg p-6">
+              <h3 className="font-semibold mb-4">Position Sizing Breakdown</h3>
+              <div className="space-y-3">
+                {exposureData.map(pos => (
+                  <div key={pos.symbol} className="flex items-center gap-4">
+                    <div className="w-24 text-sm font-medium">{pos.symbol.replace('/USDT', '').replace('USDT', '')}</div>
+                    <div className="flex-1">
+                      <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all bg-profit"
+                          style={{ width: `${pos.percentage}%` }}
+                        />
+                      </div>
                     </div>
+                    <div className="w-20 text-right text-sm font-mono">{formatCurrency(pos.value)}</div>
+                    <div className="w-12 text-right text-sm text-muted-foreground">{pos.percentage}%</div>
                   </div>
-                  <div className="w-20 text-right text-sm font-mono">{formatCurrency(pos.value)}</div>
-                  <div className="w-12 text-right text-sm text-muted-foreground">{pos.percentage}%</div>
-                  <span className={cn(
-                    'text-xs px-2 py-0.5 rounded-full',
-                    pos.side === 'long' ? 'bg-profit/20 text-profit' : 'bg-loss/20 text-loss'
-                  )}>
-                    {pos.side}
-                  </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
