@@ -18,7 +18,7 @@ import {
   isRawDashboardResponse,
   isRawDashboardPnlResponse,
 } from '@/types/api-responses'
-import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats, EquityPoint } from '@/lib/types'
+import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats } from '@/lib/types'
 
 // Query Keys
 export const QUERY_KEYS = {
@@ -38,6 +38,8 @@ export function useTrades(limit = 50, offset = 0) {
     queryKey: [...QUERY_KEYS.trades, limit, offset],
     queryFn: async () => {
       if (USE_MOCK_DATA) {
+        // NOTE: mock mode returns all trades regardless of limit/offset params.
+        // Pagination is only enforced against the real API.
         return {
           success: true as const,
           data: getMockTrades(),
@@ -96,11 +98,11 @@ export function usePositions() {
       }
 
       const response = await apiClient.getPositions()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch positions')
       }
-      
+
       // API returns {positions: [...], count: N} - extract the array
       const rawData: unknown = response.data
       if (isWrappedResponse(rawData)) {
@@ -110,7 +112,7 @@ export function usePositions() {
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.positions,
@@ -141,11 +143,11 @@ export function useOrders() {
       }
 
       const response = await apiClient.getOrders()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch orders')
       }
-      
+
       // API returns {orders: [...], count: N} - extract the array
       const rawData: unknown = response.data
       if (isWrappedOrders(rawData)) {
@@ -155,7 +157,7 @@ export function useOrders() {
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.trades,
@@ -177,17 +179,17 @@ export function useDashboard() {
       }
 
       const response = await apiClient.getDashboard()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch dashboard')
       }
-      
+
       // Transform API response shape to DashboardStats
       const raw: unknown = response.data
       if (isRawDashboardResponse(raw)) {
         const pnl = raw.pnl_summary || {}
         const pos = raw.position_summary || {}
-        
+
         const transformed: DashboardStats = {
           totalPnl: pnl.total_pnl ?? 0,
           totalPnlPercent: pnl.return_percent ?? 0,
@@ -199,14 +201,14 @@ export function useDashboard() {
           marginUsed: pos.total_exposure ?? 0,
           marginAvailable: (pnl.current_capital ?? 0) - (pos.total_exposure ?? 0),
         }
-        
+
         return {
           success: true as const,
           data: transformed,
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -227,11 +229,11 @@ export function useDashboardPositions() {
       }
 
       const response = await apiClient.getDashboardPositions()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch dashboard positions')
       }
-      
+
       // API returns {positions: [...], count: N, summary: {...}} - extract the array
       const rawData: unknown = response.data
       if (isWrappedResponse(rawData)) {
@@ -241,7 +243,7 @@ export function useDashboardPositions() {
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -266,11 +268,11 @@ export function useDashboardPnl() {
       }
 
       const response = await apiClient.getDashboardPnl()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch dashboard PnL')
       }
-      
+
       // Transform API response: API returns flat {total_pnl, realized_pnl, ...}
       const raw: unknown = response.data
       if (isRawDashboardPnlResponse(raw)) {
@@ -279,12 +281,13 @@ export function useDashboardPnl() {
           data: {
             daily: raw.realized_pnl ?? 0,
             total: raw.total_pnl ?? 0,
-            equity: (raw as { equity_curve?: EquityPoint[] }).equity_curve ?? [],
+            // TODO: replace with real API data when backend provides equity_curve
+            equity: getMockEquityPoints(),
           },
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -319,7 +322,7 @@ export function useUnifiedPortfolio() {
 // Mutations
 export function useCreateOrder() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (order: Partial<Order>) => apiClient.createOrder(order),
     onSuccess: () => {
@@ -330,7 +333,7 @@ export function useCreateOrder() {
 
 export function useDeleteOrder() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id: string) => apiClient.deleteOrder(id),
     onSuccess: () => {
@@ -342,7 +345,7 @@ export function useDeleteOrder() {
 // Trading Controls
 export function useStartTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.startTrading(),
     onSuccess: () => {
@@ -353,7 +356,7 @@ export function useStartTrading() {
 
 export function useStopTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.stopTrading(),
     onSuccess: () => {
@@ -364,7 +367,7 @@ export function useStopTrading() {
 
 export function usePauseTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.pauseTrading(),
     onSuccess: () => {
@@ -375,7 +378,7 @@ export function usePauseTrading() {
 
 export function useResumeTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.resumeTrading(),
     onSuccess: () => {

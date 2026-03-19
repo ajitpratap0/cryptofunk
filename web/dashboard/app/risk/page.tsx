@@ -13,8 +13,7 @@ import { ExposurePie } from '@/components/charts/ExposurePie'
 import { DrawdownChart } from '@/components/charts/DrawdownChart'
 import { CircuitBreakerStatus } from '@/components/risk/CircuitBreakerStatus'
 import { StatCard } from '@/components/ui/StatCard'
-import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
-import { RISK_THRESHOLDS } from '@/lib/constants'
+import { cn, formatCurrency } from '@/lib/utils'
 import { useRiskMetrics, useCircuitBreakers, useRiskExposure } from '@/hooks/usePerformance'
 import type { CircuitBreaker } from '@/lib/types'
 
@@ -45,9 +44,12 @@ const mockAlerts = [
 export default function RiskPage() {
   const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
-  const { data: metricsResponse, refetch: refetchMetrics } = useRiskMetrics()
-  const { data: breakersResponse, refetch: refetchBreakers } = useCircuitBreakers()
-  const { data: exposureResponse, refetch: refetchExposure } = useRiskExposure()
+  const { data: metricsResponse, isError: metricsError, isLoading: metricsLoading, refetch: refetchMetrics } = useRiskMetrics()
+  const { data: breakersResponse, isError: breakersError, isLoading: breakersLoading, refetch: refetchBreakers } = useCircuitBreakers()
+  const { data: exposureResponse, isError: exposureError, isLoading: exposureLoading, refetch: refetchExposure } = useRiskExposure()
+
+  const isLoading = metricsLoading || breakersLoading || exposureLoading
+  const hasError = metricsError || breakersError || exposureError
 
   const handleRefresh = () => {
     refetchMetrics()
@@ -80,6 +82,9 @@ export default function RiskPage() {
   }, [breakersResponse])
 
   // Map API exposure data
+  // Issue #2 fix: API GetExposure does not return a `side` field — omit it
+  // entirely so ExposurePie uses its default asset-based coloring instead of
+  // incorrectly coloring every bar as a long (profit/green).
   const exposureData = useMemo(() => {
     const raw = exposureResponse?.data as
       | { exposure: Array<{ symbol: string; exposure: number }> }
@@ -91,15 +96,16 @@ export default function RiskPage() {
       exposure: e.exposure,
       percentage: total > 0 ? Math.round((e.exposure / total) * 100) : 0,
       value: e.exposure,
-      side: 'long' as const,
     }))
   }, [exposureResponse])
 
   const var95 = apiMetrics?.var_95 ?? null
   const var99 = apiMetrics?.var_99 ?? null
 
-  const riskScore = useMemo(() => {
-    if (!circuitBreakers.length) return 100
+  // Issue #7 fix: return null when circuit breaker data is unavailable so the
+  // UI shows "Unknown / —" rather than a misleading "Low Risk" score of 100.
+  const riskScore = useMemo<number | null>(() => {
+    if (!circuitBreakers.length) return null
     let score = 100
     circuitBreakers.forEach(cb => {
       const usage = cb.threshold > 0 ? Math.abs(cb.currentValue) / Math.abs(cb.threshold) : 0
@@ -110,11 +116,31 @@ export default function RiskPage() {
     return Math.max(0, Math.min(100, score))
   }, [circuitBreakers])
 
-  const riskLevel = riskScore >= 80 ? 'Low' : riskScore >= 50 ? 'Medium' : 'High'
-  const riskColor = riskScore >= 80 ? 'text-profit' : riskScore >= 50 ? 'text-warning' : 'text-loss'
+  const riskLevel = riskScore == null ? 'Unknown' : riskScore >= 80 ? 'Low' : riskScore >= 50 ? 'Medium' : 'High'
+  const riskColor = riskScore == null ? 'text-muted-foreground' : riskScore >= 80 ? 'text-profit' : riskScore >= 50 ? 'text-warning' : 'text-loss'
 
   return (
     <div className="space-y-6">
+      {/* Error / Loading banner */}
+      {hasError && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-loss/40 bg-loss/10 text-sm">
+          <span className="text-loss font-medium">Risk data unavailable — API error</span>
+          <button
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-loss/40 hover:bg-loss/20 transition-colors text-loss text-xs font-medium"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+        </div>
+      )}
+      {isLoading && !hasError && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-border bg-muted/30 text-sm text-muted-foreground">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Loading risk data…
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -136,17 +162,20 @@ export default function RiskPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Risk Score"
-          value={`${riskScore}/100`}
+          value={riskScore != null ? `${riskScore}/100` : '—'}
           subtitle={riskLevel}
           icon={<Shield className="h-5 w-5" />}
           valueClassName={riskColor}
         />
+        {/* Issue #1 fix: var95/var99 are dollar PnL values, not fractional
+            percentages — use formatCurrency instead of formatPercentage.
+            Threshold comparison updated to dollar-based (>$500 = warning). */}
         <StatCard
           title="Value at Risk (95%)"
-          value={var95 != null ? formatPercentage(var95) : '—'}
-          subtitle={var99 != null ? `99%: ${formatPercentage(var99)}` : 'Insufficient data'}
+          value={var95 != null ? formatCurrency(var95) : '—'}
+          subtitle={var99 != null ? `99%: ${formatCurrency(var99)}` : 'Insufficient data'}
           icon={<TrendingDown className="h-5 w-5" />}
-          valueClassName={var95 != null && var95 > RISK_THRESHOLDS.var.warning ? 'text-warning' : 'text-foreground'}
+          valueClassName={var95 != null && Math.abs(var95) > 500 ? 'text-warning' : 'text-foreground'}
         />
         <StatCard
           title="Open Positions"

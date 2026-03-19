@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
@@ -18,10 +19,16 @@ func NewTradesHandler(database *db.DB) *TradesHandler {
 	return &TradesHandler{db: database}
 }
 
-func (h *TradesHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.HandlerFunc) {
+// RegisterRoutes mounts the /trades sub-group under the provided router group.
+// If authMiddleware is non-nil it is applied to all routes alongside readMiddleware.
+func (h *TradesHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.HandlerFunc, authMiddleware gin.HandlerFunc) {
 	trades := rg.Group("/trades")
-	trades.Use(readMiddleware)
-	trades.GET("", h.ListTrades)
+	if authMiddleware != nil {
+		trades.GET("", readMiddleware, authMiddleware, h.ListTrades)
+	} else {
+		trades.Use(readMiddleware)
+		trades.GET("", h.ListTrades)
+	}
 }
 
 // ListTrades returns recent trade fills, newest first.
@@ -53,7 +60,8 @@ func (h *TradesHandler) ListTrades(c *gin.Context) {
 	total, err := h.db.CountAllTrades(ctx)
 	if err != nil {
 		// Non-fatal: return the page without total rather than failing the request.
-		total = -1
+		log.Warn().Err(err).Msg("failed to count trades, total will be 0")
+		total = 0
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -353,8 +353,9 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
-// GetAllClosedPositions returns all positions that have been closed (exit_time IS NOT NULL)
-// across all sessions. Use this instead of iterating sessions + GetPositionsBySession to avoid N+1.
+// GetAllClosedPositions returns the most recent 1000 closed positions across all sessions,
+// ordered by exit_time DESC. VaR and performance calculations only need recent history,
+// and a full table scan becomes expensive at scale.
 func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 	query := `
 		SELECT
@@ -365,6 +366,7 @@ func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 		FROM positions
 		WHERE exit_time IS NOT NULL AND realized_pnl IS NOT NULL
 		ORDER BY exit_time DESC
+		LIMIT 1000
 	`
 
 	rows, err := db.pool.Query(ctx, query)
@@ -655,6 +657,81 @@ func (db *DB) PartialClosePosition(ctx context.Context, id uuid.UUID, closeQuant
 	}
 
 	return closedPosition, nil
+}
+
+// PairPerformance holds aggregated realized PnL and trade count for a single trading pair.
+type PairPerformance struct {
+	Symbol      string  `db:"symbol"`
+	RealizedPnL float64 `db:"realized_pnl"`
+	TradeCount  int     `db:"trade_count"`
+}
+
+// GetPairPerformance returns realized PnL and trade count grouped by symbol using SQL GROUP BY,
+// covering all closed positions where realized_pnl is not NULL.
+func (db *DB) GetPairPerformance(ctx context.Context) ([]PairPerformance, error) {
+	query := `
+		SELECT symbol, COALESCE(SUM(realized_pnl), 0) AS realized_pnl, COUNT(*) AS trade_count
+		FROM positions
+		WHERE exit_time IS NOT NULL AND realized_pnl IS NOT NULL
+		GROUP BY symbol
+		ORDER BY realized_pnl DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pair performance: %w", err)
+	}
+	defer rows.Close()
+
+	var results []PairPerformance
+	for rows.Next() {
+		var p PairPerformance
+		if err := rows.Scan(&p.Symbol, &p.RealizedPnL, &p.TradeCount); err != nil {
+			return nil, fmt.Errorf("failed to scan pair performance row: %w", err)
+		}
+		results = append(results, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pair performance rows: %w", err)
+	}
+	return results, nil
+}
+
+// SymbolExposure holds the cost-basis exposure for a single symbol across all open positions.
+type SymbolExposure struct {
+	Symbol   string  `db:"symbol"`
+	Exposure float64 `db:"exposure"`
+}
+
+// GetExposureBySymbol returns the total open-position exposure (quantity * entry_price) grouped by
+// symbol using SQL GROUP BY. Exposure is calculated at cost-basis, not mark-to-market.
+func (db *DB) GetExposureBySymbol(ctx context.Context) ([]SymbolExposure, error) {
+	query := `
+		SELECT symbol, SUM(quantity * entry_price) AS exposure
+		FROM positions
+		WHERE exit_time IS NULL
+		GROUP BY symbol
+		ORDER BY exposure DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query exposure by symbol: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SymbolExposure
+	for rows.Next() {
+		var s SymbolExposure
+		if err := rows.Scan(&s.Symbol, &s.Exposure); err != nil {
+			return nil, fmt.Errorf("failed to scan symbol exposure row: %w", err)
+		}
+		results = append(results, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating symbol exposure rows: %w", err)
+	}
+	return results, nil
 }
 
 // ConvertPositionSide converts a string to PositionSide

@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
@@ -15,23 +17,37 @@ import (
 type RiskHandler struct {
 	db          *db.DB
 	riskService *risk.Service
+	cfg         *config.RiskConfig
 }
 
-// NewRiskHandler creates a new RiskHandler backed by the given database.
-func NewRiskHandler(database *db.DB) *RiskHandler {
+// NewRiskHandler creates a new RiskHandler backed by the given database and risk config.
+// If cfg is nil a zero-value RiskConfig is used, which causes setDefaults values to be
+// applied at load time and therefore cfg should always be non-nil in production.
+func NewRiskHandler(database *db.DB, cfg *config.RiskConfig) *RiskHandler {
+	if cfg == nil {
+		cfg = &config.RiskConfig{}
+	}
 	return &RiskHandler{
 		db:          database,
 		riskService: risk.NewService(),
+		cfg:         cfg,
 	}
 }
 
 // RegisterRoutes mounts the /risk sub-group under the provided router group.
-func (h *RiskHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.HandlerFunc) {
+// If authMiddleware is non-nil it is applied to all routes alongside readMiddleware.
+func (h *RiskHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.HandlerFunc, authMiddleware gin.HandlerFunc) {
 	r := rg.Group("/risk")
-	r.Use(readMiddleware)
-	r.GET("/metrics", h.GetMetrics)
-	r.GET("/circuit-breakers", h.GetCircuitBreakers)
-	r.GET("/exposure", h.GetExposure)
+	if authMiddleware != nil {
+		r.GET("/metrics", readMiddleware, authMiddleware, h.GetMetrics)
+		r.GET("/circuit-breakers", readMiddleware, authMiddleware, h.GetCircuitBreakers)
+		r.GET("/exposure", readMiddleware, authMiddleware, h.GetExposure)
+	} else {
+		r.Use(readMiddleware)
+		r.GET("/metrics", h.GetMetrics)
+		r.GET("/circuit-breakers", h.GetCircuitBreakers)
+		r.GET("/exposure", h.GetExposure)
+	}
 }
 
 // GetMetrics returns VaR, CVaR, open position count, and total exposure.
@@ -46,6 +62,9 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 	}
 
 	openCount := len(openPositions)
+	// NOTE: exposure is calculated at cost-basis (entry_price), not mark-to-market.
+	// Current market price is not stored on the position; a live price lookup
+	// would be needed for accurate mark-to-market exposure.
 	var totalExposure float64
 	for _, p := range openPositions {
 		totalExposure += p.Quantity * p.EntryPrice
@@ -77,7 +96,9 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			"returns":          returnsIface,
 			"confidence_level": 0.95,
 		})
-		if err == nil {
+		if err != nil {
+			log.Debug().Err(err).Msg("VaR calculation failed (95%)")
+		} else {
 			if varResult, ok := res95.(*risk.VaRResult); ok {
 				response["var_95"] = varResult.VaR
 			}
@@ -87,7 +108,9 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			"returns":          returnsIface,
 			"confidence_level": 0.99,
 		})
-		if err == nil {
+		if err != nil {
+			log.Debug().Err(err).Msg("VaR calculation failed (99%)")
+		} else {
 			if varResult, ok := res99.(*risk.VaRResult); ok {
 				response["var_99"] = varResult.VaR
 				response["expected_shortfall"] = varResult.CVaR
@@ -119,12 +142,12 @@ func (h *RiskHandler) GetCircuitBreakers(c *gin.Context) {
 		totalTrades += s.TotalTrades
 	}
 
-	// Max Daily Loss: triggered when cumulative losses exceed $5000
+	// Max Daily Loss: triggered when cumulative losses exceed the configured threshold (dollars).
 	lossAmount := math.Abs(math.Min(totalPnL, 0))
 	breakers := []gin.H{
-		buildBreaker("Max Daily Loss", lossAmount, 5000),
-		buildBreaker("Max Drawdown %", maxDrawdown*100, 10),
-		buildBreaker("Total Trade Count", float64(totalTrades), 100),
+		buildBreaker("Max Daily Loss", lossAmount, h.cfg.MaxDailyLossDollars),
+		buildBreaker("Max Drawdown %", maxDrawdown*100, h.cfg.MaxDrawdownPct),
+		buildBreaker("Total Trade Count", float64(totalTrades), float64(h.cfg.MaxTradeCount)),
 	}
 
 	c.JSON(http.StatusOK, gin.H{"circuit_breakers": breakers, "count": len(breakers)})
@@ -150,33 +173,33 @@ func buildBreaker(name string, current, threshold float64) gin.H {
 func (h *RiskHandler) GetExposure(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	openPositions, err := h.db.GetAllOpenPositions(ctx)
+	// NOTE: exposure is calculated at cost-basis (entry_price), not mark-to-market.
+	// Current market price is not stored on the position; a live price lookup
+	// would be needed for accurate mark-to-market exposure.
+	rows, err := h.db.GetExposureBySymbol(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query open positions"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query exposure by symbol"})
 		return
 	}
 
-	exposureBySymbol := make(map[string]float64)
-	for _, p := range openPositions {
-		exposureBySymbol[p.Symbol] += p.Quantity * p.EntryPrice
-	}
-
-	type symbolExposure struct {
+	type symbolExposureJSON struct {
 		Symbol   string  `json:"symbol"`
 		Exposure float64 `json:"exposure"`
 	}
-	result := make([]symbolExposure, 0, len(exposureBySymbol))
-	for sym, exp := range exposureBySymbol {
-		result = append(result, symbolExposure{
-			Symbol:   sym,
-			Exposure: math.Round(exp*100) / 100,
+	result := make([]symbolExposureJSON, 0, len(rows))
+	for _, r := range rows {
+		result = append(result, symbolExposureJSON{
+			Symbol:   r.Symbol,
+			Exposure: math.Round(r.Exposure*100) / 100,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"exposure": result, "count": len(result)})
 }
 
-// collectClosedReturns gathers RealizedPnL from all closed positions in a single query.
+// collectClosedReturns gathers fractional returns from all closed positions.
+// Each return is RealizedPnL / (EntryPrice * Quantity) so values are dimensionless
+// fractions (e.g. 0.023 = 2.3%) suitable for VaR calculations.
 func (h *RiskHandler) collectClosedReturns(ctx context.Context) ([]float64, error) {
 	positions, err := h.db.GetAllClosedPositions(ctx)
 	if err != nil {
@@ -185,8 +208,14 @@ func (h *RiskHandler) collectClosedReturns(ctx context.Context) ([]float64, erro
 
 	var returns []float64
 	for _, p := range positions {
+		// RealizedPnL is non-nil here: GetAllClosedPositions filters realized_pnl IS NOT NULL.
+		// This guard is retained as defense-in-depth against future query changes.
 		if p.RealizedPnL != nil {
-			returns = append(returns, *p.RealizedPnL)
+			notional := p.EntryPrice * p.Quantity
+			if notional == 0 {
+				continue
+			}
+			returns = append(returns, *p.RealizedPnL/notional)
 		}
 	}
 	return returns, nil

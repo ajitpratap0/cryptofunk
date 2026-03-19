@@ -238,7 +238,7 @@ func (s *APIServer) setupRoutes() {
 
 		// Trades routes — fill records from the trades table
 		tradesHandler := api.NewTradesHandler(s.db)
-		tradesHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+		tradesHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig))
 
 		// TB-006: API Key Management routes
 		// These endpoints allow users to manage their API keys (create, rotate, revoke)
@@ -265,12 +265,12 @@ func (s *APIServer) setupRoutes() {
 		polymarketHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 
 		// Risk metrics routes
-		riskHandler := api.NewRiskHandler(s.db)
-		riskHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+		riskHandler := api.NewRiskHandler(s.db, &s.config.Risk)
+		riskHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig))
 
 		// Performance routes
 		perfHandler := api.NewPerformanceHandler(s.db)
-		perfHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+		perfHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig))
 
 		// Decision analytics and outcome resolution routes
 		decisionAnalyticsHandler := api.NewDecisionAnalyticsHandler(s.db)

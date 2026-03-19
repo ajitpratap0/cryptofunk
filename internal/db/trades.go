@@ -17,7 +17,7 @@ func (db *DB) ListAllTrades(ctx context.Context, limit, offset int) ([]*Trade, e
 		LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query trades: %w", err)
 	}
 	defer rows.Close()
 
@@ -29,18 +29,27 @@ func (db *DB) ListAllTrades(ctx context.Context, limit, offset int) ([]*Trade, e
 			&t.Price, &t.Quantity, &t.QuoteQuantity, &t.Commission, &t.CommissionAsset,
 			&t.ExecutedAt, &t.IsMaker, &t.Metadata, &t.CreatedAt,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan trade row: %w", err)
 		}
 		trades = append(trades, t)
 	}
 	return trades, rows.Err()
 }
 
-// CountAllTrades returns the total number of trade fill records in the database.
+// CountAllTrades returns an approximate count of trade fill records using pg_class statistics.
+// This is O(1) instead of O(n) — avoids a full sequential COUNT(*) scan on every request.
+// The estimate is sourced from pg_class.reltuples which is updated by ANALYZE/autovacuum.
+// If the table has never been analyzed (reltuples = -1), the function returns 0.
 func (db *DB) CountAllTrades(ctx context.Context) (int, error) {
-	var count int
-	if err := db.pool.QueryRow(ctx, "SELECT COUNT(*) FROM trades").Scan(&count); err != nil {
+	var estimate int64
+	if err := db.pool.QueryRow(ctx,
+		"SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'trades'",
+	).Scan(&estimate); err != nil {
 		return 0, fmt.Errorf("failed to count trades: %w", err)
 	}
-	return count, nil
+	// reltuples is -1 for a freshly created table that has never been analyzed.
+	if estimate < 0 {
+		return 0, nil
+	}
+	return int(estimate), nil
 }
