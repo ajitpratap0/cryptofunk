@@ -236,6 +236,10 @@ func (s *APIServer) setupRoutes() {
 		dashboardHandler := api.NewDashboardHandlerWithOrchestrator(s.db, orchClient, config.Version)
 		dashboardHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.ControlMiddleware())
 
+		// Trades routes — fill records from the trades table
+		tradesHandler := api.NewTradesHandler(s.db)
+		tradesHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+
 		// TB-006: API Key Management routes
 		// These endpoints allow users to manage their API keys (create, rotate, revoke)
 		// All key management operations require authentication
