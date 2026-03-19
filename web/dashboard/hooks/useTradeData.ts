@@ -20,6 +20,55 @@ import {
 } from '@/types/api-responses'
 import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats } from '@/lib/types'
 
+// RawApiTrade matches the JSON shape produced by encoding/json on db.Trade,
+// which has no struct tags — field names are the exact Go PascalCase names.
+interface RawApiTrade {
+  ID: string
+  OrderID: string
+  ExchangeTradeID?: string | null
+  Symbol: string
+  Exchange: string
+  Side: string           // "BUY" | "SELL" from db.OrderSide
+  Price: number
+  Quantity: number
+  QuoteQuantity: number
+  Commission: number
+  CommissionAsset?: string | null
+  ExecutedAt: string
+  IsMaker: boolean
+  Metadata?: Record<string, unknown> | null
+  CreatedAt: string
+}
+
+// mapApiTrade converts the PascalCase backend shape to the camelCase Trade type
+// used throughout the dashboard. Fields that have no direct backend equivalent
+// (entryPrice, currentPrice, pnl, pnlPercent, confidence, status, agent) are
+// derived or defaulted — the trades table stores exchange fills, not strategy
+// metadata, so those fields will be populated once the backend exposes them.
+function mapApiTrade(raw: RawApiTrade): Trade {
+  const side: Trade['side'] = raw.Side === 'SELL' ? 'short' : 'long'
+  return {
+    id: raw.ID,
+    symbol: raw.Symbol,
+    side,
+    // exchange fills record the execution price; use it for both entry and current
+    entryPrice: raw.Price,
+    currentPrice: raw.Price,
+    quantity: raw.Quantity,
+    // PnL is not available in the fills table — default to 0 until the backend
+    // enriches the response with position-level PnL.
+    pnl: 0,
+    pnlPercent: 0,
+    agent: raw.Exchange,        // closest available proxy for source label
+    confidence: 0,
+    timestamp: raw.ExecutedAt,
+    status: 'closed' as const,  // a fill record is always a completed trade
+    reasoning: undefined,
+    exitPrice: undefined,
+    exitTimestamp: undefined,
+  }
+}
+
 // Query Keys
 export const QUERY_KEYS = {
   trades: ['trades'],
@@ -55,7 +104,7 @@ export function useTrades(limit = 50, offset = 0) {
       const raw: unknown = response.data
       const tradeList: Trade[] =
         raw && typeof raw === 'object' && 'trades' in raw
-          ? (raw as { trades: Trade[] }).trades
+          ? (raw as { trades: RawApiTrade[] }).trades.map(mapApiTrade)
           : []
       return {
         success: true as const,

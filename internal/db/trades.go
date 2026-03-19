@@ -43,7 +43,7 @@ func (db *DB) ListAllTrades(ctx context.Context, limit, offset int) ([]*Trade, e
 func (db *DB) CountAllTrades(ctx context.Context) (int, error) {
 	var estimate int64
 	if err := db.pool.QueryRow(ctx,
-		"SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'trades'",
+		"SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'trades' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')",
 	).Scan(&estimate); err != nil {
 		return 0, fmt.Errorf("failed to count trades: %w", err)
 	}

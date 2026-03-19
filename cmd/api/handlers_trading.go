@@ -16,9 +16,11 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-// ptrF64 is a local pointer helper used only within this file.
-// Not duplicated elsewhere in the codebase (verified via grep).
-func ptrF64(f float64) *float64 { return &f }
+const (
+	paperSlippageBuy  = 1.001 // 0.1% adverse slippage for market buy orders
+	paperSlippageSell = 0.999 // 0.1% adverse slippage for market sell orders
+	// TODO: make slippage configurable via config.Trading.
+)
 
 // errOppositeSide is a sentinel returned from the WithTx callback when the
 // incoming order is on the opposite side of an existing open position. It is
@@ -444,8 +446,11 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	if sessionID == nil {
 		newSession := &db.TradingSession{
 			ID:             uuid.New(),
-			Mode:           db.TradingModePaper,
-			Symbol:         "PAPER", // Symbol is intentionally generic; paper sessions are multi-asset
+			Mode: db.TradingModePaper,
+			// TODO: Add a session_type or is_multi_asset column to trading_sessions in a follow-up
+			// migration. "PAPER" is a placeholder to distinguish multi-asset paper sessions from
+			// single-symbol sessions (which use the actual symbol, e.g. "BTCUSDT").
+			Symbol: "PAPER",
 			Exchange:       "paper",
 			InitialCapital: 100_000.0,
 			StartedAt:      time.Now(),
@@ -502,9 +507,9 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	execPrice := refPrice
 	if !isLimit {
 		if strings.EqualFold(req.Side, "BUY") {
-			execPrice = refPrice * 1.001
+			execPrice = refPrice * paperSlippageBuy
 		} else {
-			execPrice = refPrice * 0.999
+			execPrice = refPrice * paperSlippageSell
 		}
 	}
 
@@ -512,7 +517,7 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	now := time.Now()
 	var pricePtr *float64
 	if req.Price > 0 {
-		pricePtr = ptrF64(req.Price)
+		pricePtr = db.PtrFloat64(req.Price)
 	}
 	orderSide := db.ConvertOrderSide(req.Side)
 	orderType := db.ConvertOrderType(req.Type)
@@ -563,7 +568,9 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		// new position for the same symbol.
 		// AggregateSessionStats is intentionally kept outside the transaction: it
 		// is a read-then-aggregate UPDATE that can be safely retried.
-		txErr := s.db.WithTx(ctx, func(tx pgx.Tx) error {
+		// RepeatableRead + FOR UPDATE on positions prevents concurrent orders from
+		// both observing existingPos == nil and each inserting a duplicate position.
+		txErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 			// Re-fetch position inside the transaction for a consistent view.
 			existingPos, err := s.db.GetOpenPositionBySymbolTx(ctx, tx, *sessionID, req.Symbol)
 			if err != nil {
@@ -687,6 +694,13 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				return
 			}
 			log.Error().Err(txErr).Msg("Paper trade transaction failed")
+			// Attempt to cancel the order row that was inserted before the transaction
+			// began, so it is not left orphaned in NEW status with no fill.
+			canceledAt := time.Now()
+			cancelErrMsg := "fill transaction failed"
+			if cancelErr := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusCanceled, 0, 0, nil, &canceledAt, &cancelErrMsg); cancelErr != nil {
+				log.Error().Err(cancelErr).Str("order_id", order.ID.String()).Msg("Failed to cancel orphaned order after transaction failure")
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}

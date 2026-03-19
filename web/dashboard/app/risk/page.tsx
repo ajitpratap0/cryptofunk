@@ -115,7 +115,10 @@ export default function RiskPage() {
     if (!isCircuitBreakers(raw) || !raw.circuit_breakers.length) return []
     return raw.circuit_breakers.map(cb => ({
       name: cb.name,
-      status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : 'normal',
+      status: cb.status === 'TRIGGERED' ? 'triggered'
+            : cb.status === 'WARNING'   ? 'warning'
+            : cb.status === 'DISABLED'  ? 'disabled'
+            : 'normal',
       threshold: cb.threshold,
       currentValue: cb.current,
       description: cb.name,
@@ -150,6 +153,7 @@ export default function RiskPage() {
     if (!circuitBreakers.length) return null
     let score = 100
     circuitBreakers.forEach(cb => {
+      if (cb.status === 'disabled') return
       const usage = cb.threshold > 0 ? Math.abs(cb.currentValue) / Math.abs(cb.threshold) : 0
       if (cb.status === 'triggered') score -= 30
       else if (cb.status === 'warning') score -= 15

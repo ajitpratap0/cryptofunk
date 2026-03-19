@@ -144,10 +144,11 @@ func (db *DB) SetCircuitBreaker(cb *risk.CircuitBreakerManager) {
 	db.circuitBreaker = cb
 }
 
-// WithTx runs fn inside a single pgx transaction. It commits on success and
-// rolls back on any error or panic. The caller must not commit or roll back tx.
-func (db *DB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
-	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+// WithTx runs fn inside a single pgx transaction using the provided TxOptions.
+// It commits on success and rolls back on any error or panic.
+// The caller must not commit or roll back tx.
+func (db *DB) WithTx(ctx context.Context, opts pgx.TxOptions, fn func(tx pgx.Tx) error) error {
+	tx, err := db.pool.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}

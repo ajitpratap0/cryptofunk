@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // PositionSide represents the side of a position
@@ -375,7 +376,14 @@ func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 	}
 	defer rows.Close()
 
-	return scanPositions(rows)
+	positions, err := scanPositions(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(positions) == 1000 {
+		log.Warn().Msg("GetAllClosedPositions hit LIMIT 1000; VaR sample may be truncated — consider recent-only window")
+	}
+	return positions, nil
 }
 
 // GetPositionsBySession retrieves all positions (including closed) for a session
@@ -458,6 +466,7 @@ func (db *DB) GetOpenPositionBySymbolTx(ctx context.Context, tx pgx.Tx, sessionI
 		WHERE symbol = $1 AND session_id = $2 AND exit_time IS NULL
 		ORDER BY entry_time DESC
 		LIMIT 1
+		FOR UPDATE
 	`
 
 	var position Position
