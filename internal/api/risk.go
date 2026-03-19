@@ -92,6 +92,16 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			returnsIface[i] = v
 		}
 
+		// Sum InitialCapital across all active sessions to get total portfolio value.
+		// Used to convert fractional VaR (e.g. 0.023) into dollar VaR (e.g. $2,300).
+		activeSessions, sessErr := h.db.ListActiveSessions(ctx)
+		portfolioValue := 0.0
+		if sessErr == nil {
+			for _, s := range activeSessions {
+				portfolioValue += s.InitialCapital
+			}
+		}
+
 		res95, err := h.riskService.CalculateVaR(map[string]interface{}{
 			"returns":          returnsIface,
 			"confidence_level": 0.95,
@@ -100,7 +110,12 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			log.Debug().Err(err).Msg("VaR calculation failed (95%)")
 		} else {
 			if varResult, ok := res95.(*risk.VaRResult); ok {
-				response["var_95"] = varResult.VaR
+				// Convert fractional VaR to dollar VaR by scaling by total portfolio value.
+				if portfolioValue > 0 {
+					response["var_95"] = varResult.VaR * portfolioValue
+				} else {
+					response["var_95"] = varResult.VaR
+				}
 			}
 		}
 
@@ -112,8 +127,14 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			log.Debug().Err(err).Msg("VaR calculation failed (99%)")
 		} else {
 			if varResult, ok := res99.(*risk.VaRResult); ok {
-				response["var_99"] = varResult.VaR
-				response["expected_shortfall"] = varResult.CVaR
+				// Convert fractional VaR to dollar VaR by scaling by total portfolio value.
+				if portfolioValue > 0 {
+					response["var_99"] = varResult.VaR * portfolioValue
+					response["expected_shortfall"] = varResult.CVaR * portfolioValue
+				} else {
+					response["var_99"] = varResult.VaR
+					response["expected_shortfall"] = varResult.CVaR
+				}
 			}
 		}
 	}

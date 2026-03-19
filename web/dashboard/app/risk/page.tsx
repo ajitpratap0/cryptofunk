@@ -81,6 +81,12 @@ function isExposure(raw: unknown): raw is RawExposure {
   )
 }
 
+// ── Risk Thresholds ─────────────────────────────────────────────────
+
+// Dollar-value VaR threshold above which the metric is highlighted as a warning.
+// Backend now returns dollar VaR (e.g. 2345.67), not fractional.
+const VAR_WARNING_THRESHOLD = 500
+
 // ── Page Component ─────────────────────────────────────────────────
 
 export default function RiskPage() {
@@ -221,7 +227,7 @@ export default function RiskPage() {
           value={var95 != null ? formatCurrency(var95) : '—'}
           subtitle={var99 != null ? `99%: ${formatCurrency(var99)}` : 'Insufficient data'}
           icon={<TrendingDown className="h-5 w-5" />}
-          valueClassName={var95 != null && Math.abs(var95) > 500 ? 'text-warning' : 'text-foreground'}
+          valueClassName={var95 != null && Math.abs(var95) > VAR_WARNING_THRESHOLD ? 'text-warning' : 'text-foreground'}
         />
         <StatCard
           title="Open Positions"

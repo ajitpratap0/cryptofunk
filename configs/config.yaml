@@ -150,7 +150,7 @@ trading:
     - "BTCUSDT"
     - "ETHUSDT"
   exchange: "binance"
-  initial_capital: 10000.0
+  initial_capital: 100000.0  # Paper trading starting capital ($100k for realistic position sizing)
   max_positions: 3
   default_quantity: 0.01
   commission_rate: 0.001  # 0.1% taker fee applied to paper trade fills (Binance standard tier)

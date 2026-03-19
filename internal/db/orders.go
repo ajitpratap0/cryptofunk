@@ -90,6 +90,112 @@ type Trade struct {
 	CreatedAt       time.Time
 }
 
+// InsertOrderTx inserts a new order into the database within an existing transaction.
+func (db *DB) InsertOrderTx(ctx context.Context, tx pgx.Tx, order *Order) error {
+	query := `
+		INSERT INTO orders (
+			id, session_id, position_id, exchange_order_id, symbol, exchange,
+			side, type, status, price, stop_price, quantity, executed_quantity,
+			executed_quote_quantity, time_in_force, placed_at, filled_at,
+			canceled_at, error_message, metadata, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+			$16, $17, $18, $19, $20, $21, $22
+		)
+	`
+
+	_, err := tx.Exec(ctx, query,
+		order.ID,
+		order.SessionID,
+		order.PositionID,
+		order.ExchangeOrderID,
+		order.Symbol,
+		order.Exchange,
+		order.Side,
+		order.Type,
+		order.Status,
+		order.Price,
+		order.StopPrice,
+		order.Quantity,
+		order.ExecutedQuantity,
+		order.ExecutedQuoteQuantity,
+		order.TimeInForce,
+		order.PlacedAt,
+		order.FilledAt,
+		order.CanceledAt,
+		order.ErrorMessage,
+		order.Metadata,
+		order.CreatedAt,
+		order.UpdatedAt,
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("order_id", order.ID.String()).
+			Str("symbol", order.Symbol).
+			Msg("Failed to insert order in transaction")
+		return fmt.Errorf("failed to insert order: %w", err)
+	}
+
+	log.Debug().
+		Str("order_id", order.ID.String()).
+		Str("symbol", order.Symbol).
+		Str("status", string(order.Status)).
+		Msg("Order inserted into database in transaction")
+
+	return nil
+}
+
+// InsertTradeTx inserts a new trade (fill) into the database within an existing transaction.
+func (db *DB) InsertTradeTx(ctx context.Context, tx pgx.Tx, trade *Trade) error {
+	query := `
+		INSERT INTO trades (
+			id, order_id, exchange_trade_id, symbol, exchange, side,
+			price, quantity, quote_quantity, commission, commission_asset,
+			executed_at, is_maker, metadata, created_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+		)
+	`
+
+	_, err := tx.Exec(ctx, query,
+		trade.ID,
+		trade.OrderID,
+		trade.ExchangeTradeID,
+		trade.Symbol,
+		trade.Exchange,
+		trade.Side,
+		trade.Price,
+		trade.Quantity,
+		trade.QuoteQuantity,
+		trade.Commission,
+		trade.CommissionAsset,
+		trade.ExecutedAt,
+		trade.IsMaker,
+		trade.Metadata,
+		trade.CreatedAt,
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("trade_id", trade.ID.String()).
+			Str("order_id", trade.OrderID.String()).
+			Msg("Failed to insert trade in transaction")
+		return fmt.Errorf("failed to insert trade: %w", err)
+	}
+
+	log.Debug().
+		Str("trade_id", trade.ID.String()).
+		Str("order_id", trade.OrderID.String()).
+		Float64("price", trade.Price).
+		Float64("quantity", trade.Quantity).
+		Msg("Trade inserted into database in transaction")
+
+	return nil
+}
+
 // InsertOrder inserts a new order into the database
 func (db *DB) InsertOrder(ctx context.Context, order *Order) error {
 	query := `

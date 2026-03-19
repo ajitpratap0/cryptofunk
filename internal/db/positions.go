@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/rs/zerolog/log"
 )
 
 // PositionSide represents the side of a position
@@ -354,9 +353,9 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
-// GetAllClosedPositions returns the most recent 1000 closed positions across all sessions,
-// ordered by exit_time DESC. VaR and performance calculations only need recent history,
-// and a full table scan becomes expensive at scale.
+// GetAllClosedPositions returns positions closed within the last 90 days across all sessions,
+// ordered by exit_time DESC. A 90-day window ensures VaR calculations use recent,
+// relevant return data rather than an arbitrary row count.
 func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 	query := `
 		SELECT
@@ -365,9 +364,10 @@ func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
 			metadata, created_at, updated_at
 		FROM positions
-		WHERE exit_time IS NOT NULL AND realized_pnl IS NOT NULL
+		WHERE exit_time IS NOT NULL
+		  AND exit_time > NOW() - INTERVAL '90 days'
+		  AND realized_pnl IS NOT NULL
 		ORDER BY exit_time DESC
-		LIMIT 1000
 	`
 
 	rows, err := db.pool.Query(ctx, query)
@@ -376,14 +376,7 @@ func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 	}
 	defer rows.Close()
 
-	positions, err := scanPositions(rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(positions) == 1000 {
-		log.Warn().Msg("GetAllClosedPositions hit LIMIT 1000; VaR sample may be truncated — consider recent-only window")
-	}
-	return positions, nil
+	return scanPositions(rows)
 }
 
 // GetPositionsBySession retrieves all positions (including closed) for a session
@@ -614,6 +607,83 @@ func (db *DB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuant
 
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
+		return fmt.Errorf("position not found or already closed: %s", id)
+	}
+
+	return nil
+}
+
+// CreatePositionTx inserts a new position into the database within an existing transaction.
+func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Position) error {
+	query := `
+		INSERT INTO positions (
+			id, session_id, symbol, exchange, side, entry_price, quantity,
+			entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+		)
+	`
+
+	if position.ID == uuid.Nil {
+		position.ID = uuid.New()
+	}
+	if position.CreatedAt.IsZero() {
+		position.CreatedAt = time.Now()
+	}
+	if position.UpdatedAt.IsZero() {
+		position.UpdatedAt = time.Now()
+	}
+
+	_, err := tx.Exec(ctx, query,
+		position.ID,
+		position.SessionID,
+		position.Symbol,
+		position.Exchange,
+		position.Side,
+		position.EntryPrice,
+		position.Quantity,
+		position.EntryTime,
+		position.StopLoss,
+		position.TakeProfit,
+		position.EntryReason,
+		position.Metadata,
+		position.CreatedAt,
+		position.UpdatedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create position: %w", err)
+	}
+
+	return nil
+}
+
+// UpdatePositionAveragingTx updates entry price and quantity when adding to a position,
+// within an existing transaction.
+func (db *DB) UpdatePositionAveragingTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, newEntryPrice, newQuantity float64, additionalFees float64) error {
+	query := `
+		UPDATE positions
+		SET
+			entry_price = $2,
+			quantity = $3,
+			fees = fees + $4,
+			updated_at = $5
+		WHERE id = $1 AND exit_time IS NULL
+	`
+
+	result, err := tx.Exec(ctx, query,
+		id,
+		newEntryPrice,
+		newQuantity,
+		additionalFees,
+		time.Now(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update position averaging: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
 		return fmt.Errorf("position not found or already closed: %s", id)
 	}
 

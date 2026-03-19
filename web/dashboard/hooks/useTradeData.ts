@@ -62,7 +62,8 @@ function mapApiTrade(raw: RawApiTrade): Trade {
     agent: raw.Exchange,        // closest available proxy for source label
     confidence: 0,
     timestamp: raw.ExecutedAt,
-    status: 'closed' as const,  // a fill record is always a completed trade
+    // A BUY fill opens a position ('open'); a SELL fill closes one ('closed').
+    status: (raw.Side === 'SELL' ? 'closed' : 'open') as Trade['status'],
     reasoning: undefined,
     exitPrice: undefined,
     exitTimestamp: undefined,
