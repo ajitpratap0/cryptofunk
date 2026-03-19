@@ -59,7 +59,7 @@ function mapApiTrade(raw: RawApiTrade): Trade {
     // enriches the response with position-level PnL.
     pnl: 0,
     pnlPercent: 0,
-    agent: raw.exchange,        // closest available proxy for source label
+    agent: raw.exchange,  // proxy until a dedicated agent_id field is on the trade row
     confidence: 0,
     timestamp: raw.executed_at,
     // A BUY fill opens a position ('open'); a SELL fill closes one ('closed').

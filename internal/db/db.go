@@ -154,7 +154,7 @@ func (db *DB) WithTx(ctx context.Context, opts pgx.TxOptions, fn func(tx pgx.Tx)
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback(ctx)
+			_ = tx.Rollback(context.Background())
 			panic(p)
 		}
 	}()

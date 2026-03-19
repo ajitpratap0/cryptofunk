@@ -107,6 +107,15 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			for _, s := range activeSessions {
 				portfolioValue += s.InitialCapital
 			}
+		} else {
+			log.Warn().Err(sessErr).Msg("ListActiveSessions failed; VaR will be fractional (not dollar-scaled)")
+		}
+
+		// Set var_unit once so the frontend knows how to interpret var_95/var_99.
+		if portfolioValue > 0 {
+			response["var_unit"] = "dollar"
+		} else {
+			response["var_unit"] = "fractional"
 		}
 
 		res95, err := h.riskService.CalculateVaR(map[string]interface{}{

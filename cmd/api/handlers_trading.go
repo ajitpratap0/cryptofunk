@@ -397,8 +397,9 @@ func (s *APIServer) handleCancelOrder(c *gin.Context) {
 // quoteAsset derives the quote asset token from a trading symbol by checking
 // common suffixes. Falls back to "USDT" for unrecognised symbols.
 func quoteAsset(symbol string) string {
-	// TODO: make suffix list configurable via config for non-Binance exchanges
-	// (e.g. Kraken uses XBT, EUR, USD as quote assets).
+	// Ordered most-specific first: "BUSD" before "BTC" prevents "BTCUSDT" from
+	// matching suffix "BTC" when "USDT" would be the correct quote asset.
+	// TODO: make configurable for non-Binance exchanges (e.g. Kraken uses XBT/USD).
 	for _, suffix := range []string{"USDT", "BUSD", "BTC", "ETH", "BNB"} {
 		if strings.HasSuffix(strings.ToUpper(symbol), suffix) {
 			return suffix
@@ -429,6 +430,11 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// NOTE: Session lookup and creation happen outside WithTx intentionally.
+	// The session row is long-lived (one per trading mode) and is safe to create
+	// outside the fill transaction. A failed fill transaction does not orphan the
+	// session — the next request simply reuses it.
 
 	// 1. Resolve or create paper session
 	sessions, err := s.db.ListActiveSessions(ctx)
@@ -568,6 +574,12 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		// is a read-then-aggregate UPDATE that can be safely retried.
 		// RepeatableRead + FOR UPDATE on positions prevents concurrent orders from
 		// both observing existingPos == nil and each inserting a duplicate position.
+		// Final safety net: migration 019 adds a UNIQUE partial index on
+		// (session_id, symbol) WHERE exit_time IS NULL. If two concurrent transactions
+		// both observe existingPos == nil and both attempt to INSERT a new open
+		// position, the second INSERT fails with SQLSTATE 23505 (unique_violation),
+		// causing its enclosing transaction to roll back rather than silently creating
+		// a duplicate open position for the same symbol.
 		txErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 			// Insert the order as the first step so it is rolled back atomically
 			// with all fill rows if any later step fails.

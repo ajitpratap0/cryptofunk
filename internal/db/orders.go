@@ -90,21 +90,43 @@ type Trade struct {
 	CreatedAt       time.Time              `json:"created_at"`
 }
 
+const sqlInsertOrder = `
+	INSERT INTO orders (
+		id, session_id, position_id, exchange_order_id, symbol, exchange,
+		side, type, status, price, stop_price, quantity, executed_quantity,
+		executed_quote_quantity, time_in_force, placed_at, filled_at,
+		canceled_at, error_message, metadata, created_at, updated_at
+	) VALUES (
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+		$16, $17, $18, $19, $20, $21, $22
+	)
+`
+
+const sqlUpdateOrderStatus = `
+	UPDATE orders
+	SET status = $1,
+	    executed_quantity = $2,
+	    executed_quote_quantity = $3,
+	    filled_at = $4,
+	    canceled_at = $5,
+	    error_message = $6,
+	    updated_at = NOW()
+	WHERE id = $7
+`
+
+const sqlInsertTrade = `
+	INSERT INTO trades (
+		id, order_id, exchange_trade_id, symbol, exchange, side,
+		price, quantity, quote_quantity, commission, commission_asset,
+		executed_at, is_maker, metadata, created_at
+	) VALUES (
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+	)
+`
+
 // InsertOrderTx inserts a new order into the database within an existing transaction.
 func (db *DB) InsertOrderTx(ctx context.Context, tx pgx.Tx, order *Order) error {
-	query := `
-		INSERT INTO orders (
-			id, session_id, position_id, exchange_order_id, symbol, exchange,
-			side, type, status, price, stop_price, quantity, executed_quantity,
-			executed_quote_quantity, time_in_force, placed_at, filled_at,
-			canceled_at, error_message, metadata, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-			$16, $17, $18, $19, $20, $21, $22
-		)
-	`
-
-	_, err := tx.Exec(ctx, query,
+	_, err := tx.Exec(ctx, sqlInsertOrder,
 		order.ID,
 		order.SessionID,
 		order.PositionID,
@@ -149,17 +171,7 @@ func (db *DB) InsertOrderTx(ctx context.Context, tx pgx.Tx, order *Order) error 
 
 // InsertTradeTx inserts a new trade (fill) into the database within an existing transaction.
 func (db *DB) InsertTradeTx(ctx context.Context, tx pgx.Tx, trade *Trade) error {
-	query := `
-		INSERT INTO trades (
-			id, order_id, exchange_trade_id, symbol, exchange, side,
-			price, quantity, quote_quantity, commission, commission_asset,
-			executed_at, is_maker, metadata, created_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-		)
-	`
-
-	_, err := tx.Exec(ctx, query,
+	_, err := tx.Exec(ctx, sqlInsertTrade,
 		trade.ID,
 		trade.OrderID,
 		trade.ExchangeTradeID,
@@ -198,19 +210,7 @@ func (db *DB) InsertTradeTx(ctx context.Context, tx pgx.Tx, trade *Trade) error 
 
 // InsertOrder inserts a new order into the database
 func (db *DB) InsertOrder(ctx context.Context, order *Order) error {
-	query := `
-		INSERT INTO orders (
-			id, session_id, position_id, exchange_order_id, symbol, exchange,
-			side, type, status, price, stop_price, quantity, executed_quantity,
-			executed_quote_quantity, time_in_force, placed_at, filled_at,
-			canceled_at, error_message, metadata, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-			$16, $17, $18, $19, $20, $21, $22
-		)
-	`
-
-	_, err := db.pool.Exec(ctx, query,
+	_, err := db.pool.Exec(ctx, sqlInsertOrder,
 		order.ID,
 		order.SessionID,
 		order.PositionID,
@@ -255,19 +255,7 @@ func (db *DB) InsertOrder(ctx context.Context, order *Order) error {
 
 // UpdateOrderStatus updates an order's status and related fields
 func (db *DB) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, status OrderStatus, executedQty, executedQuoteQty float64, filledAt, canceledAt *time.Time, errorMsg *string) error {
-	query := `
-		UPDATE orders
-		SET status = $1,
-		    executed_quantity = $2,
-		    executed_quote_quantity = $3,
-		    filled_at = $4,
-		    canceled_at = $5,
-		    error_message = $6,
-		    updated_at = NOW()
-		WHERE id = $7
-	`
-
-	result, err := db.pool.Exec(ctx, query,
+	result, err := db.pool.Exec(ctx, sqlUpdateOrderStatus,
 		status,
 		executedQty,
 		executedQuoteQty,
@@ -299,19 +287,7 @@ func (db *DB) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, status O
 
 // UpdateOrderStatusTx updates an order's status and executed fields within an existing transaction.
 func (db *DB) UpdateOrderStatusTx(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, status OrderStatus, executedQty, executedQuoteQty float64, filledAt, canceledAt *time.Time, errorMsg *string) error {
-	query := `
-		UPDATE orders
-		SET status = $1,
-		    executed_quantity = $2,
-		    executed_quote_quantity = $3,
-		    filled_at = $4,
-		    canceled_at = $5,
-		    error_message = $6,
-		    updated_at = NOW()
-		WHERE id = $7
-	`
-
-	result, err := tx.Exec(ctx, query,
+	result, err := tx.Exec(ctx, sqlUpdateOrderStatus,
 		status,
 		executedQty,
 		executedQuoteQty,
@@ -343,17 +319,7 @@ func (db *DB) UpdateOrderStatusTx(ctx context.Context, tx pgx.Tx, orderID uuid.U
 
 // InsertTrade inserts a new trade (fill) into the database
 func (db *DB) InsertTrade(ctx context.Context, trade *Trade) error {
-	query := `
-		INSERT INTO trades (
-			id, order_id, exchange_trade_id, symbol, exchange, side,
-			price, quantity, quote_quantity, commission, commission_asset,
-			executed_at, is_maker, metadata, created_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-		)
-	`
-
-	_, err := db.pool.Exec(ctx, query,
+	_, err := db.pool.Exec(ctx, sqlInsertTrade,
 		trade.ID,
 		trade.OrderID,
 		trade.ExchangeTradeID,

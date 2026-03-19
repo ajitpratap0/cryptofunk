@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ListAllTrades returns recent trade fills across all orders, newest first.
@@ -40,11 +42,21 @@ func (db *DB) ListAllTrades(ctx context.Context, limit, offset int) ([]*Trade, e
 // This is O(1) instead of O(n) — avoids a full sequential COUNT(*) scan on every request.
 // The estimate is sourced from pg_class.reltuples which is updated by ANALYZE/autovacuum.
 // If the table has never been analyzed (reltuples = -1), the function returns 0.
+// to_regclass('public.trades') is used instead of current_schema() to avoid a wrong
+// result when TimescaleDB adds _timescaledb_internal (or another schema) to search_path,
+// which would make current_schema() return something other than 'public'.
 func (db *DB) CountAllTrades(ctx context.Context) (int, error) {
 	var estimate int64
-	if err := db.pool.QueryRow(ctx,
-		"SELECT reltuples::bigint AS estimate FROM pg_class WHERE relname = 'trades' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())",
-	).Scan(&estimate); err != nil {
+	err := db.pool.QueryRow(ctx,
+		`SELECT COALESCE(reltuples::bigint, -1) AS estimate
+		 FROM pg_class
+		 WHERE oid = to_regclass('public.trades')`,
+	).Scan(&estimate)
+	if err != nil {
+		// pgx returns pgx.ErrNoRows when to_regclass returns NULL (table doesn't exist).
+		if err == pgx.ErrNoRows {
+			return 0, nil
+		}
 		return 0, fmt.Errorf("failed to count trades: %w", err)
 	}
 	// reltuples is -1 for a freshly created table that has never been analyzed.
