@@ -445,12 +445,12 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	}
 	if sessionID == nil {
 		newSession := &db.TradingSession{
-			ID:             uuid.New(),
+			ID:   uuid.New(),
 			Mode: db.TradingModePaper,
 			// TODO: Add a session_type or is_multi_asset column to trading_sessions in a follow-up
 			// migration. "PAPER" is a placeholder to distinguish multi-asset paper sessions from
 			// single-symbol sessions (which use the actual symbol, e.g. "BTCUSDT").
-			Symbol: "PAPER",
+			Symbol:         "PAPER",
 			Exchange:       "paper",
 			InitialCapital: 100_000.0,
 			StartedAt:      time.Now(),
