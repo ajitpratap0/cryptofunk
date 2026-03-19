@@ -27,6 +27,9 @@ export const PERFORMANCE_QUERY_KEYS = {
   candlestick: (symbol: string, timeRange: string) => ['candlestick', symbol, timeRange],
   risk: ['risk'],
   circuitBreakers: ['risk', 'circuit-breakers'],
+  // Own top-level key — NOT nested under `risk` so that invalidating `risk`
+  // does not unintentionally invalidate exposure queries.
+  riskExposure: ['risk-exposure'],
 } as const
 
 // Performance Metrics
@@ -238,7 +241,7 @@ export function useCircuitBreakers() {
 // Risk Exposure by symbol
 export function useRiskExposure() {
   return useQuery({
-    queryKey: [...PERFORMANCE_QUERY_KEYS.risk, 'exposure'],
+    queryKey: PERFORMANCE_QUERY_KEYS.riskExposure,
     queryFn: () => apiClient.getRiskExposure(),
     staleTime: REFRESH_INTERVALS.risk,
     refetchInterval: REFRESH_INTERVALS.risk,

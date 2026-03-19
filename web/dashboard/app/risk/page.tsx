@@ -39,6 +39,48 @@ const mockAlerts = [
   { id: '5', severity: 'warning' as const, message: 'SOL/USDT volatility spike detected', timestamp: '5 hrs ago', asset: 'SOL/USDT' },
 ]
 
+// ── Runtime type guards ─────────────────────────────────────────────
+
+type RawRiskMetrics = {
+  var_95: number | null
+  var_99: number | null
+  expected_shortfall: number | null
+  open_positions: number
+  total_exposure: number
+}
+
+type RawCircuitBreakers = {
+  circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }>
+}
+
+type RawExposure = {
+  exposure: Array<{ symbol: string; exposure: number }>
+}
+
+function isRiskMetrics(raw: unknown): raw is RawRiskMetrics {
+  if (!raw || typeof raw !== 'object') return false
+  const r = raw as Record<string, unknown>
+  return typeof r.open_positions === 'number' && typeof r.total_exposure === 'number'
+}
+
+function isCircuitBreakers(raw: unknown): raw is RawCircuitBreakers {
+  if (!raw || typeof raw !== 'object') return false
+  const r = raw as Record<string, unknown>
+  return (
+    Array.isArray(r.circuit_breakers) &&
+    (r.circuit_breakers.length === 0 || typeof (r.circuit_breakers[0] as { name?: unknown }).name === 'string')
+  )
+}
+
+function isExposure(raw: unknown): raw is RawExposure {
+  if (!raw || typeof raw !== 'object') return false
+  const r = raw as Record<string, unknown>
+  return (
+    Array.isArray(r.exposure) &&
+    (r.exposure.length === 0 || typeof (r.exposure[0] as { symbol?: unknown }).symbol === 'string')
+  )
+}
+
 // ── Page Component ─────────────────────────────────────────────────
 
 export default function RiskPage() {
@@ -57,21 +99,20 @@ export default function RiskPage() {
     refetchExposure()
   }
 
-  // Map API risk metrics
-  const apiMetrics = metricsResponse?.data as {
-    var_95: number | null
-    var_99: number | null
-    expected_shortfall: number | null
-    open_positions: number
-    total_exposure: number
-  } | undefined
+  // Map API risk metrics — guarded so unexpected shapes surface as undefined
+  const rawMetrics: unknown = metricsResponse?.data
+  if (rawMetrics !== undefined && !isRiskMetrics(rawMetrics)) {
+    console.warn('Unexpected API response shape for risk metrics:', rawMetrics)
+  }
+  const apiMetrics: RawRiskMetrics | undefined = isRiskMetrics(rawMetrics) ? rawMetrics : undefined
 
-  // Map API circuit breakers to component shape
+  // Map API circuit breakers to component shape — guarded
   const circuitBreakers: CircuitBreaker[] = useMemo(() => {
-    const raw = breakersResponse?.data as
-      | { circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }> }
-      | undefined
-    if (!raw?.circuit_breakers?.length) return []
+    const raw: unknown = breakersResponse?.data
+    if (raw !== undefined && !isCircuitBreakers(raw)) {
+      console.warn('Unexpected API response shape for circuit breakers:', raw)
+    }
+    if (!isCircuitBreakers(raw) || !raw.circuit_breakers.length) return []
     return raw.circuit_breakers.map(cb => ({
       name: cb.name,
       status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : 'normal',
@@ -81,21 +122,22 @@ export default function RiskPage() {
     } as CircuitBreaker))
   }, [breakersResponse])
 
-  // Map API exposure data
+  // Map API exposure data — guarded
   // Issue #2 fix: API GetExposure does not return a `side` field — omit it
   // entirely so ExposurePie uses its default asset-based coloring instead of
   // incorrectly coloring every bar as a long (profit/green).
   const exposureData = useMemo(() => {
-    const raw = exposureResponse?.data as
-      | { exposure: Array<{ symbol: string; exposure: number }> }
-      | undefined
-    if (!raw?.exposure?.length) return []
+    const raw: unknown = exposureResponse?.data
+    if (raw !== undefined && !isExposure(raw)) {
+      console.warn('Unexpected API response shape for risk exposure:', raw)
+    }
+    if (!isExposure(raw) || !raw.exposure.length) return []
     const total = raw.exposure.reduce((sum, e) => sum + e.exposure, 0)
     return raw.exposure.map(e => ({
-      symbol: e.symbol,
-      exposure: e.exposure,
+      symbol:     e.symbol,
+      exposure:   e.exposure,
       percentage: total > 0 ? Math.round((e.exposure / total) * 100) : 0,
-      value: e.exposure,
+      value:      e.exposure,
     }))
   }, [exposureResponse])
 

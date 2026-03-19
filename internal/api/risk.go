@@ -142,10 +142,13 @@ func (h *RiskHandler) GetCircuitBreakers(c *gin.Context) {
 		totalTrades += s.TotalTrades
 	}
 
-	// Max Daily Loss: triggered when cumulative losses exceed the configured threshold (dollars).
+	// Session Total Loss: triggered when cumulative session losses exceed the configured threshold (dollars).
+	// NOTE: totalPnL is the sum of TotalPnL across all active sessions (lifetime session PnL),
+	// not a rolling daily figure. The threshold field MaxDailyLossDollars still applies as the
+	// absolute dollar loss limit; only the label has been corrected to avoid confusion.
 	lossAmount := math.Abs(math.Min(totalPnL, 0))
 	breakers := []gin.H{
-		buildBreaker("Max Daily Loss", lossAmount, h.cfg.MaxDailyLossDollars),
+		buildBreaker("Session Total Loss", lossAmount, h.cfg.MaxDailyLossDollars),
 		buildBreaker("Max Drawdown %", maxDrawdown*100, h.cfg.MaxDrawdownPct),
 		buildBreaker("Total Trade Count", float64(totalTrades), float64(h.cfg.MaxTradeCount)),
 	}
@@ -155,9 +158,13 @@ func (h *RiskHandler) GetCircuitBreakers(c *gin.Context) {
 
 func buildBreaker(name string, current, threshold float64) gin.H {
 	status := "OK"
-	if current >= threshold {
+	if threshold <= 0 {
+		// A zero or negative threshold means the breaker is disabled/unconfigured.
+		// Guard against false positives: never fire for unset config values.
+		status = "DISABLED"
+	} else if current >= threshold {
 		status = "TRIGGERED"
-	} else if threshold > 0 && current/threshold >= 0.8 {
+	} else if current/threshold >= 0.8 {
 		status = "WARNING"
 	}
 	return gin.H{

@@ -20,6 +20,12 @@ import (
 // Not duplicated elsewhere in the codebase (verified via grep).
 func ptrF64(f float64) *float64 { return &f }
 
+// errOppositeSide is a sentinel returned from the WithTx callback when the
+// incoming order is on the opposite side of an existing open position. It is
+// handled by the caller to produce a 422 response without logging as an
+// internal server error.
+var errOppositeSide = errors.New("opposite side trade on existing position")
+
 // Session handlers
 func (s *APIServer) handleListSessions(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -386,6 +392,17 @@ func (s *APIServer) handleCancelOrder(c *gin.Context) {
 	})
 }
 
+// quoteAsset derives the quote asset token from a trading symbol by checking
+// common suffixes. Falls back to "USDT" for unrecognised symbols.
+func quoteAsset(symbol string) string {
+	for _, suffix := range []string{"USDT", "BUSD", "BTC", "ETH", "BNB"} {
+		if strings.HasSuffix(strings.ToUpper(symbol), suffix) {
+			return suffix
+		}
+	}
+	return "USDT"
+}
+
 // handlePaperTrade executes a paper (simulated) trade order.
 // Market orders are immediately filled; limit orders remain open (NEW status).
 // POST /api/v1/trade
@@ -462,7 +479,7 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			} else {
 				log.Error().Err(err).Msg("Failed to create paper session")
 				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("failed to create paper session: %v", err),
+					"error": "internal server error",
 				})
 				return
 			}
@@ -536,176 +553,141 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			posSide = db.PositionSideShort
 		}
 
-		// Check for an opposite-side position before opening a transaction so we
-		// can reject early without acquiring DB resources unnecessarily.
-		existingPos, posErr := s.db.GetPositionBySymbolAndSession(ctx, req.Symbol, *sessionID)
-		if posErr != nil && !errors.Is(posErr, pgx.ErrNoRows) {
-			log.Warn().Err(posErr).Msg("Error looking up existing position")
-		}
-		if existingPos != nil && existingPos.Side != posSide {
-			// Opposite-side trade on an existing open position. Proper close/reduce
-			// logic (netting, realized PnL calculation) is not yet implemented.
-			// Reject the trade rather than silently corrupting position data.
-			log.Warn().
-				Str("symbol", req.Symbol).
-				Str("existing_side", string(existingPos.Side)).
-				Str("order_side", string(posSide)).
-				Msg("Opposite-side trade on existing position; position close logic not yet implemented")
-			c.JSON(http.StatusUnprocessableEntity, gin.H{
-				"error": "position close/reduce not yet implemented; opposite-side trade rejected",
-			})
-			return
-		}
+		// Derive the quote asset from the symbol (e.g. "BTCUSDT" → "USDT").
+		commissionAsset := quoteAsset(req.Symbol)
 
-		// Wrap the fill writes (UpdateOrderStatus → InsertTrade → CreatePosition/UpdatePositionAveraging)
-		// in a single DB transaction so a mid-flight failure does not leave orphaned rows.
-		// AggregateSessionStats is intentionally kept outside the transaction: it is a
-		// read-then-aggregate UPDATE that can be safely retried and does not create new rows.
-		tx, txErr := s.db.Pool().BeginTx(ctx, pgx.TxOptions{})
-		if txErr != nil {
-			log.Error().Err(txErr).Msg("Failed to begin paper trade transaction")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to begin paper trade transaction"})
-			return
-		}
-		// rollbackTx is a no-op after a successful Commit.
-		rollbackTx := func() {
-			if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-				log.Warn().Err(rbErr).Msg("Failed to rollback paper trade transaction")
+		// Wrap all fill writes in a single DB transaction so a mid-flight failure
+		// does not leave orphaned rows. The existingPos lookup is performed inside
+		// the transaction to eliminate the TOCTOU race where two concurrent BUY
+		// orders could both observe existingPos == nil and each try to INSERT a
+		// new position for the same symbol.
+		// AggregateSessionStats is intentionally kept outside the transaction: it
+		// is a read-then-aggregate UPDATE that can be safely retried.
+		txErr := s.db.WithTx(ctx, func(tx pgx.Tx) error {
+			// Re-fetch position inside the transaction for a consistent view.
+			existingPos, err := s.db.GetOpenPositionBySymbolTx(ctx, tx, *sessionID, req.Symbol)
+			if err != nil {
+				return fmt.Errorf("failed to look up existing position: %w", err)
 			}
-		}
 
-		// UpdateOrderStatus inside transaction
-		_, txErr = tx.Exec(ctx, `
-			UPDATE orders
-			SET status = $1,
-			    executed_quantity = $2,
-			    executed_quote_quantity = $3,
-			    filled_at = $4,
-			    canceled_at = $5,
-			    error_message = $6,
-			    updated_at = NOW()
-			WHERE id = $7`,
-			db.OrderStatusFilled,
-			req.Quantity,
-			execQuoteQty,
-			&now,
-			nil,
-			nil,
-			order.ID,
-		)
-		if txErr != nil {
-			rollbackTx()
-			log.Error().Err(txErr).Str("order_id", order.ID.String()).Msg("Failed to mark paper order filled in transaction")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fill paper trade order"})
-			return
-		}
-		order.Status = db.OrderStatusFilled
-		order.ExecutedQuantity = req.Quantity
-		order.ExecutedQuoteQuantity = execQuoteQty
-		order.FilledAt = &now
-		order.UpdatedAt = now
+			if existingPos != nil && existingPos.Side != posSide {
+				// Opposite-side trade on an existing open position. Proper close/reduce
+				// logic (netting, realized PnL calculation) is not yet implemented.
+				// Return a sentinel so the outer handler can respond with 422.
+				return errOppositeSide
+			}
 
-		// InsertTrade inside transaction
-		commissionAsset := "USDT"
-		tradeID := uuid.New()
-		_, txErr = tx.Exec(ctx, `
-			INSERT INTO trades (
-				id, order_id, exchange_trade_id, symbol, exchange, side,
-				price, quantity, quote_quantity, commission, commission_asset,
-				executed_at, is_maker, metadata, created_at
-			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-			)`,
-			tradeID,
-			order.ID,
-			nil,
-			req.Symbol,
-			"paper",
-			orderSide,
-			execPrice,
-			req.Quantity,
-			execQuoteQty,
-			commission,
-			&commissionAsset,
-			now,
-			false,
-			nil,
-			now,
-		)
-		if txErr != nil {
-			rollbackTx()
-			log.Error().Err(txErr).Msg("Failed to insert paper trade fill row in transaction")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record paper trade fill"})
-			return
-		}
+			// UpdateOrderStatus inside transaction
+			if err := s.db.UpdateOrderStatusTx(ctx, tx, order.ID, db.OrderStatusFilled, req.Quantity, execQuoteQty, &now, nil, nil); err != nil {
+				return fmt.Errorf("failed to mark paper order filled: %w", err)
+			}
+			order.Status = db.OrderStatusFilled
+			order.ExecutedQuantity = req.Quantity
+			order.ExecutedQuoteQuantity = execQuoteQty
+			order.FilledAt = &now
+			order.UpdatedAt = now
 
-		// Create or average into existing position inside transaction
-		if existingPos == nil {
-			posID := uuid.New()
-			entryReason := "paper_trade_api"
-			unrealizedPnL := 0.0
-			_, txErr = tx.Exec(ctx, `
-				INSERT INTO positions (
-					id, session_id, symbol, exchange, side, entry_price, quantity,
-					entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+			// InsertTrade inside transaction
+			tradeID := uuid.New()
+			_, err = tx.Exec(ctx, `
+				INSERT INTO trades (
+					id, order_id, exchange_trade_id, symbol, exchange, side,
+					price, quantity, quote_quantity, commission, commission_asset,
+					executed_at, is_maker, metadata, created_at
 				) VALUES (
-					$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+					$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 				)`,
-				posID,
-				sessionID,
+				tradeID,
+				order.ID,
+				nil,
 				req.Symbol,
 				"paper",
-				posSide,
+				orderSide,
 				execPrice,
 				req.Quantity,
-				now,
-				nil,
-				nil,
-				&entryReason,
-				nil,
-				now,
-				now,
-			)
-			if txErr != nil {
-				rollbackTx()
-				log.Error().Err(txErr).Msg("Failed to create position for paper trade in transaction")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create position for paper trade"})
-				return
-			}
-			// Persist unrealized_pnl separately as it is not in the INSERT above
-			_, _ = tx.Exec(ctx,
-				`UPDATE positions SET unrealized_pnl = $1 WHERE id = $2`,
-				unrealizedPnL, posID,
-			)
-		} else {
-			totalQty := existingPos.Quantity + req.Quantity
-			weightedAvg := (existingPos.Quantity*existingPos.EntryPrice + req.Quantity*execPrice) / totalQty
-			_, txErr = tx.Exec(ctx, `
-				UPDATE positions
-				SET
-					entry_price = $2,
-					quantity = $3,
-					fees = fees + $4,
-					updated_at = $5
-				WHERE id = $1 AND exit_time IS NULL`,
-				existingPos.ID,
-				weightedAvg,
-				totalQty,
+				execQuoteQty,
 				commission,
+				&commissionAsset,
+				now,
+				false,
+				nil,
 				now,
 			)
-			if txErr != nil {
-				rollbackTx()
-				log.Error().Err(txErr).Msg("Failed to update position for paper trade in transaction")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update position for paper trade"})
+			if err != nil {
+				return fmt.Errorf("failed to insert paper trade fill row: %w", err)
+			}
+
+			// Create or average into existing position inside transaction
+			if existingPos == nil {
+				posID := uuid.New()
+				entryReason := "paper_trade_api"
+				_, err = tx.Exec(ctx, `
+					INSERT INTO positions (
+						id, session_id, symbol, exchange, side, entry_price, quantity,
+						entry_time, stop_loss, take_profit, entry_reason, metadata,
+						unrealized_pnl, created_at, updated_at
+					) VALUES (
+						$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+					)`,
+					posID,
+					sessionID,
+					req.Symbol,
+					"paper",
+					posSide,
+					execPrice,
+					req.Quantity,
+					now,
+					nil,
+					nil,
+					&entryReason,
+					nil,
+					0.0,
+					now,
+					now,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to create position for paper trade: %w", err)
+				}
+			} else {
+				totalQty := existingPos.Quantity + req.Quantity
+				weightedAvg := (existingPos.Quantity*existingPos.EntryPrice + req.Quantity*execPrice) / totalQty
+				_, err = tx.Exec(ctx, `
+					UPDATE positions
+					SET
+						entry_price = $2,
+						quantity = $3,
+						fees = fees + $4,
+						updated_at = $5
+					WHERE id = $1 AND exit_time IS NULL`,
+					existingPos.ID,
+					weightedAvg,
+					totalQty,
+					commission,
+					now,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to update position for paper trade: %w", err)
+				}
+			}
+			return nil
+		})
+
+		if txErr != nil {
+			if errors.Is(txErr, errOppositeSide) {
+				// Opposite-side trade on an existing open position. Proper close/reduce
+				// logic (netting, realized PnL calculation) is not yet implemented.
+				// Reject the trade rather than silently corrupting position data.
+				log.Warn().
+					Str("symbol", req.Symbol).
+					Str("order_side", string(posSide)).
+					Msg("Opposite-side trade on existing position; position close logic not yet implemented")
+				c.JSON(http.StatusUnprocessableEntity, gin.H{
+					"error": "position close/reduce not yet implemented; opposite-side trade rejected",
+				})
 				return
 			}
-		}
-
-		if commitErr := tx.Commit(ctx); commitErr != nil {
-			rollbackTx()
-			log.Error().Err(commitErr).Msg("Failed to commit paper trade transaction")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit paper trade"})
+			log.Error().Err(txErr).Msg("Paper trade transaction failed")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 

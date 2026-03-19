@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
 
@@ -186,6 +187,50 @@ func (db *DB) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, status O
 		Str("order_id", orderID.String()).
 		Str("status", string(status)).
 		Msg("Order status updated")
+
+	return nil
+}
+
+// UpdateOrderStatusTx updates an order's status and executed fields within an existing transaction.
+func (db *DB) UpdateOrderStatusTx(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, status OrderStatus, executedQty, executedQuoteQty float64, filledAt, canceledAt *time.Time, errorMsg *string) error {
+	query := `
+		UPDATE orders
+		SET status = $1,
+		    executed_quantity = $2,
+		    executed_quote_quantity = $3,
+		    filled_at = $4,
+		    canceled_at = $5,
+		    error_message = $6,
+		    updated_at = NOW()
+		WHERE id = $7
+	`
+
+	result, err := tx.Exec(ctx, query,
+		status,
+		executedQty,
+		executedQuoteQty,
+		filledAt,
+		canceledAt,
+		errorMsg,
+		orderID,
+	)
+
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("order_id", orderID.String()).
+			Msg("Failed to update order status in transaction")
+		return fmt.Errorf("failed to update order status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found: %s", orderID.String())
+	}
+
+	log.Debug().
+		Str("order_id", orderID.String()).
+		Str("status", string(status)).
+		Msg("Order status updated in transaction")
 
 	return nil
 }

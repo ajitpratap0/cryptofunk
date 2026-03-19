@@ -444,6 +444,55 @@ func (db *DB) GetPositionBySymbolAndSession(ctx context.Context, symbol string, 
 	return &position, nil
 }
 
+// GetOpenPositionBySymbolTx retrieves the most recent open position for a symbol within a session
+// using an existing transaction, providing a consistent read within the transaction boundary.
+// Returns (nil, nil) when no open position is found.
+func (db *DB) GetOpenPositionBySymbolTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID, symbol string) (*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE symbol = $1 AND session_id = $2 AND exit_time IS NULL
+		ORDER BY entry_time DESC
+		LIMIT 1
+	`
+
+	var position Position
+	err := tx.QueryRow(ctx, query, symbol, sessionID).Scan(
+		&position.ID,
+		&position.SessionID,
+		&position.Symbol,
+		&position.Exchange,
+		&position.Side,
+		&position.EntryPrice,
+		&position.ExitPrice,
+		&position.Quantity,
+		&position.EntryTime,
+		&position.ExitTime,
+		&position.StopLoss,
+		&position.TakeProfit,
+		&position.RealizedPnL,
+		&position.UnrealizedPnL,
+		&position.Fees,
+		&position.EntryReason,
+		&position.ExitReason,
+		&position.Metadata,
+		&position.CreatedAt,
+		&position.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get open position by symbol in transaction: %w", err)
+	}
+
+	return &position, nil
+}
+
 // GetLatestPositionBySymbol retrieves the latest position for a symbol (any session)
 func (db *DB) GetLatestPositionBySymbol(ctx context.Context, symbol string) (*Position, error) {
 	query := `
