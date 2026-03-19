@@ -20,50 +20,50 @@ import {
 } from '@/types/api-responses'
 import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats } from '@/lib/types'
 
-// RawApiTrade matches the JSON shape produced by encoding/json on db.Trade,
-// which has no struct tags — field names are the exact Go PascalCase names.
+// RawApiTrade matches the JSON shape produced by encoding/json on db.Trade
+// with snake_case struct tags (added in the backend data-pipeline update).
 interface RawApiTrade {
-  ID: string
-  OrderID: string
-  ExchangeTradeID?: string | null
-  Symbol: string
-  Exchange: string
-  Side: string           // "BUY" | "SELL" from db.OrderSide
-  Price: number
-  Quantity: number
-  QuoteQuantity: number
-  Commission: number
-  CommissionAsset?: string | null
-  ExecutedAt: string
-  IsMaker: boolean
-  Metadata?: Record<string, unknown> | null
-  CreatedAt: string
+  id: string
+  order_id: string
+  exchange_trade_id?: string | null
+  symbol: string
+  exchange: string
+  side: string           // "BUY" | "SELL" from db.OrderSide
+  price: number
+  quantity: number
+  quote_quantity: number
+  commission: number
+  commission_asset?: string | null
+  executed_at: string
+  is_maker: boolean
+  metadata?: Record<string, unknown> | null
+  created_at: string
 }
 
-// mapApiTrade converts the PascalCase backend shape to the camelCase Trade type
+// mapApiTrade converts the snake_case backend shape to the camelCase Trade type
 // used throughout the dashboard. Fields that have no direct backend equivalent
 // (entryPrice, currentPrice, pnl, pnlPercent, confidence, status, agent) are
 // derived or defaulted — the trades table stores exchange fills, not strategy
 // metadata, so those fields will be populated once the backend exposes them.
 function mapApiTrade(raw: RawApiTrade): Trade {
-  const side: Trade['side'] = raw.Side === 'SELL' ? 'short' : 'long'
+  const side: Trade['side'] = raw.side === 'SELL' ? 'short' : 'long'
   return {
-    id: raw.ID,
-    symbol: raw.Symbol,
+    id: raw.id,
+    symbol: raw.symbol,
     side,
     // exchange fills record the execution price; use it for both entry and current
-    entryPrice: raw.Price,
-    currentPrice: raw.Price,
-    quantity: raw.Quantity,
+    entryPrice: raw.price,
+    currentPrice: raw.price,
+    quantity: raw.quantity,
     // PnL is not available in the fills table — default to 0 until the backend
     // enriches the response with position-level PnL.
     pnl: 0,
     pnlPercent: 0,
-    agent: raw.Exchange,        // closest available proxy for source label
+    agent: raw.exchange,        // closest available proxy for source label
     confidence: 0,
-    timestamp: raw.ExecutedAt,
+    timestamp: raw.executed_at,
     // A BUY fill opens a position ('open'); a SELL fill closes one ('closed').
-    status: (raw.Side === 'SELL' ? 'closed' : 'open') as Trade['status'],
+    status: (raw.side === 'SELL' ? 'closed' : 'open') as Trade['status'],
     reasoning: undefined,
     exitPrice: undefined,
     exitTimestamp: undefined,

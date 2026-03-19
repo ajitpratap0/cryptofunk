@@ -76,24 +76,31 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 		return
 	}
 
+	dataPoints := len(returns)
 	response := gin.H{
 		"open_positions":     openCount,
 		"total_exposure":     math.Round(totalExposure*100) / 100,
-		"data_points":        len(returns),
+		"data_points":        dataPoints,
 		"var_95":             nil,
 		"var_99":             nil,
 		"expected_shortfall": nil,
 	}
+	if dataPoints < 10 {
+		log.Debug().Int("data_points", dataPoints).Msg("insufficient data for meaningful VaR estimate; need at least 10 closed positions in the last 90 days")
+	}
 
-	if len(returns) >= 10 {
+	if dataPoints >= 10 {
 		// CalculateVaR requires []interface{} not []float64
-		returnsIface := make([]interface{}, len(returns))
+		returnsIface := make([]interface{}, dataPoints)
 		for i, v := range returns {
 			returnsIface[i] = v
 		}
 
 		// Sum InitialCapital across all active sessions to get total portfolio value.
 		// Used to convert fractional VaR (e.g. 0.023) into dollar VaR (e.g. $2,300).
+		// NOTE: scaling by InitialCapital (not CurrentCapital) because TradingSession
+		// does not yet track current portfolio value. Dollar VaR will be inaccurate
+		// after significant P&L. Track in TASKS.md follow-up.
 		activeSessions, sessErr := h.db.ListActiveSessions(ctx)
 		portfolioValue := 0.0
 		if sessErr == nil {

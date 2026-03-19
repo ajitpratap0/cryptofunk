@@ -73,6 +73,7 @@ This document consolidates all implementation tasks from the architecture and de
 |------|----------|----------|--------|-------------|
 | **TB-001** | Configuration | CRITICAL | 2h | Remove hardcoded version "1.0.0" in orchestrator - use build flags |
 | **TB-002** | Configuration | CRITICAL | 1h | Remove hardcoded exchange mode "PAPER" in API - use config |
+| **CONFIG** | Configuration | INFO | — | Paper session initial_capital changed to $100k (2026-03-20) — affects new auto-created sessions only |
 | **TB-003** | Configuration | HIGH | 2h | Remove hardcoded exchange fees in arbitrage agent - make configurable |
 | **TB-004** | Testing | CRITICAL | 6h | Fix E2E test infrastructure (T262) - currently skipped |
 | **TB-005** | Observability | HIGH | 4h | Implement MCP metrics (request count, latency, errors) |

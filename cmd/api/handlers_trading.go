@@ -397,6 +397,8 @@ func (s *APIServer) handleCancelOrder(c *gin.Context) {
 // quoteAsset derives the quote asset token from a trading symbol by checking
 // common suffixes. Falls back to "USDT" for unrecognised symbols.
 func quoteAsset(symbol string) string {
+	// TODO: make suffix list configurable via config for non-Binance exchanges
+	// (e.g. Kraken uses XBT, EUR, USD as quote assets).
 	for _, suffix := range []string{"USDT", "BUSD", "BTC", "ETH", "BNB"} {
 		if strings.HasSuffix(strings.ToUpper(symbol), suffix) {
 			return suffix

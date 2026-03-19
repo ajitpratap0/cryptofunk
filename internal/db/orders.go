@@ -73,21 +73,21 @@ type Order struct {
 
 // Trade represents a database trade record (fill)
 type Trade struct {
-	ID              uuid.UUID
-	OrderID         uuid.UUID
-	ExchangeTradeID *string
-	Symbol          string
-	Exchange        string
-	Side            OrderSide
-	Price           float64
-	Quantity        float64
-	QuoteQuantity   float64
-	Commission      float64
-	CommissionAsset *string
-	ExecutedAt      time.Time
-	IsMaker         bool
-	Metadata        map[string]interface{}
-	CreatedAt       time.Time
+	ID              uuid.UUID              `json:"id"`
+	OrderID         uuid.UUID              `json:"order_id"`
+	ExchangeTradeID *string                `json:"exchange_trade_id"`
+	Symbol          string                 `json:"symbol"`
+	Exchange        string                 `json:"exchange"`
+	Side            OrderSide              `json:"side"`
+	Price           float64                `json:"price"`
+	Quantity        float64                `json:"quantity"`
+	QuoteQuantity   float64                `json:"quote_quantity"`
+	Commission      float64                `json:"commission"`
+	CommissionAsset *string                `json:"commission_asset"`
+	ExecutedAt      time.Time              `json:"executed_at"`
+	IsMaker         bool                   `json:"is_maker"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt       time.Time              `json:"created_at"`
 }
 
 // InsertOrderTx inserts a new order into the database within an existing transaction.

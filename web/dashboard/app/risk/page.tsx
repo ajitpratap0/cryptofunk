@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Shield,
   TrendingDown,
@@ -105,19 +105,35 @@ export default function RiskPage() {
     refetchExposure()
   }
 
+  // Warn once per distinct bad-shape response — not on every render
+  useEffect(() => {
+    const raw = metricsResponse?.data
+    if (raw !== undefined && !isRiskMetrics(raw)) {
+      console.warn('Unexpected API response shape for risk metrics:', raw)
+    }
+  }, [metricsResponse])
+
+  useEffect(() => {
+    const raw = breakersResponse?.data
+    if (raw !== undefined && !isCircuitBreakers(raw)) {
+      console.warn('Unexpected API response shape for circuit breakers:', raw)
+    }
+  }, [breakersResponse])
+
+  useEffect(() => {
+    const raw = exposureResponse?.data
+    if (raw !== undefined && !isExposure(raw)) {
+      console.warn('Unexpected API response shape for risk exposure:', raw)
+    }
+  }, [exposureResponse])
+
   // Map API risk metrics — guarded so unexpected shapes surface as undefined
   const rawMetrics: unknown = metricsResponse?.data
-  if (rawMetrics !== undefined && !isRiskMetrics(rawMetrics)) {
-    console.warn('Unexpected API response shape for risk metrics:', rawMetrics)
-  }
   const apiMetrics: RawRiskMetrics | undefined = isRiskMetrics(rawMetrics) ? rawMetrics : undefined
 
   // Map API circuit breakers to component shape — guarded
   const circuitBreakers: CircuitBreaker[] = useMemo(() => {
     const raw: unknown = breakersResponse?.data
-    if (raw !== undefined && !isCircuitBreakers(raw)) {
-      console.warn('Unexpected API response shape for circuit breakers:', raw)
-    }
     if (!isCircuitBreakers(raw) || !raw.circuit_breakers.length) return []
     return raw.circuit_breakers.map(cb => ({
       name: cb.name,
@@ -137,9 +153,6 @@ export default function RiskPage() {
   // incorrectly coloring every bar as a long (profit/green).
   const exposureData = useMemo(() => {
     const raw: unknown = exposureResponse?.data
-    if (raw !== undefined && !isExposure(raw)) {
-      console.warn('Unexpected API response shape for risk exposure:', raw)
-    }
     if (!isExposure(raw) || !raw.exposure.length) return []
     const total = raw.exposure.reduce((sum, e) => sum + e.exposure, 0)
     return raw.exposure.map(e => ({
