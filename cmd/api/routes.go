@@ -264,6 +264,14 @@ func (s *APIServer) setupRoutes() {
 		polymarketHandler := api.NewPolymarketHandler(s.db)
 		polymarketHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 
+		// Risk metrics routes
+		riskHandler := api.NewRiskHandler(s.db)
+		riskHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+
+		// Performance routes
+		perfHandler := api.NewPerformanceHandler(s.db)
+		perfHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware())
+
 		// Decision analytics and outcome resolution routes
 		decisionAnalyticsHandler := api.NewDecisionAnalyticsHandler(s.db)
 		decisionAnalyticsHandler.RegisterRoutes(v1, s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig))

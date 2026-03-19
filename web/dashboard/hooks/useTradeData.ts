@@ -18,7 +18,7 @@ import {
   isRawDashboardResponse,
   isRawDashboardPnlResponse,
 } from '@/types/api-responses'
-import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats } from '@/lib/types'
+import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats, EquityPoint } from '@/lib/types'
 
 // Query Keys
 export const QUERY_KEYS = {
@@ -33,15 +33,32 @@ export const QUERY_KEYS = {
 } as const
 
 // Trades
-export function useTrades() {
+export function useTrades(limit = 50, offset = 0) {
   return useQuery({
-    queryKey: [...QUERY_KEYS.trades],
+    queryKey: [...QUERY_KEYS.trades, limit, offset],
     queryFn: async () => {
-      const mockTrades = getMockTrades()
+      if (USE_MOCK_DATA) {
+        return {
+          success: true as const,
+          data: getMockTrades(),
+          timestamp: new Date().toISOString(),
+        }
+      }
+
+      const response = await apiClient.getTrades(limit, offset)
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch trades')
+      }
+
+      const raw: unknown = response.data
+      const tradeList: Trade[] =
+        raw && typeof raw === 'object' && 'trades' in raw
+          ? (raw as { trades: Trade[] }).trades
+          : []
       return {
         success: true as const,
-        data: mockTrades,
-        timestamp: new Date().toISOString(),
+        data: tradeList,
+        timestamp: response.timestamp,
       }
     },
     staleTime: REFRESH_INTERVALS.trades,
@@ -262,7 +279,7 @@ export function useDashboardPnl() {
           data: {
             daily: raw.realized_pnl ?? 0,
             total: raw.total_pnl ?? 0,
-            equity: getMockEquityPoints(), // No equity curve from API yet
+            equity: (raw as { equity_curve?: EquityPoint[] }).equity_curve ?? [],
           },
           timestamp: response.timestamp,
         }
