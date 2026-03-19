@@ -1,16 +1,22 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
+
+func ptrStr(s string) *string  { return &s }
+func ptrF64(f float64) *float64 { return &f }
 
 // Session handlers
 func (s *APIServer) handleListSessions(c *gin.Context) {
@@ -389,63 +395,179 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		Quantity float64 `json:"quantity" binding:"required,gt=0"`
 		Price    float64 `json:"price"`
 	}
-
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
-
-	if (req.Type == "limit" || req.Type == "LIMIT") && req.Price <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "price is required for limit orders",
-		})
+	isLimit := strings.EqualFold(req.Type, "limit")
+	if isLimit && req.Price <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "price is required for limit orders"})
 		return
-	}
-
-	var price *float64
-	if req.Price > 0 {
-		price = &req.Price
-	}
-
-	order := &db.Order{
-		ID:        uuid.New(),
-		Symbol:    req.Symbol,
-		Exchange:  "paper",
-		Side:      db.ConvertOrderSide(req.Side),
-		Type:      db.ConvertOrderType(req.Type),
-		Quantity:  req.Quantity,
-		Price:     price,
-		Status:    db.OrderStatusNew,
-		PlacedAt:  time.Now(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
 	}
 
 	ctx := c.Request.Context()
+
+	// 1. Resolve or create paper session
+	sessions, err := s.db.ListActiveSessions(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to list active sessions for paper trade")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve trading session"})
+		return
+	}
+	var sessionID *uuid.UUID
+	for i := range sessions {
+		if sessions[i].Mode == db.TradingModePaper {
+			id := sessions[i].ID
+			sessionID = &id
+			break
+		}
+	}
+	if sessionID == nil {
+		newSession := &db.TradingSession{
+			ID:             uuid.New(),
+			Mode:           db.TradingModePaper,
+			Symbol:         req.Symbol,
+			Exchange:       "paper",
+			InitialCapital: 100_000.0,
+			StartedAt:      time.Now(),
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		if err := s.db.CreateSession(ctx, newSession); err != nil {
+			log.Error().Err(err).Msg("Failed to create paper session")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trading session"})
+			return
+		}
+		sessionID = &newSession.ID
+	}
+
+	// 2. Determine execution price
+	refPrice := req.Price
+	if !isLimit && refPrice <= 0 {
+		mockEx := exchange.NewMockExchange(s.db)
+		refPrice = mockEx.GetMarketPrice(req.Symbol)
+		if refPrice <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "no market price configured for symbol; provide a price field",
+			})
+			return
+		}
+	}
+	execPrice := refPrice
+	if !isLimit {
+		if strings.EqualFold(req.Side, "BUY") {
+			execPrice = refPrice * 1.001
+		} else {
+			execPrice = refPrice * 0.999
+		}
+	}
+
+	// 3. Insert order
+	now := time.Now()
+	var pricePtr *float64
+	if req.Price > 0 {
+		pricePtr = ptrF64(req.Price)
+	}
+	orderSide := db.ConvertOrderSide(req.Side)
+	orderType := db.ConvertOrderType(req.Type)
+
+	order := &db.Order{
+		ID:        uuid.New(),
+		SessionID: sessionID,
+		Symbol:    req.Symbol,
+		Exchange:  "paper",
+		Side:      orderSide,
+		Type:      orderType,
+		Quantity:  req.Quantity,
+		Price:     pricePtr,
+		Status:    db.OrderStatusNew,
+		PlacedAt:  now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 	if err := s.db.InsertOrder(ctx, order); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to create paper trade order",
-		})
+		log.Error().Err(err).Msg("Failed to insert paper trade order")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create paper trade order"})
 		return
 	}
 
-	// Simulate immediate fill for market orders
+	// 4. Immediate fill for market orders
 	if order.Type == db.OrderTypeMarket {
-		now := time.Now()
-		execPrice := req.Price
 		execQuoteQty := execPrice * req.Quantity
+		commission := execQuoteQty * 0.001
 
-		if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled, req.Quantity, execQuoteQty, &now, nil, nil); err != nil {
-			log.Warn().Err(err).Str("order_id", order.ID.String()).Msg("Failed to mark paper trade order as filled")
+		if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled,
+			req.Quantity, execQuoteQty, &now, nil, nil); err != nil {
+			log.Warn().Err(err).Str("order_id", order.ID.String()).Msg("Failed to mark paper order filled")
 		} else {
 			order.Status = db.OrderStatusFilled
 			order.ExecutedQuantity = req.Quantity
 			order.ExecutedQuoteQuantity = execQuoteQty
 			order.FilledAt = &now
 			order.UpdatedAt = now
+		}
+
+		// Write fill record
+		commissionAsset := "USDT"
+		trade := &db.Trade{
+			ID:              uuid.New(),
+			OrderID:         order.ID,
+			Symbol:          req.Symbol,
+			Exchange:        "paper",
+			Side:            orderSide,
+			Price:           execPrice,
+			Quantity:        req.Quantity,
+			QuoteQuantity:   execQuoteQty,
+			Commission:      commission,
+			CommissionAsset: &commissionAsset,
+			ExecutedAt:      now,
+			IsMaker:         false,
+			CreatedAt:       now,
+		}
+		if err := s.db.InsertTrade(ctx, trade); err != nil {
+			log.Warn().Err(err).Msg("Failed to insert paper trade fill row")
+		}
+
+		// Create or average into existing position
+		existingPos, posErr := s.db.GetPositionBySymbolAndSession(ctx, req.Symbol, *sessionID)
+		if posErr != nil && !errors.Is(posErr, pgx.ErrNoRows) {
+			log.Warn().Err(posErr).Msg("Error looking up existing position")
+		}
+
+		posSide := db.PositionSideLong
+		if orderSide == db.OrderSideSell {
+			posSide = db.PositionSideShort
+		}
+
+		if existingPos == nil {
+			pos := &db.Position{
+				ID:            uuid.New(),
+				SessionID:     sessionID,
+				Symbol:        req.Symbol,
+				Exchange:      "paper",
+				Side:          posSide,
+				EntryPrice:    execPrice,
+				Quantity:      req.Quantity,
+				EntryTime:     now,
+				Fees:          commission,
+				EntryReason:   ptrStr("paper_trade_api"),
+				UnrealizedPnL: ptrF64(0),
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			if err := s.db.CreatePosition(ctx, pos); err != nil {
+				log.Warn().Err(err).Msg("Failed to create position for paper trade")
+			}
+		} else {
+			totalQty := existingPos.Quantity + req.Quantity
+			weightedAvg := (existingPos.Quantity*existingPos.EntryPrice + req.Quantity*execPrice) / totalQty
+			if err := s.db.UpdatePositionAveraging(ctx, existingPos.ID, weightedAvg, totalQty, commission); err != nil {
+				log.Warn().Err(err).Msg("Failed to update position for paper trade")
+			}
+		}
+
+		if err := s.db.AggregateSessionStats(ctx, *sessionID); err != nil {
+			log.Warn().Err(err).Msg("Failed to aggregate session stats after paper trade")
 		}
 	}
 
