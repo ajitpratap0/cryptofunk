@@ -16,9 +16,8 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-// ptrStr and ptrF64 are local pointer helpers used only within this file.
-// They are not duplicated elsewhere in the codebase (verified via grep).
-func ptrStr(s string) *string   { return &s }
+// ptrF64 is a local pointer helper used only within this file.
+// Not duplicated elsewhere in the codebase (verified via grep).
 func ptrF64(f float64) *float64 { return &f }
 
 // Session handlers
