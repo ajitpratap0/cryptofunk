@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -82,6 +83,7 @@ type DecisionContext struct {
 
 // TradingDecision represents the final orchestrator decision
 type TradingDecision struct {
+	DecisionID          uuid.UUID              `json:"decision_id"`
 	Symbol              string                 `json:"symbol"`
 	Action              SignalAction           `json:"action"` // BUY, SELL, HOLD
 	Confidence          float64                `json:"confidence"`
@@ -720,6 +722,7 @@ func (o *Orchestrator) calculateDecision(ctx *DecisionContext) *TradingDecision 
 	}
 
 	return &TradingDecision{
+		DecisionID:          uuid.New(),
 		Symbol:              ctx.Symbol,
 		Action:              winningAction,
 		Confidence:          confidence,
