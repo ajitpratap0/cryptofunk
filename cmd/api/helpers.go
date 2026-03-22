@@ -318,6 +318,9 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 		// Enable XSS protection in older browsers (most modern browsers ignore this)
 		c.Header("X-XSS-Protection", "1; mode=block")
 
+		// Control referrer information sent with requests
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+
 		c.Next()
 	}
 }

@@ -292,9 +292,8 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		}
 
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"order":   order,
-			"error":   "order execution failed",
-			"details": errMsg,
+			"order": order,
+			"error": "order execution failed",
 		})
 		return
 	}
@@ -888,8 +887,7 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to call orchestrator pause endpoint")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to pause trading",
-			"details": err.Error(),
+			"error": "failed to pause trading",
 		})
 		return
 	}
@@ -952,8 +950,7 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to call orchestrator resume endpoint")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to resume trading",
-			"details": err.Error(),
+			"error": "failed to resume trading",
 		})
 		return
 	}

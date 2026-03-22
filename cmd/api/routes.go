@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
@@ -16,6 +17,12 @@ import (
 )
 
 func (s *APIServer) setupMiddleware() {
+	// Limit request bodies to 1 MB to prevent OOM attacks
+	s.router.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20) // 1 MB
+		c.Next()
+	})
+
 	// Security headers middleware (applies to all responses)
 	s.router.Use(securityHeadersMiddleware())
 

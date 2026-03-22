@@ -33,6 +33,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -130,6 +131,13 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 
 	if err != nil {
 		return nil, err // Key not found or DB error
+	}
+
+	// Constant-time comparison to prevent timing attacks.
+	// Even though the DB lookup already matched by hash, we re-verify in Go
+	// to guard against any future refactoring that might skip the DB filter.
+	if subtle.ConstantTimeCompare([]byte(apiKey.KeyHash), []byte(keyHash)) != 1 {
+		return nil, nil
 	}
 
 	// Unmarshal permissions JSON into slice
