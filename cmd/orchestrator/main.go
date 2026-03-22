@@ -222,6 +222,7 @@ func main() {
 		PaperOnly:        viper.GetBool("executor.paper_only"),
 		TradingMode:      viper.GetString("trading.mode"),
 		OrderCooldown:    viper.GetDuration("executor.order_cooldown"),
+		Database:         database,
 	}
 	executor := orchestrator.NewExecutor(execConfig)
 	if natsConn := orch.GetNATSConnection(); natsConn != nil {
