@@ -103,7 +103,27 @@ func (s *Server) buildHandler() http.Handler {
 	outer.HandleFunc("/health", s.healthHandler) // bypasses all middleware and panic recovery
 	outer.Handle("/", s.panicRecoveryMiddleware(s.wrapMiddleware(s.buildMux())))
 
-	return outer
+	return s.panicRecoveryMiddleware(outer)
+}
+
+// panicRecoveryMiddleware wraps an http.Handler and recovers from panics,
+// returning a JSON-RPC error response instead of crashing the process.
+func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				stack := debug.Stack()
+				s.logger.Error().
+					Interface("panic", rec).
+					Bytes("stack", stack).
+					Msg("panic recovered in MCP HTTP handler")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"internal server error"}}`))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // panicRecoveryMiddleware wraps an http.Handler and recovers from panics,

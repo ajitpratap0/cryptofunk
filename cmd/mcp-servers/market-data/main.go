@@ -91,9 +91,10 @@ func main() {
 	}
 
 	srv := mcpserver.New(mcpserver.Config{
-		Name:    serverName,
-		Version: serverVersion,
-		Logger:  logger,
+		Name:        serverName,
+		Version:     serverVersion,
+		Logger:      logger,
+		MetricsPort: 9110,
 	})
 
 	registerTools(srv, service)

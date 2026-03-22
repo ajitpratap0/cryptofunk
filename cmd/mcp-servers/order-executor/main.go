@@ -92,9 +92,10 @@ func main() {
 	initPaperPrices(exchangeService, logger)
 
 	srv := mcpserver.New(mcpserver.Config{
-		Name:    serverName,
-		Version: serverVersion,
-		Logger:  logger,
+		Name:        serverName,
+		Version:     serverVersion,
+		Logger:      logger,
+		MetricsPort: 9111,
 	})
 
 	registerTools(srv, exchangeService)
