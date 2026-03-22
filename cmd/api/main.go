@@ -20,6 +20,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
@@ -169,6 +170,22 @@ func main() {
 	// Setup routes
 	server.setupRoutes()
 
+	// Background goroutine to update DB connection pool metrics every 5 seconds
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stat := database.Pool().Stat()
+				metrics.DatabaseConnectionsActive.Set(float64(stat.AcquiredConns()))
+				metrics.DatabaseConnectionsIdle.Set(float64(stat.IdleConns()))
+			}
+		}
+	}()
+
 	// Start server
 	server.start()
 }
@@ -223,12 +240,12 @@ func (s *APIServer) start() {
 		}
 	}
 
-	// Graceful shutdown with 5 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Graceful shutdown with 30 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal().Err(err).Msg("Server forced to shutdown")
+		log.Error().Err(err).Msg("Server forced to shutdown")
 	}
 
 	log.Info().Msg("API server stopped")
