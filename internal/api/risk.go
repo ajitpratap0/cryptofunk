@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
@@ -50,7 +51,7 @@ func (h *RiskHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware gin.Han
 	}
 }
 
-// GetMetrics returns VaR, CVaR, open position count, and total exposure.
+// GetMetrics returns VaR, CVaR, open position count, total exposure, max_drawdown, and sharpe_ratio.
 // GET /api/v1/risk/metrics
 func (h *RiskHandler) GetMetrics(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -89,6 +90,12 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 		log.Debug().Int("data_points", dataPoints).Msg("insufficient data for meaningful VaR estimate; need at least 10 closed positions in the last 90 days")
 	}
 
+	// Fetch active sessions once; reused by the VaR block and drawdown block below.
+	// NOTE: scaling by InitialCapital (not CurrentCapital) because TradingSession
+	// does not yet track current portfolio value. Dollar VaR will be inaccurate
+	// after significant P&L. Track in TASKS.md follow-up.
+	activeSessions, sessErr := h.db.ListActiveSessions(ctx)
+
 	if dataPoints >= 10 {
 		// CalculateVaR requires []interface{} not []float64
 		returnsIface := make([]interface{}, dataPoints)
@@ -98,10 +105,6 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 
 		// Sum InitialCapital across all active sessions to get total portfolio value.
 		// Used to convert fractional VaR (e.g. 0.023) into dollar VaR (e.g. $2,300).
-		// NOTE: scaling by InitialCapital (not CurrentCapital) because TradingSession
-		// does not yet track current portfolio value. Dollar VaR will be inaccurate
-		// after significant P&L. Track in TASKS.md follow-up.
-		activeSessions, sessErr := h.db.ListActiveSessions(ctx)
 		portfolioValue := 0.0
 		if sessErr == nil {
 			for _, s := range activeSessions {
@@ -140,6 +143,35 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			}
 		}
 	}
+
+	// Compute max_drawdown and sharpe_ratio from equity snapshots.
+	// Instead of calling ListEquitySnapshots once per session (N+1 queries), we:
+	//   1. Collect all active session IDs into a string slice — O(n) in memory.
+	//   2. Issue ONE query to find the session with the most snapshots.
+	//   3. Issue ONE query to fetch that session's snapshots.
+	// Total: 2 DB round-trips regardless of how many sessions are active.
+	var drawdownSnapshots []*db.EquitySnapshot
+	if sessErr == nil && len(activeSessions) > 0 {
+		sessionIDs := make([]string, 0, len(activeSessions))
+		for _, s := range activeSessions {
+			sessionIDs = append(sessionIDs, s.ID.String())
+		}
+
+		bestID, idErr := h.db.GetSessionIDWithMostSnapshots(ctx, sessionIDs)
+		if idErr != nil {
+			log.Debug().Err(idErr).Msg("GetSessionIDWithMostSnapshots failed; skipping drawdown/Sharpe")
+		} else if bestID != "" {
+			// Parse the UUID string back so we can call ListEquitySnapshots.
+			bestUUID, parseErr := uuid.Parse(bestID)
+			if parseErr != nil {
+				log.Debug().Err(parseErr).Str("session_id", bestID).Msg("failed to parse best session UUID")
+			} else {
+				drawdownSnapshots, _ = h.db.ListEquitySnapshots(ctx, bestUUID, 500)
+			}
+		}
+	}
+	response["max_drawdown"] = computeMaxDrawdown(drawdownSnapshots)
+	response["sharpe_ratio"] = computeSharpeRatio(drawdownSnapshots) // *float64 or nil
 
 	c.JSON(http.StatusOK, response)
 }
@@ -225,6 +257,62 @@ func (h *RiskHandler) GetExposure(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"exposure": result, "count": len(result)})
+}
+
+// computeMaxDrawdown returns the maximum peak-to-trough decline as a positive fraction
+// (e.g. 0.15 means 15% drawdown). Returns 0 when snapshots has fewer than two entries.
+func computeMaxDrawdown(snapshots []*db.EquitySnapshot) float64 {
+	if len(snapshots) < 2 {
+		return 0
+	}
+	peak := snapshots[0].Equity
+	maxDD := 0.0
+	for _, s := range snapshots[1:] {
+		if s.Equity > peak {
+			peak = s.Equity
+		}
+		if peak > 0 {
+			if dd := (peak - s.Equity) / peak; dd > maxDD {
+				maxDD = dd
+			}
+		}
+	}
+	return maxDD
+}
+
+// computeSharpeRatio returns the annualised Sharpe ratio (risk-free rate = 0) computed
+// from inter-snapshot returns. Returns nil when there are fewer than two snapshots.
+func computeSharpeRatio(snapshots []*db.EquitySnapshot) *float64 {
+	if len(snapshots) < 2 {
+		return nil
+	}
+	rets := make([]float64, 0, len(snapshots)-1)
+	for i := 1; i < len(snapshots); i++ {
+		if prev := snapshots[i-1].Equity; prev > 0 {
+			rets = append(rets, (snapshots[i].Equity-prev)/prev)
+		}
+	}
+	n := len(rets)
+	if n < 2 {
+		return nil
+	}
+	mean := 0.0
+	for _, r := range rets {
+		mean += r
+	}
+	mean /= float64(n)
+	variance := 0.0
+	for _, r := range rets {
+		d := r - mean
+		variance += d * d
+	}
+	variance /= float64(n - 1)
+	stddev := math.Sqrt(variance)
+	if stddev == 0 {
+		return nil
+	}
+	sharpe := mean / stddev * math.Sqrt(252)
+	return &sharpe
 }
 
 // collectClosedReturns gathers fractional returns from all closed positions.
