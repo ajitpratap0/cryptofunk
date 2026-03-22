@@ -771,8 +771,41 @@ func (db *DB) PartialClosePosition(ctx context.Context, id uuid.UUID, closeQuant
 		UpdatedAt:   now,
 	}
 
-	// Insert the closed portion as a new record
-	err = db.CreatePosition(ctx, closedPosition)
+	// Insert the closed portion as a new record.
+	// CreatePosition only inserts open-position columns (exit_time is omitted), so we
+	// use a direct INSERT here to include exit_time, exit_price, realized_pnl, etc.
+	// Without exit_time the row would land as NULL, violating the UNIQUE partial index
+	// idx_positions_open_session_symbol_uniq (session_id, symbol) WHERE exit_time IS NULL.
+	insertClosedQuery := `
+		INSERT INTO positions (
+			id, session_id, symbol, exchange, side, entry_price, exit_price, quantity,
+			entry_time, exit_time, stop_loss, take_profit, realized_pnl, fees,
+			entry_reason, exit_reason, metadata, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+		)
+	`
+	_, err = db.pool.Exec(ctx, insertClosedQuery,
+		closedPosition.ID,
+		closedPosition.SessionID,
+		closedPosition.Symbol,
+		closedPosition.Exchange,
+		closedPosition.Side,
+		closedPosition.EntryPrice,
+		closedPosition.ExitPrice,
+		closedPosition.Quantity,
+		closedPosition.EntryTime,
+		closedPosition.ExitTime,
+		closedPosition.StopLoss,
+		closedPosition.TakeProfit,
+		closedPosition.RealizedPnL,
+		closedPosition.Fees,
+		closedPosition.EntryReason,
+		closedPosition.ExitReason,
+		closedPosition.Metadata,
+		closedPosition.CreatedAt,
+		closedPosition.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create closed position record: %w", err)
 	}
