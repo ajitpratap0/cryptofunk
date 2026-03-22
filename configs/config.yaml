@@ -150,9 +150,13 @@ trading:
     - "BTCUSDT"
     - "ETHUSDT"
   exchange: "binance"
-  initial_capital: 10000.0
+  # initial_capital: starting capital for auto-created paper trading sessions.
+  # Changed from 10000.0 → 100000.0 (2026-03-20) to reflect realistic position sizing.
+  # Existing sessions are unaffected; only newly auto-created sessions use this value.
+  initial_capital: 100000.0
   max_positions: 3
   default_quantity: 0.01
+  commission_rate: 0.001  # 0.1% taker fee applied to paper trade fills (Binance standard tier)
 
 risk:
   max_position_size: 0.1       # 10% of portfolio
@@ -162,6 +166,11 @@ risk:
   default_take_profit: 0.05    # 5% take profit
   llm_approval_required: true  # Require LLM approval for trades
   min_confidence: 0.7          # Minimum confidence for signals
+
+  # Dashboard circuit breaker thresholds (absolute units, used by /risk/circuit-breakers)
+  max_daily_loss_dollars: 5000.0   # Trigger when cumulative session loss exceeds $5000
+  max_drawdown_pct: 10.0           # Trigger when max session drawdown exceeds 10%
+  max_trade_count: 100             # Trigger when total trades across active sessions exceeds 100
 
   # Safety Guard Configuration
   # Live trading protection mechanisms to prevent excessive losses

@@ -78,6 +78,8 @@ This document consolidates all implementation tasks from the architecture and de
 | **TB-005** | Observability | HIGH | 4h | Implement MCP metrics (request count, latency, errors) |
 | **TB-006** | Security | HIGH | 3h | Add API key expiration/rotation mechanism |
 
+> **Note (2026-03-20)**: Paper session `initial_capital` changed to $100k — affects new auto-created sessions only (existing sessions are unaffected).
+
 **Total Blocking Effort**: ~18 hours (2-3 days)
 
 ### ⚠️ CRITICAL FOR BETA LAUNCH

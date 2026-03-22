@@ -18,6 +18,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/api"
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
@@ -43,6 +44,7 @@ type APIServer struct {
 	orderExecSession   *mcp.ClientSession      // MCP session for order-executor calls
 	mcpClient          *mcp.Client             // MCP client for creating/reconnecting sessions
 	activeSessionID    *uuid.UUID              // Currently active trading session ID (guarded by sessionMu)
+	exchange           exchange.Exchange       // Shared mock exchange instance for paper trading
 }
 
 // HTTP client for orchestrator communication with timeout and connection pooling
@@ -122,6 +124,7 @@ func main() {
 		ctx:                ctx,
 		safetyGuard:        safetyGuard,
 		orderExecutorURL:   getOrderExecutorURL(),
+		exchange:           exchange.NewMockExchange(database),
 	}
 
 	// Initialize MCP client for order-executor (session connects lazily on first order)

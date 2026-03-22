@@ -9,14 +9,12 @@ import {
   calculateWinRate,
   groupBy 
 } from '@/lib/utils'
-import type { 
-  PerformanceMetrics, 
-  EquityPoint, 
-  CandlestickData, 
+import type {
+  PerformanceMetrics,
+  EquityPoint,
+  CandlestickData,
   TimeRange,
   Trade,
-  RiskMetrics,
-  CircuitBreaker
 } from '@/lib/types'
 
 // Query Keys
@@ -29,6 +27,9 @@ export const PERFORMANCE_QUERY_KEYS = {
   candlestick: (symbol: string, timeRange: string) => ['candlestick', symbol, timeRange],
   risk: ['risk'],
   circuitBreakers: ['risk', 'circuit-breakers'],
+  // Own top-level key — NOT nested under `risk` so that invalidating `risk`
+  // does not unintentionally invalidate exposure queries.
+  riskExposure: ['risk-exposure'],
 } as const
 
 // Performance Metrics
@@ -174,28 +175,14 @@ export function usePairPerformance() {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.pairPerformance,
     queryFn: async () => {
-      try {
-        // Try to get actual data from API
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/performance/pairs`)
-        if (!response.ok) throw new Error('API error')
-        return await response.json()
-      } catch {
-        // Return mock data if API fails
-        const mockPairData = [
-          { pair: 'BTC/USDT', pnl: 4520.30, trades: 45, winRate: 72.5, avgReturn: 2.8 },
-          { pair: 'ETH/USDT', pnl: 3240.15, trades: 38, winRate: 68.4, avgReturn: 3.1 },
-          { pair: 'BNB/USDT', pnl: 1890.45, trades: 52, winRate: 65.2, avgReturn: 1.9 },
-          { pair: 'XRP/USDT', pnl: -234.56, trades: 23, winRate: 43.5, avgReturn: -0.5 },
-          { pair: 'ADA/USDT', pnl: 567.89, trades: 31, winRate: 58.1, avgReturn: 1.2 },
-          { pair: 'SOL/USDT', pnl: 2134.67, trades: 28, winRate: 75.0, avgReturn: 4.2 },
-        ]
-        
-        return {
-          success: true,
-          data: mockPairData,
-          timestamp: new Date().toISOString(),
-        }
-      }
+      const response = await apiClient.getPairPerformance()
+      if (!response.success) throw new Error(response.error || 'Failed to fetch pair performance')
+      const raw: unknown = response.data
+      const pairs =
+        raw && typeof raw === 'object' && 'pairs' in raw
+          ? (raw as { pairs: Array<{ symbol: string; realized_pnl: number; trade_count: number }> }).pairs
+          : []
+      return { success: true as const, data: pairs, timestamp: response.timestamp }
     },
     staleTime: REFRESH_INTERVALS.performance,
     refetchInterval: REFRESH_INTERVALS.performance,
@@ -235,40 +222,7 @@ export function useCandlestickData(symbol: string, timeRange: string = '1d') {
 export function useRiskMetrics() {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.risk,
-    queryFn: async () => {
-      try {
-        // Try to get actual risk data
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/risk/metrics`)
-        if (!response.ok) throw new Error('API error')
-        return await response.json()
-      } catch {
-        // Return mock data if API fails
-        const mockRiskMetrics: RiskMetrics = {
-          var95: 0.025, // 2.5%
-          var99: 0.045, // 4.5%
-          expectedShortfall: 0.062, // 6.2%
-          betaToMarket: 1.23,
-          correlation: {
-            'BTC/USDT': 0.85,
-            'ETH/USDT': 0.78,
-            'BNB/USDT': 0.65,
-            'Market': 1.0,
-          },
-          concentration: {
-            'BTC/USDT': 0.35,
-            'ETH/USDT': 0.25,
-            'BNB/USDT': 0.15,
-            'Others': 0.25,
-          },
-        }
-        
-        return {
-          success: true,
-          data: mockRiskMetrics,
-          timestamp: new Date().toISOString(),
-        }
-      }
-    },
+    queryFn: () => apiClient.getRiskMetrics(),
     staleTime: REFRESH_INTERVALS.risk,
     refetchInterval: REFRESH_INTERVALS.risk,
   })
@@ -278,52 +232,17 @@ export function useRiskMetrics() {
 export function useCircuitBreakers() {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.circuitBreakers,
-    queryFn: async () => {
-      try {
-        // Try to get actual circuit breaker data
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/risk/circuit-breakers`)
-        if (!response.ok) throw new Error('API error')
-        return await response.json()
-      } catch {
-        // Return mock data if API fails
-        const mockCircuitBreakers: CircuitBreaker[] = [
-          {
-            name: 'Max Daily Loss',
-            status: 'normal',
-            threshold: 5.0,
-            currentValue: 2.3,
-            description: 'Maximum daily loss percentage',
-          },
-          {
-            name: 'Max Drawdown',
-            status: 'warning',
-            threshold: 10.0,
-            currentValue: 8.5,
-            description: 'Maximum portfolio drawdown',
-          },
-          {
-            name: 'Position Concentration',
-            status: 'normal',
-            threshold: 50.0,
-            currentValue: 35.0,
-            description: 'Maximum single position exposure',
-          },
-          {
-            name: 'Leverage Limit',
-            status: 'normal',
-            threshold: 10.0,
-            currentValue: 6.2,
-            description: 'Maximum portfolio leverage',
-          },
-        ]
-        
-        return {
-          success: true,
-          data: mockCircuitBreakers,
-          timestamp: new Date().toISOString(),
-        }
-      }
-    },
+    queryFn: () => apiClient.getCircuitBreakers(),
+    staleTime: REFRESH_INTERVALS.risk,
+    refetchInterval: REFRESH_INTERVALS.risk,
+  })
+}
+
+// Risk Exposure by symbol
+export function useRiskExposure() {
+  return useQuery({
+    queryKey: PERFORMANCE_QUERY_KEYS.riskExposure,
+    queryFn: () => apiClient.getRiskExposure(),
     staleTime: REFRESH_INTERVALS.risk,
     refetchInterval: REFRESH_INTERVALS.risk,
   })

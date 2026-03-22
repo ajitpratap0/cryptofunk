@@ -62,6 +62,8 @@ export function CircuitBreakerStatus({
         return <AlertTriangle className="h-4 w-4 text-warning" />
       case 'triggered':
         return <XCircle className="h-4 w-4 text-loss" />
+      case 'disabled':
+        return <Shield className="h-4 w-4 text-muted-foreground" />
       default:
         return <Shield className="h-4 w-4 text-muted-foreground" />
     }
@@ -75,6 +77,8 @@ export function CircuitBreakerStatus({
         return 'bg-warning'
       case 'triggered':
         return 'bg-loss'
+      case 'disabled':
+        return 'bg-muted-foreground/40'
       default:
         return 'bg-muted'
     }
@@ -84,10 +88,12 @@ export function CircuitBreakerStatus({
     return Math.min((Math.abs(current) / Math.abs(threshold)) * 100, 100)
   }
 
-  const overallStatus = circuitBreakers.some(cb => cb.status === 'triggered') 
+  const overallStatus = circuitBreakers.some(cb => cb.status === 'triggered')
     ? 'triggered'
     : circuitBreakers.some(cb => cb.status === 'warning')
     ? 'warning'
+    : circuitBreakers.every(cb => cb.status === 'disabled')
+    ? 'disabled'
     : 'normal'
 
   return (
@@ -103,9 +109,9 @@ export function CircuitBreakerStatus({
         </div>
 
         <div className="text-right">
-          <StatusDot 
-            status={overallStatus === 'triggered' ? 'error' : overallStatus === 'warning' ? 'warning' : 'healthy'} 
-            label={null} 
+          <StatusDot
+            status={overallStatus === 'triggered' ? 'error' : overallStatus === 'warning' ? 'warning' : overallStatus === 'disabled' ? 'disabled' : 'healthy'}
+            label={null}
           />
           <div className="text-xs text-muted-foreground mt-1 capitalize">
             {overallStatus}
@@ -125,7 +131,8 @@ export function CircuitBreakerStatus({
                 "p-4 rounded-lg border transition-all",
                 breaker.status === 'normal' && "bg-background border-border",
                 breaker.status === 'warning' && "bg-warning/10 border-warning/30",
-                breaker.status === 'triggered' && "bg-loss/10 border-loss/30"
+                breaker.status === 'triggered' && "bg-loss/10 border-loss/30",
+                breaker.status === 'disabled' && "bg-muted/30 border-border opacity-60"
               )}
             >
               <div className="flex items-start justify-between mb-3">
@@ -134,7 +141,8 @@ export function CircuitBreakerStatus({
                     "p-2 rounded-lg",
                     breaker.status === 'normal' && "bg-muted text-muted-foreground",
                     breaker.status === 'warning' && "bg-warning/20 text-warning",
-                    breaker.status === 'triggered' && "bg-loss/20 text-loss"
+                    breaker.status === 'triggered' && "bg-loss/20 text-loss",
+                    breaker.status === 'disabled' && "bg-muted text-muted-foreground"
                   )}>
                     {getIcon(breaker.name)}
                   </div>
@@ -199,6 +207,15 @@ export function CircuitBreakerStatus({
                 </div>
               )}
 
+              {breaker.status === 'disabled' && (
+                <div className="p-2 bg-muted border border-border rounded text-sm">
+                  <div className="font-medium text-muted-foreground">Disabled</div>
+                  <div className="text-muted-foreground/80 text-xs mt-1">
+                    This risk control is not active — threshold not configured
+                  </div>
+                </div>
+              )}
+
               {breaker.status === 'normal' && progressPercentage > 50 && (
                 <div className="p-2 bg-info/10 border border-info/20 rounded text-sm">
                   <div className="font-medium text-info">Within Safe Range</div>
@@ -214,7 +231,7 @@ export function CircuitBreakerStatus({
 
       {/* Summary */}
       <div className="mt-6 pt-4 border-t border-border">
-        <div className="grid grid-cols-3 gap-4 text-center text-sm">
+        <div className="grid grid-cols-4 gap-4 text-center text-sm">
           <div>
             <div className="text-muted-foreground">Normal</div>
             <div className="font-bold text-profit">
@@ -231,6 +248,12 @@ export function CircuitBreakerStatus({
             <div className="text-muted-foreground">Triggered</div>
             <div className="font-bold text-loss">
               {circuitBreakers.filter(cb => cb.status === 'triggered').length}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Disabled</div>
+            <div className="font-bold text-muted-foreground">
+              {circuitBreakers.filter(cb => cb.status === 'disabled').length}
             </div>
           </div>
         </div>

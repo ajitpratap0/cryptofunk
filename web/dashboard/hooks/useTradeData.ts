@@ -20,6 +20,56 @@ import {
 } from '@/types/api-responses'
 import type { Trade, Position, Order, UnifiedPortfolio, DashboardStats } from '@/lib/types'
 
+// RawApiTrade matches the JSON shape produced by encoding/json on db.Trade
+// with snake_case struct tags (added in the backend data-pipeline update).
+interface RawApiTrade {
+  id: string
+  order_id: string
+  exchange_trade_id?: string | null
+  symbol: string
+  exchange: string
+  side: string           // "BUY" | "SELL" from db.OrderSide
+  price: number
+  quantity: number
+  quote_quantity: number
+  commission: number
+  commission_asset?: string | null
+  executed_at: string
+  is_maker: boolean
+  metadata?: Record<string, unknown> | null
+  created_at: string
+}
+
+// mapApiTrade converts the snake_case backend shape to the camelCase Trade type
+// used throughout the dashboard. Fields that have no direct backend equivalent
+// (entryPrice, currentPrice, pnl, pnlPercent, confidence, status, agent) are
+// derived or defaulted — the trades table stores exchange fills, not strategy
+// metadata, so those fields will be populated once the backend exposes them.
+function mapApiTrade(raw: RawApiTrade): Trade {
+  const side: Trade['side'] = raw.side === 'SELL' ? 'short' : 'long'
+  return {
+    id: raw.id,
+    symbol: raw.symbol,
+    side,
+    // exchange fills record the execution price; use it for both entry and current
+    entryPrice: raw.price,
+    currentPrice: raw.price,
+    quantity: raw.quantity,
+    // PnL is not available in the fills table — default to 0 until the backend
+    // enriches the response with position-level PnL.
+    pnl: 0,
+    pnlPercent: 0,
+    agent: raw.exchange,  // proxy until a dedicated agent_id field is on the trade row
+    confidence: 0,
+    timestamp: raw.executed_at,
+    // A BUY fill opens a position ('open'); a SELL fill closes one ('closed').
+    status: (raw.side === 'SELL' ? 'closed' : 'open') as Trade['status'],
+    reasoning: undefined,
+    exitPrice: undefined,
+    exitTimestamp: undefined,
+  }
+}
+
 // Query Keys
 export const QUERY_KEYS = {
   trades: ['trades'],
@@ -33,15 +83,34 @@ export const QUERY_KEYS = {
 } as const
 
 // Trades
-export function useTrades() {
+export function useTrades(limit = 50, offset = 0) {
   return useQuery({
-    queryKey: [...QUERY_KEYS.trades],
+    queryKey: [...QUERY_KEYS.trades, limit, offset],
     queryFn: async () => {
-      const mockTrades = getMockTrades()
+      if (USE_MOCK_DATA) {
+        // NOTE: mock mode returns all trades regardless of limit/offset params.
+        // Pagination is only enforced against the real API.
+        return {
+          success: true as const,
+          data: getMockTrades(),
+          timestamp: new Date().toISOString(),
+        }
+      }
+
+      const response = await apiClient.getTrades(limit, offset)
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch trades')
+      }
+
+      const raw: unknown = response.data
+      const tradeList: Trade[] =
+        raw && typeof raw === 'object' && 'trades' in raw
+          ? (raw as { trades: RawApiTrade[] }).trades.map(mapApiTrade)
+          : []
       return {
         success: true as const,
-        data: mockTrades,
-        timestamp: new Date().toISOString(),
+        data: tradeList,
+        timestamp: response.timestamp,
       }
     },
     staleTime: REFRESH_INTERVALS.trades,
@@ -79,11 +148,11 @@ export function usePositions() {
       }
 
       const response = await apiClient.getPositions()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch positions')
       }
-      
+
       // API returns {positions: [...], count: N} - extract the array
       const rawData: unknown = response.data
       if (isWrappedResponse(rawData)) {
@@ -93,7 +162,7 @@ export function usePositions() {
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.positions,
@@ -124,11 +193,11 @@ export function useOrders() {
       }
 
       const response = await apiClient.getOrders()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch orders')
       }
-      
+
       // API returns {orders: [...], count: N} - extract the array
       const rawData: unknown = response.data
       if (isWrappedOrders(rawData)) {
@@ -138,7 +207,7 @@ export function useOrders() {
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.trades,
@@ -160,17 +229,17 @@ export function useDashboard() {
       }
 
       const response = await apiClient.getDashboard()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch dashboard')
       }
-      
+
       // Transform API response shape to DashboardStats
       const raw: unknown = response.data
       if (isRawDashboardResponse(raw)) {
         const pnl = raw.pnl_summary || {}
         const pos = raw.position_summary || {}
-        
+
         const transformed: DashboardStats = {
           totalPnl: pnl.total_pnl ?? 0,
           totalPnlPercent: pnl.return_percent ?? 0,
@@ -182,14 +251,14 @@ export function useDashboard() {
           marginUsed: pos.total_exposure ?? 0,
           marginAvailable: (pnl.current_capital ?? 0) - (pos.total_exposure ?? 0),
         }
-        
+
         return {
           success: true as const,
           data: transformed,
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -210,11 +279,11 @@ export function useDashboardPositions() {
       }
 
       const response = await apiClient.getDashboardPositions()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch dashboard positions')
       }
-      
+
       // API returns {positions: [...], count: N, summary: {...}} - extract the array
       const rawData: unknown = response.data
       if (isWrappedResponse(rawData)) {
@@ -224,7 +293,7 @@ export function useDashboardPositions() {
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -249,11 +318,11 @@ export function useDashboardPnl() {
       }
 
       const response = await apiClient.getDashboardPnl()
-      
+
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch dashboard PnL')
       }
-      
+
       // Transform API response: API returns flat {total_pnl, realized_pnl, ...}
       const raw: unknown = response.data
       if (isRawDashboardPnlResponse(raw)) {
@@ -262,12 +331,13 @@ export function useDashboardPnl() {
           data: {
             daily: raw.realized_pnl ?? 0,
             total: raw.total_pnl ?? 0,
-            equity: getMockEquityPoints(), // No equity curve from API yet
+            // TODO: replace with real API data when backend provides equity_curve
+            equity: getMockEquityPoints(),
           },
           timestamp: response.timestamp,
         }
       }
-      
+
       return response
     },
     staleTime: REFRESH_INTERVALS.dashboard,
@@ -302,7 +372,7 @@ export function useUnifiedPortfolio() {
 // Mutations
 export function useCreateOrder() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (order: Partial<Order>) => apiClient.createOrder(order),
     onSuccess: () => {
@@ -313,7 +383,7 @@ export function useCreateOrder() {
 
 export function useDeleteOrder() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id: string) => apiClient.deleteOrder(id),
     onSuccess: () => {
@@ -325,7 +395,7 @@ export function useDeleteOrder() {
 // Trading Controls
 export function useStartTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.startTrading(),
     onSuccess: () => {
@@ -336,7 +406,7 @@ export function useStartTrading() {
 
 export function useStopTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.stopTrading(),
     onSuccess: () => {
@@ -347,7 +417,7 @@ export function useStopTrading() {
 
 export function usePauseTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.pauseTrading(),
     onSuccess: () => {
@@ -358,7 +428,7 @@ export function usePauseTrading() {
 
 export function useResumeTrading() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: () => apiClient.resumeTrading(),
     onSuccess: () => {

@@ -276,6 +276,45 @@ class ApiClient {
       body: JSON.stringify(trade),
     })
   }
+
+  // Trades (fill records)
+  async getTrades(limit = 50, offset = 0): Promise<ApiResponse<{ trades: Trade[]; count: number }>> {
+    return this.request(`/trades?limit=${limit}&offset=${offset}`)
+  }
+
+  // Risk metrics
+  async getRiskMetrics(): Promise<ApiResponse<{
+    open_positions: number
+    total_exposure: number
+    data_points: number
+    var_95: number | null
+    var_99: number | null
+    expected_shortfall: number | null
+  }>> {
+    return this.request('/risk/metrics')
+  }
+
+  async getCircuitBreakers(): Promise<ApiResponse<{
+    circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }>
+    count: number
+  }>> {
+    return this.request('/risk/circuit-breakers')
+  }
+
+  async getRiskExposure(): Promise<ApiResponse<{
+    exposure: Array<{ symbol: string; exposure: number }>
+    count: number
+  }>> {
+    return this.request('/risk/exposure')
+  }
+
+  // Performance by trading pair
+  async getPairPerformance(): Promise<ApiResponse<{
+    pairs: Array<{ symbol: string; realized_pnl: number; trade_count: number }>
+    count: number
+  }>> {
+    return this.request('/performance/pairs')
+  }
 }
 
 export const apiClient = new ApiClient()
