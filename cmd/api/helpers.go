@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,21 @@ var startTime = time.Now()
 
 func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
+}
+
+// parseIntQuery parses an integer query parameter from the request.
+// Returns defaultVal if the parameter is absent or cannot be parsed.
+// Negative values are clamped to 0.
+func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
+	raw := c.Query(key)
+	if raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return defaultVal
+	}
+	return v
 }
 
 // setActiveSessionID sets the active trading session ID (thread-safe).
