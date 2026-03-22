@@ -9,14 +9,14 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	mcpserver "github.com/ajitpratap0/cryptofunk/internal/mcp"
 	"github.com/ajitpratap0/cryptofunk/internal/polymarket"
 )
 
-const (
-	serverName    = "polymarket"
-	serverVersion = "1.0.0"
-)
+const serverName = "polymarket"
+
+var serverVersion = config.Version
 
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339

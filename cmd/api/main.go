@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -113,6 +114,27 @@ func main() {
 	safetyMonitor := safety.NewMonitor(0) // portfolio value updated at runtime
 	safetyGuard := safety.NewGuard(safetyLimits, safetyMonitor)
 
+	// Select exchange implementation based on configured trading mode.
+	// PAPER mode (default): MockExchange with simulated fills and slippage.
+	// LIVE mode: BinanceExchange using API key/secret from config or env.
+	var ex exchange.Exchange
+	if strings.EqualFold(cfg.Trading.Mode, "live") {
+		binanceCfg := exchange.BinanceConfig{}
+		if exc, ok := cfg.Exchanges["binance"]; ok {
+			binanceCfg.APIKey = exc.APIKey
+			binanceCfg.SecretKey = exc.SecretKey
+		}
+		binanceEx, err := exchange.NewBinanceExchange(binanceCfg, database)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to initialize Binance exchange for LIVE trading")
+		}
+		ex = binanceEx
+		log.Warn().Msg("LIVE trading mode: real orders will be placed on Binance")
+	} else {
+		ex = exchange.NewMockExchange(database)
+		log.Info().Str("mode", cfg.Trading.Mode).Msg("Paper trading mode: using mock exchange")
+	}
+
 	// Create API server
 	server := &APIServer{
 		router:             gin.Default(),
@@ -124,14 +146,14 @@ func main() {
 		ctx:                ctx,
 		safetyGuard:        safetyGuard,
 		orderExecutorURL:   getOrderExecutorURL(),
-		exchange:           exchange.NewMockExchange(database),
+		exchange:           ex,
 	}
 
 	// Initialize MCP client for order-executor (session connects lazily on first order)
 	server.mcpClient = mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "cryptofunk-api",
-			Version: "1.0.0",
+			Version: config.Version,
 		},
 		nil,
 	)

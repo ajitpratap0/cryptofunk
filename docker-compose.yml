@@ -172,7 +172,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployments/prometheus/prometheus-docker.yml:/etc/prometheus/prometheus.yml:ro
       - ./deployments/prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     command:
@@ -322,6 +322,7 @@ services:
       args:
         SERVER_NAME: market-data
     container_name: cryptofunk-market-data-server
+    command: ["--metrics-port", "9110"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -353,6 +354,7 @@ services:
       args:
         SERVER_NAME: technical-indicators
     container_name: cryptofunk-technical-indicators-server
+    command: ["--metrics-port", "9113"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -383,6 +385,7 @@ services:
       args:
         SERVER_NAME: risk-analyzer
     container_name: cryptofunk-risk-analyzer-server
+    command: ["--metrics-port", "9112"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -413,6 +416,7 @@ services:
       args:
         SERVER_NAME: order-executor
     container_name: cryptofunk-order-executor-server
+    command: ["--metrics-port", "9111"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cryptofunk?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -683,6 +687,7 @@ services:
       NATS_URL: nats://nats:4222
       ORCHESTRATOR_URL: http://orchestrator:8080
       API_PORT: 8080
+      CRYPTOFUNK_TRADING_MODE: ${TRADING_MODE:-PAPER}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET environment variable is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3333}
       LOG_LEVEL: ${LOG_LEVEL:-info}
