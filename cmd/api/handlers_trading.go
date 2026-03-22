@@ -17,9 +17,14 @@ import (
 )
 
 const (
-	paperSlippageBuy  = 1.001 // 0.1% adverse slippage for market buy orders
-	paperSlippageSell = 0.999 // 0.1% adverse slippage for market sell orders
-	// TODO: make slippage configurable via config.Trading.
+	// paperSlippageBuy and paperSlippageSell are the default adverse slippage factors
+	// applied to paper market orders when config.Trading.SlippageBuyFactor /
+	// SlippageSellFactor are not set (zero value). Configure via configs/config.yaml:
+	//   trading:
+	//     slippage_buy_factor:  1.001
+	//     slippage_sell_factor: 0.999
+	paperSlippageBuy  = 1.001
+	paperSlippageSell = 0.999
 )
 
 // errOppositeSide is a sentinel returned from the WithTx callback when the
@@ -527,12 +532,21 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			return
 		}
 	}
+	// Resolve slippage factors: prefer config values, fall back to package constants.
+	slippageBuy := s.config.Trading.SlippageBuyFactor
+	if slippageBuy == 0 {
+		slippageBuy = paperSlippageBuy
+	}
+	slippageSell := s.config.Trading.SlippageSellFactor
+	if slippageSell == 0 {
+		slippageSell = paperSlippageSell
+	}
 	execPrice := refPrice
 	if !isLimit {
 		if strings.EqualFold(req.Side, "BUY") {
-			execPrice = refPrice * paperSlippageBuy
+			execPrice = refPrice * slippageBuy
 		} else {
-			execPrice = refPrice * paperSlippageSell
+			execPrice = refPrice * slippageSell
 		}
 	}
 

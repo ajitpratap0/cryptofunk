@@ -25,9 +25,11 @@ func (h *PerformanceHandler) RegisterRoutes(rg *gin.RouterGroup, readMiddleware 
 	g := rg.Group("/performance")
 	if authMiddleware != nil {
 		g.GET("/pairs", readMiddleware, authMiddleware, h.GetPairPerformance)
+		g.GET("/summary", readMiddleware, authMiddleware, h.GetSummary)
 	} else {
 		g.Use(readMiddleware)
 		g.GET("/pairs", h.GetPairPerformance)
+		g.GET("/summary", h.GetSummary)
 	}
 }
 
@@ -57,4 +59,43 @@ func (h *PerformanceHandler) GetPairPerformance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"pairs": pairs, "count": len(pairs)})
+}
+
+// GetSummary returns aggregate portfolio performance metrics across all active sessions.
+// GET /api/v1/performance/summary
+func (h *PerformanceHandler) GetSummary(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	sessions, err := h.db.ListActiveSessions(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list sessions"})
+		return
+	}
+
+	var totalPnL, totalInitialCapital float64
+	var totalTrades, winningTrades int
+	for _, s := range sessions {
+		totalPnL += s.TotalPnL
+		totalInitialCapital += s.InitialCapital
+		totalTrades += s.TotalTrades
+		winningTrades += s.WinningTrades
+	}
+
+	winRate := 0.0
+	if totalTrades > 0 {
+		winRate = float64(winningTrades) / float64(totalTrades) * 100
+	}
+	returnPct := 0.0
+	if totalInitialCapital > 0 {
+		returnPct = totalPnL / totalInitialCapital * 100
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_pnl":      math.Round(totalPnL*100) / 100,
+		"total_trades":   totalTrades,
+		"winning_trades": winningTrades,
+		"win_rate":       math.Round(winRate*100) / 100,
+		"return_percent": math.Round(returnPct*100) / 100,
+		"session_count":  len(sessions),
+	})
 }
