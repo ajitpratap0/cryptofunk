@@ -140,7 +140,7 @@ export interface RiskMetrics {
 
 export interface CircuitBreaker {
   name: string;
-  status: 'normal' | 'warning' | 'triggered';
+  status: 'normal' | 'warning' | 'triggered' | 'disabled';
   threshold: number;
   currentValue: number;
   description: string;

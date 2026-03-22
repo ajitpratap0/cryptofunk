@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 	"github.com/sony/gobreaker"
@@ -141,4 +142,25 @@ func (db *DB) GetCircuitBreaker() *risk.CircuitBreakerManager {
 // This is useful for sharing circuit breakers across components
 func (db *DB) SetCircuitBreaker(cb *risk.CircuitBreakerManager) {
 	db.circuitBreaker = cb
+}
+
+// WithTx runs fn inside a single pgx transaction using the provided TxOptions.
+// It commits on success and rolls back on any error or panic.
+// The caller must not commit or roll back tx.
+func (db *DB) WithTx(ctx context.Context, opts pgx.TxOptions, fn func(tx pgx.Tx) error) error {
+	tx, err := db.pool.BeginTx(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(context.Background())
+			panic(p)
+		}
+	}()
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+	return tx.Commit(ctx)
 }

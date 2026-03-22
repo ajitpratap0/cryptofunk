@@ -353,6 +353,32 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
+// GetAllClosedPositions returns positions closed within the last 90 days across all sessions,
+// ordered by exit_time DESC. A 90-day window ensures VaR calculations use recent,
+// relevant return data rather than an arbitrary row count.
+func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE exit_time IS NOT NULL
+		  AND exit_time > NOW() - INTERVAL '90 days'
+		  AND realized_pnl IS NOT NULL
+		ORDER BY exit_time DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query closed positions: %w", err)
+	}
+	defer rows.Close()
+
+	return scanPositions(rows)
+}
+
 // GetPositionsBySession retrieves all positions (including closed) for a session
 func (db *DB) GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*Position, error) {
 	query := `
@@ -414,6 +440,56 @@ func (db *DB) GetPositionBySymbolAndSession(ctx context.Context, symbol string, 
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get position by symbol and session: %w", err)
+	}
+
+	return &position, nil
+}
+
+// GetOpenPositionBySymbolTx retrieves the most recent open position for a symbol within a session
+// using an existing transaction, providing a consistent read within the transaction boundary.
+// Returns (nil, nil) when no open position is found.
+func (db *DB) GetOpenPositionBySymbolTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID, symbol string) (*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE symbol = $1 AND session_id = $2 AND exit_time IS NULL
+		ORDER BY entry_time DESC
+		LIMIT 1
+		FOR UPDATE
+	`
+
+	var position Position
+	err := tx.QueryRow(ctx, query, symbol, sessionID).Scan(
+		&position.ID,
+		&position.SessionID,
+		&position.Symbol,
+		&position.Exchange,
+		&position.Side,
+		&position.EntryPrice,
+		&position.ExitPrice,
+		&position.Quantity,
+		&position.EntryTime,
+		&position.ExitTime,
+		&position.StopLoss,
+		&position.TakeProfit,
+		&position.RealizedPnL,
+		&position.UnrealizedPnL,
+		&position.Fees,
+		&position.EntryReason,
+		&position.ExitReason,
+		&position.Metadata,
+		&position.CreatedAt,
+		&position.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get open position by symbol in transaction: %w", err)
 	}
 
 	return &position, nil
@@ -537,6 +613,83 @@ func (db *DB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuant
 	return nil
 }
 
+// CreatePositionTx inserts a new position into the database within an existing transaction.
+func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Position) error {
+	query := `
+		INSERT INTO positions (
+			id, session_id, symbol, exchange, side, entry_price, quantity,
+			entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+		)
+	`
+
+	if position.ID == uuid.Nil {
+		position.ID = uuid.New()
+	}
+	if position.CreatedAt.IsZero() {
+		position.CreatedAt = time.Now()
+	}
+	if position.UpdatedAt.IsZero() {
+		position.UpdatedAt = time.Now()
+	}
+
+	_, err := tx.Exec(ctx, query,
+		position.ID,
+		position.SessionID,
+		position.Symbol,
+		position.Exchange,
+		position.Side,
+		position.EntryPrice,
+		position.Quantity,
+		position.EntryTime,
+		position.StopLoss,
+		position.TakeProfit,
+		position.EntryReason,
+		position.Metadata,
+		position.CreatedAt,
+		position.UpdatedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create position: %w", err)
+	}
+
+	return nil
+}
+
+// UpdatePositionAveragingTx updates entry price and quantity when adding to a position,
+// within an existing transaction.
+func (db *DB) UpdatePositionAveragingTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, newEntryPrice, newQuantity float64, additionalFees float64) error {
+	query := `
+		UPDATE positions
+		SET
+			entry_price = $2,
+			quantity = $3,
+			fees = fees + $4,
+			updated_at = $5
+		WHERE id = $1 AND exit_time IS NULL
+	`
+
+	result, err := tx.Exec(ctx, query,
+		id,
+		newEntryPrice,
+		newQuantity,
+		additionalFees,
+		time.Now(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update position averaging: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("position not found or already closed: %s", id)
+	}
+
+	return nil
+}
+
 // UpdatePositionAveraging updates entry price and quantity when adding to a position
 func (db *DB) UpdatePositionAveraging(ctx context.Context, id uuid.UUID, newEntryPrice, newQuantity float64, additionalFees float64) error {
 	query := `
@@ -618,8 +771,41 @@ func (db *DB) PartialClosePosition(ctx context.Context, id uuid.UUID, closeQuant
 		UpdatedAt:   now,
 	}
 
-	// Insert the closed portion as a new record
-	err = db.CreatePosition(ctx, closedPosition)
+	// Insert the closed portion as a new record.
+	// CreatePosition only inserts open-position columns (exit_time is omitted), so we
+	// use a direct INSERT here to include exit_time, exit_price, realized_pnl, etc.
+	// Without exit_time the row would land as NULL, violating the UNIQUE partial index
+	// idx_positions_open_session_symbol_uniq (session_id, symbol) WHERE exit_time IS NULL.
+	insertClosedQuery := `
+		INSERT INTO positions (
+			id, session_id, symbol, exchange, side, entry_price, exit_price, quantity,
+			entry_time, exit_time, stop_loss, take_profit, realized_pnl, fees,
+			entry_reason, exit_reason, metadata, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+		)
+	`
+	_, err = db.pool.Exec(ctx, insertClosedQuery,
+		closedPosition.ID,
+		closedPosition.SessionID,
+		closedPosition.Symbol,
+		closedPosition.Exchange,
+		closedPosition.Side,
+		closedPosition.EntryPrice,
+		closedPosition.ExitPrice,
+		closedPosition.Quantity,
+		closedPosition.EntryTime,
+		closedPosition.ExitTime,
+		closedPosition.StopLoss,
+		closedPosition.TakeProfit,
+		closedPosition.RealizedPnL,
+		closedPosition.Fees,
+		closedPosition.EntryReason,
+		closedPosition.ExitReason,
+		closedPosition.Metadata,
+		closedPosition.CreatedAt,
+		closedPosition.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create closed position record: %w", err)
 	}
@@ -632,6 +818,85 @@ func (db *DB) PartialClosePosition(ctx context.Context, id uuid.UUID, closeQuant
 	}
 
 	return closedPosition, nil
+}
+
+// PairPerformance holds aggregated realized PnL and trade count for a single trading pair.
+type PairPerformance struct {
+	Symbol      string  `db:"symbol"`
+	RealizedPnL float64 `db:"realized_pnl"`
+	TradeCount  int     `db:"trade_count"`
+}
+
+// GetPairPerformance returns realized PnL and trade count grouped by symbol using SQL GROUP BY,
+// covering all closed positions where realized_pnl is not NULL.
+func (db *DB) GetPairPerformance(ctx context.Context) ([]PairPerformance, error) {
+	query := `
+		SELECT symbol, COALESCE(SUM(realized_pnl), 0) AS realized_pnl, COUNT(*) AS trade_count
+		FROM positions
+		WHERE exit_time IS NOT NULL AND realized_pnl IS NOT NULL
+		GROUP BY symbol
+		ORDER BY realized_pnl DESC
+		-- Cap at 200 rows — sufficient for dashboard display; a full paginated API is a follow-up.
+		LIMIT 200
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pair performance: %w", err)
+	}
+	defer rows.Close()
+
+	var results []PairPerformance
+	for rows.Next() {
+		var p PairPerformance
+		if err := rows.Scan(&p.Symbol, &p.RealizedPnL, &p.TradeCount); err != nil {
+			return nil, fmt.Errorf("failed to scan pair performance row: %w", err)
+		}
+		results = append(results, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pair performance rows: %w", err)
+	}
+	return results, nil
+}
+
+// SymbolExposure holds the cost-basis exposure for a single symbol across all open positions.
+type SymbolExposure struct {
+	Symbol   string  `db:"symbol"`
+	Exposure float64 `db:"exposure"`
+}
+
+// GetExposureBySymbol returns the total open-position exposure (quantity * entry_price) grouped by
+// symbol using SQL GROUP BY. Exposure is calculated at cost-basis, not mark-to-market.
+func (db *DB) GetExposureBySymbol(ctx context.Context) ([]SymbolExposure, error) {
+	query := `
+		SELECT symbol, SUM(quantity * entry_price) AS exposure
+		FROM positions
+		WHERE exit_time IS NULL
+		GROUP BY symbol
+		ORDER BY exposure DESC
+		-- Cap at 200 rows — sufficient for dashboard display; a full paginated API is a follow-up.
+		LIMIT 200
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query exposure by symbol: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SymbolExposure
+	for rows.Next() {
+		var s SymbolExposure
+		if err := rows.Scan(&s.Symbol, &s.Exposure); err != nil {
+			return nil, fmt.Errorf("failed to scan symbol exposure row: %w", err)
+		}
+		results = append(results, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating symbol exposure rows: %w", err)
+	}
+	return results, nil
 }
 
 // ConvertPositionSide converts a string to PositionSide

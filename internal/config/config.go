@@ -136,6 +136,7 @@ type TradingConfig struct {
 	InitialCapital  float64  `mapstructure:"initial_capital"`  // 10000.0
 	MaxPositions    int      `mapstructure:"max_positions"`    // 3
 	DefaultQuantity float64  `mapstructure:"default_quantity"` // 0.01
+	CommissionRate  float64  `mapstructure:"commission_rate"`  // 0.001 (0.1%) — paper trade taker fee
 }
 
 // RiskConfig contains risk management settings
@@ -149,6 +150,13 @@ type RiskConfig struct {
 	MinConfidence       float64              `mapstructure:"min_confidence"`        // 0.7
 	CircuitBreaker      CircuitBreakerConfig `mapstructure:"circuit_breaker"`       // Circuit breaker thresholds
 	SafetyGuard         SafetyGuardConfig    `mapstructure:"safety_guard"`          // Live trading safety guards
+
+	// Dashboard circuit breaker thresholds — used by the /risk/circuit-breakers endpoint.
+	// These are expressed in absolute units: dollars for MaxDailyLossDollars,
+	// percentage points for MaxDrawdownPct, and a count for MaxTradeCount.
+	MaxDailyLossDollars float64 `mapstructure:"max_daily_loss_dollars"` // 5000.0 (USD)
+	MaxDrawdownPct      float64 `mapstructure:"max_drawdown_pct"`       // 10.0 (percent)
+	MaxTradeCount       int     `mapstructure:"max_trade_count"`        // 100
 }
 
 // SafetyGuardConfig contains safety guard settings for live trading protection
@@ -434,6 +442,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("trading.initial_capital", 10000.0)
 	v.SetDefault("trading.max_positions", 3)
 	v.SetDefault("trading.default_quantity", 0.01)
+	v.SetDefault("trading.commission_rate", 0.001) // 0.1% taker fee (Binance standard tier)
 
 	// Risk defaults
 	v.SetDefault("risk.max_position_size", 0.1)
@@ -443,6 +452,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("risk.default_take_profit", 0.05)
 	v.SetDefault("risk.llm_approval_required", true)
 	v.SetDefault("risk.min_confidence", 0.7)
+
+	// Dashboard circuit breaker threshold defaults (absolute units)
+	v.SetDefault("risk.max_daily_loss_dollars", 5000.0)
+	v.SetDefault("risk.max_drawdown_pct", 10.0)
+	v.SetDefault("risk.max_trade_count", 100)
 
 	// Circuit Breaker defaults - aligned with configs/circuit_breakers.yaml
 	// Exchange
