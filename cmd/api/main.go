@@ -131,7 +131,7 @@ func main() {
 	server.mcpClient = mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "cryptofunk-api",
-			Version: "1.0.0",
+			Version: config.Version,
 		},
 		nil,
 	)
