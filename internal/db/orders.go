@@ -583,6 +583,28 @@ func (db *DB) GetRecentOrders(ctx context.Context, limit int) ([]*Order, error) 
 	return scanOrders(rows)
 }
 
+// GetRecentOrdersPaginated retrieves recent orders with limit/offset pagination.
+// limit=0 means no limit (returns all rows).
+func (db *DB) GetRecentOrdersPaginated(ctx context.Context, limit, offset int) ([]*Order, error) {
+	query := `
+		SELECT id, session_id, position_id, exchange_order_id, symbol, exchange,
+		       side, type, status, price, stop_price, quantity, executed_quantity,
+		       executed_quote_quantity, time_in_force, placed_at, filled_at,
+		       canceled_at, error_message, metadata, created_at, updated_at
+		FROM orders
+		ORDER BY created_at DESC
+		LIMIT NULLIF($1, 0) OFFSET $2
+	`
+
+	rows, err := db.pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent orders: %w", err)
+	}
+	defer rows.Close()
+
+	return scanOrders(rows)
+}
+
 // scanOrders is a helper to scan multiple order rows
 func scanOrders(rows interface {
 	Next() bool

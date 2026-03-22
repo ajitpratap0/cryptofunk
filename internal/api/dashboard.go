@@ -707,9 +707,13 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		if p.UnrealizedPnL != nil {
 			pnl.UnrealizedPnL += *p.UnrealizedPnL
 		}
-		if p.RealizedPnL != nil {
-			pnl.RealizedPnL += *p.RealizedPnL
-		}
+		// NOTE: RealizedPnL from open positions is intentionally omitted here.
+		// After a position closes (SELL), it no longer appears in GetAllOpenPositions,
+		// so summing RealizedPnL from open positions would always be 0 once trades
+		// complete. TotalPnL from session records (already summed above) is the
+		// authoritative source for realized P&L.
+		// TODO: Include fees from closed positions once a GetAllPositions (open+closed)
+		// query is added to the repository interface.
 		pnl.TotalFees += p.Fees
 	}
 
@@ -718,10 +722,13 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		pnl.WinRate = float64(pnl.WinningTrades) / float64(pnl.TotalTrades) * 100
 	}
 
-	// Calculate current capital and return
-	pnl.CurrentCapital = pnl.InitialCapital + pnl.RealizedPnL + pnl.UnrealizedPnL
+	// Derive CurrentCapital from TotalPnL (session-level realized P&L) plus any
+	// open-position unrealized P&L. Using RealizedPnL summed from open positions
+	// would return 0 after all positions close because closed positions are no
+	// longer returned by GetAllOpenPositions.
+	pnl.CurrentCapital = pnl.InitialCapital + pnl.TotalPnL + pnl.UnrealizedPnL
 	if pnl.InitialCapital > 0 {
-		returnPercent := ((pnl.CurrentCapital - pnl.InitialCapital) / pnl.InitialCapital) * 100
+		returnPercent := (pnl.TotalPnL / pnl.InitialCapital) * 100
 		pnl.ReturnPercent = &returnPercent
 	}
 
