@@ -17,8 +17,7 @@ import (
 )
 
 const (
-	serverName    = "order-executor"
-	serverVersion = "1.0.0"
+	serverName = "order-executor"
 
 	// MCP Tool Names
 	toolPlaceMarketOrder = "place_market_order"
@@ -29,6 +28,8 @@ const (
 	toolStopSession      = "stop_session"
 	toolGetSessionStats  = "get_session_stats"
 )
+
+var serverVersion = config.Version
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
