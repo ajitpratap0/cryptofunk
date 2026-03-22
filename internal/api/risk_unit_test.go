@@ -14,8 +14,8 @@ import (
 // strings into the correct past time.Time value relative to now.
 func TestParseDuration(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
+		name        string
+		input       string
 		checkApprox func(t *testing.T, got time.Time)
 	}{
 		{
