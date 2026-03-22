@@ -20,7 +20,6 @@ on:
       - 'deployments/grafana/**'
       - 'deployments/prometheus/**'
       - '.github/CODEOWNERS'
-      - 'web/**'
   schedule:
     # Run nightly at 2 AM UTC for thorough race detection
     - cron: '0 2 * * *'
