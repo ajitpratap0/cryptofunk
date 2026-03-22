@@ -36,7 +36,7 @@ type ExecutorConfig struct {
 // order-executor MCP server.
 type Executor struct {
 	config          ExecutorConfig
-	database        *db.DB             // optional: link decisions to orders for outcome tracking
+	database        *db.DB // optional: link decisions to orders for outcome tracking
 	natsConn        *nats.Conn
 	mcpClient       *mcp.Client
 	session         *mcp.ClientSession
