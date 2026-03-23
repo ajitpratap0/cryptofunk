@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,10 +15,12 @@ type Updater struct {
 	db       *pgxpool.Pool
 	interval time.Duration
 	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // NewUpdater creates a new metrics updater
 func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
+	log.Warn().Float64("initial_capital", 10000.0).Msg("metrics/updater: initialCapital is hardcoded to 10000; return metrics will be incorrect for non-10k portfolios until this is made configurable")
 	return &Updater{
 		db:       db,
 		interval: interval,
@@ -47,9 +50,11 @@ func (u *Updater) Start(ctx context.Context) {
 	}
 }
 
-// Stop stops the metrics updater
+// Stop stops the metrics updater. Safe to call multiple times.
 func (u *Updater) Stop() {
-	close(u.stopCh)
+	u.stopOnce.Do(func() {
+		close(u.stopCh)
+	})
 }
 
 // update fetches and updates all metrics
@@ -259,7 +264,7 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 			diff := r - mean
 			variance += diff * diff
 		}
-		variance /= float64(len(returns))
+		variance /= float64(len(returns) - 1)
 		stdDev := math.Sqrt(variance)
 
 		// Sharpe ratio (assuming risk-free rate of 0)
