@@ -14,16 +14,27 @@ import { DrawdownChart } from '@/components/charts/DrawdownChart'
 import { CircuitBreakerStatus } from '@/components/risk/CircuitBreakerStatus'
 import { StatCard } from '@/components/ui/StatCard'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
-import { RISK_THRESHOLDS } from '@/lib/constants'
 import { useRiskMetrics, useCircuitBreakers, useRiskExposure } from '@/hooks/usePerformance'
 import type { CircuitBreaker } from '@/lib/types'
 
 // ── Static Mock Data (no API equivalent yet) ───────────────────────
 
+// TODO: replace with real data from API
+const MOCK_DRAWDOWN_NOISE = [
+  0.05, 0.12, 0.08, 0.19, 0.03, 0.14, 0.07, 0.17, 0.02, 0.11,
+  0.06, 0.15, 0.09, 0.18, 0.04, 0.13, 0.01, 0.16, 0.10, 0.20,
+  0.05, 0.12, 0.08, 0.19, 0.03, 0.14, 0.07, 0.17, 0.02, 0.11,
+  0.06, 0.15, 0.09, 0.18, 0.04, 0.13, 0.01, 0.16, 0.10, 0.20,
+  0.05, 0.12, 0.08, 0.19, 0.03, 0.14, 0.07, 0.17, 0.02, 0.11,
+  0.06, 0.15, 0.09, 0.18, 0.04, 0.13, 0.01, 0.16, 0.10, 0.20,
+  0.05, 0.12, 0.08, 0.19, 0.03, 0.14, 0.07, 0.17, 0.02, 0.11,
+  0.06, 0.15, 0.09, 0.18, 0.04, 0.13, 0.01, 0.16, 0.10, 0.20,
+  0.05, 0.12, 0.08, 0.19, 0.03, 0.14, 0.07, 0.17, 0.02, 0.11,
+]
 const mockDrawdown = Array.from({ length: 90 }, (_, i) => {
   const now = Date.now()
   const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
-  const base = Math.sin(i / 15) * 4 + Math.random() * 2
+  const base = Math.sin(i / 15) * 4 + MOCK_DRAWDOWN_NOISE[i]
   const drawdownPercent = -Math.abs(base)
   return {
     timestamp,
@@ -72,7 +83,7 @@ export default function RiskPage() {
     if (!raw?.circuit_breakers?.length) return []
     return raw.circuit_breakers.map(cb => ({
       name: cb.name,
-      status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : 'normal',
+      status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : cb.status === 'DISABLED' ? 'disabled' : 'normal',
       threshold: cb.threshold,
       currentValue: cb.current,
       description: cb.name,
@@ -101,6 +112,7 @@ export default function RiskPage() {
     if (!circuitBreakers.length) return null
     let score = 100
     circuitBreakers.forEach(cb => {
+      if (cb.status === 'disabled') return
       const usage = cb.threshold > 0 ? Math.abs(cb.currentValue) / Math.abs(cb.threshold) : 0
       if (cb.status === 'triggered') score -= 30
       else if (cb.status === 'warning') score -= 15
