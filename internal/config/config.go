@@ -130,13 +130,13 @@ type MCPRateLimitConfig struct {
 
 // TradingConfig contains trading settings
 type TradingConfig struct {
-	Mode               string   `mapstructure:"mode"`                 // "paper" or "live"
-	Symbols            []string `mapstructure:"symbols"`              // ["BTCUSDT", "ETHUSDT"]
-	Exchange           string   `mapstructure:"exchange"`             // "binance"
-	InitialCapital     float64  `mapstructure:"initial_capital"`      // 10000.0
-	MaxPositions       int      `mapstructure:"max_positions"`        // 3
-	DefaultQuantity    float64  `mapstructure:"default_quantity"`     // 0.01
-	CommissionRate float64 `mapstructure:"commission_rate"` // 0.001 (0.1%) — paper trade taker fee
+	Mode            string   `mapstructure:"mode"`             // "paper" or "live"
+	Symbols         []string `mapstructure:"symbols"`          // ["BTCUSDT", "ETHUSDT"]
+	Exchange        string   `mapstructure:"exchange"`         // "binance"
+	InitialCapital  float64  `mapstructure:"initial_capital"`  // 10000.0
+	MaxPositions    int      `mapstructure:"max_positions"`    // 3
+	DefaultQuantity float64  `mapstructure:"default_quantity"` // 0.01
+	CommissionRate  float64  `mapstructure:"commission_rate"`  // 0.001 (0.1%) — paper trade taker fee
 	// SlippageBuyFactor multiplies the buy price to simulate slippage (e.g. 1.001 = 0.1% slippage).
 	// 0 means "use default" (1.001); cannot configure zero slippage via this field.
 	SlippageBuyFactor float64 `mapstructure:"slippage_buy_factor"`
