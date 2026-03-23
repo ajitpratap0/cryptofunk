@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -68,7 +68,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		var maxBytesErr *http.MaxBytesError
-		if stderrors.As(err, &maxBytesErr) {
+		if errors.As(err, &maxBytesErr) {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
 			return
 		}
@@ -78,7 +78,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 
 	// Apply updates to safe configuration fields
 	updates := make(map[string]interface{})
-	errors := []string{}
+	validationErrors := []string{}
 
 	// Allow updating trading configuration
 	if tradingMode, ok := req["trading_mode"].(string); ok {
@@ -86,7 +86,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Trading.Mode = tradingMode
 			updates["trading_mode"] = tradingMode
 		} else {
-			errors = append(errors, "trading_mode must be 'paper' or 'live'")
+			validationErrors = append(validationErrors, "trading_mode must be 'paper' or 'live'")
 		}
 	}
 
@@ -95,7 +95,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Trading.InitialCapital = initialCapital
 			updates["initial_capital"] = initialCapital
 		} else {
-			errors = append(errors, "initial_capital must be positive")
+			validationErrors = append(validationErrors, "initial_capital must be positive")
 		}
 	}
 
@@ -104,7 +104,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Trading.MaxPositions = int(maxPositions)
 			updates["max_positions"] = int(maxPositions)
 		} else {
-			errors = append(errors, "max_positions must be positive")
+			validationErrors = append(validationErrors, "max_positions must be positive")
 		}
 	}
 
@@ -114,7 +114,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Risk.MaxPositionSize = maxPositionSize
 			updates["max_position_size"] = maxPositionSize
 		} else {
-			errors = append(errors, "max_position_size must be between 0 and 1")
+			validationErrors = append(validationErrors, "max_position_size must be between 0 and 1")
 		}
 	}
 
@@ -123,7 +123,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Risk.MaxDailyLoss = maxDailyLoss
 			updates["max_daily_loss"] = maxDailyLoss
 		} else {
-			errors = append(errors, "max_daily_loss must be between 0 and 1")
+			validationErrors = append(validationErrors, "max_daily_loss must be between 0 and 1")
 		}
 	}
 
@@ -132,7 +132,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Risk.MaxDrawdown = maxDrawdown
 			updates["max_drawdown"] = maxDrawdown
 		} else {
-			errors = append(errors, "max_drawdown must be between 0 and 1")
+			validationErrors = append(validationErrors, "max_drawdown must be between 0 and 1")
 		}
 	}
 
@@ -141,7 +141,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Risk.DefaultStopLoss = defaultStopLoss
 			updates["default_stop_loss"] = defaultStopLoss
 		} else {
-			errors = append(errors, "default_stop_loss must be between 0 and 1")
+			validationErrors = append(validationErrors, "default_stop_loss must be between 0 and 1")
 		}
 	}
 
@@ -150,7 +150,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Risk.DefaultTakeProfit = defaultTakeProfit
 			updates["default_take_profit"] = defaultTakeProfit
 		} else {
-			errors = append(errors, "default_take_profit must be positive")
+			validationErrors = append(validationErrors, "default_take_profit must be positive")
 		}
 	}
 
@@ -159,7 +159,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.Risk.MinConfidence = minConfidence
 			updates["min_confidence"] = minConfidence
 		} else {
-			errors = append(errors, "min_confidence must be between 0 and 1")
+			validationErrors = append(validationErrors, "min_confidence must be between 0 and 1")
 		}
 	}
 
@@ -174,7 +174,7 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.LLM.Temperature = temperature
 			updates["llm_temperature"] = temperature
 		} else {
-			errors = append(errors, "llm_temperature must be between 0 and 2")
+			validationErrors = append(validationErrors, "llm_temperature must be between 0 and 2")
 		}
 	}
 
@@ -183,15 +183,15 @@ func (s *APIServer) handleUpdateConfig(c *gin.Context) {
 			s.config.LLM.MaxTokens = int(maxTokens)
 			updates["llm_max_tokens"] = int(maxTokens)
 		} else {
-			errors = append(errors, "llm_max_tokens must be positive")
+			validationErrors = append(validationErrors, "llm_max_tokens must be positive")
 		}
 	}
 
 	// Check for any validation errors
-	if len(errors) > 0 {
+	if len(validationErrors) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  "validation failed",
-			"errors": errors,
+			"errors": validationErrors,
 		})
 		return
 	}
