@@ -225,10 +225,12 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
@@ -292,7 +294,6 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		}
 
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"order": order,
 			"error": "order execution failed",
 		})
 		return
@@ -419,7 +420,12 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		Price    float64 `json:"price"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 	isLimit := strings.EqualFold(req.Type, "limit")
@@ -713,10 +719,12 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
@@ -781,10 +789,12 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
@@ -855,10 +865,12 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
@@ -918,10 +930,12 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
