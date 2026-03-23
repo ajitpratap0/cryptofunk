@@ -19,13 +19,17 @@ import (
 
 var startTime = time.Now()
 
+// maxPageSize is the upper bound on any paginated query's limit parameter.
+// Clients that pass a larger value are silently capped to this limit.
+const maxPageSize = 1000
+
 func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
 }
 
 // parseIntQuery parses an integer query parameter from the request.
 // Returns defaultVal if the parameter is absent or cannot be parsed.
-// Negative values are clamped to 0.
+// Negative values are clamped to 0. Values above maxPageSize are capped.
 func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
 	raw := c.Query(key)
 	if raw == "" {
@@ -34,6 +38,9 @@ func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 0 {
 		return defaultVal
+	}
+	if v > maxPageSize {
+		return maxPageSize
 	}
 	return v
 }

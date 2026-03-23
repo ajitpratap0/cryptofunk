@@ -722,10 +722,9 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		pnl.WinRate = float64(pnl.WinningTrades) / float64(pnl.TotalTrades) * 100
 	}
 
-	// Mirror TotalPnL into RealizedPnL so API consumers see a consistent non-zero
-	// value. TotalPnL (sourced from session records) is the authoritative realized
-	// P&L figure; RealizedPnL from open positions would always be 0 once trades
-	// complete because closed positions are no longer returned by GetAllOpenPositions.
+	// RealizedPnL mirrors TotalPnL from session stats (which IS realized PnL).
+	// Do NOT sum both fields — they are the same value.
+	// TODO: deprecate RealizedPnL when all clients migrate to TotalPnL.
 	pnl.RealizedPnL = pnl.TotalPnL
 
 	// Derive CurrentCapital from TotalPnL (session-level realized P&L) plus any
