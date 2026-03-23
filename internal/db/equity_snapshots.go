@@ -20,8 +20,8 @@ type EquitySnapshot struct {
 
 // InsertEquitySnapshot writes a new equity snapshot for the given session.
 // Best-effort: callers should log on error but not fail the trade.
-func (d *DB) InsertEquitySnapshot(ctx context.Context, sessionID uuid.UUID, equity, realizedPnL, unrealizedPnL float64) error {
-	_, err := d.pool.Exec(ctx, `
+func (db *DB) InsertEquitySnapshot(ctx context.Context, sessionID uuid.UUID, equity, realizedPnL, unrealizedPnL float64) error {
+	_, err := db.pool.Exec(ctx, `
 		INSERT INTO equity_snapshots (session_id, equity, realized_pnl, unrealized_pnl)
 		VALUES ($1, $2, $3, $4)
 	`, sessionID, equity, realizedPnL, unrealizedPnL)
@@ -30,8 +30,8 @@ func (d *DB) InsertEquitySnapshot(ctx context.Context, sessionID uuid.UUID, equi
 
 // ListEquitySnapshots returns up to limit snapshots for the session, oldest-first.
 // Returns an empty slice (not nil) when no snapshots exist.
-func (d *DB) ListEquitySnapshots(ctx context.Context, sessionID uuid.UUID, limit int) ([]*EquitySnapshot, error) {
-	rows, err := d.pool.Query(ctx, `
+func (db *DB) ListEquitySnapshots(ctx context.Context, sessionID uuid.UUID, limit int) ([]*EquitySnapshot, error) {
+	rows, err := db.pool.Query(ctx, `
 		SELECT id, session_id, equity, realized_pnl, unrealized_pnl, recorded_at
 		FROM equity_snapshots
 		WHERE session_id = $1
@@ -59,12 +59,12 @@ func (d *DB) ListEquitySnapshots(ctx context.Context, sessionID uuid.UUID, limit
 // richest data set for drawdown/Sharpe computation with a single round-trip instead of
 // issuing one query per session (N+1).
 // Returns ("", nil) when sessionIDs is empty.
-func (d *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []string) (string, error) {
+func (db *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []string) (string, error) {
 	if len(sessionIDs) == 0 {
 		return "", nil
 	}
 	var sessionID string
-	err := d.pool.QueryRow(ctx, `
+	err := db.pool.QueryRow(ctx, `
 		SELECT session_id
 		FROM equity_snapshots
 		WHERE session_id = ANY($1)

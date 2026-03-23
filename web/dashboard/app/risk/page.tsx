@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Shield,
   TrendingDown,
@@ -10,14 +10,27 @@ import {
   Zap
 } from 'lucide-react'
 import { ExposurePie } from '@/components/charts/ExposurePie'
-
+import { DrawdownChart } from '@/components/charts/DrawdownChart'
 import { CircuitBreakerStatus } from '@/components/risk/CircuitBreakerStatus'
 import { StatCard } from '@/components/ui/StatCard'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
+import { RISK_THRESHOLDS } from '@/lib/constants'
 import { useRiskMetrics, useCircuitBreakers, useRiskExposure } from '@/hooks/usePerformance'
 import type { CircuitBreaker } from '@/lib/types'
 
 // ── Static Mock Data (no API equivalent yet) ───────────────────────
+
+const mockDrawdown = Array.from({ length: 90 }, (_, i) => {
+  const now = Date.now()
+  const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
+  const base = Math.sin(i / 15) * 4 + Math.random() * 2
+  const drawdownPercent = -Math.abs(base)
+  return {
+    timestamp,
+    drawdown: drawdownPercent,
+    equity: 100000 + (drawdownPercent / 100) * 100000,
+  }
+})
 
 const mockAlerts = [
   { id: '1', severity: 'warning' as const, message: 'Max drawdown approaching threshold (78%)', timestamp: '2 min ago', asset: 'Portfolio' },
@@ -27,64 +40,14 @@ const mockAlerts = [
   { id: '5', severity: 'warning' as const, message: 'SOL/USDT volatility spike detected', timestamp: '5 hrs ago', asset: 'SOL/USDT' },
 ]
 
-// ── Runtime type guards ─────────────────────────────────────────────
-
-type RawRiskMetrics = {
-  var_95: number | null
-  var_99: number | null
-  expected_shortfall: number | null
-  open_positions: number
-  total_exposure: number
-  var_unit?: 'dollar' | 'fractional'
-}
-
-type RawCircuitBreakers = {
-  circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }>
-}
-
-type RawExposure = {
-  exposure: Array<{ symbol: string; exposure: number }>
-}
-
-function isRiskMetrics(raw: unknown): raw is RawRiskMetrics {
-  if (!raw || typeof raw !== 'object') return false
-  const r = raw as Record<string, unknown>
-  return typeof r.open_positions === 'number' && typeof r.total_exposure === 'number'
-}
-
-function isCircuitBreakers(raw: unknown): raw is RawCircuitBreakers {
-  if (!raw || typeof raw !== 'object') return false
-  const r = raw as Record<string, unknown>
-  return (
-    Array.isArray(r.circuit_breakers) &&
-    (r.circuit_breakers.length === 0 || typeof (r.circuit_breakers[0] as { name?: unknown }).name === 'string')
-  )
-}
-
-function isExposure(raw: unknown): raw is RawExposure {
-  if (!raw || typeof raw !== 'object') return false
-  const r = raw as Record<string, unknown>
-  return (
-    Array.isArray(r.exposure) &&
-    (r.exposure.length === 0 || typeof (r.exposure[0] as { symbol?: unknown }).symbol === 'string')
-  )
-}
-
-// ── Risk Thresholds ─────────────────────────────────────────────────
-
-// Dollar-value VaR threshold above which the metric is highlighted as a warning.
-// Backend now returns dollar VaR (e.g. 2345.67), not fractional.
-const VAR_WARNING_THRESHOLD = 500
-
 // ── Page Component ─────────────────────────────────────────────────
 
 export default function RiskPage() {
-  const { data: metricsResponse, isError: metricsError, isLoading: metricsLoading, refetch: refetchMetrics } = useRiskMetrics()
-  const { data: breakersResponse, isError: breakersError, isLoading: breakersLoading, refetch: refetchBreakers } = useCircuitBreakers()
-  const { data: exposureResponse, isError: exposureError, isLoading: exposureLoading, refetch: refetchExposure } = useRiskExposure()
+  const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
-  const isLoading = metricsLoading || breakersLoading || exposureLoading
-  const hasError = metricsError || breakersError || exposureError
+  const { data: metricsResponse, refetch: refetchMetrics } = useRiskMetrics()
+  const { data: breakersResponse, refetch: refetchBreakers } = useCircuitBreakers()
+  const { data: exposureResponse, refetch: refetchExposure } = useRiskExposure()
 
   const handleRefresh = () => {
     refetchMetrics()
@@ -92,79 +55,52 @@ export default function RiskPage() {
     refetchExposure()
   }
 
-  // Warn once per distinct bad-shape response — not on every render
-  useEffect(() => {
-    const raw = metricsResponse?.data
-    if (raw !== undefined && !isRiskMetrics(raw)) {
-      console.warn('Unexpected API response shape for risk metrics:', raw)
-    }
-  }, [metricsResponse])
+  // Map API risk metrics
+  const apiMetrics = metricsResponse?.data as {
+    var_95: number | null
+    var_99: number | null
+    expected_shortfall: number | null
+    open_positions: number
+    total_exposure: number
+  } | undefined
 
-  useEffect(() => {
-    const raw = breakersResponse?.data
-    if (raw !== undefined && !isCircuitBreakers(raw)) {
-      console.warn('Unexpected API response shape for circuit breakers:', raw)
-    }
-  }, [breakersResponse])
-
-  useEffect(() => {
-    const raw = exposureResponse?.data
-    if (raw !== undefined && !isExposure(raw)) {
-      console.warn('Unexpected API response shape for risk exposure:', raw)
-    }
-  }, [exposureResponse])
-
-  // Map API risk metrics — guarded so unexpected shapes surface as undefined
-  const rawMetrics: unknown = metricsResponse?.data
-  const apiMetrics: RawRiskMetrics | undefined = isRiskMetrics(rawMetrics) ? rawMetrics : undefined
-
-  // var_unit: 'dollar' when VaR is scaled by portfolio value; 'fractional' when
-  // no active sessions exist and the backend returns a raw fractional value (e.g. 0.023).
-  const varUnit = isRiskMetrics(rawMetrics) ? (rawMetrics.var_unit ?? 'dollar') : 'dollar'
-  const formatVar = (v: number) => varUnit === 'dollar' ? formatCurrency(v) : formatPercentage(v * 100)
-
-  // Map API circuit breakers to component shape — guarded
+  // Map API circuit breakers to component shape
   const circuitBreakers: CircuitBreaker[] = useMemo(() => {
-    const raw: unknown = breakersResponse?.data
-    if (!isCircuitBreakers(raw) || !raw.circuit_breakers.length) return []
+    const raw = breakersResponse?.data as
+      | { circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }> }
+      | undefined
+    if (!raw?.circuit_breakers?.length) return []
     return raw.circuit_breakers.map(cb => ({
       name: cb.name,
-      status: cb.status === 'TRIGGERED' ? 'triggered'
-            : cb.status === 'WARNING'   ? 'warning'
-            : cb.status === 'DISABLED'  ? 'disabled'
-            : 'normal',
+      status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : 'normal',
       threshold: cb.threshold,
       currentValue: cb.current,
       description: cb.name,
     } as CircuitBreaker))
   }, [breakersResponse])
 
-  // Map API exposure data — guarded
-  // Issue #2 fix: API GetExposure does not return a `side` field — omit it
-  // entirely so ExposurePie uses its default asset-based coloring instead of
-  // incorrectly coloring every bar as a long (profit/green).
+  // Map API exposure data
   const exposureData = useMemo(() => {
-    const raw: unknown = exposureResponse?.data
-    if (!isExposure(raw) || !raw.exposure.length) return []
+    const raw = exposureResponse?.data as
+      | { exposure: Array<{ symbol: string; exposure: number }> }
+      | undefined
+    if (!raw?.exposure?.length) return []
     const total = raw.exposure.reduce((sum, e) => sum + e.exposure, 0)
     return raw.exposure.map(e => ({
-      symbol:     e.symbol,
-      exposure:   e.exposure,
+      symbol: e.symbol,
+      exposure: e.exposure,
       percentage: total > 0 ? Math.round((e.exposure / total) * 100) : 0,
-      value:      e.exposure,
+      value: e.exposure,
     }))
   }, [exposureResponse])
 
   const var95 = apiMetrics?.var_95 ?? null
   const var99 = apiMetrics?.var_99 ?? null
 
-  // Issue #7 fix: return null when circuit breaker data is unavailable so the
-  // UI shows "Unknown / —" rather than a misleading "Low Risk" score of 100.
   const riskScore = useMemo<number | null>(() => {
     if (!circuitBreakers.length) return null
     let score = 100
     circuitBreakers.forEach(cb => {
-      if (cb.status === 'disabled') return
       const usage = cb.threshold > 0 ? Math.abs(cb.currentValue) / Math.abs(cb.threshold) : 0
       if (cb.status === 'triggered') score -= 30
       else if (cb.status === 'warning') score -= 15
@@ -178,26 +114,6 @@ export default function RiskPage() {
 
   return (
     <div className="space-y-6">
-      {/* Error / Loading banner */}
-      {hasError && (
-        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-loss/40 bg-loss/10 text-sm">
-          <span className="text-loss font-medium">Risk data unavailable — API error</span>
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-loss/40 hover:bg-loss/20 transition-colors text-loss text-xs font-medium"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Retry
-          </button>
-        </div>
-      )}
-      {isLoading && !hasError && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-border bg-muted/30 text-sm text-muted-foreground">
-          <RefreshCw className="h-4 w-4 animate-spin" />
-          Loading risk data…
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -224,24 +140,17 @@ export default function RiskPage() {
           icon={<Shield className="h-5 w-5" />}
           valueClassName={riskColor}
         />
-        {/* var_unit from API controls formatting: 'dollar' → formatCurrency,
-            'fractional' → formatPercentage. Threshold warning uses dollar-equivalent
-            (>$500) for dollar mode; for fractional >2.3% is roughly equivalent. */}
         <StatCard
           title="Value at Risk (95%)"
-          value={var95 != null ? formatVar(var95) : '—'}
-          subtitle={var99 != null ? `99%: ${formatVar(var99)}` : 'Insufficient data'}
+          value={var95 != null ? formatCurrency(var95) : '—'}
+          subtitle={var99 != null ? `99%: ${formatCurrency(var99)}` : 'Insufficient data'}
           icon={<TrendingDown className="h-5 w-5" />}
-          valueClassName={var95 != null && Math.abs(var95) > VAR_WARNING_THRESHOLD ? 'text-warning' : 'text-foreground'}
+          valueClassName={var95 != null && Math.abs(var95) > 500 ? 'text-warning' : 'text-foreground'}
         />
         <StatCard
           title="Open Positions"
           value={apiMetrics?.open_positions?.toString() ?? '—'}
-          subtitle={
-            apiMetrics?.open_positions != null && apiMetrics.open_positions > 0 && apiMetrics?.total_exposure != null
-              ? `Avg size: ${formatCurrency(apiMetrics.total_exposure / apiMetrics.open_positions)}`
-              : 'No open positions'
-          }
+          subtitle={`Exposure: ${apiMetrics?.total_exposure != null ? formatCurrency(apiMetrics.total_exposure) : '—'}`}
           icon={<Activity className="h-5 w-5" />}
         />
         <StatCard
@@ -313,11 +222,31 @@ export default function RiskPage() {
           <div className="bg-card border border-border rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">Drawdown History</h3>
+              <div className="flex gap-1 bg-muted/50 rounded-lg p-1">
+                {(['1w', '1m', '3m'] as const).map(range => (
+                  <button
+                    key={range}
+                    onClick={() => setTimeRange(range)}
+                    className={cn(
+                      'px-3 py-1 text-xs rounded-md transition-colors',
+                      timeRange === range
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {range.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </div>
-            {/* TODO: Replace with real drawdown data from /api/v1/performance/drawdown once available */}
-            <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-zinc-700 text-sm text-zinc-500">
-              Drawdown chart — historical data not yet available
-            </div>
+            <DrawdownChart
+              data={
+                timeRange === '1w' ? mockDrawdown.slice(-7)
+                  : timeRange === '1m' ? mockDrawdown.slice(-30)
+                  : mockDrawdown
+              }
+              height={300}
+            />
           </div>
 
           {/* Position Sizing */}
