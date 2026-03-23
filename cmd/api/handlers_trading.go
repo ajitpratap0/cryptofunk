@@ -14,13 +14,37 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
-	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 )
+
+const (
+	paperSlippageBuy  = 1.001 // 0.1% adverse slippage for market buy orders
+	paperSlippageSell = 0.999 // 0.1% adverse slippage for market sell orders
+	// TODO: make slippage configurable via config.Trading.
+)
+
+// errNoPosition is a sentinel returned from the WithTx callback when a SELL
+// is attempted with no existing open position for that symbol. Handled by the
+// caller to produce a 422 response without logging as an internal server error.
+var errNoPosition = errors.New("no open position to sell")
 
 // ptrStr and ptrF64 are local pointer helpers used only within this file.
 // They are not duplicated elsewhere in the codebase (verified via grep).
 func ptrStr(s string) *string   { return &s }
 func ptrF64(f float64) *float64 { return &f }
+
+// quoteAsset derives the quote asset token from a trading symbol by checking
+// common suffixes. Falls back to "USDT" for unrecognised symbols.
+func quoteAsset(symbol string) string {
+	// Ordered most-specific first: "BUSD" before "BTC" prevents "BTCUSDT" from
+	// matching suffix "BTC" when "USDT" would be the correct quote asset.
+	// TODO: make configurable for non-Binance exchanges (e.g. Kraken uses XBT/USD).
+	for _, suffix := range []string{"USDT", "BUSD", "BTC", "ETH", "BNB"} {
+		if strings.HasSuffix(strings.ToUpper(symbol), suffix) {
+			return suffix
+		}
+	}
+	return "USDT"
+}
 
 // Session handlers
 func (s *APIServer) handleListSessions(c *gin.Context) {
@@ -476,8 +500,7 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	// 2. Determine execution price
 	refPrice := req.Price
 	if !isLimit && refPrice <= 0 {
-		mockEx := exchange.NewMockExchange(s.db)
-		refPrice = mockEx.GetMarketPrice(req.Symbol)
+		refPrice = s.exchange.GetMarketPrice(req.Symbol)
 		if refPrice <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "no market price configured for symbol; provide a price field",
@@ -488,17 +511,17 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	execPrice := refPrice
 	if !isLimit {
 		if strings.EqualFold(req.Side, "BUY") {
-			execPrice = refPrice * 1.001
+			execPrice = refPrice * paperSlippageBuy
 		} else {
-			execPrice = refPrice * 0.999
+			execPrice = refPrice * paperSlippageSell
 		}
 	}
 
-	// 3. Insert order
+	// 3. Build order struct (inserted inside the transaction below)
 	now := time.Now()
 	var pricePtr *float64
 	if req.Price > 0 {
-		pricePtr = ptrF64(req.Price)
+		pricePtr = db.PtrFloat64(req.Price)
 	}
 	orderSide := db.ConvertOrderSide(req.Side)
 	orderType := db.ConvertOrderType(req.Type)
@@ -517,16 +540,18 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := s.db.InsertOrder(ctx, order); err != nil {
-		log.Error().Err(err).Msg("Failed to insert paper trade order")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create paper trade order"})
-		return
-	}
+
+	// Capture close results for use in the final response (set inside market order block).
+	var (
+		wasClose       bool
+		actualCloseQty float64
+		remainingQty   float64
+	)
 
 	// 4. Immediate fill for market orders
 	if order.Type == db.OrderTypeMarket {
 		execQuoteQty := execPrice * req.Quantity
-		// Use the configured paper trading commission rate (taker fee from exchanges config).
+		// Use the configured paper trading commission rate (taker fee from trading config).
 		// Falls back to 0.001 (0.1%) if not configured, matching Binance standard tier.
 		commissionRate := s.config.Trading.CommissionRate
 		if commissionRate <= 0 {
@@ -534,91 +559,202 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		}
 		commission := execQuoteQty * commissionRate
 
-		if err := s.db.UpdateOrderStatus(ctx, order.ID, db.OrderStatusFilled,
-			req.Quantity, execQuoteQty, &now, nil, nil); err != nil {
-			log.Warn().Err(err).Str("order_id", order.ID.String()).Msg("Failed to mark paper order filled")
-		} else {
-			order.Status = db.OrderStatusFilled
-			order.ExecutedQuantity = req.Quantity
-			order.ExecutedQuoteQuantity = execQuoteQty
-			order.FilledAt = &now
-			order.UpdatedAt = now
-		}
-
-		// Write fill record
-		commissionAsset := "USDT"
-		trade := &db.Trade{
-			ID:              uuid.New(),
-			OrderID:         order.ID,
-			Symbol:          req.Symbol,
-			Exchange:        "paper",
-			Side:            orderSide,
-			Price:           execPrice,
-			Quantity:        req.Quantity,
-			QuoteQuantity:   execQuoteQty,
-			Commission:      commission,
-			CommissionAsset: &commissionAsset,
-			ExecutedAt:      now,
-			IsMaker:         false,
-			CreatedAt:       now,
-		}
-		if err := s.db.InsertTrade(ctx, trade); err != nil {
-			log.Warn().Err(err).Msg("Failed to insert paper trade fill row")
-		}
-
-		// Create or average into existing position
-		existingPos, posErr := s.db.GetPositionBySymbolAndSession(ctx, req.Symbol, *sessionID)
-		if posErr != nil && !errors.Is(posErr, pgx.ErrNoRows) {
-			log.Warn().Err(posErr).Msg("Error looking up existing position")
-		}
-
 		posSide := db.PositionSideLong
 		if orderSide == db.OrderSideSell {
 			posSide = db.PositionSideShort
 		}
 
-		if existingPos != nil && existingPos.Side != posSide {
-			// Opposite-side trade on an existing open position. Proper close/reduce
-			// logic (netting, realized PnL calculation) is not yet implemented.
-			// For now we average into the opposite direction, which is incorrect for
-			// a long→short flip. This is a known limitation.
-			// TODO: implement position close/reduce logic.
-			log.Warn().
-				Str("symbol", req.Symbol).
-				Str("existing_side", string(existingPos.Side)).
-				Str("order_side", string(posSide)).
-				Msg("Opposite-side trade on existing position; position close logic not yet implemented")
+		// Derive the quote asset from the symbol (e.g. "BTCUSDT" → "USDT").
+		commissionAsset := quoteAsset(req.Symbol)
+
+		// Wrap all fill writes in a single DB transaction so a mid-flight failure
+		// does not leave orphaned rows. The order insert is the first step inside
+		// the transaction so no orphaned order rows can result from a failed fill.
+		// The existingPos lookup is also inside the transaction to eliminate the
+		// TOCTOU race where two concurrent BUY orders could both observe
+		// existingPos == nil and each try to INSERT a new position for the same symbol.
+		// AggregateSessionStats is intentionally kept outside the transaction: it
+		// is a read-then-aggregate UPDATE that can be safely retried.
+		txErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
+			// Insert the order as the first step so it is rolled back atomically
+			// with all fill rows if any later step fails.
+			if err := s.db.InsertOrderTx(ctx, tx, order); err != nil {
+				return fmt.Errorf("failed to insert paper trade order: %w", err)
+			}
+
+			// Re-fetch position inside the transaction for a consistent view.
+			existingPos, err := s.db.GetOpenPositionBySymbolTx(ctx, tx, *sessionID, req.Symbol)
+			if err != nil {
+				return fmt.Errorf("failed to look up existing position: %w", err)
+			}
+
+			// Reject SELL when no open position exists (no short selling in paper mode).
+			if existingPos == nil && orderSide == db.OrderSideSell {
+				return errNoPosition
+			}
+
+			if existingPos != nil && existingPos.Side != posSide {
+				// POSITION CLOSE — full or partial depending on quantities.
+				closeQty := req.Quantity
+				if closeQty > existingPos.Quantity {
+					closeQty = existingPos.Quantity // clamp: never over-sell
+				}
+				remainQty := existingPos.Quantity - closeQty
+				proportionalFees := existingPos.Fees * (closeQty / existingPos.Quantity)
+
+				// Mark order filled for the actual close quantity (may be clamped).
+				closeQuoteQty := closeQty * execPrice
+				if err := s.db.UpdateOrderStatusTx(ctx, tx, order.ID, db.OrderStatusFilled,
+					closeQty, closeQuoteQty, &now, nil, nil); err != nil {
+					return fmt.Errorf("failed to fill close order: %w", err)
+				}
+				order.Status = db.OrderStatusFilled
+				order.ExecutedQuantity = closeQty
+				order.ExecutedQuoteQuantity = closeQuoteQty
+				order.FilledAt = &now
+				order.UpdatedAt = now
+
+				// Insert trade fill record for the close.
+				closeCommission := closeQty * execPrice * commissionRate
+				closeCommAsset := commissionAsset
+				closeTrade := &db.Trade{
+					ID:              uuid.New(),
+					OrderID:         order.ID,
+					Symbol:          req.Symbol,
+					Exchange:        "paper",
+					Side:            orderSide,
+					Price:           execPrice,
+					Quantity:        closeQty,
+					QuoteQuantity:   closeQuoteQty,
+					Commission:      closeCommission,
+					CommissionAsset: &closeCommAsset,
+					ExecutedAt:      now,
+					IsMaker:         false,
+					CreatedAt:       now,
+				}
+				if err := s.db.InsertTradeTx(ctx, tx, closeTrade); err != nil {
+					return fmt.Errorf("failed to insert close trade fill: %w", err)
+				}
+
+				if remainQty < 1e-10 {
+					// Full close
+					if err := s.db.ClosePositionTx(ctx, tx, existingPos.ID, execPrice, "api_close", proportionalFees); err != nil {
+						return fmt.Errorf("failed to close position: %w", err)
+					}
+				} else {
+					// Partial close
+					if _, err := s.db.PartialClosePositionTx(ctx, tx, existingPos, closeQty, execPrice, "api_partial_close", proportionalFees); err != nil {
+						return fmt.Errorf("failed to partially close position: %w", err)
+					}
+				}
+
+				wasClose = true
+				actualCloseQty = closeQty
+				remainingQty = remainQty
+				return nil
+			}
+
+			// UpdateOrderStatus inside transaction
+			if err := s.db.UpdateOrderStatusTx(ctx, tx, order.ID, db.OrderStatusFilled, req.Quantity, execQuoteQty, &now, nil, nil); err != nil {
+				return fmt.Errorf("failed to mark paper order filled: %w", err)
+			}
+			order.Status = db.OrderStatusFilled
+			order.ExecutedQuantity = req.Quantity
+			order.ExecutedQuoteQuantity = execQuoteQty
+			order.FilledAt = &now
+			order.UpdatedAt = now
+
+			// InsertTrade inside transaction via DB-layer method.
+			trade := &db.Trade{
+				ID:              uuid.New(),
+				OrderID:         order.ID,
+				ExchangeTradeID: nil,
+				Symbol:          req.Symbol,
+				Exchange:        "paper",
+				Side:            orderSide,
+				Price:           execPrice,
+				Quantity:        req.Quantity,
+				QuoteQuantity:   execQuoteQty,
+				Commission:      commission,
+				CommissionAsset: &commissionAsset,
+				ExecutedAt:      now,
+				IsMaker:         false,
+				Metadata:        nil,
+				CreatedAt:       now,
+			}
+			if err := s.db.InsertTradeTx(ctx, tx, trade); err != nil {
+				return fmt.Errorf("failed to insert paper trade fill row: %w", err)
+			}
+
+			// Create or average into existing position inside transaction via DB-layer methods.
+			if existingPos == nil {
+				entryReason := "paper_trade_api"
+				pos := &db.Position{
+					ID:          uuid.New(),
+					SessionID:   sessionID,
+					Symbol:      req.Symbol,
+					Exchange:    "paper",
+					Side:        posSide,
+					EntryPrice:  execPrice,
+					Quantity:    req.Quantity,
+					EntryTime:   now,
+					EntryReason: &entryReason,
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				}
+				if err := s.db.CreatePositionTx(ctx, tx, pos); err != nil {
+					return fmt.Errorf("failed to create position for paper trade: %w", err)
+				}
+			} else {
+				totalQty := existingPos.Quantity + req.Quantity
+				weightedAvg := (existingPos.Quantity*existingPos.EntryPrice + req.Quantity*execPrice) / totalQty
+				if err := s.db.UpdatePositionAveragingTx(ctx, tx, existingPos.ID, weightedAvg, totalQty, commission); err != nil {
+					return fmt.Errorf("failed to update position for paper trade: %w", err)
+				}
+			}
+			return nil
+		})
+
+		if txErr != nil {
+			if errors.Is(txErr, errNoPosition) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{
+					"error": fmt.Sprintf("no open position for %s", req.Symbol),
+				})
+				return
+			}
+			log.Error().Err(txErr).Msg("Paper trade transaction failed")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			return
 		}
 
-		if existingPos == nil {
-			pos := &db.Position{
-				ID:            uuid.New(),
-				SessionID:     sessionID,
-				Symbol:        req.Symbol,
-				Exchange:      "paper",
-				Side:          posSide,
-				EntryPrice:    execPrice,
-				Quantity:      req.Quantity,
-				EntryTime:     now,
-				Fees:          commission,
-				EntryReason:   ptrStr("paper_trade_api"),
-				UnrealizedPnL: ptrF64(0),
-				CreatedAt:     now,
-				UpdatedAt:     now,
-			}
-			if err := s.db.CreatePosition(ctx, pos); err != nil {
-				log.Warn().Err(err).Msg("Failed to create position for paper trade")
-			}
-		} else {
-			totalQty := existingPos.Quantity + req.Quantity
-			weightedAvg := (existingPos.Quantity*existingPos.EntryPrice + req.Quantity*execPrice) / totalQty
-			if err := s.db.UpdatePositionAveraging(ctx, existingPos.ID, weightedAvg, totalQty, commission); err != nil {
-				log.Warn().Err(err).Msg("Failed to update position for paper trade")
-			}
-		}
-
+		// AggregateSessionStats is outside the transaction: it is a safe read-aggregate
+		// UPDATE that can be retried without risk of partial data corruption.
 		if err := s.db.AggregateSessionStats(ctx, *sessionID); err != nil {
 			log.Warn().Err(err).Msg("Failed to aggregate session stats after paper trade")
+		}
+
+		// Write equity snapshot (best-effort: don't fail the trade on snapshot errors).
+		if session, err := s.db.GetSession(ctx, *sessionID); err != nil {
+			log.Warn().Err(err).Msg("Failed to re-fetch session for equity snapshot")
+		} else {
+			openPositions, _ := s.db.GetOpenPositions(ctx, *sessionID)
+			var sumUnrealized float64
+			for _, p := range openPositions {
+				if p.UnrealizedPnL != nil {
+					sumUnrealized += *p.UnrealizedPnL
+				}
+			}
+			currentEquity := session.InitialCapital + session.TotalPnL + sumUnrealized
+			if snapErr := s.db.InsertEquitySnapshot(ctx, *sessionID, currentEquity, session.TotalPnL, sumUnrealized); snapErr != nil {
+				log.Warn().Err(snapErr).Msg("Failed to write equity snapshot")
+			}
+		}
+	} else {
+		// Limit orders are not immediately filled; persist the order record in NEW status.
+		if err := s.db.InsertOrder(ctx, order); err != nil {
+			log.Error().Err(err).Msg("Failed to insert paper trade limit order")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create paper trade order"})
+			return
 		}
 	}
 
@@ -626,11 +762,20 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		log.Warn().Err(err).Msg("Failed to broadcast paper trade order update")
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
+	tradeResp := gin.H{
 		"order":        order,
-		"message":      "Paper trade order executed successfully",
 		"trading_mode": "paper",
-	})
+	}
+	tradeStatus := http.StatusCreated
+	if wasClose {
+		tradeResp["message"] = "Position closed successfully"
+		tradeResp["closed_quantity"] = actualCloseQty
+		tradeResp["remaining_quantity"] = remainingQty
+		tradeStatus = http.StatusOK // close returns 200, not 201
+	} else {
+		tradeResp["message"] = "Paper trade order executed successfully"
+	}
+	c.JSON(tradeStatus, tradeResp)
 }
 
 // Trading control handlers

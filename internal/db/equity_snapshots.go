@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // EquitySnapshot records account equity at a point in time.
@@ -67,11 +69,14 @@ func (db *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []st
 	err := db.pool.QueryRow(ctx, `
 		SELECT session_id
 		FROM equity_snapshots
-		WHERE session_id = ANY($1)
+		WHERE session_id = ANY($1::uuid[])
 		GROUP BY session_id
 		ORDER BY COUNT(*) DESC
 		LIMIT 1
 	`, sessionIDs).Scan(&sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil // no snapshots yet — normal initial state
+	}
 	if err != nil {
 		return "", err
 	}
