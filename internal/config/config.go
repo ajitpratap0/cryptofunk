@@ -136,9 +136,13 @@ type TradingConfig struct {
 	InitialCapital     float64  `mapstructure:"initial_capital"`      // 10000.0
 	MaxPositions       int      `mapstructure:"max_positions"`        // 3
 	DefaultQuantity    float64  `mapstructure:"default_quantity"`     // 0.01
-	CommissionRate     float64  `mapstructure:"commission_rate"`      // 0.001 (0.1%) — paper trade taker fee
-	SlippageBuyFactor  float64  `mapstructure:"slippage_buy_factor"`  // 1.001 — 0.1% adverse slippage for paper market buys
-	SlippageSellFactor float64  `mapstructure:"slippage_sell_factor"` // 0.999 — 0.1% adverse slippage for paper market sells
+	CommissionRate float64 `mapstructure:"commission_rate"` // 0.001 (0.1%) — paper trade taker fee
+	// SlippageBuyFactor multiplies the buy price to simulate slippage (e.g. 1.001 = 0.1% slippage).
+	// 0 means "use default" (1.001); cannot configure zero slippage via this field.
+	SlippageBuyFactor float64 `mapstructure:"slippage_buy_factor"`
+	// SlippageSellFactor multiplies the sell price to simulate slippage (e.g. 0.999 = 0.1% slippage).
+	// 0 means "use default" (0.999); cannot configure zero slippage via this field.
+	SlippageSellFactor float64 `mapstructure:"slippage_sell_factor"`
 }
 
 // RiskConfig contains risk management settings
