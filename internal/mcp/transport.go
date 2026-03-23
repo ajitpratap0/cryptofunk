@@ -144,7 +144,8 @@ func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
 				// id. This is a known limitation of middleware-level panic recovery.
 				//
 				// Future improvement: intercept and buffer/peek the request body before
-				// passing to the handler so the id can be echoed accurately on panic.				w.Header().Set("Content-Type", "application/json")
+				// passing to the handler so the id can be echoed accurately on panic.
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal server error"}}`))
 			}
