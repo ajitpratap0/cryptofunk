@@ -734,7 +734,7 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 	// longer returned by GetAllOpenPositions.
 	pnl.CurrentCapital = pnl.InitialCapital + pnl.TotalPnL + pnl.UnrealizedPnL
 	if pnl.InitialCapital > 0 {
-		returnPercent := (pnl.TotalPnL / pnl.InitialCapital) * 100
+		returnPercent := ((pnl.CurrentCapital - pnl.InitialCapital) / pnl.InitialCapital) * 100
 		pnl.ReturnPercent = &returnPercent
 	}
 
