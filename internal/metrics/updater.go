@@ -21,11 +21,11 @@ type Updater struct {
 	stopCh    chan struct{}
 	stopOnce  sync.Once
 	startOnce sync.Once
-	wg        sync.WaitGroup
-}
+	wg        sync.WaitGroup}
 
 // NewUpdater creates a new metrics updater
 func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
+	log.Warn().Float64("initial_capital", 10000.0).Msg("metrics/updater: initialCapital is hardcoded to 10000; return metrics will be incorrect for non-10k portfolios until this is made configurable")
 	return &Updater{
 		db:       db,
 		interval: interval,
@@ -75,8 +75,7 @@ func (u *Updater) StartAsync(ctx context.Context) {
 // multiple times.
 func (u *Updater) Stop() {
 	u.stopOnce.Do(func() { close(u.stopCh) })
-	u.wg.Wait()
-}
+	u.wg.Wait()}
 
 // update fetches and updates all metrics
 func (u *Updater) update(ctx context.Context) {
@@ -287,7 +286,6 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 		sum += r
 	}
 	mean := sum / float64(len(returns))
-
 	// Calculate standard deviation
 	var variance float64
 	for _, r := range returns {
