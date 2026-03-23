@@ -200,8 +200,9 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	// misleading. Only include those keys on the un-filtered paginated path.
 	if sessionIDStr != "" || symbol != "" || status != "" {
 		c.JSON(http.StatusOK, gin.H{
-			"orders": orders,
-			"count":  len(orders),
+			"orders":    orders,
+			"count":     len(orders),
+			"paginated": false,
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{
