@@ -96,34 +96,17 @@ func (s *Server) buildHandler() http.Handler {
 		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
 	}
 
-	// panicRecoveryMiddleware wraps the full middleware + handler chain so that
-	// panics anywhere in request processing are caught and returned as a JSON-RPC error.
-	// /health is served directly from the outer mux, bypassing all middleware and panic recovery.
+	// panicRecoveryMiddleware is scoped to the inner MCP mux only.
+	// /health is registered on the outer mux OUTSIDE the panic recovery so that
+	// a panic in an MCP handler never causes /health to return a JSON-RPC error
+	// shape — K8s liveness/readiness probes would misinterpret that response.
+	inner := s.panicRecoveryMiddleware(s.buildMux())
+
 	outer := http.NewServeMux()
-	outer.HandleFunc("/health", s.healthHandler) // bypasses all middleware and panic recovery
-	outer.Handle("/", s.panicRecoveryMiddleware(s.wrapMiddleware(s.buildMux())))
+	outer.HandleFunc("/health", s.healthHandler) // bypasses panic recovery and all middleware
+	outer.Handle("/", s.wrapMiddleware(inner))   // everything else wrapped
 
-	return s.panicRecoveryMiddleware(outer)
-}
-
-// panicRecoveryMiddleware wraps an http.Handler and recovers from panics,
-// returning a JSON-RPC error response instead of crashing the process.
-func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				stack := debug.Stack()
-				s.logger.Error().
-					Interface("panic", rec).
-					Bytes("stack", stack).
-					Msg("panic recovered in MCP HTTP handler")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"internal server error"}}`))
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+	return outer
 }
 
 // panicRecoveryMiddleware wraps an http.Handler and recovers from panics,
