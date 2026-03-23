@@ -454,7 +454,7 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			Mode:           db.TradingModePaper,
 			Symbol:         req.Symbol,
 			Exchange:       "paper",
-			InitialCapital: 100_000.0,
+			InitialCapital: s.config.Trading.InitialCapital,
 			StartedAt:      time.Now(),
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),

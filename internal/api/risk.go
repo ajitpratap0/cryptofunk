@@ -138,12 +138,12 @@ func (h *RiskHandler) GetCircuitBreakers(c *gin.Context) {
 		totalTrades += s.TotalTrades
 	}
 
-	// Max Daily Loss: triggered when cumulative losses exceed $5000
+	// Max Daily Loss: triggered when cumulative losses exceed the configured threshold
 	lossAmount := math.Abs(math.Min(totalPnL, 0))
 	breakers := []gin.H{
-		buildBreaker("Max Daily Loss", lossAmount, 5000),
-		buildBreaker("Max Drawdown %", maxDrawdown*100, 10),
-		buildBreaker("Total Trade Count", float64(totalTrades), 100),
+		buildBreaker("Max Daily Loss", lossAmount, h.cfg.MaxDailyLossDollars),
+		buildBreaker("Max Drawdown %", maxDrawdown*100, h.cfg.MaxDrawdownPct),
+		buildBreaker("Total Trade Count", float64(totalTrades), float64(h.cfg.MaxTradeCount)),
 	}
 
 	c.JSON(http.StatusOK, gin.H{"circuit_breakers": breakers, "count": len(breakers)})
