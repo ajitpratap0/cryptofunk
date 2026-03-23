@@ -117,9 +117,15 @@ func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
 					Interface("panic", rec).
 					Bytes("stack", stack).
 					Msg("panic recovered in MCP HTTP handler")
+				// NOTE: For SSE streaming responses (GET /mcp), if a panic occurs after
+				// response headers have been flushed, the WriteHeader(500) and body write
+				// below will be silently ignored by Go's HTTP library — the status code
+				// and Content-Type header have already been sent. The log entry above is
+				// still emitted. This is an inherent limitation of HTTP middleware-level
+				// recovery for streaming protocols.
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"internal server error"}}`))
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal server error"}}`))
 			}
 		}()
 		next.ServeHTTP(w, r)
