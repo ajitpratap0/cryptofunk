@@ -195,12 +195,22 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"orders": orders,
-		"count":  len(orders),
-		"limit":  limit,
-		"offset": offset,
-	})
+	// When a filter is active (session_id / symbol / status) the query returns
+	// all matching rows without pagination, so echoing limit/offset would be
+	// misleading. Only include those keys on the un-filtered paginated path.
+	if sessionIDStr != "" || symbol != "" || status != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"orders": orders,
+			"count":  len(orders),
+		})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"orders": orders,
+			"count":  len(orders),
+			"limit":  limit,
+			"offset": offset,
+		})
+	}
 }
 
 func (s *APIServer) handleGetOrder(c *gin.Context) {
