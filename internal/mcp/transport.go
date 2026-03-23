@@ -123,6 +123,24 @@ func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
 				// and Content-Type header have already been sent. The log entry above is
 				// still emitted. This is an inherent limitation of HTTP middleware-level
 				// recovery for streaming protocols.
+				//
+				// NOTE: JSON-RPC 2.0 compliance — "id":null limitation.
+				// The JSON-RPC 2.0 spec (§5) requires error responses to echo the request's
+				// "id" field. Using "id":null is only correct when the id cannot be
+				// determined. However, by the time a panic fires at this middleware layer,
+				// the request body has already been consumed by the handler chain; we
+				// cannot re-parse the body here to extract the id without significant
+				// complexity (e.g., body-peeking before routing).
+				//
+				// A compliant JSON-RPC 2.0 client receiving "id":null will treat this as
+				// an unmatched error notification per spec §5: "If there was an error in
+				// detecting the id in the Request object (e.g. Parse error/Invalid
+				// Request), it MUST be Null." The client may log the notification and
+				// continue, but could hang waiting for the real response on its matching
+				// id. This is a known limitation of middleware-level panic recovery.
+				//
+				// Future improvement: intercept and buffer/peek the request body before
+				// passing to the handler so the id can be echoed accurately on panic.
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal server error"}}`))
