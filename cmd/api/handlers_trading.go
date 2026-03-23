@@ -295,6 +295,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "order execution failed",
+			"order": order,
 		})
 		return
 	}
