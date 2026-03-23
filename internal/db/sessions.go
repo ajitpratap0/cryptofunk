@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
 
@@ -210,6 +211,45 @@ func (db *DB) ListActiveSessions(ctx context.Context) ([]*TradingSession, error)
 	return db.ListActiveSessionsPaginated(ctx, 0, 0)
 }
 
+// scanSessions reads all rows from a pgx.Rows result set into a slice of
+// TradingSession pointers. The caller is responsible for calling rows.Close().
+// This mirrors the scanOrders helper in orders.go.
+func scanSessions(rows pgx.Rows) ([]*TradingSession, error) {
+	var sessions []*TradingSession
+	for rows.Next() {
+		var session TradingSession
+		err := rows.Scan(
+			&session.ID,
+			&session.Mode,
+			&session.Symbol,
+			&session.Exchange,
+			&session.StartedAt,
+			&session.StoppedAt,
+			&session.InitialCapital,
+			&session.FinalCapital,
+			&session.TotalTrades,
+			&session.WinningTrades,
+			&session.LosingTrades,
+			&session.TotalPnL,
+			&session.MaxDrawdown,
+			&session.SharpeRatio,
+			&session.Config,
+			&session.Metadata,
+			&session.CreatedAt,
+			&session.UpdatedAt,
+		)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan session row")
+			return nil, fmt.Errorf("failed to scan session row: %w", err)
+		}
+		sessions = append(sessions, &session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating session rows: %w", err)
+	}
+	return sessions, nil
+}
+
 // ListActiveSessionsPaginated retrieves active (not stopped) trading sessions with
 // limit/offset pagination. limit=0 means no limit (returns all rows).
 func (db *DB) ListActiveSessionsPaginated(ctx context.Context, limit, offset int) ([]*TradingSession, error) {
@@ -235,40 +275,9 @@ func (db *DB) ListActiveSessionsPaginated(ctx context.Context, limit, offset int
 	}
 	defer rows.Close()
 
-	var sessions []*TradingSession
-	for rows.Next() {
-		var session TradingSession
-		err := rows.Scan(
-			&session.ID,
-			&session.Mode,
-			&session.Symbol,
-			&session.Exchange,
-			&session.StartedAt,
-			&session.StoppedAt,
-			&session.InitialCapital,
-			&session.FinalCapital,
-			&session.TotalTrades,
-			&session.WinningTrades,
-			&session.LosingTrades,
-			&session.TotalPnL,
-			&session.MaxDrawdown,
-			&session.SharpeRatio,
-			&session.Config,
-			&session.Metadata,
-			&session.CreatedAt,
-			&session.UpdatedAt,
-		)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to scan session row")
-			return nil, fmt.Errorf("failed to scan session row: %w", err)
-		}
-		sessions = append(sessions, &session)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating session rows: %w", err)
+	sessions, err := scanSessions(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	log.Debug().
@@ -302,41 +311,9 @@ func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*Tradin
 	}
 	defer rows.Close()
 
-	var sessions []*TradingSession
-	for rows.Next() {
-		var session TradingSession
-		err := rows.Scan(
-			&session.ID,
-			&session.Mode,
-			&session.Symbol,
-			&session.Exchange,
-			&session.StartedAt,
-			&session.StoppedAt,
-			&session.InitialCapital,
-			&session.FinalCapital,
-			&session.TotalTrades,
-			&session.WinningTrades,
-			&session.LosingTrades,
-			&session.TotalPnL,
-			&session.MaxDrawdown,
-			&session.SharpeRatio,
-			&session.Config,
-			&session.Metadata,
-			&session.CreatedAt,
-			&session.UpdatedAt,
-		)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("symbol", symbol).
-				Msg("Failed to scan session row")
-			return nil, fmt.Errorf("failed to scan session row: %w", err)
-		}
-		sessions = append(sessions, &session)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating session rows: %w", err)
+	sessions, err := scanSessions(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	log.Debug().

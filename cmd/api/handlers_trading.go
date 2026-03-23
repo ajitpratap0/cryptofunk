@@ -32,7 +32,7 @@ var errOppositeSide = errors.New("opposite side trade on existing position")
 func (s *APIServer) handleListSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	limit := parseIntQuery(c, "limit", 0)
+	limit := parseIntQuery(c, "limit", 50) // default 50; pass limit=0 for unlimited
 	offset := parseIntQuery(c, "offset", 0)
 
 	sessions, err := s.db.ListActiveSessionsPaginated(ctx, limit, offset)
