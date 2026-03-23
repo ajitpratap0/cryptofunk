@@ -204,68 +204,10 @@ func (db *DB) StopSession(ctx context.Context, sessionID uuid.UUID, finalCapital
 	return nil
 }
 
-// ListActiveSessions retrieves all active (not stopped) trading sessions
+// ListActiveSessions retrieves all active (not stopped) trading sessions.
+// It delegates to ListActiveSessionsPaginated with limit=0 (unlimited).
 func (db *DB) ListActiveSessions(ctx context.Context) ([]*TradingSession, error) {
-	query := `
-		SELECT id, mode, symbol, exchange, started_at, stopped_at,
-		       initial_capital, final_capital, total_trades, winning_trades,
-		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
-		       config, metadata, created_at, updated_at
-		FROM trading_sessions
-		WHERE stopped_at IS NULL
-		ORDER BY started_at DESC
-	`
-
-	rows, err := db.pool.Query(ctx, query)
-	if err != nil {
-		log.Error().
-			Err(err).
-			Msg("Failed to list active sessions")
-		return nil, fmt.Errorf("failed to list active sessions: %w", err)
-	}
-	defer rows.Close()
-
-	var sessions []*TradingSession
-	for rows.Next() {
-		var session TradingSession
-		err := rows.Scan(
-			&session.ID,
-			&session.Mode,
-			&session.Symbol,
-			&session.Exchange,
-			&session.StartedAt,
-			&session.StoppedAt,
-			&session.InitialCapital,
-			&session.FinalCapital,
-			&session.TotalTrades,
-			&session.WinningTrades,
-			&session.LosingTrades,
-			&session.TotalPnL,
-			&session.MaxDrawdown,
-			&session.SharpeRatio,
-			&session.Config,
-			&session.Metadata,
-			&session.CreatedAt,
-			&session.UpdatedAt,
-		)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to scan session row")
-			return nil, fmt.Errorf("failed to scan session row: %w", err)
-		}
-		sessions = append(sessions, &session)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating session rows: %w", err)
-	}
-
-	log.Debug().
-		Int("count", len(sessions)).
-		Msg("Listed active sessions")
-
-	return sessions, nil
+	return db.ListActiveSessionsPaginated(ctx, 0, 0)
 }
 
 // ListActiveSessionsPaginated retrieves active (not stopped) trading sessions with
