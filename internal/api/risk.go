@@ -151,9 +151,13 @@ func (h *RiskHandler) GetCircuitBreakers(c *gin.Context) {
 
 func buildBreaker(name string, current, threshold float64) gin.H {
 	status := "OK"
-	if current >= threshold {
+	if threshold <= 0 {
+		// A zero or negative threshold means the breaker is disabled/unconfigured.
+		// Guard against false positives: never fire for unset config values.
+		status = "DISABLED"
+	} else if current >= threshold {
 		status = "TRIGGERED"
-	} else if threshold > 0 && current/threshold >= 0.8 {
+	} else if current/threshold >= 0.8 {
 		status = "WARNING"
 	}
 	return gin.H{
