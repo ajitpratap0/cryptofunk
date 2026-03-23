@@ -452,7 +452,7 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		newSession := &db.TradingSession{
 			ID:             uuid.New(),
 			Mode:           db.TradingModePaper,
-			Symbol:         req.Symbol,
+			Symbol:         "PAPER",
 			Exchange:       "paper",
 			InitialCapital: s.config.Trading.InitialCapital,
 			StartedAt:      time.Now(),
@@ -484,9 +484,9 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 					return
 				}
 			} else {
-				log.Error().Err(err).Msg("Failed to create paper session")
+				log.Error().Err(err).Msg("failed to create paper session")
 				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("failed to create paper session: %v", err),
+					"error": "failed to create paper trading session",
 				})
 				return
 			}

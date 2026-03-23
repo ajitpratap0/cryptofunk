@@ -96,7 +96,7 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			log.Debug().Err(err).Msg("VaR calculation failed (95%)")
 		} else {
 			if varResult, ok := res95.(*risk.VaRResult); ok {
-				response["var_95"] = varResult.VaR
+				response["var_95"] = math.Round(varResult.VaR*totalExposure*100) / 100
 			}
 		}
 
@@ -108,8 +108,8 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			log.Debug().Err(err).Msg("VaR calculation failed (99%)")
 		} else {
 			if varResult, ok := res99.(*risk.VaRResult); ok {
-				response["var_99"] = varResult.VaR
-				response["expected_shortfall"] = varResult.CVaR
+				response["var_99"] = math.Round(varResult.VaR*totalExposure*100) / 100
+				response["expected_shortfall"] = math.Round(varResult.CVaR*totalExposure*100) / 100
 			}
 		}
 	}
