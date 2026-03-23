@@ -29,8 +29,6 @@ var errNoPosition = errors.New("no open position to sell")
 
 // ptrStr and ptrF64 are local pointer helpers used only within this file.
 // They are not duplicated elsewhere in the codebase (verified via grep).
-func ptrStr(s string) *string   { return &s }
-func ptrF64(f float64) *float64 { return &f }
 
 // quoteAsset derives the quote asset token from a trading symbol by checking
 // common suffixes. Falls back to "USDT" for unrecognised symbols.
