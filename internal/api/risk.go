@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
@@ -16,13 +17,19 @@ import (
 type RiskHandler struct {
 	db          *db.DB
 	riskService *risk.Service
+	cfg         *config.RiskConfig
 }
 
-// NewRiskHandler creates a new RiskHandler backed by the given database.
-func NewRiskHandler(database *db.DB) *RiskHandler {
+// NewRiskHandler creates a new RiskHandler backed by the given database and risk config.
+// If cfg is nil a zero-value RiskConfig is used.
+func NewRiskHandler(database *db.DB, cfg *config.RiskConfig) *RiskHandler {
+	if cfg == nil {
+		cfg = &config.RiskConfig{}
+	}
 	return &RiskHandler{
 		db:          database,
 		riskService: risk.NewService(),
+		cfg:         cfg,
 	}
 }
 
