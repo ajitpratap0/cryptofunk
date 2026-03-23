@@ -170,24 +170,14 @@ func main() {
 	// Setup routes
 	server.setupRoutes()
 
-	// Background goroutine to update DB connection pool metrics every 5 seconds
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				stat := database.Pool().Stat()
-				metrics.DatabaseConnectionsActive.Set(float64(stat.AcquiredConns()))
-				metrics.DatabaseConnectionsIdle.Set(float64(stat.IdleConns()))
-			}
-		}
-	}()
+	// Start metrics updater — periodically refreshes DB pool stats, trading metrics,
+	// position values, and agent status from the database.
+	metricsUpdater := metrics.NewUpdater(database.Pool(), 5*time.Second)
+	go metricsUpdater.Start(ctx)
 
 	// Start server
 	server.start()
+	metricsUpdater.Stop()
 }
 
 func (s *APIServer) start() {
