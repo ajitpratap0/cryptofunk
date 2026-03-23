@@ -96,15 +96,12 @@ func (s *Server) buildHandler() http.Handler {
 		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
 	}
 
-	// panicRecoveryMiddleware is scoped to the inner MCP mux only.
-	// /health is registered on the outer mux OUTSIDE the panic recovery so that
-	// a panic in an MCP handler never causes /health to return a JSON-RPC error
-	// shape — K8s liveness/readiness probes would misinterpret that response.
-	inner := s.panicRecoveryMiddleware(s.buildMux())
-
+	// panicRecoveryMiddleware wraps the full middleware + handler chain so that
+	// panics anywhere in request processing are caught and returned as a JSON-RPC error.
+	// /health is served directly from the outer mux, bypassing all middleware and panic recovery.
 	outer := http.NewServeMux()
-	outer.HandleFunc("/health", s.healthHandler) // bypasses panic recovery and all middleware
-	outer.Handle("/", s.wrapMiddleware(inner))   // everything else wrapped
+	outer.HandleFunc("/health", s.healthHandler) // bypasses all middleware and panic recovery
+	outer.Handle("/", s.panicRecoveryMiddleware(s.wrapMiddleware(s.buildMux())))
 
 	return outer
 }
