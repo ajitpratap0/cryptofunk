@@ -32,7 +32,7 @@ var errOppositeSide = errors.New("opposite side trade on existing position")
 func (s *APIServer) handleListSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	limit := parseIntQuery(c, "limit", 50) // default 50; pass limit=0 for unlimited
+	limit := parseIntQuery(c, "limit", 50) // default 50; capped at maxPageSize by parseIntQuery
 	offset := parseIntQuery(c, "offset", 0)
 
 	sessions, err := s.db.ListActiveSessionsPaginated(ctx, limit, offset)
@@ -196,14 +196,18 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	}
 
 	// When a filter is active (session_id / symbol / status) the query returns
-	// all matching rows without pagination, so echoing limit/offset would be
-	// misleading. Only include those keys on the un-filtered paginated path.
+	// all matching rows without pagination. Limit/offset are ignored in this path;
+	// include a warning if the caller specified them to avoid silent data truncation.
 	if sessionIDStr != "" || symbol != "" || status != "" {
-		c.JSON(http.StatusOK, gin.H{
+		resp := gin.H{
 			"orders":    orders,
 			"count":     len(orders),
 			"paginated": false,
-		})
+		}
+		if c.Query("limit") != "" || c.Query("offset") != "" {
+			resp["warning"] = "limit and offset are not supported with filters; all matching orders returned"
+		}
+		c.JSON(http.StatusOK, resp)
 	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"orders": orders,
