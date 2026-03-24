@@ -353,16 +353,19 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
-// GetTotalClosedFees returns the sum of fees from all closed positions across all sessions
-// and all time (no date window). This is intentional — the dashboard shows global stats.
+// GetClosedFeesBySessionIDs returns the sum of fees from closed positions belonging to
+// the specified sessions. If sessionIDs is empty, returns 0 immediately without querying.
 // Uses a single SQL aggregate instead of loading all rows.
-func (db *DB) GetTotalClosedFees(ctx context.Context) (float64, error) {
+func (db *DB) GetClosedFeesBySessionIDs(ctx context.Context, sessionIDs []uuid.UUID) (float64, error) {
+	if len(sessionIDs) == 0 {
+		return 0, nil
+	}
 	var total float64
 	err := db.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(fees), 0)
 		FROM positions
-		WHERE exit_time IS NOT NULL
-	`).Scan(&total)
+		WHERE exit_time IS NOT NULL AND session_id = ANY($1::uuid[])
+	`, sessionIDs).Scan(&total)
 	if err != nil {
 		return 0, fmt.Errorf("failed to sum closed position fees: %w", err)
 	}
