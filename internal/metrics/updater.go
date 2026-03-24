@@ -293,7 +293,6 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 	}
 	variance /= float64(len(returns) - 1)
 	stdDev := math.Sqrt(variance)
-
 	// Sharpe ratio (assuming risk-free rate of 0)
 	if stdDev > 0 {
 		sharpe := mean / stdDev * math.Sqrt(252) // Annualized

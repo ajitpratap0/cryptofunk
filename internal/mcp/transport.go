@@ -118,8 +118,7 @@ func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
 				stack := debug.Stack()
 				s.logger.Error().
 					Interface("panic", rec).
-					Str("path", r.URL.Path).
-					Str("stack", string(stack)).
+					Str("path", r.URL.Path).					Str("stack", string(stack)).
 					Msg("panic recovered in MCP HTTP handler")
 				// NOTE: For SSE streaming responses (GET /mcp), if a panic occurs after
 				// response headers have been flushed, the WriteHeader(500) and body write
