@@ -282,14 +282,18 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		order.Status = db.OrderStatusRejected
 		order.ErrorMessage = &errMsg
 
-		// Broadcast rejection to WebSocket clients
+		// Broadcast rejection to WebSocket clients (internal message with error details is OK)
 		if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
 			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
 		}
 
+		// Nil out ErrorMessage before returning to client — the raw error string must not be
+		// leaked externally. The DB row already has the error captured; callers can query it.
+		safeOrder := *order
+		safeOrder.ErrorMessage = nil
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "order execution failed",
-			"order": order,
+			"order": safeOrder,
 		})
 		return
 	}
