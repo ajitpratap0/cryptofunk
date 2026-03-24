@@ -176,7 +176,7 @@ func main() {
 	log.Warn().Float64("initial_capital", 10000.0).Msg("metrics/updater: initialCapital is hardcoded to 10000; return metrics will be incorrect for non-10k portfolios until this is made configurable")
 	go metricsUpdater.Start(ctx)
 
-	// Start server
+	// start() blocks until a SIGTERM/SIGINT signal is received and the graceful drain completes.
 	server.start()
 	metricsUpdater.Stop()
 }

@@ -249,28 +249,31 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 		returns = append(returns, pnl/initialCapital)
 	}
 
-	if len(returns) > 1 {
-		// Calculate mean return
-		var sum float64
-		for _, r := range returns {
-			sum += r
-		}
-		mean := sum / float64(len(returns))
+	// Require at least 2 data points for sample variance (Bessel's correction uses len-1).
+	if len(returns) < 2 {
+		return
+	}
 
-		// Calculate standard deviation
-		var variance float64
-		for _, r := range returns {
-			diff := r - mean
-			variance += diff * diff
-		}
-		variance /= float64(len(returns) - 1)
-		stdDev := math.Sqrt(variance)
+	// Calculate mean return
+	var sum float64
+	for _, r := range returns {
+		sum += r
+	}
+	mean := sum / float64(len(returns))
 
-		// Sharpe ratio (assuming risk-free rate of 0)
-		if stdDev > 0 {
-			sharpe := mean / stdDev * math.Sqrt(252) // Annualized
-			SharpeRatio.Set(sharpe)
-		}
+	// Calculate standard deviation
+	var variance float64
+	for _, r := range returns {
+		diff := r - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(returns) - 1)
+	stdDev := math.Sqrt(variance)
+
+	// Sharpe ratio (assuming risk-free rate of 0)
+	if stdDev > 0 {
+		sharpe := mean / stdDev * math.Sqrt(252) // Annualized
+		SharpeRatio.Set(sharpe)
 	}
 }
 
