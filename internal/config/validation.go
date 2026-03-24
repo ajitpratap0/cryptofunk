@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ValidationError represents a configuration validation error
@@ -317,6 +319,18 @@ func (c *Config) validateTrading() ValidationErrors {
 			Field:   "trading.default_quantity",
 			Message: "Default quantity must be greater than 0",
 		})
+	}
+
+	// Warn when slippage factors are configured in an unrealistically favorable direction.
+	// Normal buy slippage means paying MORE than mid-price (factor >= 1.0).
+	// Normal sell slippage means receiving LESS than mid-price (factor <= 1.0).
+	if c.Trading.SlippageBuyFactor != 0 && c.Trading.SlippageBuyFactor < 1.0 {
+		log.Warn().Float64("slippage_buy_factor", c.Trading.SlippageBuyFactor).
+			Msg("slippage_buy_factor < 1.0 means favorable buy execution (negative slippage) — verify this is intentional")
+	}
+	if c.Trading.SlippageSellFactor != 0 && c.Trading.SlippageSellFactor > 1.0 {
+		log.Warn().Float64("slippage_sell_factor", c.Trading.SlippageSellFactor).
+			Msg("slippage_sell_factor > 1.0 means favorable sell execution (negative slippage) — verify this is intentional")
 	}
 
 	return errors

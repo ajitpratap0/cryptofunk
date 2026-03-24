@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"math"
 	"net/http"
 
@@ -9,9 +10,15 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
+// PerformanceRepository is the minimal database interface required by PerformanceHandler.
+type PerformanceRepository interface {
+	GetPairPerformance(ctx context.Context) ([]db.PairPerformance, error)
+	ListActiveSessions(ctx context.Context) ([]*db.TradingSession, error)
+}
+
 // PerformanceHandler provides REST endpoints for per-symbol performance metrics.
 type PerformanceHandler struct {
-	db *db.DB
+	db PerformanceRepository
 }
 
 // NewPerformanceHandler creates a new PerformanceHandler backed by the given database.
@@ -63,6 +70,9 @@ func (h *PerformanceHandler) GetPairPerformance(c *gin.Context) {
 
 // GetSummary returns aggregate portfolio performance metrics across all active sessions.
 // GET /api/v1/performance/summary
+//
+// NOTE: This endpoint only aggregates across currently active (not stopped) sessions.
+// Stopped session P&L is excluded from all reported metrics.
 func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 	ctx := c.Request.Context()
 
