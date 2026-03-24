@@ -334,7 +334,10 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		}
 	}
 
-	// Broadcast success to WebSocket clients
+	// Broadcast success to WebSocket clients.
+	// order.ErrorMessage is nil on the success path (execution succeeded), so no
+	// raw error string is leaked here. The sanitized safeOrder is used only on
+	// the rejection path above (see "Broadcast rejection" comment).
 	if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
 		log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
 	}

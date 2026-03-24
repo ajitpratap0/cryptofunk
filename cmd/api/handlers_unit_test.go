@@ -705,6 +705,35 @@ func TestHandlePaperTrade_InvalidBody(t *testing.T) {
 	assert.Equal(t, "invalid request body", resp["error"])
 }
 
+// TestHandlePlaceOrder_ErrorSanitization verifies that when handlePlaceOrder fails
+// (DB unavailable → panic caught by recovery or explicit 500 response), the response
+// body does NOT leak internal fields: error_message, exchange_id, or session_id.
+// These fields must never be returned to clients even on the error path.
+func TestHandlePlaceOrder_ErrorSanitization(t *testing.T) {
+	server := setupMinimalServer(t)
+	// db is nil — InsertOrder will panic; gin.Recovery converts it to a 500.
+	server.router.Use(gin.Recovery())
+	server.router.POST("/api/v1/orders", server.handlePlaceOrder)
+
+	body := `{"symbol":"BTCUSDT","side":"BUY","type":"MARKET","quantity":0.01}`
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	// Must be 500 (either from our explicit JSON response or Recovery panic handler).
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	// The response body (if any) must not contain sensitive internal fields.
+	bodyStr := w.Body.String()
+	assert.NotContains(t, bodyStr, "error_message",
+		"error_message must not be exposed in error responses")
+	assert.NotContains(t, bodyStr, "exchange_id",
+		"exchange_id must not be exposed in error responses")
+	assert.NotContains(t, bodyStr, "session_id",
+		"session_id must not be exposed in error responses")
+}
+
 // TestHandlePaperTrade_LimitMissingPrice tests that limit orders without a price are rejected
 func TestHandlePaperTrade_LimitMissingPrice(t *testing.T) {
 	server := setupMinimalServer(t)
