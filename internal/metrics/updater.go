@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,14 +21,12 @@ type Updater struct {
 	stopCh    chan struct{}
 	stopOnce  sync.Once
 	startOnce sync.Once
-	wg        sync.WaitGroup}
-// NewUpdater creates a new metrics updater
+	wg        sync.WaitGroup}// NewUpdater creates a new metrics updater
 func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 	return &Updater{
 		db:       db,
 		interval: interval,
 		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
 	}
 }
 
@@ -37,7 +34,6 @@ func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 // To run in the background with proper lifecycle tracking, use StartAsync instead.func (u *Updater) Start(ctx context.Context) {
 	u.started.Store(true)
 	defer close(u.doneCh)
-
 	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
 
@@ -70,8 +66,7 @@ func (u *Updater) StartAsync(ctx context.Context) {
 		}()	})
 	if u.started.Load() {
 		<-u.doneCh
-	}
-}
+	}}
 
 // Stop signals the metrics updater to halt and blocks until the background
 // goroutine (if started via StartAsync) fully exits. This prevents DB queries
