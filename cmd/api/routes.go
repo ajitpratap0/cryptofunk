@@ -1,9 +1,5 @@
 package main
 
-// maxRequestBodyBytes is the maximum allowed request body size.
-// Tune this value if larger payloads become necessary (e.g. batch order uploads).
-const maxRequestBodyBytes = 1 << 20 // 1 MB
-
 import (
 	"net/http"
 	"strings"
@@ -19,6 +15,10 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
+
+// maxRequestBodyBytes is the maximum allowed request body size.
+// Tune this value if larger payloads become necessary (e.g. batch order uploads).
+const maxRequestBodyBytes = 1 << 20 // 1 MB
 
 func (s *APIServer) setupMiddleware() {
 	// Limit request bodies to 1 MB to prevent OOM attacks
