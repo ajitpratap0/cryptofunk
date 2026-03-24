@@ -29,10 +29,9 @@ func main() {
 	logger := log.With().Str("server", serverName).Logger()
 
 	srv := mcpserver.New(mcpserver.Config{
-		Name:        serverName,
-		Version:     serverVersion,
-		Logger:      logger,
-		MetricsPort: 9112,
+		Name:    serverName,
+		Version: serverVersion,
+		Logger:  logger,
 	})
 
 	registerTools(srv)
