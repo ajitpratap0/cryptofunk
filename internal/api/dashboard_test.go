@@ -29,7 +29,7 @@ type MockDashboardRepository struct {
 	CreateSessionFunc         func(ctx context.Context, session *db.TradingSession) error
 	StopSessionFunc           func(ctx context.Context, sessionID uuid.UUID, finalCapital float64) error
 	GetAllOpenPositionsFunc   func(ctx context.Context) ([]*db.Position, error)
-	GetAllClosedPositionsFunc func(ctx context.Context) ([]*db.Position, error)
+	GetTotalClosedFeesFunc    func(ctx context.Context) (float64, error)
 	GetPositionsBySessionFunc func(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
 	PingFunc                  func(ctx context.Context) error
 	IsTradingPausedFunc       func(ctx context.Context) (bool, error)
@@ -72,11 +72,11 @@ func (m *MockDashboardRepository) GetAllOpenPositions(ctx context.Context) ([]*d
 	return []*db.Position{}, nil
 }
 
-func (m *MockDashboardRepository) GetAllClosedPositions(ctx context.Context) ([]*db.Position, error) {
-	if m.GetAllClosedPositionsFunc != nil {
-		return m.GetAllClosedPositionsFunc(ctx)
+func (m *MockDashboardRepository) GetTotalClosedFees(ctx context.Context) (float64, error) {
+	if m.GetTotalClosedFeesFunc != nil {
+		return m.GetTotalClosedFeesFunc(ctx)
 	}
-	return []*db.Position{}, nil
+	return 0, nil
 }
 
 func (m *MockDashboardRepository) GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error) {

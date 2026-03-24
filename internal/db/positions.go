@@ -353,6 +353,21 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
+// GetTotalClosedFees returns the sum of fees from all closed positions across all sessions.
+// Uses a single SQL aggregate instead of loading all rows.
+func (db *DB) GetTotalClosedFees(ctx context.Context) (float64, error) {
+	var total float64
+	err := db.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(fees), 0)
+		FROM positions
+		WHERE exit_time IS NOT NULL
+	`).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("failed to sum closed position fees: %w", err)
+	}
+	return total, nil
+}
+
 // GetAllClosedPositions returns positions closed within the last 90 days across all sessions,
 // ordered by exit_time DESC. A 90-day window ensures VaR calculations use recent,
 // relevant return data rather than an arbitrary row count.
