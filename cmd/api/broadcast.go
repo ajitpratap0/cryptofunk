@@ -71,8 +71,11 @@ func (s *APIServer) BroadcastTradeNotification(trade *db.Trade) error {
 }
 
 // BroadcastOrderUpdate broadcasts an order status update.
-// Only client-safe fields are included — exchange_order_id is intentionally
-// omitted to avoid leaking the raw exchange credential/ID.
+// Only client-safe fields are included — exchange_order_id and error_message are
+// intentionally omitted to avoid leaking internal infrastructure details.
+// BREAKING: error_message and exchange_order_id were removed from this payload
+// as part of the security hardening in PR #111. WebSocket consumers must not
+// depend on those fields.
 func (s *APIServer) BroadcastOrderUpdate(order *db.Order) error {
 	data := map[string]interface{}{
 		"order_id":                order.ID.String(),
