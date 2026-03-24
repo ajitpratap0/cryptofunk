@@ -58,7 +58,7 @@ func TestGetSummaryHandler(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/performance/summary", nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/performance/summary", nil)
 		require.NoError(t, err)
 		router.ServeHTTP(w, req)
 
@@ -87,7 +87,7 @@ func TestGetSummaryHandler(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/performance/summary", nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/performance/summary", nil)
 		require.NoError(t, err)
 		router.ServeHTTP(w, req)
 
@@ -121,7 +121,7 @@ func TestGetSummaryHandler(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/performance/summary", nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/performance/summary", nil)
 		require.NoError(t, err)
 		router.ServeHTTP(w, req)
 
@@ -143,7 +143,7 @@ func TestGetSummaryHandler(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/performance/summary", nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/performance/summary", nil)
 		require.NoError(t, err)
 		router.ServeHTTP(w, req)
 
