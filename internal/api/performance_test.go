@@ -81,6 +81,7 @@ func TestGetSummaryHandler(t *testing.T) {
 			TotalPnL:       500.0,
 			TotalTrades:    10,
 			WinningTrades:  7,
+			LosingTrades:   3,
 		}
 		router := setupPerformanceRouter(&mockPerformanceRepo{
 			sessions: []*db.TradingSession{session},
@@ -99,7 +100,9 @@ func TestGetSummaryHandler(t *testing.T) {
 		assert.Equal(t, float64(500), body["total_pnl"])
 		assert.Equal(t, float64(10), body["total_trades"])
 		assert.Equal(t, float64(7), body["winning_trades"])
+		assert.Equal(t, float64(3), body["losing_trades"])
 		assert.Equal(t, float64(1), body["session_count"])
+		assert.Equal(t, "active_sessions_only", body["scope"])
 
 		// win_rate: 7/10 * 100 = 70.0
 		assert.InDelta(t, 70.0, body["win_rate"], 0.01)
@@ -140,8 +143,8 @@ func TestGetSummaryHandler(t *testing.T) {
 	t.Run("multiple sessions aggregate totals", func(t *testing.T) {
 		router := setupPerformanceRouter(&mockPerformanceRepo{
 			sessions: []*db.TradingSession{
-				{InitialCapital: 10000, TotalPnL: 200, TotalTrades: 5, WinningTrades: 3},
-				{InitialCapital: 5000, TotalPnL: -50, TotalTrades: 3, WinningTrades: 1},
+				{InitialCapital: 10000, TotalPnL: 200, TotalTrades: 5, WinningTrades: 3, LosingTrades: 2},
+				{InitialCapital: 5000, TotalPnL: -50, TotalTrades: 3, WinningTrades: 1, LosingTrades: 2},
 			},
 		})
 
@@ -160,8 +163,12 @@ func TestGetSummaryHandler(t *testing.T) {
 		assert.Equal(t, float64(2), body["session_count"])
 		assert.Equal(t, float64(8), body["total_trades"])   // 5 + 3
 		assert.Equal(t, float64(4), body["winning_trades"]) // 3 + 1
+		assert.Equal(t, float64(4), body["losing_trades"])  // 2 + 2
 		// win_rate: 4/8 * 100 = 50%
 		assert.InDelta(t, 50.0, body["win_rate"], 0.01)
+		// return_percent uses max(InitialCapital)=10000, not sum=15000
+		// 150 / 10000 * 100 = 1.5%
+		assert.InDelta(t, 1.5, body["return_percent"], 0.01)
 	})
 
 	t.Run("database error returns 500", func(t *testing.T) {
