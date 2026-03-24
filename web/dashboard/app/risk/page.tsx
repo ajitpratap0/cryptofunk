@@ -39,6 +39,20 @@ const mockAlerts = [
   { id: '5', severity: 'warning' as const, message: 'SOL/USDT volatility spike detected', timestamp: '5 hrs ago', asset: 'SOL/USDT' },
 ]
 
+// ── Runtime Type Guards ─────────────────────────────────────────────
+
+function isRiskMetricsData(data: unknown): data is { var_95: number | null; var_99: number | null; expected_shortfall: number | null; open_positions: number; total_exposure: number } {
+  return typeof data === 'object' && data !== null && 'var_95' in data
+}
+
+function isCircuitBreakersData(data: unknown): data is { circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }> } {
+  return typeof data === 'object' && data !== null && 'circuit_breakers' in data
+}
+
+function isExposureData(data: unknown): data is { exposure: Array<{ symbol: string; exposure: number }> } {
+  return typeof data === 'object' && data !== null && 'exposure' in data
+}
+
 // ── Page Component ─────────────────────────────────────────────────
 
 export default function RiskPage() {
@@ -51,7 +65,7 @@ export default function RiskPage() {
   const mockDrawdown = useMemo(() => Array.from({ length: 90 }, (_, i) => {
     const now = Date.now()
     const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
-    const base = Math.sin(i / 15) * 4 + MOCK_DRAWDOWN_NOISE[i]
+    const base = Math.sin(i / 15) * 4 + MOCK_DRAWDOWN_NOISE[i % MOCK_DRAWDOWN_NOISE.length]
     const drawdownPercent = -Math.abs(base)
     return {
       timestamp,
@@ -83,20 +97,20 @@ export default function RiskPage() {
   }
 
   // Map API risk metrics
-  const apiMetrics = metricsResponse?.data as {
-    var_95: number | null
-    var_99: number | null
-    expected_shortfall: number | null
-    open_positions: number
-    total_exposure: number
-  } | undefined
+  const raw_metrics = metricsResponse?.data
+  if (raw_metrics !== undefined && !isRiskMetricsData(raw_metrics)) {
+    console.warn('risk/metrics: unexpected API shape', raw_metrics)
+  }
+  const apiMetrics = isRiskMetricsData(raw_metrics) ? raw_metrics : undefined
 
   // Map API circuit breakers to component shape
   const circuitBreakers: CircuitBreaker[] = useMemo(() => {
-    const raw = breakersResponse?.data as
-      | { circuit_breakers: Array<{ name: string; current: number; threshold: number; status: string }> }
-      | undefined
-    if (!raw?.circuit_breakers?.length) return []
+    const raw = breakersResponse?.data
+    if (raw !== undefined && !isCircuitBreakersData(raw)) {
+      console.warn('risk/circuit-breakers: unexpected API shape', raw)
+      return []
+    }
+    if (!isCircuitBreakersData(raw) || !raw.circuit_breakers?.length) return []
     return raw.circuit_breakers.map(cb => ({
       name: cb.name,
       status: cb.status === 'TRIGGERED' ? 'triggered' : cb.status === 'WARNING' ? 'warning' : cb.status === 'DISABLED' ? 'disabled' : 'normal',
@@ -108,10 +122,12 @@ export default function RiskPage() {
 
   // Map API exposure data
   const exposureData = useMemo(() => {
-    const raw = exposureResponse?.data as
-      | { exposure: Array<{ symbol: string; exposure: number }> }
-      | undefined
-    if (!raw?.exposure?.length) return []
+    const raw = exposureResponse?.data
+    if (raw !== undefined && !isExposureData(raw)) {
+      console.warn('risk/exposure: unexpected API shape', raw)
+      return []
+    }
+    if (!isExposureData(raw) || !raw.exposure?.length) return []
     const total = raw.exposure.reduce((sum, e) => sum + e.exposure, 0)
     return raw.exposure.map(e => ({
       symbol: e.symbol,

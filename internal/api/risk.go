@@ -190,29 +190,24 @@ func buildBreaker(name string, current, threshold float64) gin.H {
 func (h *RiskHandler) GetExposure(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	openPositions, err := h.db.GetAllOpenPositions(ctx)
+	rows, err := h.db.GetExposureBySymbol(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query open positions"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query exposure"})
 		return
-	}
-
-	exposureBySymbol := make(map[string]float64)
-	for _, p := range openPositions {
-		exposureBySymbol[p.Symbol] += p.Quantity * p.EntryPrice
 	}
 
 	type symbolExposure struct {
 		Symbol   string  `json:"symbol"`
 		Exposure float64 `json:"exposure"`
 	}
-	result := make([]symbolExposure, 0, len(exposureBySymbol))
-	for sym, exp := range exposureBySymbol {
+	result := make([]symbolExposure, 0, len(rows))
+	for _, r := range rows {
 		result = append(result, symbolExposure{
-			Symbol:   sym,
-			Exposure: math.Round(exp*100) / 100,
+			Symbol:   r.Symbol,
+			Exposure: math.Round(r.Exposure*100) / 100,
 		})
 	}
-	// Sort by symbol for deterministic response ordering (Go map iteration is randomised)
+	// Sort alphabetically for deterministic response ordering
 	sort.Slice(result, func(i, j int) bool { return result[i].Symbol < result[j].Symbol })
 
 	c.JSON(http.StatusOK, gin.H{"exposure": result, "count": len(result)})
