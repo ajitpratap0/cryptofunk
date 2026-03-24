@@ -975,12 +975,19 @@ func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos
 		return nil, fmt.Errorf("PartialClosePositionTx: insert closed portion: %w", err)
 	}
 
-	// Update remaining open position's quantity and fees (SET, not ADD)
+	// Scale unrealized_pnl proportionally to remaining quantity so the open position
+	// no longer carries P&L attributed to the closed portion.
+	remainUnrealizedPnL := 0.0
+	if existingPos.UnrealizedPnL != nil && existingPos.Quantity > 0 {
+		remainUnrealizedPnL = *existingPos.UnrealizedPnL * (remainQty / existingPos.Quantity)
+	}
+
+	// Update remaining open position's quantity, fees, and unrealized_pnl (SET, not ADD)
 	_, err = tx.Exec(ctx, `
 		UPDATE positions
-		SET quantity=$2, fees=$3, updated_at=$4
+		SET quantity=$2, fees=$3, unrealized_pnl=$5, updated_at=$4
 		WHERE id=$1 AND exit_time IS NULL
-	`, existingPos.ID, remainQty, remainFees, now)
+	`, existingPos.ID, remainQty, remainFees, now, remainUnrealizedPnL)
 	if err != nil {
 		return nil, fmt.Errorf("PartialClosePositionTx: update remaining: %w", err)
 	}
@@ -989,6 +996,7 @@ func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos
 	remain := *existingPos
 	remain.Quantity = remainQty
 	remain.Fees = remainFees
+	remain.UnrealizedPnL = &remainUnrealizedPnL
 	remain.UpdatedAt = now
 	return &remain, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -66,6 +67,19 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 		totalExposure += p.Quantity * p.EntryPrice
 	}
 
+	// Compute portfolio value from active sessions' InitialCapital for VaR scaling.
+	// Falls back to totalExposure when no sessions exist. VaR is suppressed (nil) when
+	// portfolioValue == 0 because multiplying a fractional VaR by zero gives a
+	// misleadingly valid 0.0 result instead of an absent/nil.
+	sessions, _ := h.db.ListActiveSessions(ctx) // best-effort; VaR still nil on error
+	var portfolioValue float64
+	for _, s := range sessions {
+		portfolioValue += s.InitialCapital
+	}
+	if portfolioValue == 0 {
+		portfolioValue = totalExposure
+	}
+
 	returns, err := h.collectClosedReturns(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to collect returns"})
@@ -81,7 +95,7 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 		"expected_shortfall": nil,
 	}
 
-	if len(returns) >= 10 {
+	if len(returns) >= 10 && portfolioValue > 0 {
 		// CalculateVaR requires []interface{} not []float64
 		returnsIface := make([]interface{}, len(returns))
 		for i, v := range returns {
@@ -96,7 +110,7 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			log.Debug().Err(err).Msg("VaR calculation failed (95%)")
 		} else {
 			if varResult, ok := res95.(*risk.VaRResult); ok {
-				response["var_95"] = math.Round(varResult.VaR*totalExposure*100) / 100
+				response["var_95"] = math.Round(varResult.VaR*portfolioValue*100) / 100
 			}
 		}
 
@@ -108,8 +122,8 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 			log.Debug().Err(err).Msg("VaR calculation failed (99%)")
 		} else {
 			if varResult, ok := res99.(*risk.VaRResult); ok {
-				response["var_99"] = math.Round(varResult.VaR*totalExposure*100) / 100
-				response["expected_shortfall"] = math.Round(varResult.CVaR*totalExposure*100) / 100
+				response["var_99"] = math.Round(varResult.VaR*portfolioValue*100) / 100
+				response["expected_shortfall"] = math.Round(varResult.CVaR*portfolioValue*100) / 100
 			}
 		}
 	}
@@ -195,6 +209,8 @@ func (h *RiskHandler) GetExposure(c *gin.Context) {
 			Exposure: math.Round(exp*100) / 100,
 		})
 	}
+	// Sort by symbol for deterministic response ordering (Go map iteration is randomised)
+	sort.Slice(result, func(i, j int) bool { return result[i].Symbol < result[j].Symbol })
 
 	c.JSON(http.StatusOK, gin.H{"exposure": result, "count": len(result)})
 }
