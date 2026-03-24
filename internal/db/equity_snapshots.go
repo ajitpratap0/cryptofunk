@@ -60,12 +60,12 @@ func (db *DB) ListEquitySnapshots(ctx context.Context, sessionID uuid.UUID, limi
 // equity snapshots among the provided session IDs. This allows callers to find the
 // richest data set for drawdown/Sharpe computation with a single round-trip instead of
 // issuing one query per session (N+1).
-// Returns ("", nil) when sessionIDs is empty.
-func (db *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []string) (string, error) {
+// Returns (uuid.UUID{}, nil) when sessionIDs is empty.
+func (db *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []uuid.UUID) (uuid.UUID, error) {
 	if len(sessionIDs) == 0 {
-		return "", nil
+		return uuid.UUID{}, nil
 	}
-	var sessionID string
+	var sessionID uuid.UUID
 	err := db.pool.QueryRow(ctx, `
 		SELECT session_id
 		FROM equity_snapshots
@@ -75,10 +75,10 @@ func (db *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []st
 		LIMIT 1
 	`, sessionIDs).Scan(&sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil // no snapshots yet — normal initial state
+		return uuid.UUID{}, nil // no snapshots yet — normal initial state
 	}
 	if err != nil {
-		return "", err
+		return uuid.UUID{}, err
 	}
 	return sessionID, nil
 }

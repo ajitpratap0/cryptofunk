@@ -31,18 +31,6 @@ const MOCK_DRAWDOWN_NOISE = [
   0.06, 0.15, 0.09, 0.18, 0.04, 0.13, 0.01, 0.16, 0.10, 0.20,
   0.05, 0.12, 0.08, 0.19, 0.03, 0.14, 0.07, 0.17, 0.02, 0.11,
 ]
-const mockDrawdown = Array.from({ length: 90 }, (_, i) => {
-  const now = Date.now()
-  const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
-  const base = Math.sin(i / 15) * 4 + MOCK_DRAWDOWN_NOISE[i]
-  const drawdownPercent = -Math.abs(base)
-  return {
-    timestamp,
-    drawdown: drawdownPercent,
-    equity: 100000 + (drawdownPercent / 100) * 100000,
-  }
-})
-
 const mockAlerts = [
   { id: '1', severity: 'warning' as const, message: 'Max drawdown approaching threshold (78%)', timestamp: '2 min ago', asset: 'Portfolio' },
   { id: '2', severity: 'info' as const, message: 'ETH/USDT correlation with BTC increasing', timestamp: '15 min ago', asset: 'ETH/USDT' },
@@ -56,14 +44,34 @@ const mockAlerts = [
 export default function RiskPage() {
   const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
-  const { data: metricsResponse, refetch: refetchMetrics } = useRiskMetrics()
+  const { data: metricsResponse, isError: metricsError, refetch: refetchMetrics } = useRiskMetrics()
   const { data: breakersResponse, refetch: refetchBreakers } = useCircuitBreakers()
   const { data: exposureResponse, refetch: refetchExposure } = useRiskExposure()
+
+  const mockDrawdown = useMemo(() => Array.from({ length: 90 }, (_, i) => {
+    const now = Date.now()
+    const timestamp = new Date(now - (89 - i) * 24 * 60 * 60 * 1000).toISOString()
+    const base = Math.sin(i / 15) * 4 + MOCK_DRAWDOWN_NOISE[i]
+    const drawdownPercent = -Math.abs(base)
+    return {
+      timestamp,
+      drawdown: drawdownPercent,
+      equity: 100000 + (drawdownPercent / 100) * 100000,
+    }
+  }), [])
 
   const handleRefresh = () => {
     refetchMetrics()
     refetchBreakers()
     refetchExposure()
+  }
+
+  if (metricsError) {
+    return (
+      <div className="p-6 text-red-500">
+        Failed to load risk metrics. Please check the API connection.
+      </div>
+    )
   }
 
   // Map API risk metrics
