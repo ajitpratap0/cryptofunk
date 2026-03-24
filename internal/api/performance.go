@@ -107,5 +107,6 @@ func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 		"win_rate":       math.Round(winRate*100) / 100,
 		"return_percent": math.Round(returnPct*100) / 100,
 		"session_count":  len(sessions),
+		"scope":          "active_sessions_only", // only running sessions included; stopped sessions are excluded
 	})
 }

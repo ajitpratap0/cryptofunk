@@ -137,6 +137,33 @@ func TestGetSummaryHandler(t *testing.T) {
 		assert.Equal(t, float64(4), body["total_trades"])
 	})
 
+	t.Run("multiple sessions aggregate totals", func(t *testing.T) {
+		router := setupPerformanceRouter(&mockPerformanceRepo{
+			sessions: []*db.TradingSession{
+				{InitialCapital: 10000, TotalPnL: 200, TotalTrades: 5, WinningTrades: 3},
+				{InitialCapital: 5000, TotalPnL: -50, TotalTrades: 3, WinningTrades: 1},
+			},
+		})
+
+		w := httptest.NewRecorder()
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/performance/summary", nil)
+		require.NoError(t, err)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+
+		// 200 + (-50) = 150
+		assert.InDelta(t, 150.0, body["total_pnl"], 0.01)
+		assert.Equal(t, float64(2), body["session_count"])
+		assert.Equal(t, float64(8), body["total_trades"])   // 5 + 3
+		assert.Equal(t, float64(4), body["winning_trades"]) // 3 + 1
+		// win_rate: 4/8 * 100 = 50%
+		assert.InDelta(t, 50.0, body["win_rate"], 0.01)
+	})
+
 	t.Run("database error returns 500", func(t *testing.T) {
 		router := setupPerformanceRouter(&mockPerformanceRepo{
 			sessErr: errors.New("db unavailable"),
