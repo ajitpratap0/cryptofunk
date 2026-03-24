@@ -17,11 +17,12 @@ import (
 )
 
 // maxRequestBodyBytes is the maximum allowed request body size.
-// Tune this value if larger payloads become necessary (e.g. batch order uploads).
-const maxRequestBodyBytes = 1 << 20 // 1 MB
+// Trading API payloads are small JSON objects; 64 KB is generous.
+// Increase if batch uploads are added (see TASKS.md).
+const maxRequestBodyBytes = 64 << 10 // 64 KB
 
 func (s *APIServer) setupMiddleware() {
-	// Limit request bodies to 1 MB to prevent OOM attacks
+	// Limit request bodies to 64 KB to prevent OOM attacks (trading payloads are small)
 	s.router.Use(func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
 		c.Next()
