@@ -129,7 +129,7 @@ type DashboardRepositoryInterface interface {
 
 	// Position management
 	GetAllOpenPositions(ctx context.Context) ([]*db.Position, error)
-	GetTotalClosedFees(ctx context.Context) (float64, error)
+	GetClosedFeesBySessionIDs(ctx context.Context, sessionIDs []uuid.UUID) (float64, error)
 	GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
 
 	// Health checks
@@ -686,7 +686,9 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		return pnl, err
 	}
 
+	sessionIDs := make([]uuid.UUID, 0, len(sessions))
 	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
 		pnl.TotalPnL += session.TotalPnL
 		pnl.TotalTrades += session.TotalTrades
 		pnl.WinningTrades += session.WinningTrades
@@ -717,9 +719,10 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		pnl.TotalFees += p.Fees
 	}
 
-	// Also sum fees from all closed positions so TotalFees reflects the full round-trip cost.
+	// Also sum fees from closed positions in the active sessions so TotalFees reflects the full
+	// round-trip cost without leaking fees from historical inactive sessions whose P&L is not counted.
 	// Uses a SQL aggregate to avoid loading all rows and the 90-day truncation issue.
-	closedFees, err := h.repo.GetTotalClosedFees(ctx)
+	closedFees, err := h.repo.GetClosedFeesBySessionIDs(ctx, sessionIDs)
 	if err != nil {
 		return pnl, err
 	}

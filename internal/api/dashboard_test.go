@@ -24,16 +24,16 @@ import (
 
 // MockDashboardRepository implements DashboardRepositoryInterface for testing
 type MockDashboardRepository struct {
-	ListActiveSessionsFunc    func(ctx context.Context) ([]*db.TradingSession, error)
-	GetSessionFunc            func(ctx context.Context, sessionID uuid.UUID) (*db.TradingSession, error)
-	CreateSessionFunc         func(ctx context.Context, session *db.TradingSession) error
-	StopSessionFunc           func(ctx context.Context, sessionID uuid.UUID, finalCapital float64) error
-	GetAllOpenPositionsFunc   func(ctx context.Context) ([]*db.Position, error)
-	GetTotalClosedFeesFunc    func(ctx context.Context) (float64, error)
-	GetPositionsBySessionFunc func(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
-	PingFunc                  func(ctx context.Context) error
-	IsTradingPausedFunc       func(ctx context.Context) (bool, error)
-	GetAllAgentStatusesFunc   func(ctx context.Context) ([]*db.AgentStatus, error)
+	ListActiveSessionsFunc          func(ctx context.Context) ([]*db.TradingSession, error)
+	GetSessionFunc                  func(ctx context.Context, sessionID uuid.UUID) (*db.TradingSession, error)
+	CreateSessionFunc               func(ctx context.Context, session *db.TradingSession) error
+	StopSessionFunc                 func(ctx context.Context, sessionID uuid.UUID, finalCapital float64) error
+	GetAllOpenPositionsFunc         func(ctx context.Context) ([]*db.Position, error)
+	GetClosedFeesBySessionIDsFunc   func(ctx context.Context, sessionIDs []uuid.UUID) (float64, error)
+	GetPositionsBySessionFunc       func(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
+	PingFunc                        func(ctx context.Context) error
+	IsTradingPausedFunc             func(ctx context.Context) (bool, error)
+	GetAllAgentStatusesFunc         func(ctx context.Context) ([]*db.AgentStatus, error)
 }
 
 func (m *MockDashboardRepository) ListActiveSessions(ctx context.Context) ([]*db.TradingSession, error) {
@@ -72,9 +72,9 @@ func (m *MockDashboardRepository) GetAllOpenPositions(ctx context.Context) ([]*d
 	return []*db.Position{}, nil
 }
 
-func (m *MockDashboardRepository) GetTotalClosedFees(ctx context.Context) (float64, error) {
-	if m.GetTotalClosedFeesFunc != nil {
-		return m.GetTotalClosedFeesFunc(ctx)
+func (m *MockDashboardRepository) GetClosedFeesBySessionIDs(ctx context.Context, sessionIDs []uuid.UUID) (float64, error) {
+	if m.GetClosedFeesBySessionIDsFunc != nil {
+		return m.GetClosedFeesBySessionIDsFunc(ctx, sessionIDs)
 	}
 	return 0, nil
 }
@@ -441,6 +441,7 @@ func TestGetPositions(t *testing.T) {
 func TestGetPnL(t *testing.T) {
 	testSessionID := uuid.New()
 
+	closedFeesCalled := false
 	mock := &MockDashboardRepository{
 		ListActiveSessionsFunc: func(ctx context.Context) ([]*db.TradingSession, error) {
 			return []*db.TradingSession{
@@ -485,6 +486,10 @@ func TestGetPnL(t *testing.T) {
 				},
 			}, nil
 		},
+		GetClosedFeesBySessionIDsFunc: func(ctx context.Context, sessionIDs []uuid.UUID) (float64, error) {
+			closedFeesCalled = true
+			return 10.0, nil
+		},
 		GetPositionsBySessionFunc: func(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error) {
 			unrealizedPnL := 100.0
 			return []*db.Position{
@@ -500,6 +505,7 @@ func TestGetPnL(t *testing.T) {
 	router := setupDashboardTestRouter(mock, nil)
 
 	t.Run("get aggregate P&L", func(t *testing.T) {
+		closedFeesCalled = false
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/api/v1/dashboard/pnl", nil)
 		router.ServeHTTP(w, req)
@@ -515,6 +521,16 @@ func TestGetPnL(t *testing.T) {
 		assert.Equal(t, 7, pnl.WinningTrades)
 		assert.Equal(t, 70.0, pnl.WinRate)
 		assert.Equal(t, 10000.0, pnl.InitialCapital)
+
+		// RealizedPnL must equal TotalPnL (both represent session-level realized P&L).
+		assert.Equal(t, pnl.TotalPnL, pnl.RealizedPnL, "RealizedPnL should equal TotalPnL")
+
+		// CurrentCapital must be InitialCapital + TotalPnL + UnrealizedPnL.
+		assert.Equal(t, pnl.InitialCapital+pnl.TotalPnL+pnl.UnrealizedPnL, pnl.CurrentCapital,
+			"CurrentCapital should equal InitialCapital + TotalPnL + UnrealizedPnL")
+
+		// GetClosedFeesBySessionIDs must have been called to scope fees to active sessions.
+		assert.True(t, closedFeesCalled, "GetClosedFeesBySessionIDs should have been called")
 	})
 
 	t.Run("get session-specific P&L", func(t *testing.T) {
