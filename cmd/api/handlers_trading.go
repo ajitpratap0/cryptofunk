@@ -292,13 +292,15 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
 		}
 
-		// Return the sanitized order struct on 500 so clients can inspect the order_id,
-		// status (REJECTED), symbol, and side for retry correlation. Sensitive fields:
-		// ErrorMessage is nil'd above; exchange and session_id are non-sensitive metadata.
-		// If db.Order adds sensitive fields in future, audit this return site.
+		// Return only the fields needed for client retry correlation — not the full db.Order
+		// struct, which contains ExchangeID, SessionID, and other internal metadata clients
+		// don't need on failure.
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "order execution failed",
-			"order": safeOrder,
+			"error":    "order execution failed",
+			"order_id": order.ID,
+			"status":   order.Status,
+			"symbol":   order.Symbol,
+			"side":     order.Side,
 		})
 		return
 	}
