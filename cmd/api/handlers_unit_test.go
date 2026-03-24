@@ -634,6 +634,7 @@ func TestSecurityHeaders(t *testing.T) {
 	assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 	assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
 	assert.Equal(t, "1; mode=block", w.Header().Get("X-XSS-Protection"))
+	assert.Equal(t, "strict-origin-when-cross-origin", w.Header().Get("Referrer-Policy"))
 }
 
 // TestDetermineEventType tests audit event type determination
