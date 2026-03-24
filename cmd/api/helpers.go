@@ -41,6 +41,7 @@ func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v <= 0 {
+		log.Warn().Str("key", key).Str("value", raw).Msg("invalid pagination param, using default")
 		return defaultVal
 	}
 	if v > maxPageSize {

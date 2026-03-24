@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,6 +90,34 @@ func TestBindJSONValid(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestParseIntQuery tests the parseIntQuery helper for pagination edge cases
+func TestParseIntQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		queryValue string
+		want       int
+	}{
+		{queryValue: "0", want: 50},
+		{queryValue: "-1", want: 50},
+		{queryValue: "abc", want: 50},
+		{queryValue: "1001", want: maxPageSize},
+		{queryValue: "50", want: 50},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(fmt.Sprintf("limit=%s", tc.queryValue), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/?limit="+tc.queryValue, nil)
+
+			got := parseIntQuery(c, "limit", 50)
+			assert.Equal(t, tc.want, got)
+		})
 	}
 }
 

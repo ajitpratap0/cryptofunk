@@ -715,7 +715,6 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		// so summing RealizedPnL from open positions would always be 0 once trades
 		// complete. TotalPnL from session records (already summed above) is the
 		// authoritative source for realized P&L.
-		//
 		pnl.TotalFees += p.Fees
 	}
 
@@ -744,6 +743,9 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 	// longer returned by GetAllOpenPositions.
 	pnl.CurrentCapital = pnl.InitialCapital + pnl.TotalPnL + pnl.UnrealizedPnL
 	if pnl.InitialCapital > 0 {
+		// ReturnPercent is a mark-to-market total return: it includes both realised P&L
+		// (TotalPnL from closed session stats) and any unrealised P&L from open positions.
+		// This differs from realised-only return = TotalPnL / InitialCapital.
 		returnPercent := ((pnl.CurrentCapital - pnl.InitialCapital) / pnl.InitialCapital) * 100
 		pnl.ReturnPercent = &returnPercent
 	}

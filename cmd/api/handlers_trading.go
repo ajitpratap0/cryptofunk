@@ -204,9 +204,6 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 		return
 	}
 
-	// When a filter is active (session_id / symbol / status) the query returns
-	// all matching rows without pagination. Return 400 if the caller also specified
-	// limit/offset so the error is explicit rather than silently ignored.
 	if sessionIDStr != "" || symbol != "" || status != "" {
 		c.JSON(http.StatusOK, gin.H{
 			"orders":    orders,
