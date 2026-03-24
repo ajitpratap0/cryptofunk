@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,19 +23,21 @@ type Updater struct {
 	stopOnce  sync.Once
 	startOnce sync.Once
 	wg        sync.WaitGroup}
-
 // NewUpdater creates a new metrics updater
 func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 	return &Updater{
 		db:       db,
 		interval: interval,
 		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
 	}
 }
 
 // Start begins the metrics update loop. Must be called at most once.
-// To run in the background with proper lifecycle tracking, use StartAsync instead.
-func (u *Updater) Start(ctx context.Context) {
+// To run in the background with proper lifecycle tracking, use StartAsync instead.func (u *Updater) Start(ctx context.Context) {
+	u.started.Store(true)
+	defer close(u.doneCh)
+
 	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
 
@@ -64,8 +67,10 @@ func (u *Updater) StartAsync(ctx context.Context) {
 		go func() {
 			defer u.wg.Done()
 			u.Start(ctx)
-		}()
-	})
+		}()	})
+	if u.started.Load() {
+		<-u.doneCh
+	}
 }
 
 // Stop signals the metrics updater to halt and blocks until the background
@@ -200,8 +205,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var dailyPnL float64
 	err := u.db.QueryRow(ctx, query).Scan(&dailyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital
-		DailyReturn.Set(dailyPnL / initialCapital)
+		initialCapital := DefaultInitialCapital		DailyReturn.Set(dailyPnL / initialCapital)
 	}
 
 	// Weekly return
@@ -215,8 +219,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var weeklyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&weeklyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital
-		WeeklyReturn.Set(weeklyPnL / initialCapital)
+		initialCapital := DefaultInitialCapital		WeeklyReturn.Set(weeklyPnL / initialCapital)
 	}
 
 	// Monthly return
@@ -230,8 +233,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var monthlyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&monthlyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital
-		MonthlyReturn.Set(monthlyPnL / initialCapital)
+		initialCapital := DefaultInitialCapital		MonthlyReturn.Set(monthlyPnL / initialCapital)
 	}
 }
 
@@ -258,7 +260,6 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 
 	var returns []float64
 	initialCapital := DefaultInitialCapital
-
 	for rows.Next() {
 		var date time.Time
 		var pnl float64
