@@ -353,7 +353,8 @@ func (db *DB) GetAllOpenPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
-// GetTotalClosedFees returns the sum of fees from all closed positions across all sessions.
+// GetTotalClosedFees returns the sum of fees from all closed positions across all sessions
+// and all time (no date window). This is intentional — the dashboard shows global stats.
 // Uses a single SQL aggregate instead of loading all rows.
 func (db *DB) GetTotalClosedFees(ctx context.Context) (float64, error) {
 	var total float64
