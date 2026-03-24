@@ -20,7 +20,6 @@ type Updater struct {
 
 // NewUpdater creates a new metrics updater
 func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
-	log.Warn().Float64("initial_capital", 10000.0).Msg("metrics/updater: initialCapital is hardcoded to 10000; return metrics will be incorrect for non-10k portfolios until this is made configurable")
 	return &Updater{
 		db:       db,
 		interval: interval,
