@@ -166,9 +166,11 @@ func TestGetSummaryHandler(t *testing.T) {
 		assert.Equal(t, float64(4), body["losing_trades"])  // 2 + 2
 		// win_rate: 4/8 * 100 = 50%
 		assert.InDelta(t, 50.0, body["win_rate"], 0.01)
-		// return_percent uses max(InitialCapital)=10000, not sum=15000
-		// 150 / 10000 * 100 = 1.5%
-		assert.InDelta(t, 1.5, body["return_percent"], 0.01)
+		// return_percent uses sum(InitialCapital)=15000 (10000+5000)
+		// 150 / 15000 * 100 = 1.0%
+		assert.InDelta(t, 1.0, body["return_percent"], 0.01)
+		// capital_basis must reflect the sum of all session InitialCapital values
+		assert.Equal(t, float64(15000), body["capital_basis"])
 	})
 
 	t.Run("database error returns 500", func(t *testing.T) {

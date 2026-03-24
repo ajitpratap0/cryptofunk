@@ -82,16 +82,15 @@ func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	var totalPnL, maxInitialCapital float64
+	var totalPnL, totalInitialCapital float64
 	var totalTrades, winningTrades, losingTrades int
 	for _, s := range sessions {
 		totalPnL += s.TotalPnL
-		// Use max InitialCapital across sessions rather than summing, because all
-		// concurrent sessions draw from the same underlying portfolio. Summing
-		// would double-count capital and artificially deflate return_percent.
-		if s.InitialCapital > maxInitialCapital {
-			maxInitialCapital = s.InitialCapital
-		}
+		// Sum InitialCapital across all active sessions: each session represents a
+		// distinct capital allocation, so the correct portfolio-level denominator
+		// for return_percent is the total capital deployed, not the maximum of any
+		// single session.
+		totalInitialCapital += s.InitialCapital
 		totalTrades += s.TotalTrades
 		winningTrades += s.WinningTrades
 		losingTrades += s.LosingTrades
@@ -102,8 +101,8 @@ func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 		winRate = float64(winningTrades) / float64(totalTrades) * 100
 	}
 	returnPct := 0.0
-	if maxInitialCapital > 0 {
-		returnPct = totalPnL / maxInitialCapital * 100
+	if totalInitialCapital > 0 {
+		returnPct = totalPnL / totalInitialCapital * 100
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -113,6 +112,7 @@ func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 		"losing_trades":  losingTrades,
 		"win_rate":       math.Round(winRate*100) / 100,
 		"return_percent": math.Round(returnPct*100) / 100,
+		"capital_basis":  totalInitialCapital, // sum of InitialCapital across all active sessions
 		"session_count":  len(sessions),
 		"scope":          "active_sessions_only", // only running sessions included; stopped sessions are excluded
 	})

@@ -157,8 +157,8 @@ trading:
   max_positions: 3
   default_quantity: 0.01
   commission_rate: 0.001  # 0.1% taker fee applied to paper trade fills (Binance standard tier)
-  # slippage_buy_factor: 1.001   # 0.1% adverse slippage on paper buys (0 = use this default)
-  # slippage_sell_factor: 0.999  # 0.1% adverse slippage on paper sells (0 = use this default)
+  # slippage_buy_factor: 1.001   # 0.1% adverse slippage on paper buys (omit this line to keep the 1.001 default)
+  # slippage_sell_factor: 0.999  # 0.1% adverse slippage on paper sells (omit this line to keep the 0.999 default)
 
 risk:
   max_position_size: 0.1       # 10% of portfolio
