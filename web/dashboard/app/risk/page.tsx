@@ -44,7 +44,7 @@ const mockAlerts = [
 export default function RiskPage() {
   const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
-  const { data: metricsResponse, isError: metricsError, refetch: refetchMetrics } = useRiskMetrics()
+  const { data: metricsResponse, isLoading: metricsLoading, isError: metricsError, refetch: refetchMetrics } = useRiskMetrics()
   const { data: breakersResponse, isError: breakersError, refetch: refetchBreakers } = useCircuitBreakers()
   const { data: exposureResponse, isError: exposureError, refetch: refetchExposure } = useRiskExposure()
 
@@ -64,6 +64,14 @@ export default function RiskPage() {
     refetchMetrics()
     refetchBreakers()
     refetchExposure()
+  }
+
+  if (metricsLoading) {
+    return (
+      <div className="p-6 text-muted-foreground">
+        Loading risk data...
+      </div>
+    )
   }
 
   if (metricsError || breakersError || exposureError) {
