@@ -563,9 +563,13 @@ func (db *DB) GetOrdersByStatus(ctx context.Context, status OrderStatus) ([]*Ord
 }
 
 // GetRecentOrders returns the most recent orders, limited by limit.
-// limit=0 returns all orders (unbounded). Use a positive limit for paginated access.
+// limit=0 returns zero rows (preserving original LIMIT 0 semantics). Use a positive limit for
+// paginated access, or GetRecentOrdersPaginated with limit=0 for unbounded results.
 // Deprecated: prefer GetRecentOrdersPaginated for new callers.
 func (db *DB) GetRecentOrders(ctx context.Context, limit int) ([]*Order, error) {
+	if limit == 0 {
+		return nil, nil // preserve old semantics: limit=0 returned zero rows
+	}
 	return db.GetRecentOrdersPaginated(ctx, limit, 0)
 }
 
