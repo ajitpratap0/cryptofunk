@@ -161,18 +161,16 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	status := c.Query("status")
 
 	// Pagination params: limit defaults to 100, offset defaults to 0.
-	// When a session/symbol/status filter is active, limit/offset are not
-	// supported (filtered queries return all matching rows). Return 400 to
-	// make the conflict explicit rather than silently ignoring the params.
+	// When a session/symbol/status filter is active, limit/offset are silently
+	// ignored (filtered queries return all matching rows, capped at 1000).
+	// A "warning" field is included in the response to inform the caller.
 	limit := parseIntQuery(c, "limit", 100, 1)
 	offset := parseIntQuery(c, "offset", 0, 0)
 
+	var paginationWarning string
 	if sessionIDStr != "" || symbol != "" || status != "" {
 		if c.Query("limit") != "" || c.Query("offset") != "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "limit and offset are not supported with session_id, symbol, or status filters",
-			})
-			return
+			paginationWarning = "limit and offset are ignored when session_id, symbol, or status filters are used; filtered queries return all matching rows (capped at 1000)"
 		}
 	}
 
@@ -205,17 +203,25 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	}
 
 	if sessionIDStr != "" || symbol != "" || status != "" {
-		c.JSON(http.StatusOK, gin.H{
+		resp := gin.H{
 			"orders":    orders,
 			"count":     len(orders),
 			"paginated": false,
-		})
+			// truncated is true when the result set was capped at 1000 rows
+			// (db.maxFilteredOrders); callers should add more specific filters.
+			"truncated": len(orders) == 1000,
+		}
+		if paginationWarning != "" {
+			resp["warning"] = paginationWarning
+		}
+		c.JSON(http.StatusOK, resp)
 	} else {
 		c.JSON(http.StatusOK, gin.H{
-			"orders": orders,
-			"count":  len(orders),
-			"limit":  limit,
-			"offset": offset,
+			"orders":    orders,
+			"count":     len(orders),
+			"limit":     limit,
+			"offset":    offset,
+			"paginated": true,
 		})
 	}
 }

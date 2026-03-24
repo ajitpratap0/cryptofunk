@@ -22,6 +22,7 @@ var startTime = time.Now()
 
 // maxPageSize is the upper bound on any paginated query's limit parameter.
 // Clients that pass a larger value are silently capped to this limit.
+// NOTE: must match maxFilteredOrders in internal/db/orders.go
 const maxPageSize = 1000
 
 func parseUUID(s string) (uuid.UUID, error) {

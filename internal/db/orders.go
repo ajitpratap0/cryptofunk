@@ -13,6 +13,7 @@ import (
 
 // maxFilteredOrders caps the number of rows returned by filter-based order queries.
 // Full pagination for filtered queries is a TODO follow-up.
+// NOTE: must match maxPageSize in cmd/api/helpers.go
 const maxFilteredOrders = 1000
 
 // OrderSide represents buy or sell (database enum)
