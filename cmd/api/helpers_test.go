@@ -104,11 +104,11 @@ func TestParseIntQuery(t *testing.T) {
 		queryValue string
 		want       int
 	}{
-		{queryValue: "0", want: 50},    // zero rejected for limit
-		{queryValue: "-1", want: 50},   // negative rejected
-		{queryValue: "abc", want: 50},  // non-numeric rejected
+		{queryValue: "0", want: 50},             // zero rejected for limit
+		{queryValue: "-1", want: 50},            // negative rejected
+		{queryValue: "abc", want: 50},           // non-numeric rejected
 		{queryValue: "1001", want: maxPageSize}, // capped at maxPageSize
-		{queryValue: "50", want: 50},   // valid
+		{queryValue: "50", want: 50},            // valid
 	}
 
 	for _, tc := range limitTests {
@@ -128,9 +128,9 @@ func TestParseIntQuery(t *testing.T) {
 		queryValue string
 		want       int
 	}{
-		{queryValue: "0", want: 0},    // zero is a valid first-page offset
-		{queryValue: "-1", want: 0},   // negative rejected, returns default
-		{queryValue: "abc", want: 0},  // non-numeric rejected, returns default
+		{queryValue: "0", want: 0},     // zero is a valid first-page offset
+		{queryValue: "-1", want: 0},    // negative rejected, returns default
+		{queryValue: "abc", want: 0},   // non-numeric rejected, returns default
 		{queryValue: "100", want: 100}, // valid
 	}
 
