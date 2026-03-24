@@ -70,13 +70,12 @@ func (s *APIServer) BroadcastTradeNotification(trade *db.Trade) error {
 	return s.hub.Broadcast(MessageTypeTrade, data)
 }
 
-// BroadcastOrderUpdate broadcasts an order status update
+// BroadcastOrderUpdate broadcasts an order status update.
+// Only client-safe fields are included — session_id, position_id, and
+// exchange_order_id are intentionally omitted to avoid leaking internal IDs.
 func (s *APIServer) BroadcastOrderUpdate(order *db.Order) error {
 	data := map[string]interface{}{
 		"order_id":                order.ID.String(),
-		"session_id":              order.SessionID,
-		"position_id":             order.PositionID,
-		"exchange_order_id":       order.ExchangeOrderID,
 		"symbol":                  order.Symbol,
 		"exchange":                order.Exchange,
 		"side":                    order.Side,
@@ -91,7 +90,6 @@ func (s *APIServer) BroadcastOrderUpdate(order *db.Order) error {
 		"placed_at":               order.PlacedAt,
 		"filled_at":               order.FilledAt,
 		"canceled_at":             order.CanceledAt,
-		"error_message":           order.ErrorMessage,
 	}
 
 	return s.hub.Broadcast(MessageTypeOrderUpdate, data)

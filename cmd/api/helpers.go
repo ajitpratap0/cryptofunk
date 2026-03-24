@@ -268,7 +268,7 @@ func bindJSON(c *gin.Context, obj any) bool {
 	if err := c.ShouldBindJSON(obj); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			log.Debug().Str("path", c.Request.URL.Path).Msg("request body too large (413)")
+			log.Warn().Str("path", c.Request.URL.Path).Msg("request body too large (413)")
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
 		} else {
 			log.Debug().Str("path", c.Request.URL.Path).Err(err).Msg("invalid request body (400)")
