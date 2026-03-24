@@ -71,7 +71,10 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 	// Falls back to totalExposure when no sessions exist. VaR is suppressed (nil) when
 	// portfolioValue == 0 because multiplying a fractional VaR by zero gives a
 	// misleadingly valid 0.0 result instead of an absent/nil.
-	sessions, _ := h.db.ListActiveSessions(ctx) // best-effort; on error falls back to totalExposure
+	sessions, sessErr := h.db.ListActiveSessions(ctx)
+	if sessErr != nil {
+		log.Warn().Err(sessErr).Msg("risk/GetMetrics: failed to fetch sessions for VaR scaling, falling back to totalExposure")
+	}
 	var portfolioValue float64
 	for _, s := range sessions {
 		portfolioValue += s.InitialCapital

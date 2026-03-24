@@ -45,8 +45,8 @@ export default function RiskPage() {
   const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
   const { data: metricsResponse, isError: metricsError, refetch: refetchMetrics } = useRiskMetrics()
-  const { data: breakersResponse, refetch: refetchBreakers } = useCircuitBreakers()
-  const { data: exposureResponse, refetch: refetchExposure } = useRiskExposure()
+  const { data: breakersResponse, isError: breakersError, refetch: refetchBreakers } = useCircuitBreakers()
+  const { data: exposureResponse, isError: exposureError, refetch: refetchExposure } = useRiskExposure()
 
   const mockDrawdown = useMemo(() => Array.from({ length: 90 }, (_, i) => {
     const now = Date.now()
@@ -66,10 +66,10 @@ export default function RiskPage() {
     refetchExposure()
   }
 
-  if (metricsError) {
+  if (metricsError || breakersError || exposureError) {
     return (
       <div className="p-6 text-red-500">
-        Failed to load risk metrics. Please check the API connection.
+        Failed to load risk data. Please check the API connection and try refreshing.
       </div>
     )
   }

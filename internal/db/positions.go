@@ -945,6 +945,9 @@ func (db *DB) ClosePositionTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, exit
 // position's quantity. existingPos must be the tx-locked position (from GetOpenPositionBySymbolTx).
 // Returns the updated open position (in-memory; not re-fetched from DB).
 func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos *Position, closeQty, exitPrice float64, exitReason string, closeFees float64) (*Position, error) {
+	if remainQty := existingPos.Quantity - closeQty; remainQty < 1e-10 {
+		return nil, fmt.Errorf("PartialClosePositionTx: remainQty must be > 0; use ClosePositionTx for full close")
+	}
 	now := time.Now()
 	remainQty := existingPos.Quantity - closeQty
 	// Fees proportional to the remaining open size stay on the position
