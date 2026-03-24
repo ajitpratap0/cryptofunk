@@ -30,17 +30,18 @@ func parseUUID(s string) (uuid.UUID, error) {
 
 // parseIntQuery parses an integer query parameter from the request.
 // Returns defaultVal if the parameter is absent or cannot be parsed.
-// Zero and negative values are treated as invalid and return defaultVal. Values above maxPageSize are capped.
-// NOTE: zero must be rejected here because callers pass the value into
-// LIMIT NULLIF($1, 0) — NULLIF converts 0 to NULL, removing the LIMIT
-// entirely and allowing callers to dump entire tables.
-func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
+// Values below minVal or above maxPageSize are rejected/capped.
+//
+// Use minVal=1 for LIMIT parameters: zero is invalid because LIMIT NULLIF($1, 0)
+// converts 0 to NULL, removing the LIMIT entirely and allowing callers to dump entire tables.
+// Use minVal=0 for OFFSET parameters: zero is a perfectly valid first-page offset.
+func parseIntQuery(c *gin.Context, key string, defaultVal, minVal int) int {
 	raw := c.Query(key)
 	if raw == "" {
 		return defaultVal
 	}
 	v, err := strconv.Atoi(raw)
-	if err != nil || v <= 0 {
+	if err != nil || v < minVal {
 		log.Warn().Str("key", key).Str("value", raw).Msg("invalid pagination param, using default")
 		return defaultVal
 	}

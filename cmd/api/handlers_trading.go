@@ -32,8 +32,8 @@ var errOppositeSide = errors.New("opposite side trade on existing position")
 func (s *APIServer) handleListSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	limit := parseIntQuery(c, "limit", 50) // default 50; capped at maxPageSize by parseIntQuery
-	offset := parseIntQuery(c, "offset", 0)
+	limit := parseIntQuery(c, "limit", 50, 1) // default 50; capped at maxPageSize by parseIntQuery
+	offset := parseIntQuery(c, "offset", 0, 0)
 
 	sessions, err := s.db.ListActiveSessionsPaginated(ctx, limit, offset)
 	if err != nil {
@@ -164,8 +164,8 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	// When a session/symbol/status filter is active, limit/offset are not
 	// supported (filtered queries return all matching rows). Return 400 to
 	// make the conflict explicit rather than silently ignoring the params.
-	limit := parseIntQuery(c, "limit", 100)
-	offset := parseIntQuery(c, "offset", 0)
+	limit := parseIntQuery(c, "limit", 100, 1)
+	offset := parseIntQuery(c, "offset", 0, 0)
 
 	if sessionIDStr != "" || symbol != "" || status != "" {
 		if c.Query("limit") != "" || c.Query("offset") != "" {

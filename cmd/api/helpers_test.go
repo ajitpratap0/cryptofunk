@@ -93,29 +93,55 @@ func TestBindJSONValid(t *testing.T) {
 	}
 }
 
-// TestParseIntQuery tests the parseIntQuery helper for pagination edge cases
+// TestParseIntQuery tests the parseIntQuery helper for pagination edge cases.
+// minVal=1 is used for LIMIT (zero must be rejected — NULLIF($1,0) would remove the LIMIT).
+// minVal=0 is used for OFFSET (zero is a valid first-page request).
 func TestParseIntQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	tests := []struct {
+	// Cases for limit-style params (minVal=1): 0 must be rejected.
+	limitTests := []struct {
 		queryValue string
 		want       int
 	}{
-		{queryValue: "0", want: 50},
-		{queryValue: "-1", want: 50},
-		{queryValue: "abc", want: 50},
-		{queryValue: "1001", want: maxPageSize},
-		{queryValue: "50", want: 50},
+		{queryValue: "0", want: 50},    // zero rejected for limit
+		{queryValue: "-1", want: 50},   // negative rejected
+		{queryValue: "abc", want: 50},  // non-numeric rejected
+		{queryValue: "1001", want: maxPageSize}, // capped at maxPageSize
+		{queryValue: "50", want: 50},   // valid
 	}
 
-	for _, tc := range tests {
+	for _, tc := range limitTests {
 		tc := tc
-		t.Run(fmt.Sprintf("limit=%s", tc.queryValue), func(t *testing.T) {
+		t.Run(fmt.Sprintf("limit/%s", tc.queryValue), func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodGet, "/?limit="+tc.queryValue, nil)
 
-			got := parseIntQuery(c, "limit", 50)
+			got := parseIntQuery(c, "limit", 50, 1)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	// Cases for offset-style params (minVal=0): zero must be allowed.
+	offsetTests := []struct {
+		queryValue string
+		want       int
+	}{
+		{queryValue: "0", want: 0},    // zero is a valid first-page offset
+		{queryValue: "-1", want: 0},   // negative rejected, returns default
+		{queryValue: "abc", want: 0},  // non-numeric rejected, returns default
+		{queryValue: "100", want: 100}, // valid
+	}
+
+	for _, tc := range offsetTests {
+		tc := tc
+		t.Run(fmt.Sprintf("offset/%s", tc.queryValue), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/?offset="+tc.queryValue, nil)
+
+			got := parseIntQuery(c, "offset", 0, 0)
 			assert.Equal(t, tc.want, got)
 		})
 	}

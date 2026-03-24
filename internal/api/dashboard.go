@@ -721,6 +721,12 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 	// Also sum fees from closed positions in the active sessions so TotalFees reflects the full
 	// round-trip cost without leaking fees from historical inactive sessions whose P&L is not counted.
 	// Uses a SQL aggregate to avoid loading all rows and the 90-day truncation issue.
+	//
+	// Race note: a position may transition open→closed between the GetAllOpenPositions call above
+	// and this GetClosedFeesBySessionIDs call. If that happens, the position's fees could appear in
+	// both the open-position loop (pnl.TotalFees += p.Fees) and the closed-fees query, causing a
+	// one-position double-count. The window is tiny (milliseconds) and the impact is limited to a
+	// single position's fees, so this is accepted as a known approximation in the aggregate view.
 	closedFees, err := h.repo.GetClosedFeesBySessionIDs(ctx, sessionIDs)
 	if err != nil {
 		return pnl, err
