@@ -29,7 +29,7 @@ func parseUUID(s string) (uuid.UUID, error) {
 
 // parseIntQuery parses an integer query parameter from the request.
 // Returns defaultVal if the parameter is absent or cannot be parsed.
-// Negative values are clamped to 0. Values above maxPageSize are capped.
+// Negative values are treated as invalid and return defaultVal. Values above maxPageSize are capped.
 func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
 	raw := c.Query(key)
 	if raw == "" {
