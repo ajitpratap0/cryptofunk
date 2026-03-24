@@ -282,12 +282,16 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		order.Status = db.OrderStatusRejected
 		order.ErrorMessage = &errMsg
 
-		// Nil out ErrorMessage before broadcasting and returning to clients — the raw error
-		// string must not be leaked externally. The DB row already has the error captured.
-		// broadcast.go also omits this field, but nil here to prevent future refactors
-		// from re-introducing it (belt-and-suspenders defense).
+		// Nil out sensitive fields before broadcasting and returning to clients.
+		// ErrorMessage: raw error string must not be leaked externally (DB row already has it).
+		// ExchangeOrderID: exchange-side ID is internal infrastructure detail.
+		// SessionID: internal session reference clients must not see.
+		// broadcast.go also omits these fields, but clearing here prevents future refactors
+		// from re-introducing them (belt-and-suspenders defense).
 		safeOrder := *order
 		safeOrder.ErrorMessage = nil
+		safeOrder.ExchangeOrderID = nil // don't expose exchange-side IDs
+		safeOrder.SessionID = nil       // don't expose internal session reference
 
 		// Broadcast rejection to WebSocket clients (using sanitized order without raw error)
 		if broadcastErr := s.BroadcastOrderUpdate(&safeOrder); broadcastErr != nil {
