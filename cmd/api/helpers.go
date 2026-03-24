@@ -30,14 +30,17 @@ func parseUUID(s string) (uuid.UUID, error) {
 
 // parseIntQuery parses an integer query parameter from the request.
 // Returns defaultVal if the parameter is absent or cannot be parsed.
-// Negative values are treated as invalid and return defaultVal. Values above maxPageSize are capped.
+// Zero and negative values are treated as invalid and return defaultVal. Values above maxPageSize are capped.
+// NOTE: zero must be rejected here because callers pass the value into
+// LIMIT NULLIF($1, 0) — NULLIF converts 0 to NULL, removing the LIMIT
+// entirely and allowing callers to dump entire tables.
 func parseIntQuery(c *gin.Context, key string, defaultVal int) int {
 	raw := c.Query(key)
 	if raw == "" {
 		return defaultVal
 	}
 	v, err := strconv.Atoi(raw)
-	if err != nil || v < 0 {
+	if err != nil || v <= 0 {
 		return defaultVal
 	}
 	if v > maxPageSize {
