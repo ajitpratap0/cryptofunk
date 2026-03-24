@@ -4,18 +4,25 @@ import (
 	"context"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
+// defaultInitialCapital is a placeholder until configuration is wired through.
+// TODO: wire actual session InitialCapital from config/DB — tracked in metrics/updater.go
+const defaultInitialCapital = 10000.0
+
 // Updater periodically updates metrics from the database
 type Updater struct {
 	db       *pgxpool.Pool
 	interval time.Duration
 	stopCh   chan struct{}
+	doneCh   chan struct{}
 	stopOnce sync.Once
+	started  atomic.Bool
 }
 
 // NewUpdater creates a new metrics updater
@@ -24,11 +31,15 @@ func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 		db:       db,
 		interval: interval,
 		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
 	}
 }
 
-// Start begins the metrics update loop
+// Start begins the metrics update loop. Must be called at most once.
 func (u *Updater) Start(ctx context.Context) {
+	u.started.Store(true)
+	defer close(u.doneCh)
+
 	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
 
@@ -49,11 +60,16 @@ func (u *Updater) Start(ctx context.Context) {
 	}
 }
 
-// Stop stops the metrics updater. Safe to call multiple times.
+// Stop signals the metrics updater to halt and, if Start was called, blocks
+// until the goroutine fully exits. This prevents DB queries from racing with
+// a deferred database.Close() in the caller. Safe to call multiple times.
 func (u *Updater) Stop() {
 	u.stopOnce.Do(func() {
 		close(u.stopCh)
 	})
+	if u.started.Load() {
+		<-u.doneCh
+	}
 }
 
 // update fetches and updates all metrics
@@ -180,8 +196,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var dailyPnL float64
 	err := u.db.QueryRow(ctx, query).Scan(&dailyPnL)
 	if err == nil {
-		// Assuming initial capital of 10000 (should be configurable)
-		initialCapital := 10000.0
+		initialCapital := defaultInitialCapital
 		DailyReturn.Set(dailyPnL / initialCapital)
 	}
 
@@ -196,7 +211,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var weeklyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&weeklyPnL)
 	if err == nil {
-		initialCapital := 10000.0
+		initialCapital := defaultInitialCapital
 		WeeklyReturn.Set(weeklyPnL / initialCapital)
 	}
 
@@ -211,7 +226,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var monthlyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&monthlyPnL)
 	if err == nil {
-		initialCapital := 10000.0
+		initialCapital := defaultInitialCapital
 		MonthlyReturn.Set(monthlyPnL / initialCapital)
 	}
 }
@@ -238,7 +253,7 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 	defer rows.Close()
 
 	var returns []float64
-	initialCapital := 10000.0
+	initialCapital := defaultInitialCapital
 
 	for rows.Next() {
 		var date time.Time
