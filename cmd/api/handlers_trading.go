@@ -284,6 +284,8 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 
 		// Nil out ErrorMessage before broadcasting and returning to clients — the raw error
 		// string must not be leaked externally. The DB row already has the error captured.
+		// broadcast.go also omits this field, but nil here to prevent future refactors
+		// from re-introducing it (belt-and-suspenders defense).
 		safeOrder := *order
 		safeOrder.ErrorMessage = nil
 
@@ -301,6 +303,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 			"status":   order.Status,
 			"symbol":   order.Symbol,
 			"side":     order.Side,
+			"quantity": order.Quantity,
 		})
 		return
 	}
