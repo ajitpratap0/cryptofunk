@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,9 +19,8 @@ type Updater struct {
 	db       *pgxpool.Pool
 	interval time.Duration
 	stopCh   chan struct{}
-	doneCh   chan struct{}
 	stopOnce sync.Once
-	started  atomic.Bool
+	wg       sync.WaitGroup
 }
 
 // NewUpdater creates a new metrics updater
@@ -31,15 +29,12 @@ func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 		db:       db,
 		interval: interval,
 		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
 	}
 }
 
 // Start begins the metrics update loop. Must be called at most once.
+// To run in the background with proper lifecycle tracking, use StartAsync instead.
 func (u *Updater) Start(ctx context.Context) {
-	u.started.Store(true)
-	defer close(u.doneCh)
-
 	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
 
@@ -60,16 +55,24 @@ func (u *Updater) Start(ctx context.Context) {
 	}
 }
 
-// Stop signals the metrics updater to halt and, if Start was called, blocks
-// until the goroutine fully exits. This prevents DB queries from racing with
-// a deferred database.Close() in the caller. Safe to call multiple times.
+// StartAsync increments the internal WaitGroup and launches the update loop
+// in a background goroutine. Stop() will block until the goroutine exits.
+// Call StartAsync exactly once before calling Stop().
+func (u *Updater) StartAsync(ctx context.Context) {
+	u.wg.Add(1)
+	go func() {
+		defer u.wg.Done()
+		u.Start(ctx)
+	}()
+}
+
+// Stop signals the metrics updater to halt and blocks until the background
+// goroutine (if started via StartAsync) fully exits. This prevents DB queries
+// from racing with a deferred database.Close() in the caller. Safe to call
+// multiple times.
 func (u *Updater) Stop() {
-	u.stopOnce.Do(func() {
-		close(u.stopCh)
-	})
-	if u.started.Load() {
-		<-u.doneCh
-	}
+	u.stopOnce.Do(func() { close(u.stopCh) })
+	u.wg.Wait()
 }
 
 // update fetches and updates all metrics
