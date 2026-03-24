@@ -38,6 +38,11 @@ func setupTestAPIServer(t *testing.T) (*APIServer, *testhelpers.PostgresContaine
 			Port:            8081,
 			OrchestratorURL: "http://localhost:8082",
 		},
+		Trading: config.TradingConfig{
+			// Viper SetDefault is not invoked in tests that bypass LoadConfig.
+			SlippageBuyFactor:  1.001,
+			SlippageSellFactor: 0.999,
+		},
 	}
 
 	hub := NewHub()
