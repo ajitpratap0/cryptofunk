@@ -735,7 +735,10 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		if session, err := s.db.GetSession(ctx, *sessionID); err != nil {
 			log.Warn().Err(err).Msg("Failed to re-fetch session for equity snapshot")
 		} else {
-			openPositions, _ := s.db.GetOpenPositions(ctx, *sessionID)
+			openPositions, posErr := s.db.GetOpenPositions(ctx, *sessionID)
+			if posErr != nil {
+				log.Warn().Err(posErr).Str("session_id", sessionID.String()).Msg("equity snapshot: failed to fetch open positions, unrealizedPnL will be 0")
+			}
 			var sumUnrealized float64
 			for _, p := range openPositions {
 				if p.UnrealizedPnL != nil {

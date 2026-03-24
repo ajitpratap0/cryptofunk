@@ -32,12 +32,14 @@ func (db *DB) InsertEquitySnapshot(ctx context.Context, sessionID uuid.UUID, equ
 
 // ListEquitySnapshots returns up to limit snapshots for the session, oldest-first.
 // Returns an empty slice (not nil) when no snapshots exist.
+// Internally queries DESC to select the most recent N rows, then reverses the result
+// so callers always receive chronological (ASC) order — critical for drawdown/Sharpe calculations.
 func (db *DB) ListEquitySnapshots(ctx context.Context, sessionID uuid.UUID, limit int) ([]*EquitySnapshot, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT id, session_id, equity, realized_pnl, unrealized_pnl, recorded_at
 		FROM equity_snapshots
 		WHERE session_id = $1
-		ORDER BY recorded_at ASC
+		ORDER BY recorded_at DESC
 		LIMIT $2
 	`, sessionID, limit)
 	if err != nil {
@@ -52,6 +54,10 @@ func (db *DB) ListEquitySnapshots(ctx context.Context, sessionID uuid.UUID, limi
 			return nil, err
 		}
 		snapshots = append(snapshots, s)
+	}
+	// Reverse so the caller receives chronological (oldest-first) order.
+	for i, j := 0, len(snapshots)-1; i < j; i, j = i+1, j-1 {
+		snapshots[i], snapshots[j] = snapshots[j], snapshots[i]
 	}
 	return snapshots, rows.Err()
 }
@@ -71,7 +77,7 @@ func (db *DB) GetSessionIDWithMostSnapshots(ctx context.Context, sessionIDs []uu
 		FROM equity_snapshots
 		WHERE session_id = ANY($1::uuid[])
 		GROUP BY session_id
-		ORDER BY COUNT(*) DESC
+		ORDER BY MAX(recorded_at) DESC
 		LIMIT 1
 	`, sessionIDs).Scan(&sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -45,8 +45,8 @@ export default function RiskPage() {
   const [timeRange, setTimeRange] = useState<'1w' | '1m' | '3m'>('1m')
 
   const { data: metricsResponse, isLoading: metricsLoading, isError: metricsError, refetch: refetchMetrics } = useRiskMetrics()
-  const { data: breakersResponse, isError: breakersError, refetch: refetchBreakers } = useCircuitBreakers()
-  const { data: exposureResponse, isError: exposureError, refetch: refetchExposure } = useRiskExposure()
+  const { data: breakersResponse, isLoading: breakersLoading, isError: breakersError, refetch: refetchBreakers } = useCircuitBreakers()
+  const { data: exposureResponse, isLoading: exposureLoading, isError: exposureError, refetch: refetchExposure } = useRiskExposure()
 
   const mockDrawdown = useMemo(() => Array.from({ length: 90 }, (_, i) => {
     const now = Date.now()
@@ -66,7 +66,7 @@ export default function RiskPage() {
     refetchExposure()
   }
 
-  if (metricsLoading) {
+  if (metricsLoading || breakersLoading || exposureLoading) {
     return (
       <div className="p-6 text-muted-foreground">
         Loading risk data...
@@ -267,14 +267,19 @@ export default function RiskPage() {
                 ))}
               </div>
             </div>
-            <DrawdownChart
-              data={
-                timeRange === '1w' ? mockDrawdown.slice(-7)
-                  : timeRange === '1m' ? mockDrawdown.slice(-30)
-                  : mockDrawdown
-              }
-              height={300}
-            />
+            <div className="relative">
+              <div className="absolute top-2 right-2 z-10 text-xs text-yellow-500 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-0.5 rounded">
+                Mock data — real API pending
+              </div>
+              <DrawdownChart
+                data={
+                  timeRange === '1w' ? mockDrawdown.slice(-7)
+                    : timeRange === '1m' ? mockDrawdown.slice(-30)
+                    : mockDrawdown
+                }
+                height={300}
+              />
+            </div>
           </div>
 
           {/* Position Sizing */}
