@@ -112,7 +112,7 @@ func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 		"losing_trades":  losingTrades,
 		"win_rate":       math.Round(winRate*100) / 100,
 		"return_percent": math.Round(returnPct*100) / 100,
-		"capital_basis":  totalInitialCapital, // sum of InitialCapital across all active sessions
+		"capital_basis":  math.Round(totalInitialCapital*100) / 100, // sum of InitialCapital across all active sessions
 		"session_count":  len(sessions),
 		"scope":          "active_sessions_only", // only running sessions included; stopped sessions are excluded
 	})
