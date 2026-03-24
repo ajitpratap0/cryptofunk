@@ -74,8 +74,9 @@ func (h *PerformanceHandler) GetPairPerformance(c *gin.Context) {
 // GetSummary returns aggregate portfolio performance metrics across all active sessions.
 // GET /api/v1/performance/summary
 //
-// NOTE: This endpoint only aggregates across currently active (not stopped) sessions.
-// Stopped session P&L is excluded from all reported metrics.
+// NOTE: This endpoint aggregates across ALL currently active sessions regardless of
+// trading mode (PAPER and LIVE sessions are combined). Stopped session P&L is excluded.
+// Use the session-level endpoints to filter by mode when paper/live breakdown is needed.
 func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 	ctx := c.Request.Context()
 
