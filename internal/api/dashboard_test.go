@@ -24,15 +24,16 @@ import (
 
 // MockDashboardRepository implements DashboardRepositoryInterface for testing
 type MockDashboardRepository struct {
-	ListActiveSessionsFunc    func(ctx context.Context) ([]*db.TradingSession, error)
-	GetSessionFunc            func(ctx context.Context, sessionID uuid.UUID) (*db.TradingSession, error)
-	CreateSessionFunc         func(ctx context.Context, session *db.TradingSession) error
-	StopSessionFunc           func(ctx context.Context, sessionID uuid.UUID, finalCapital float64) error
-	GetAllOpenPositionsFunc   func(ctx context.Context) ([]*db.Position, error)
-	GetPositionsBySessionFunc func(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
-	PingFunc                  func(ctx context.Context) error
-	IsTradingPausedFunc       func(ctx context.Context) (bool, error)
-	GetAllAgentStatusesFunc   func(ctx context.Context) ([]*db.AgentStatus, error)
+	ListActiveSessionsFunc      func(ctx context.Context) ([]*db.TradingSession, error)
+	GetSessionFunc              func(ctx context.Context, sessionID uuid.UUID) (*db.TradingSession, error)
+	CreateSessionFunc           func(ctx context.Context, session *db.TradingSession) error
+	StopSessionFunc             func(ctx context.Context, sessionID uuid.UUID, finalCapital float64) error
+	GetAllOpenPositionsFunc     func(ctx context.Context) ([]*db.Position, error)
+	GetAllClosedPositionsFunc   func(ctx context.Context) ([]*db.Position, error)
+	GetPositionsBySessionFunc   func(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
+	PingFunc                    func(ctx context.Context) error
+	IsTradingPausedFunc         func(ctx context.Context) (bool, error)
+	GetAllAgentStatusesFunc     func(ctx context.Context) ([]*db.AgentStatus, error)
 }
 
 func (m *MockDashboardRepository) ListActiveSessions(ctx context.Context) ([]*db.TradingSession, error) {
@@ -67,6 +68,13 @@ func (m *MockDashboardRepository) StopSession(ctx context.Context, sessionID uui
 func (m *MockDashboardRepository) GetAllOpenPositions(ctx context.Context) ([]*db.Position, error) {
 	if m.GetAllOpenPositionsFunc != nil {
 		return m.GetAllOpenPositionsFunc(ctx)
+	}
+	return []*db.Position{}, nil
+}
+
+func (m *MockDashboardRepository) GetAllClosedPositions(ctx context.Context) ([]*db.Position, error) {
+	if m.GetAllClosedPositionsFunc != nil {
+		return m.GetAllClosedPositionsFunc(ctx)
 	}
 	return []*db.Position{}, nil
 }

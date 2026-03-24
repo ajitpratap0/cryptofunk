@@ -129,6 +129,7 @@ type DashboardRepositoryInterface interface {
 
 	// Position management
 	GetAllOpenPositions(ctx context.Context) ([]*db.Position, error)
+	GetAllClosedPositions(ctx context.Context) ([]*db.Position, error)
 	GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
 
 	// Health checks
@@ -712,8 +713,16 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		// so summing RealizedPnL from open positions would always be 0 once trades
 		// complete. TotalPnL from session records (already summed above) is the
 		// authoritative source for realized P&L.
-		// TODO: Include fees from closed positions once a GetAllPositions (open+closed)
-		// query is added to the repository interface.
+		//
+		pnl.TotalFees += p.Fees
+	}
+
+	// Also sum fees from closed positions so TotalFees reflects the full round-trip cost.
+	closedPositions, err := h.repo.GetAllClosedPositions(ctx)
+	if err != nil {
+		return pnl, err
+	}
+	for _, p := range closedPositions {
 		pnl.TotalFees += p.Fees
 	}
 
