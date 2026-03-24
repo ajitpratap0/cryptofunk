@@ -606,7 +606,6 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			order.FilledAt = nil
 			order.AveragePrice = 0
 			order.UpdatedAt = time.Now()
-
 			// Insert the order as the first step so it is rolled back atomically
 			// with all fill rows if any later step fails.
 			if err := s.db.InsertOrderTx(ctx, tx, order); err != nil {
