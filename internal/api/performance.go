@@ -16,6 +16,9 @@ type PerformanceRepository interface {
 	ListActiveSessions(ctx context.Context) ([]*db.TradingSession, error)
 }
 
+// Compile-time assertion: *db.DB must satisfy PerformanceRepository.
+var _ PerformanceRepository = (*db.DB)(nil)
+
 // PerformanceHandler provides REST endpoints for per-symbol performance metrics.
 type PerformanceHandler struct {
 	db PerformanceRepository
@@ -93,6 +96,9 @@ func (h *PerformanceHandler) GetSummary(c *gin.Context) {
 		totalInitialCapital += s.InitialCapital
 		totalTrades += s.TotalTrades
 		winningTrades += s.WinningTrades
+		// Note: winning_trades + losing_trades may be < total_trades when sessions
+		// have open positions that are not yet resolved (neither a win nor a loss).
+		// This is expected behavior for the "active sessions only" summary.
 		losingTrades += s.LosingTrades
 	}
 
