@@ -184,60 +184,58 @@ func TestStopSession(t *testing.T) {
 	assert.Equal(t, 10500.0, *stopped.FinalCapital)
 }
 
-// TestListActiveSessions is skipped because ListActiveSessions() method doesn't exist yet
-// TODO: Implement ListActiveSessions() method and enable this test
-// func TestListActiveSessions(t *testing.T) {
-// 	db, cleanup := setupTestDB(t)
-// 	defer cleanup()
-//
-// 	ctx := context.Background()
-//
-// 	// Create multiple sessions
-// 	session1 := &TradingSession{
-// 		Mode:           TradingModePaper,
-// 		Symbol:         "BTC/USDT",
-// 		Exchange:       "binance",
-// 		StartedAt:      time.Now(),
-// 		InitialCapital: 10000.0,
-// 	}
-// 	err := db.CreateSession(ctx, session1)
-// 	require.NoError(t, err)
-//
-// 	session2 := &TradingSession{
-// 		Mode:           TradingModeLive,
-// 		Symbol:         "ETH/USDT",
-// 		Exchange:       "binance",
-// 		StartedAt:      time.Now(),
-// 		InitialCapital: 5000.0,
-// 	}
-// 	err = db.CreateSession(ctx, session2)
-// 	require.NoError(t, err)
-//
-// 	// Stop one session
-// 	err = db.StopSession(ctx, session2.ID, 5200.0)
-// 	require.NoError(t, err)
-//
-// 	// List active sessions
-// 	activeSessions, err := db.ListActiveSessions(ctx)
-// 	require.NoError(t, err)
-//
-// 	// Should have at least session1 (session2 is stopped)
-// 	foundSession1 := false
-// 	foundSession2 := false
-//
-// 	for _, s := range activeSessions {
-// 		if s.ID == session1.ID {
-// 			foundSession1 = true
-// 			assert.Nil(t, s.StoppedAt)
-// 		}
-// 		if s.ID == session2.ID {
-// 			foundSession2 = true
-// 		}
-// 	}
-//
-// 	assert.True(t, foundSession1, "Active session should be in list")
-// 	assert.False(t, foundSession2, "Stopped session should not be in active list")
-// }
+func TestListActiveSessions(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create multiple sessions
+	session1 := &TradingSession{
+		Mode:           TradingModePaper,
+		Symbol:         "BTC/USDT",
+		Exchange:       "binance",
+		StartedAt:      time.Now(),
+		InitialCapital: 10000.0,
+	}
+	err := db.CreateSession(ctx, session1)
+	require.NoError(t, err)
+
+	session2 := &TradingSession{
+		Mode:           TradingModeLive,
+		Symbol:         "ETH/USDT",
+		Exchange:       "binance",
+		StartedAt:      time.Now(),
+		InitialCapital: 5000.0,
+	}
+	err = db.CreateSession(ctx, session2)
+	require.NoError(t, err)
+
+	// Stop one session
+	err = db.StopSession(ctx, session2.ID, 5200.0)
+	require.NoError(t, err)
+
+	// List active sessions
+	activeSessions, err := db.ListActiveSessions(ctx)
+	require.NoError(t, err)
+
+	// Should have at least session1 (session2 is stopped)
+	foundSession1 := false
+	foundSession2 := false
+
+	for _, s := range activeSessions {
+		if s.ID == session1.ID {
+			foundSession1 = true
+			assert.Nil(t, s.StoppedAt)
+		}
+		if s.ID == session2.ID {
+			foundSession2 = true
+		}
+	}
+
+	assert.True(t, foundSession1, "Active session should be in list")
+	assert.False(t, foundSession2, "Stopped session should not be in active list")
+}
 
 // TestGetSessionsBySymbol is skipped because GetSessionsBySymbol() method doesn't exist yet
 // TODO: Implement GetSessionsBySymbol() method and enable this test
