@@ -32,7 +32,10 @@ var errOppositeSide = errors.New("opposite side trade on existing position")
 func (s *APIServer) handleListSessions(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	sessions, err := s.db.ListActiveSessions(ctx)
+	limit := parseIntQuery(c, "limit", 50, 1) // default 50; capped at maxPageSize by parseIntQuery
+	offset := parseIntQuery(c, "offset", 0, 0)
+
+	sessions, err := s.db.ListActiveSessionsPaginated(ctx, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to retrieve sessions",
@@ -43,6 +46,8 @@ func (s *APIServer) handleListSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"sessions": sessions,
 		"count":    len(sessions),
+		"limit":    limit,
+		"offset":   offset,
 	})
 }
 
@@ -155,6 +160,20 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	symbol := c.Query("symbol")
 	status := c.Query("status")
 
+	// Pagination params: limit defaults to 100, offset defaults to 0.
+	// When a session/symbol/status filter is active, limit/offset are silently
+	// ignored (filtered queries return all matching rows, capped at 1000).
+	// A "warning" field is included in the response to inform the caller.
+	limit := parseIntQuery(c, "limit", 100, 1)
+	offset := parseIntQuery(c, "offset", 0, 0)
+
+	var paginationWarning string
+	if sessionIDStr != "" || symbol != "" || status != "" {
+		if c.Query("limit") != "" || c.Query("offset") != "" {
+			paginationWarning = "limit and offset are ignored when session_id, symbol, or status filters are used; filtered queries return all matching rows (capped at 1000)"
+		}
+	}
+
 	var orders []*db.Order
 	var err error
 
@@ -172,8 +191,8 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	} else if status != "" {
 		orders, err = s.db.GetOrdersByStatus(ctx, db.ConvertOrderStatus(status))
 	} else {
-		// Get recent orders (limit 100)
-		orders, err = s.db.GetRecentOrders(ctx, 100)
+		// No filter: use paginated query so limit/offset are honoured.
+		orders, err = s.db.GetRecentOrdersPaginated(ctx, limit, offset)
 	}
 
 	if err != nil {
@@ -183,10 +202,34 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"orders": orders,
-		"count":  len(orders),
-	})
+	if sessionIDStr != "" || symbol != "" || status != "" {
+		// Sentinel pattern: DB was asked for maxFilteredOrders+1 rows.
+		// If more than maxFilteredOrders came back, the result was truncated.
+		truncated := len(orders) > maxPageSize
+		if truncated {
+			orders = orders[:maxPageSize]
+		}
+		resp := gin.H{
+			"orders":    orders,
+			"count":     len(orders),
+			"paginated": false,
+			// truncated is true only when additional rows exist beyond the cap;
+			// callers should add more specific filters.
+			"truncated": truncated,
+		}
+		if paginationWarning != "" {
+			resp["warning"] = paginationWarning
+		}
+		c.JSON(http.StatusOK, resp)
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"orders":    orders,
+			"count":     len(orders),
+			"limit":     limit,
+			"offset":    offset,
+			"paginated": true,
+		})
+	}
 }
 
 func (s *APIServer) handleGetOrder(c *gin.Context) {

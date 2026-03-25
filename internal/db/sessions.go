@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
 
@@ -204,27 +205,16 @@ func (db *DB) StopSession(ctx context.Context, sessionID uuid.UUID, finalCapital
 	return nil
 }
 
-// ListActiveSessions retrieves all active (not stopped) trading sessions
+// ListActiveSessions retrieves all active (not stopped) trading sessions.
+// It delegates to ListActiveSessionsPaginated with limit=0 (unlimited).
 func (db *DB) ListActiveSessions(ctx context.Context) ([]*TradingSession, error) {
-	query := `
-		SELECT id, mode, symbol, exchange, started_at, stopped_at,
-		       initial_capital, final_capital, total_trades, winning_trades,
-		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
-		       config, metadata, created_at, updated_at
-		FROM trading_sessions
-		WHERE stopped_at IS NULL
-		ORDER BY started_at DESC
-	`
+	return db.ListActiveSessionsPaginated(ctx, 0, 0)
+}
 
-	rows, err := db.pool.Query(ctx, query)
-	if err != nil {
-		log.Error().
-			Err(err).
-			Msg("Failed to list active sessions")
-		return nil, fmt.Errorf("failed to list active sessions: %w", err)
-	}
-	defer rows.Close()
-
+// scanSessions reads all rows from a pgx.Rows result set into a slice of
+// TradingSession pointers. The caller is responsible for calling rows.Close().
+// This mirrors the scanOrders helper in orders.go.
+func scanSessions(rows pgx.Rows) ([]*TradingSession, error) {
 	var sessions []*TradingSession
 	for rows.Next() {
 		var session TradingSession
@@ -249,21 +239,52 @@ func (db *DB) ListActiveSessions(ctx context.Context) ([]*TradingSession, error)
 			&session.UpdatedAt,
 		)
 		if err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to scan session row")
+			log.Error().Err(err).Msg("Failed to scan session row")
 			return nil, fmt.Errorf("failed to scan session row: %w", err)
 		}
 		sessions = append(sessions, &session)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating session rows: %w", err)
 	}
+	return sessions, nil
+}
+
+// ListActiveSessionsPaginated retrieves active (not stopped) trading sessions with
+// limit/offset pagination. limit=0 means no limit (returns all rows).
+func (db *DB) ListActiveSessionsPaginated(ctx context.Context, limit, offset int) ([]*TradingSession, error) {
+	query := `
+		SELECT id, mode, symbol, exchange, started_at, stopped_at,
+		       initial_capital, final_capital, total_trades, winning_trades,
+		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
+		       config, metadata, created_at, updated_at
+		FROM trading_sessions
+		WHERE stopped_at IS NULL
+		ORDER BY started_at DESC
+		LIMIT NULLIF($1, 0) OFFSET $2
+	`
+
+	rows, err := db.pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int("limit", limit).
+			Int("offset", offset).
+			Msg("Failed to list active sessions (paginated)")
+		return nil, fmt.Errorf("failed to list active sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions, err := scanSessions(rows)
+	if err != nil {
+		return nil, err
+	}
 
 	log.Debug().
+		Int("limit", limit).
+		Int("offset", offset).
 		Int("count", len(sessions)).
-		Msg("Listed active sessions")
+		Msg("Listed active sessions (paginated)")
 
 	return sessions, nil
 }
@@ -290,41 +311,9 @@ func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*Tradin
 	}
 	defer rows.Close()
 
-	var sessions []*TradingSession
-	for rows.Next() {
-		var session TradingSession
-		err := rows.Scan(
-			&session.ID,
-			&session.Mode,
-			&session.Symbol,
-			&session.Exchange,
-			&session.StartedAt,
-			&session.StoppedAt,
-			&session.InitialCapital,
-			&session.FinalCapital,
-			&session.TotalTrades,
-			&session.WinningTrades,
-			&session.LosingTrades,
-			&session.TotalPnL,
-			&session.MaxDrawdown,
-			&session.SharpeRatio,
-			&session.Config,
-			&session.Metadata,
-			&session.CreatedAt,
-			&session.UpdatedAt,
-		)
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("symbol", symbol).
-				Msg("Failed to scan session row")
-			return nil, fmt.Errorf("failed to scan session row: %w", err)
-		}
-		sessions = append(sessions, &session)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating session rows: %w", err)
+	sessions, err := scanSessions(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	log.Debug().
@@ -336,18 +325,19 @@ func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*Tradin
 }
 
 // AggregateSessionStats recalculates session statistics from completed trades.
-// It counts total orders linked to the session and aggregates P&L from closed positions.
-// Note: total_trades counts both FILLED and PARTIALLY_FILLED as one trade each.
-// winning_trades/losing_trades are derived from positions (not orders) so the
-// count bases differ intentionally — an order may produce multiple position entries.
+// All four counters (total_trades, winning_trades, losing_trades, total_pnl) are
+// derived from closed positions (exit_time IS NOT NULL) so the win-rate denominator
+// is consistent: win_rate = winning_trades / total_trades.
+// Previously total_trades counted FILLED/PARTIALLY_FILLED orders while the win/loss
+// counts used positions, causing a denominator mismatch.
 // TODO: Executor-placed orders (via NATS decisions) bypass the API and don't carry
-// session_id. Those orders won't be counted here until the order-executor MCP tool
+// session_id. Those positions won't be counted here until the order-executor MCP tool
 // accepts a session_id parameter.
 func (db *DB) AggregateSessionStats(ctx context.Context, sessionID uuid.UUID) error {
 	query := `
 		UPDATE trading_sessions SET
 			total_trades = COALESCE((
-				SELECT COUNT(*) FROM orders WHERE session_id = $1 AND status IN ('FILLED', 'PARTIALLY_FILLED')
+				SELECT COUNT(*) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL
 			), 0),
 			total_pnl = COALESCE((
 				SELECT SUM(realized_pnl) FROM positions WHERE session_id = $1 AND exit_time IS NOT NULL

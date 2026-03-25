@@ -129,6 +129,7 @@ type DashboardRepositoryInterface interface {
 
 	// Position management
 	GetAllOpenPositions(ctx context.Context) ([]*db.Position, error)
+	GetClosedFeesBySessionIDs(ctx context.Context, sessionIDs []uuid.UUID) (float64, error)
 	GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*db.Position, error)
 
 	// Health checks
@@ -685,7 +686,9 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		return pnl, err
 	}
 
+	sessionIDs := make([]uuid.UUID, 0, len(sessions))
 	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
 		pnl.TotalPnL += session.TotalPnL
 		pnl.TotalTrades += session.TotalTrades
 		pnl.WinningTrades += session.WinningTrades
@@ -707,20 +710,48 @@ func (h *DashboardHandler) getPnLSummary(ctx context.Context) (PnLSummaryInfo, e
 		if p.UnrealizedPnL != nil {
 			pnl.UnrealizedPnL += *p.UnrealizedPnL
 		}
-		if p.RealizedPnL != nil {
-			pnl.RealizedPnL += *p.RealizedPnL
-		}
+		// NOTE: RealizedPnL from open positions is intentionally omitted here.
+		// After a position closes (SELL), it no longer appears in GetAllOpenPositions,
+		// so summing RealizedPnL from open positions would always be 0 once trades
+		// complete. TotalPnL from session records (already summed above) is the
+		// authoritative source for realized P&L.
 		pnl.TotalFees += p.Fees
 	}
+
+	// Also sum fees from closed positions in the active sessions so TotalFees reflects the full
+	// round-trip cost without leaking fees from historical inactive sessions whose P&L is not counted.
+	// Uses a SQL aggregate to avoid loading all rows and the 90-day truncation issue.
+	//
+	// Race note: a position may transition open→closed between the GetAllOpenPositions call above
+	// and this GetClosedFeesBySessionIDs call. If that happens, the position's fees could appear in
+	// both the open-position loop (pnl.TotalFees += p.Fees) and the closed-fees query, causing a
+	// one-position double-count. The window is tiny (milliseconds) and the impact is limited to a
+	// single position's fees, so this is accepted as a known approximation in the aggregate view.
+	closedFees, err := h.repo.GetClosedFeesBySessionIDs(ctx, sessionIDs)
+	if err != nil {
+		return pnl, err
+	}
+	pnl.TotalFees += closedFees
 
 	// Calculate win rate
 	if pnl.TotalTrades > 0 {
 		pnl.WinRate = float64(pnl.WinningTrades) / float64(pnl.TotalTrades) * 100
 	}
 
-	// Calculate current capital and return
-	pnl.CurrentCapital = pnl.InitialCapital + pnl.RealizedPnL + pnl.UnrealizedPnL
+	// RealizedPnL mirrors TotalPnL from session stats (which IS realized PnL).
+	// Do NOT sum both fields — they are the same value.
+	// TODO: deprecate RealizedPnL when all clients migrate to TotalPnL.
+	pnl.RealizedPnL = pnl.TotalPnL
+
+	// Derive CurrentCapital from TotalPnL (session-level realized P&L) plus any
+	// open-position unrealized P&L. Using RealizedPnL summed from open positions
+	// would return 0 after all positions close because closed positions are no
+	// longer returned by GetAllOpenPositions.
+	pnl.CurrentCapital = pnl.InitialCapital + pnl.TotalPnL + pnl.UnrealizedPnL
 	if pnl.InitialCapital > 0 {
+		// ReturnPercent is a mark-to-market total return: it includes both realised P&L
+		// (TotalPnL from closed session stats) and any unrealised P&L from open positions.
+		// This differs from realised-only return = TotalPnL / InitialCapital.
 		returnPercent := ((pnl.CurrentCapital - pnl.InitialCapital) / pnl.InitialCapital) * 100
 		pnl.ReturnPercent = &returnPercent
 	}
