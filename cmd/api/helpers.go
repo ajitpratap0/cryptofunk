@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,14 +14,44 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // Helper functions
 
 var startTime = time.Now()
 
+// maxPageSize is the upper bound on any paginated query's limit parameter.
+// Clients that pass a larger value are silently capped to this limit.
+// Defined as db.MaxFilteredOrders so both layers share a single source of truth.
+const maxPageSize = db.MaxFilteredOrders
+
 func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
+}
+
+// parseIntQuery parses an integer query parameter from the request.
+// Returns defaultVal if the parameter is absent or cannot be parsed.
+// Values below minVal or above maxPageSize are rejected/capped.
+//
+// Use minVal=1 for LIMIT parameters: zero is invalid because LIMIT NULLIF($1, 0)
+// converts 0 to NULL, removing the LIMIT entirely and allowing callers to dump entire tables.
+// Use minVal=0 for OFFSET parameters: zero is a perfectly valid first-page offset.
+func parseIntQuery(c *gin.Context, key string, defaultVal, minVal int) int {
+	raw := c.Query(key)
+	if raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < minVal {
+		log.Warn().Str("key", key).Str("value", raw).Msg("invalid pagination param, using default")
+		return defaultVal
+	}
+	if v > maxPageSize {
+		return maxPageSize
+	}
+	return v
 }
 
 // setActiveSessionID sets the active trading session ID (thread-safe).
