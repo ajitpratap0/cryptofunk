@@ -23,10 +23,10 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # CryptoFunk Orchestrator (internal port 8080)
+  # CryptoFunk Orchestrator (internal port 8081)
   - job_name: 'orchestrator'
     static_configs:
-      - targets: ['orchestrator:8080']
+      - targets: ['orchestrator:8081']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
@@ -47,6 +47,7 @@ scrape_configs:
         - 'order-executor-server:9111'
         - 'risk-analyzer-server:9112'
         - 'technical-indicators-server:9113'
+        - 'polymarket-server:9114'
     metrics_path: '/metrics'
     scrape_interval: 10s
 

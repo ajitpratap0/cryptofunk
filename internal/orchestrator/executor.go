@@ -8,10 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
 
+	"github.com/ajitpratap0/cryptofunk/internal/db"
+	"github.com/ajitpratap0/cryptofunk/internal/exchange"
 	"github.com/ajitpratap0/cryptofunk/internal/market"
 )
 
@@ -25,6 +28,7 @@ type ExecutorConfig struct {
 	TradingMode      string        // "PAPER" or "LIVE" — passed from config, not read from Viper
 	ReconnectBackoff time.Duration // Skip reconnect for this duration after failure (default 60s)
 	OrderCooldown    time.Duration // Min time between orders for same symbol (default 5m)
+	Database         *db.DB        // Optional: used to link decisions to orders for outcome tracking
 }
 
 // Executor bridges orchestrator decisions to order execution via MCP.
@@ -32,6 +36,7 @@ type ExecutorConfig struct {
 // order-executor MCP server.
 type Executor struct {
 	config          ExecutorConfig
+	database        *db.DB // optional: link decisions to orders for outcome tracking
 	natsConn        *nats.Conn
 	mcpClient       *mcp.Client
 	session         *mcp.ClientSession
@@ -52,7 +57,8 @@ func NewExecutor(config ExecutorConfig) *Executor {
 	// connectReady starts nil — allocated fresh in connectMCP on each connect attempt.
 	// Callers entering the connecting==true branch check for nil before waiting.
 	return &Executor{
-		config: config,
+		config:   config,
+		database: config.Database,
 	}
 }
 
@@ -206,8 +212,9 @@ func (e *Executor) handleDecision(msg *nats.Msg) {
 	// Record cooldown immediately (before goroutine) to prevent duplicate dispatch
 	e.recentOrders.Store(symbol, time.Now())
 
+	decisionID := decision.DecisionID
 	go func() {
-		if err := e.placeOrder(symbol, side, qty); err != nil {
+		if err := e.placeOrder(symbol, side, qty, decisionID); err != nil {
 			log.Error().Err(err).
 				Str("symbol", symbol).
 				Str("side", side).
@@ -317,7 +324,8 @@ func (e *Executor) connectMCP() error {
 // tracking order, calls the executor, then marks FILLED), this path has no separate
 // tracking record in the API's DB. This is intentional — the MCP server is the
 // single source of truth for executor-placed orders.
-func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
+// If a database is configured, the returned order ID is linked to decisionID for outcome tracking.
+func (e *Executor) placeOrder(symbol, side string, quantity float64, decisionID uuid.UUID) error {
 	// Ensure we have a session
 	e.sessionMu.Lock()
 	needsConnect := e.session == nil
@@ -363,6 +371,26 @@ func (e *Executor) placeOrder(symbol, side string, quantity float64) error {
 			}
 		}
 		return fmt.Errorf("order-executor error: tool returned error result")
+	}
+
+	// Parse order ID from response and link to the originating decision.
+	// Best-effort: failures are logged but don't affect order placement success.
+	if e.database != nil && decisionID != uuid.Nil && len(result.Content) > 0 {
+		if textContent, ok := result.Content[0].(*mcp.TextContent); ok {
+			var order exchange.Order
+			if err := json.Unmarshal([]byte(textContent.Text), &order); err == nil && order.ID != "" {
+				if orderID, err := uuid.Parse(order.ID); err == nil {
+					linkCtx, linkCancel := context.WithTimeout(e.ctx, 5*time.Second)
+					defer linkCancel()
+					if err := e.database.LinkDecisionToOrder(linkCtx, decisionID, orderID); err != nil {
+						log.Warn().Err(err).
+							Str("decision_id", decisionID.String()).
+							Str("order_id", order.ID).
+							Msg("Failed to link decision to order")
+					}
+				}
+			}
+		}
 	}
 
 	return nil
