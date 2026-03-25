@@ -605,7 +605,11 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			order.ExecutedQuoteQuantity = 0
 			order.FilledAt = nil
 			order.AveragePrice = 0
-			order.UpdatedAt = time.Now()			// Insert the order as the first step so it is rolled back atomically
+			// Clear error state set by any prior failed attempt.
+			order.CanceledAt = nil
+			order.ErrorMessage = nil
+
+			// Insert the order as the first step so it is rolled back atomically
 			// with all fill rows if any later step fails.
 			if err := s.db.InsertOrderTx(ctx, tx, order); err != nil {
 				return fmt.Errorf("failed to insert paper trade order: %w", err)
