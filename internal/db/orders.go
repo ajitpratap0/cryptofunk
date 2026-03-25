@@ -517,7 +517,7 @@ func (db *DB) GetOrdersBySession(ctx context.Context, sessionID uuid.UUID) ([]*O
 		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, sessionID, maxFilteredOrders)
+	rows, err := db.pool.Query(ctx, query, sessionID, maxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by session: %w", err)
 	}
@@ -539,7 +539,7 @@ func (db *DB) GetOrdersBySymbol(ctx context.Context, symbol string) ([]*Order, e
 		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, symbol, maxFilteredOrders)
+	rows, err := db.pool.Query(ctx, query, symbol, maxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by symbol: %w", err)
 	}
@@ -561,7 +561,7 @@ func (db *DB) GetOrdersByStatus(ctx context.Context, status OrderStatus) ([]*Ord
 		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, status, maxFilteredOrders)
+	rows, err := db.pool.Query(ctx, query, status, maxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by status: %w", err)
 	}

@@ -203,13 +203,19 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 	}
 
 	if sessionIDStr != "" || symbol != "" || status != "" {
+		// Sentinel pattern: DB was asked for maxFilteredOrders+1 rows.
+		// If more than maxFilteredOrders came back, the result was truncated.
+		truncated := len(orders) > maxPageSize
+		if truncated {
+			orders = orders[:maxPageSize]
+		}
 		resp := gin.H{
 			"orders":    orders,
 			"count":     len(orders),
 			"paginated": false,
-			// truncated is true when the result set was capped at 1000 rows
-			// (db.maxFilteredOrders); callers should add more specific filters.
-			"truncated": len(orders) == 1000,
+			// truncated is true only when additional rows exist beyond the cap;
+			// callers should add more specific filters.
+			"truncated": truncated,
 		}
 		if paginationWarning != "" {
 			resp["warning"] = paginationWarning
