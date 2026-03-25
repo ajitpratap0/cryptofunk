@@ -197,9 +197,16 @@ jobs:
             pkg:golang/golang.org/x/crypto,
             pkg:golang/golang.org/x/sync,
             pkg:golang/golang.org/x/text,
+            pkg:golang/golang.org/x/net,
+            pkg:golang/golang.org/x/time,
             pkg:golang/google.golang.org/protobuf,
             pkg:golang/github.com/ethereum/go-ethereum,
-            pkg:golang/github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp
+            pkg:golang/github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp,
+            pkg:golang/github.com/envoyproxy/protoc-gen-validate,
+            pkg:golang/github.com/google/go-tpm,
+            pkg:golang/github.com/klauspost/compress,
+            pkg:golang/github.com/nats-io/nats.go,
+            pkg:golang/github.com/nats-io/nkeys
 
   # Check for TODO comments
   todo-check:

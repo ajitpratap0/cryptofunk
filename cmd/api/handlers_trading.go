@@ -596,6 +596,17 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		// causing its enclosing transaction to roll back rather than silently creating
 		// a duplicate open position for the same symbol.
 		txErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
+			// Reset order fields mutated by previous attempt so that a serialization
+			// retry always starts from a clean state. The UUID is also regenerated so
+			// InsertOrderTx does not collide with a row that was rolled back.
+			order.ID = uuid.New()
+			order.Status = db.OrderStatusNew
+			order.ExecutedQuantity = 0
+			order.ExecutedQuoteQuantity = 0
+			order.FilledAt = nil
+			order.AveragePrice = 0
+			order.UpdatedAt = time.Now()
+
 			// Insert the order as the first step so it is rolled back atomically
 			// with all fill rows if any later step fails.
 			if err := s.db.InsertOrderTx(ctx, tx, order); err != nil {
@@ -623,6 +634,8 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			order.ExecutedQuantity = req.Quantity
 			order.ExecutedQuoteQuantity = execQuoteQty
 			order.FilledAt = &now
+			// Sync in-memory struct to the timestamp stored in the DB (intentional:
+			// avoids divergence between the struct and the row UpdateOrderStatusTx wrote).
 			order.UpdatedAt = now
 
 			// InsertTrade inside transaction via DB-layer method.

@@ -33,6 +33,7 @@ func TestNewManager(t *testing.T) {
 
 	if manager == nil {
 		t.Fatal("Expected non-nil manager")
+		return
 	}
 
 	if len(manager.alerters) != 2 {

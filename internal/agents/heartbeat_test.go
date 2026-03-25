@@ -39,6 +39,7 @@ func TestNewHeartbeatPublisher(t *testing.T) {
 
 	if publisher == nil {
 		t.Fatal("NewHeartbeatPublisher returned nil")
+		return
 	}
 	if publisher.agentName != "test-agent" {
 		t.Errorf("Expected agent name 'test-agent', got '%s'", publisher.agentName)
