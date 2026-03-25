@@ -200,8 +200,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var dailyPnL float64
 	err := u.db.QueryRow(ctx, query).Scan(&dailyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital		DailyReturn.Set(dailyPnL / initialCapital)
-	}
+		initialCapital := DefaultInitialCapital		DailyReturn.Set(dailyPnL / initialCapital)	}
 
 	// Weekly return
 	query = `
@@ -214,8 +213,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var weeklyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&weeklyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital		WeeklyReturn.Set(weeklyPnL / initialCapital)
-	}
+		initialCapital := DefaultInitialCapital		WeeklyReturn.Set(weeklyPnL / initialCapital)	}
 
 	// Monthly return
 	query = `
@@ -228,8 +226,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var monthlyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&monthlyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital		MonthlyReturn.Set(monthlyPnL / initialCapital)
-	}
+		initialCapital := DefaultInitialCapital		MonthlyReturn.Set(monthlyPnL / initialCapital)	}
 }
 
 // updateSharpeRatio calculates the Sharpe ratio
