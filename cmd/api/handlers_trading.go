@@ -224,11 +224,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		Price    float64 `json:"price"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -286,15 +282,32 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		order.Status = db.OrderStatusRejected
 		order.ErrorMessage = &errMsg
 
-		// Broadcast rejection to WebSocket clients
-		if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
+		// Nil out sensitive fields before broadcasting and returning to clients.
+		// ErrorMessage: raw error string must not be leaked externally (DB row already has it).
+		// ExchangeOrderID: exchange-side ID is internal infrastructure detail.
+		// SessionID: internal session reference clients must not see.
+		// broadcast.go also omits these fields, but clearing here prevents future refactors
+		// from re-introducing them (belt-and-suspenders defense).
+		safeOrder := *order
+		safeOrder.ErrorMessage = nil
+		safeOrder.ExchangeOrderID = nil // don't expose exchange-side IDs
+		safeOrder.SessionID = nil       // don't expose internal session reference
+
+		// Broadcast rejection to WebSocket clients (using sanitized order without raw error)
+		if broadcastErr := s.BroadcastOrderUpdate(&safeOrder); broadcastErr != nil {
 			log.Warn().Err(broadcastErr).Msg("Failed to broadcast order rejection")
 		}
 
+		// Return only the fields needed for client retry correlation — not the full db.Order
+		// struct, which contains ExchangeID, SessionID, and other internal metadata clients
+		// don't need on failure.
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"order":   order,
-			"error":   "order execution failed",
-			"details": errMsg,
+			"error":    "order execution failed",
+			"order_id": order.ID,
+			"status":   order.Status,
+			"symbol":   order.Symbol,
+			"side":     order.Side,
+			"quantity": order.Quantity,
 		})
 		return
 	}
@@ -328,7 +341,10 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		}
 	}
 
-	// Broadcast success to WebSocket clients
+	// Broadcast success to WebSocket clients.
+	// order.ErrorMessage is nil on the success path (execution succeeded), so no
+	// raw error string is leaked here. The sanitized safeOrder is used only on
+	// the rejection path above (see "Broadcast rejection" comment).
 	if broadcastErr := s.BroadcastOrderUpdate(order); broadcastErr != nil {
 		log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
 	}
@@ -419,8 +435,7 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		Quantity float64 `json:"quantity" binding:"required,gt=0"`
 		Price    float64 `json:"price"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+	if !bindJSON(c, &req) {
 		return
 	}
 	isLimit := strings.EqualFold(req.Type, "limit")
@@ -713,11 +728,7 @@ func (s *APIServer) handleStartTrading(c *gin.Context) {
 		Mode           string  `json:"mode" binding:"oneof=paper live PAPER LIVE"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -781,11 +792,7 @@ func (s *APIServer) handleStopTrading(c *gin.Context) {
 		FinalCapital float64 `json:"final_capital" binding:"required,gte=0"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -855,11 +862,7 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 		SessionID string `json:"session_id" binding:"required"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -888,8 +891,7 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to call orchestrator pause endpoint")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to pause trading",
-			"details": err.Error(),
+			"error": "failed to pause trading",
 		})
 		return
 	}
@@ -919,11 +921,7 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 		SessionID string `json:"session_id" binding:"required"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid request body",
-			"details": err.Error(),
-		})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -952,8 +950,7 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to call orchestrator resume endpoint")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to resume trading",
-			"details": err.Error(),
+			"error": "failed to resume trading",
 		})
 		return
 	}

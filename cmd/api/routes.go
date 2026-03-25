@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,7 +16,18 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
+// maxRequestBodyBytes is the maximum allowed request body size.
+// 1 MB accommodates bulk requests and strategy config payloads while still
+// bounding memory usage per request against OOM attacks.
+const maxRequestBodyBytes = 1 << 20 // 1 MB
+
 func (s *APIServer) setupMiddleware() {
+	// Limit request bodies to 1 MB to prevent OOM attacks
+	s.router.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+		c.Next()
+	})
+
 	// Security headers middleware (applies to all responses)
 	s.router.Use(securityHeadersMiddleware())
 

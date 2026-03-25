@@ -562,3 +562,55 @@ func TestPaperTrade_LimitOrder(t *testing.T) {
 	assert.Contains(t, response, "order")
 	assert.Equal(t, "paper", response["trading_mode"])
 }
+
+// TestPlaceOrder_ErrorPathSanitization verifies that when handlePlaceOrder reaches the
+// executeOrder failure path, the HTTP 500 response does NOT contain sensitive internal
+// fields (error_message, exchange_order_id, session_id, details).
+//
+// Setup: real DB (InsertOrder succeeds) + nil mcpClient (connectOrderExecutor returns
+// "MCP client not initialized" immediately, triggering the safeOrder sanitization branch).
+// This is the only path that exercises the safeOrder nil assignments in the handler.
+func TestPlaceOrder_ErrorPathSanitization(t *testing.T) {
+	server, tc := setupTestAPIServer(t)
+	_ = tc // testcontainers handles cleanup automatically
+
+	// Ensure mcpClient is nil so connectOrderExecutor short-circuits and executeOrder
+	// returns an error — landing in the safeOrder sanitization branch of handlePlaceOrder.
+	server.mcpClient = nil
+
+	reqBody := map[string]interface{}{
+		"symbol":   "BTCUSDT",
+		"side":     "BUY",
+		"type":     "MARKET",
+		"quantity": 0.01,
+	}
+	body, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+
+	// Sensitive internal fields must never appear in the error response.
+	assert.NotContains(t, resp, "error_message",
+		"error_message must not be exposed in the 500 response")
+	assert.NotContains(t, resp, "exchange_order_id",
+		"exchange_order_id must not be exposed in the 500 response")
+	assert.NotContains(t, resp, "session_id",
+		"session_id must not be exposed in the 500 response")
+	assert.NotContains(t, resp, "details",
+		"details must not be exposed in the 500 response")
+
+	// Safe correlation fields must be present so the client can retry.
+	assert.Contains(t, resp, "error", "a generic error key must be present")
+	assert.Contains(t, resp, "order_id", "order_id must be present for client retry correlation")
+	assert.Contains(t, resp, "symbol", "symbol must be present in the error response")
+	assert.Contains(t, resp, "side", "side must be present in the error response")
+}
