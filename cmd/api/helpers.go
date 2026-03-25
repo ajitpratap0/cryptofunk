@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
+
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // Helper functions
