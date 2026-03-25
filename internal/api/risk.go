@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -223,6 +224,8 @@ func (h *RiskHandler) GetExposure(c *gin.Context) {
 			Exposure: math.Round(r.Exposure*100) / 100,
 		})
 	}
+	// Sort alphabetically for deterministic response ordering
+	sort.Slice(result, func(i, j int) bool { return result[i].Symbol < result[j].Symbol })
 
 	c.JSON(http.StatusOK, gin.H{"exposure": result, "count": len(result)})
 }
