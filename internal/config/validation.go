@@ -319,6 +319,22 @@ func (c *Config) validateTrading() ValidationErrors {
 		})
 	}
 
+	// Warn when slippage factors are configured in an unrealistically favorable direction.
+	// Normal buy slippage means paying MORE than mid-price (factor >= 1.0).
+	// Normal sell slippage means receiving LESS than mid-price (factor <= 1.0).
+	if c.Trading.SlippageBuyFactor < 1.0 {
+		errors = append(errors, ValidationError{
+			Field:   "trading.slippage_buy_factor",
+			Message: fmt.Sprintf("slippage_buy_factor %.4f < 1.0 means favorable buy execution (negative slippage) — verify this is intentional", c.Trading.SlippageBuyFactor),
+		})
+	}
+	if c.Trading.SlippageSellFactor > 1.0 {
+		errors = append(errors, ValidationError{
+			Field:   "trading.slippage_sell_factor",
+			Message: fmt.Sprintf("slippage_sell_factor %.4f > 1.0 means favorable sell execution (negative slippage) — verify this is intentional", c.Trading.SlippageSellFactor),
+		})
+	}
+
 	return errors
 }
 

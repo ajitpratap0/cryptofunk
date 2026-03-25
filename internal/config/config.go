@@ -137,6 +137,12 @@ type TradingConfig struct {
 	MaxPositions    int      `mapstructure:"max_positions"`    // 3
 	DefaultQuantity float64  `mapstructure:"default_quantity"` // 0.01
 	CommissionRate  float64  `mapstructure:"commission_rate"`  // 0.001 (0.1%) — paper trade taker fee
+	// SlippageBuyFactor multiplies the buy price to simulate slippage (e.g. 1.001 = 0.1% slippage).
+	// Defaults to 1.001 via Viper. Set to 1.0 to disable buy slippage.
+	SlippageBuyFactor float64 `mapstructure:"slippage_buy_factor"`
+	// SlippageSellFactor multiplies the sell price to simulate slippage (e.g. 0.999 = 0.1% slippage).
+	// Defaults to 0.999 via Viper. Set to 1.0 to disable sell slippage.
+	SlippageSellFactor float64 `mapstructure:"slippage_sell_factor"`
 }
 
 // RiskConfig contains risk management settings
@@ -442,7 +448,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("trading.initial_capital", 10000.0)
 	v.SetDefault("trading.max_positions", 3)
 	v.SetDefault("trading.default_quantity", 0.01)
-	v.SetDefault("trading.commission_rate", 0.001) // 0.1% taker fee (Binance standard tier)
+	v.SetDefault("trading.commission_rate", 0.001)      // 0.1% taker fee (Binance standard tier)
+	v.SetDefault("trading.slippage_buy_factor", 1.001)  // 0.1% adverse slippage on paper buys
+	v.SetDefault("trading.slippage_sell_factor", 0.999) // 0.1% adverse slippage on paper sells
 
 	// Risk defaults
 	v.SetDefault("risk.max_position_size", 0.1)

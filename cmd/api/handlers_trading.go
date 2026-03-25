@@ -16,12 +16,6 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-const (
-	paperSlippageBuy  = 1.001 // 0.1% adverse slippage for market buy orders
-	paperSlippageSell = 0.999 // 0.1% adverse slippage for market sell orders
-	// TODO: make slippage configurable via config.Trading.
-)
-
 // errOppositeSide is a sentinel returned from the WithTx callback when the
 // incoming order is on the opposite side of an existing open position. It is
 // handled by the caller to produce a 422 response without logging as an
@@ -570,12 +564,15 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			return
 		}
 	}
+	// Slippage factors are always populated via Viper defaults (1.001 / 0.999) — no sentinel needed.
+	slippageBuy := s.config.Trading.SlippageBuyFactor
+	slippageSell := s.config.Trading.SlippageSellFactor
 	execPrice := refPrice
 	if !isLimit {
 		if strings.EqualFold(req.Side, "BUY") {
-			execPrice = refPrice * paperSlippageBuy
+			execPrice = refPrice * slippageBuy
 		} else {
-			execPrice = refPrice * paperSlippageSell
+			execPrice = refPrice * slippageSell
 		}
 	}
 
