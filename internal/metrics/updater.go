@@ -35,7 +35,7 @@ func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 
 // Start begins the metrics update loop. Must be called at most once.
 // To run in the background with proper lifecycle tracking, use StartAsync instead.
-func (u *Updater) Start(ctx context.Context) {
+func (u *Updater) start(ctx context.Context) {
 	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
 
@@ -64,7 +64,7 @@ func (u *Updater) StartAsync(ctx context.Context) {
 		u.wg.Add(1)
 		go func() {
 			defer u.wg.Done()
-			u.Start(ctx)
+			u.start(ctx)
 		}()
 	})
 }
@@ -260,7 +260,6 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 
 	var returns []float64
 	initialCapital := DefaultInitialCapital
-
 	for rows.Next() {
 		var date time.Time
 		var pnl float64
@@ -287,7 +286,6 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 		sum += r
 	}
 	mean := sum / float64(len(returns))
-
 	// Calculate standard deviation
 	var variance float64
 	for _, r := range returns {
@@ -296,7 +294,6 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 	}
 	variance /= float64(len(returns) - 1)
 	stdDev := math.Sqrt(variance)
-
 	// Sharpe ratio (assuming risk-free rate of 0)
 	if stdDev > 0 {
 		sharpe := mean / stdDev * math.Sqrt(252) // Annualized

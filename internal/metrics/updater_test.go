@@ -95,7 +95,7 @@ func TestUpdater_Start_Integration(t *testing.T) {
 	// Start updater in background
 	done := make(chan bool)
 	go func() {
-		updater.Start(ctx)
+		updater.start(ctx)
 		done <- true
 	}()
 
@@ -128,7 +128,7 @@ func TestUpdater_Start_ContextCancellation_Integration(t *testing.T) {
 	// Start updater in background
 	done := make(chan bool)
 	go func() {
-		updater.Start(ctx)
+		updater.start(ctx)
 		done <- true
 	}()
 
@@ -312,7 +312,7 @@ func TestUpdater_ImmediateUpdate_Integration(t *testing.T) {
 	started := make(chan bool)
 	go func() {
 		started <- true
-		updater.Start(ctx)
+		updater.start(ctx)
 	}()
 
 	// Wait for goroutine to start

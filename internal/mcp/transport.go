@@ -96,12 +96,15 @@ func (s *Server) buildHandler() http.Handler {
 		s.logger.Warn().Msg("MCP_CORS_ORIGIN not set — defaulting to '*'. Set MCP_CORS_ORIGIN to restrict allowed origins.")
 	}
 
-	// panicRecoveryMiddleware wraps the full middleware + handler chain so that
-	// panics anywhere in request processing are caught and returned as a JSON-RPC error.
-	// /health is served directly from the outer mux, bypassing all middleware and panic recovery.
+	// panicRecoveryMiddleware is scoped to the inner MCP mux only.
+	// /health is registered on the outer mux OUTSIDE the panic recovery so that
+	// a panic in an MCP handler never causes /health to return a JSON-RPC error
+	// shape — K8s liveness/readiness probes would misinterpret that response.
+	inner := s.panicRecoveryMiddleware(s.buildMux())
+
 	outer := http.NewServeMux()
-	outer.HandleFunc("/health", s.healthHandler) // bypasses all middleware and panic recovery
-	outer.Handle("/", s.panicRecoveryMiddleware(s.wrapMiddleware(s.buildMux())))
+	outer.HandleFunc("/health", s.healthHandler) // bypasses panic recovery and all middleware
+	outer.Handle("/", s.wrapMiddleware(inner))   // everything else wrapped
 
 	return outer
 }
@@ -115,9 +118,7 @@ func (s *Server) panicRecoveryMiddleware(next http.Handler) http.Handler {
 				stack := debug.Stack()
 				s.logger.Error().
 					Interface("panic", rec).
-					Str("path", r.URL.Path).
-					Str("stack", string(stack)).
-					Msg("panic recovered in MCP HTTP handler")
+					Str("path", r.URL.Path).Str("stack", string(stack)).Msg("panic recovered in MCP HTTP handler")
 				// NOTE: For SSE streaming responses (GET /mcp), if a panic occurs after
 				// response headers have been flushed, the WriteHeader(500) and body write
 				// below will be silently ignored by Go's HTTP library — the status code
