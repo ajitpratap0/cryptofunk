@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/viper"
 )
 
 // DefaultInitialCapital is the assumed portfolio start value for return metrics until per-session tracking is implemented.
@@ -196,6 +197,7 @@ func (u *Updater) updateDrawdownMetrics(ctx context.Context) {
 func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	// DB-001 fix: use positions.realized_pnl instead of non-existent trades.pnl.
 	// DB-002 fix: use positions.exit_time instead of non-existent trades.status/exit_time.
+	initialCapital := initialCapitalFromConfig()
 
 	// Daily return
 	query := `
@@ -208,7 +210,6 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var dailyPnL float64
 	err := u.db.QueryRow(ctx, query).Scan(&dailyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital
 		DailyReturn.Set(dailyPnL / initialCapital)
 	}
 
@@ -223,7 +224,6 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var weeklyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&weeklyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital
 		WeeklyReturn.Set(weeklyPnL / initialCapital)
 	}
 
@@ -238,7 +238,6 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var monthlyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&monthlyPnL)
 	if err == nil {
-		initialCapital := DefaultInitialCapital
 		MonthlyReturn.Set(monthlyPnL / initialCapital)
 	}
 }
@@ -266,7 +265,8 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 	defer rows.Close()
 
 	var returns []float64
-	initialCapital := DefaultInitialCapital
+	initialCapital := initialCapitalFromConfig()
+
 	for rows.Next() {
 		var date time.Time
 		var pnl float64

@@ -22,6 +22,9 @@ import (
 const maxRequestBodyBytes = 1 << 20 // 1 MB
 
 func (s *APIServer) setupMiddleware() {
+	// Recovery middleware must be first so panics in ALL subsequent middleware and handlers are caught
+	s.router.Use(gin.Recovery())
+
 	// Limit request bodies to 1 MB to prevent OOM attacks
 	s.router.Use(func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
@@ -87,9 +90,6 @@ func (s *APIServer) setupMiddleware() {
 
 	// Request logging middleware
 	s.router.Use(requestLogger())
-
-	// Recovery middleware
-	s.router.Use(gin.Recovery())
 }
 
 func (s *APIServer) setupRoutes() {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
@@ -24,17 +25,27 @@ type PositionManager struct {
 }
 
 // NewPositionManager creates a new position manager with default fee rate.
+// The fee rate is read from config key trading.commission_rate (default 0.001 = 0.1%).
 // Uses context.Background() for DB operations. Prefer NewPositionManagerWithContext.
 func NewPositionManager(database *db.DB) *PositionManager {
-	return NewPositionManagerWithFees(database, 0.001)
+	feeRate := viper.GetFloat64("trading.commission_rate")
+	if feeRate == 0 {
+		feeRate = 0.001 // 0.1% fallback when viper is not initialized
+	}
+	return NewPositionManagerWithFees(database, feeRate)
 }
 
 // NewPositionManagerWithContext creates a new position manager with a parent context for DB operations.
+// The fee rate is read from config key trading.commission_rate (default 0.001 = 0.1%).
 func NewPositionManagerWithContext(ctx context.Context, database *db.DB) *PositionManager {
+	feeRate := viper.GetFloat64("trading.commission_rate")
+	if feeRate == 0 {
+		feeRate = 0.001 // 0.1% fallback when viper is not initialized
+	}
 	return &PositionManager{
 		db:            database,
 		openPositions: make(map[string]*db.Position),
-		feeRate:       0.001,
+		feeRate:       feeRate,
 		ctx:           ctx,
 	}
 }

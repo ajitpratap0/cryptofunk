@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -376,24 +377,13 @@ func (h *BacktestHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup,
 	}
 }
 
-// ExecuteBacktestJob executes a backtest job (this would typically run in a worker)
-// This is a placeholder implementation for demonstration
+// ExecuteBacktestJob executes a backtest job (this would typically run in a worker).
+// Backtest execution is not yet implemented; the job is immediately marked as failed.
 func ExecuteBacktestJob(ctx context.Context, job *backtest.BacktestJob, jobManager *backtest.JobManager) error {
-	// Update status to running
-	if err := jobManager.UpdateJobStatus(ctx, job.ID, backtest.JobStatusRunning, ""); err != nil {
-		return err
+	log.Warn().Str("job_id", job.ID.String()).Msg("Backtest execution not yet implemented")
+	// Mark as failed so callers and UI don't show a perpetually-running job
+	if err := jobManager.UpdateJobStatus(ctx, job.ID, backtest.JobStatusFailed, "backtest execution not yet implemented"); err != nil {
+		return fmt.Errorf("failed to mark unimplemented backtest job as failed: %w", err)
 	}
-
-	// TODO: Implement actual backtest execution
-	// This would involve:
-	// 1. Loading historical data for the symbols
-	// 2. Creating a backtest engine
-	// 3. Running the strategy
-	// 4. Collecting results
-	// 5. Saving results to database
-
-	// For now, just return success (job will remain in "running" state)
-	log.Warn().Str("job_id", job.ID.String()).Msg("Backtest execution not yet implemented - job will remain in running state")
-
-	return nil
+	return fmt.Errorf("backtest execution not yet implemented")
 }
