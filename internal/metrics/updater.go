@@ -32,8 +32,7 @@ type Updater struct {
 // Start begins the metrics update loop. Must be called at most once.
 // To run in the background with proper lifecycle tracking, use StartAsync instead.func (u *Updater) Start(ctx context.Context) {
 	u.started.Store(true)
-	defer close(u.doneCh)
-	ticker := time.NewTicker(u.interval)
+	defer close(u.doneCh)	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
 
 	// Update immediately on start
@@ -65,8 +64,7 @@ func (u *Updater) StartAsync(ctx context.Context) {
 		}()	})
 	if u.started.Load() {
 		<-u.doneCh
-	}}
-// Stop signals the metrics updater to halt and blocks until the background
+	}}// Stop signals the metrics updater to halt and blocks until the background
 // goroutine (if started via StartAsync) fully exits. This prevents DB queries
 // from racing with a deferred database.Close() in the caller. Safe to call
 // multiple times.
