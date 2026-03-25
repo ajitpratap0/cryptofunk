@@ -20,6 +20,7 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/ajitpratap0/cryptofunk/internal/exchange"
+	"github.com/ajitpratap0/cryptofunk/internal/metrics"
 	"github.com/ajitpratap0/cryptofunk/internal/safety"
 )
 
@@ -169,7 +170,14 @@ func main() {
 	// Setup routes
 	server.setupRoutes()
 
-	// Start server
+	// Start metrics updater — periodically refreshes DB pool stats, trading metrics,
+	// position values, and agent status from the database.
+	metricsUpdater := metrics.NewUpdater(database.Pool(), 5*time.Second)
+	log.Warn().Float64("initial_capital", metrics.DefaultInitialCapital).Msg("metrics/updater: initialCapital is hardcoded to 10000; return metrics will be incorrect for non-10k portfolios until this is made configurable")
+	metricsUpdater.StartAsync(ctx)
+	defer metricsUpdater.Stop()
+
+	// start() blocks until a SIGTERM/SIGINT signal is received and the graceful drain completes.
 	server.start()
 }
 
@@ -223,12 +231,13 @@ func (s *APIServer) start() {
 		}
 	}
 
-	// Graceful shutdown with 5 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Graceful shutdown with 30 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal().Err(err).Msg("Server forced to shutdown")
+		log.Error().Err(err).Msg("Server forced to shutdown")
+		os.Exit(1)
 	}
 
 	log.Info().Msg("API server stopped")
