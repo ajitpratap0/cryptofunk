@@ -1,16 +1,96 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
+
+// TestBindJSONBodyTooLarge verifies bindJSON returns 413 when the request body exceeds maxRequestBodyBytes.
+// The MaxBytesReader middleware must be present (as in production via setupMiddleware) so that
+// http.MaxBytesError is propagated through ShouldBindJSON.
+func TestBindJSONBodyTooLarge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	// Apply the same MaxBytesReader middleware used in production.
+	r.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+		c.Next()
+	})
+	r.POST("/test", func(c *gin.Context) {
+		var body map[string]any
+		if !bindJSON(c, &body) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// Build a body just over the limit. Wrap a string value large enough so the full
+	// JSON encoding exceeds maxRequestBodyBytes.
+	padding := strings.Repeat("x", int(maxRequestBodyBytes)+1)
+	payload := `{"data":"` + padding + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestBindJSONMalformed verifies bindJSON returns 400 for invalid JSON.
+func TestBindJSONMalformed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/test", func(c *gin.Context) {
+		var body map[string]any
+		if !bindJSON(c, &body) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString(`{invalid json`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestBindJSONValid verifies bindJSON returns 200 for a well-formed JSON body.
+func TestBindJSONValid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/test", func(c *gin.Context) {
+		var body map[string]any
+		if !bindJSON(c, &body) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString(`{"key":"value"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
 
 // TestRateLimiter_Allow tests the rate limiter allow method
 func TestRateLimiter_Allow(t *testing.T) {
