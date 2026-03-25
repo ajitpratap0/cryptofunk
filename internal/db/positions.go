@@ -398,6 +398,50 @@ func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 	return scanPositions(rows)
 }
 
+// ClosedPositionReturn holds the minimal fields needed to compute fractional returns
+// for VaR calculations: realized_pnl / (entry_price * quantity).
+type ClosedPositionReturn struct {
+	RealizedPnL float64
+	EntryPrice  float64
+	Quantity    float64
+}
+
+// GetClosedPositionReturns fetches only the columns required for VaR return calculations
+// (realized_pnl, entry_price, quantity) from positions closed within the last 90 days.
+// This narrows the projected column set compared to GetAllClosedPositions, reducing
+// per-row data transfer for the risk/metrics endpoint (issue #143).
+func (db *DB) GetClosedPositionReturns(ctx context.Context) ([]ClosedPositionReturn, error) {
+	query := `
+		SELECT realized_pnl, entry_price, quantity
+		FROM positions
+		WHERE exit_time IS NOT NULL
+		  AND exit_time > NOW() - INTERVAL '90 days'
+		  AND realized_pnl IS NOT NULL
+		  AND entry_price > 0
+		  AND quantity > 0
+		ORDER BY exit_time DESC
+	`
+
+	rows, err := db.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query closed position returns: %w", err)
+	}
+	defer rows.Close()
+
+	var results []ClosedPositionReturn
+	for rows.Next() {
+		var r ClosedPositionReturn
+		if err := rows.Scan(&r.RealizedPnL, &r.EntryPrice, &r.Quantity); err != nil {
+			return nil, fmt.Errorf("failed to scan closed position return: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating closed position returns: %w", err)
+	}
+	return results, nil
+}
+
 // GetPositionsBySession retrieves all positions (including closed) for a session
 func (db *DB) GetPositionsBySession(ctx context.Context, sessionID uuid.UUID) ([]*Position, error) {
 	query := `

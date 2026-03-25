@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/sony/gobreaker"
 
+	appconfig "github.com/ajitpratap0/cryptofunk/internal/config"
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 	"github.com/ajitpratap0/cryptofunk/internal/vault"
 )
@@ -21,9 +22,19 @@ type DB struct {
 	circuitBreaker *risk.CircuitBreakerManager
 }
 
-// New creates a new database connection pool.
-// It first tries to get credentials from Vault, then falls back to DATABASE_URL env var.
-func New(ctx context.Context) (*DB, error) {
+// New creates a new database connection pool using DATABASE_URL or Vault credentials.
+// Pool size defaults to 25 connections; pass a non-nil *appconfig.DatabaseConfig to
+// override via database.pool_size in the application config.
+func New(ctx context.Context, cfg ...*appconfig.DatabaseConfig) (*DB, error) {
+	var dbCfg *appconfig.DatabaseConfig
+	if len(cfg) > 0 {
+		dbCfg = cfg[0]
+	}
+	return newWithConfig(ctx, dbCfg)
+}
+
+// newWithConfig is the internal constructor that accepts an optional DatabaseConfig.
+func newWithConfig(ctx context.Context, dbCfg *appconfig.DatabaseConfig) (*DB, error) {
 	var databaseURL string
 
 	// Try to get database URL from Vault first
@@ -51,9 +62,16 @@ func New(ctx context.Context) (*DB, error) {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Set pool configuration
-	config.MaxConns = 10
-	config.MinConns = 2
+	// Set pool configuration.
+	// Default pool size is 25 (up from the old hardcoded 10) for better throughput
+	// under concurrent API request load. The value is overridden by
+	// database.pool_size in the application config when a DatabaseConfig is supplied.
+	maxConns := int32(25)
+	if dbCfg != nil && dbCfg.PoolSize > 0 {
+		maxConns = int32(dbCfg.PoolSize)
+	}
+	config.MaxConns = maxConns
+	config.MinConns = 5
 	config.MaxConnLifetime = time.Hour
 	config.MaxConnIdleTime = 30 * time.Minute
 	config.HealthCheckPeriod = time.Minute
