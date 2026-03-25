@@ -736,10 +736,14 @@ func TestSafeOrderSanitization(t *testing.T) {
 	// This is exactly the sanitization logic from handlePlaceOrder.
 	safeOrder := *order
 	safeOrder.ErrorMessage = nil
+	safeOrder.ExchangeOrderID = nil // don't expose exchange-side IDs
+	safeOrder.SessionID = nil       // don't expose internal session reference
 
 	// The safe copy must NOT retain any sensitive fields from the original.
 	assert.Nil(t, safeOrder.ErrorMessage,
 		"ErrorMessage must be nil in the sanitized copy so raw errors are not broadcast/leaked")
+	assert.Nil(t, safeOrder.ExchangeOrderID, "ExchangeOrderID must be nil in the sanitized copy")
+	assert.Nil(t, safeOrder.SessionID, "SessionID must be nil in the sanitized copy")
 
 	// The original must be unchanged (safeOrder is a value copy, not a pointer to the same struct).
 	assert.NotNil(t, order.ErrorMessage,
