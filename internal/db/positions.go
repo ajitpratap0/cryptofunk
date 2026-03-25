@@ -929,3 +929,110 @@ func ConvertPositionSide(side string) PositionSide {
 		return PositionSideFlat
 	}
 }
+
+// ClosePositionTx fully closes a position inside an existing transaction.
+// Uses the entry_price and quantity already on the position row to compute realized P&L.
+// Open/closed state is determined by exit_time IS NULL — there is no status column.
+//
+// fees is the total fees attributable to this position's closed portion (entry fees
+// already recorded on the row plus any exit commission). The column is SET (not added)
+// because the caller (handlePaperTrade) computes proportionalFees = existingPos.Fees *
+// (closeQty / existingPos.Quantity), which is already a slice of the entry fees stored
+// in the column. Using fees=fees+$5 would double-count those entry fees.
+func (db *DB) ClosePositionTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
+	// NOTE: The SELECT below re-reads fields that the caller already has from a
+	// FOR UPDATE lock (via GetOpenPositionBySymbolTx). The re-read is redundant but
+	// safe — it provides a defence-in-depth guard and keeps this function
+	// self-contained. Eliminating it (by accepting entryPrice/side as parameters)
+	// is a valid follow-up refactor but is out of scope here.
+	var entryPrice, qty float64
+	var side PositionSide
+	if err := tx.QueryRow(ctx,
+		`SELECT entry_price, quantity, side FROM positions WHERE id=$1 AND exit_time IS NULL`,
+		id).Scan(&entryPrice, &qty, &side); err != nil {
+		return fmt.Errorf("ClosePositionTx: read position: %w", err)
+	}
+
+	var realizedPnL float64
+	if side == PositionSideLong {
+		realizedPnL = (exitPrice-entryPrice)*qty - fees
+	} else {
+		realizedPnL = (entryPrice-exitPrice)*qty - fees
+	}
+
+	now := time.Now()
+	_, err := tx.Exec(ctx, `
+		UPDATE positions
+		SET exit_price=$2, exit_time=$3, realized_pnl=$4, unrealized_pnl=0,
+		    fees=$5, exit_reason=$6, updated_at=$7
+		WHERE id=$1
+	`, id, exitPrice, now, realizedPnL, fees, exitReason, now)
+	return err
+}
+
+// PartialClosePositionTx partially closes a position inside an existing transaction.
+// Creates a new closed position row for the closed portion and reduces the open
+// position's quantity. existingPos must be the tx-locked position (from GetOpenPositionBySymbolTx).
+// Returns the updated open position (in-memory; not re-fetched from DB).
+func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos *Position, closeQty, exitPrice float64, exitReason string, closeFees float64) (*Position, error) {
+	remainQty := existingPos.Quantity - closeQty
+	if remainQty < 1e-10 {
+		return nil, fmt.Errorf("PartialClosePositionTx: remainQty must be > 0; use ClosePositionTx for full close")
+	}
+	if existingPos.Quantity == 0 {
+		return nil, fmt.Errorf("PartialClosePositionTx: existing position has zero quantity")
+	}
+	now := time.Now()
+	// Fees proportional to the remaining open size stay on the position
+	remainFees := existingPos.Fees * (remainQty / existingPos.Quantity)
+
+	var realizedPnL float64
+	if existingPos.Side == PositionSideLong {
+		realizedPnL = (exitPrice-existingPos.EntryPrice)*closeQty - closeFees
+	} else {
+		realizedPnL = (existingPos.EntryPrice-exitPrice)*closeQty - closeFees
+	}
+
+	// Insert a new row for the closed portion
+	_, err := tx.Exec(ctx, `
+		INSERT INTO positions (
+			id, session_id, symbol, exchange, side,
+			entry_price, exit_price, quantity, entry_time, exit_time,
+			realized_pnl, fees, entry_reason, exit_reason,
+			created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+	`,
+		uuid.New(), existingPos.SessionID, existingPos.Symbol, existingPos.Exchange, existingPos.Side,
+		existingPos.EntryPrice, exitPrice, closeQty, existingPos.EntryTime, now,
+		realizedPnL, closeFees, existingPos.EntryReason, &exitReason,
+		now, now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("PartialClosePositionTx: insert closed portion: %w", err)
+	}
+
+	// Scale unrealized_pnl proportionally to remaining quantity so the open position
+	// no longer carries P&L attributed to the closed portion.
+	remainUnrealizedPnL := 0.0
+	if existingPos.UnrealizedPnL != nil && existingPos.Quantity > 0 {
+		remainUnrealizedPnL = *existingPos.UnrealizedPnL * (remainQty / existingPos.Quantity)
+	}
+
+	// Update remaining open position's quantity, fees, and unrealized_pnl (SET, not ADD)
+	_, err = tx.Exec(ctx, `
+		UPDATE positions
+		SET quantity=$2, fees=$3, unrealized_pnl=$5, updated_at=$4
+		WHERE id=$1 AND exit_time IS NULL
+	`, existingPos.ID, remainQty, remainFees, now, remainUnrealizedPnL)
+	if err != nil {
+		return nil, fmt.Errorf("PartialClosePositionTx: update remaining: %w", err)
+	}
+
+	// Return updated in-memory copy
+	remain := *existingPos
+	remain.Quantity = remainQty
+	remain.Fees = remainFees
+	remain.UnrealizedPnL = &remainUnrealizedPnL
+	remain.UpdatedAt = now
+	return &remain, nil
+}

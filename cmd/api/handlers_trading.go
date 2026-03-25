@@ -16,11 +16,24 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
-// errOppositeSide is a sentinel returned from the WithTx callback when the
-// incoming order is on the opposite side of an existing open position. It is
-// handled by the caller to produce a 422 response without logging as an
-// internal server error.
-var errOppositeSide = errors.New("opposite side trade on existing position")
+// errNoPosition is a sentinel returned from the WithTx callback when a SELL
+// is attempted with no existing open position for that symbol. Handled by the
+// caller to produce a 422 response without logging as an internal server error.
+var errNoPosition = errors.New("no open position to sell")
+
+// quoteAsset derives the quote asset token from a trading symbol by checking
+// common suffixes. Falls back to "USDT" for unrecognised symbols.
+func quoteAsset(symbol string) string {
+	// Ordered most-specific first: "BUSD" before "BTC" prevents "BTCUSDT" from
+	// matching suffix "BTC" when "USDT" would be the correct quote asset.
+	// TODO: make configurable for non-Binance exchanges (e.g. Kraken uses XBT/USD).
+	for _, suffix := range []string{"USDT", "BUSD", "BTC", "ETH", "BNB"} {
+		if strings.HasSuffix(strings.ToUpper(symbol), suffix) {
+			return suffix
+		}
+	}
+	return "USDT"
+}
 
 // Session handlers
 func (s *APIServer) handleListSessions(c *gin.Context) {
@@ -447,20 +460,6 @@ func (s *APIServer) handleCancelOrder(c *gin.Context) {
 	})
 }
 
-// quoteAsset derives the quote asset token from a trading symbol by checking
-// common suffixes. Falls back to "USDT" for unrecognised symbols.
-func quoteAsset(symbol string) string {
-	// Ordered most-specific first: "BUSD" before "BTC" prevents "BTCUSDT" from
-	// matching suffix "BTC" when "USDT" would be the correct quote asset.
-	// TODO: make configurable for non-Binance exchanges (e.g. Kraken uses XBT/USD).
-	for _, suffix := range []string{"USDT", "BUSD", "BTC", "ETH", "BNB"} {
-		if strings.HasSuffix(strings.ToUpper(symbol), suffix) {
-			return suffix
-		}
-	}
-	return "USDT"
-}
-
 // handlePaperTrade executes a paper (simulated) trade order.
 // Market orders are immediately filled; limit orders remain open (NEW status).
 // POST /api/v1/trade
@@ -483,11 +482,6 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// NOTE: Session lookup and creation happen outside WithTx intentionally.
-	// The session row is long-lived (one per trading mode) and is safe to create
-	// outside the fill transaction. A failed fill transaction does not orphan the
-	// session — the next request simply reuses it.
-
 	// 1. Resolve or create paper session
 	sessions, err := s.db.ListActiveSessions(ctx)
 	if err != nil {
@@ -505,11 +499,8 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 	}
 	if sessionID == nil {
 		newSession := &db.TradingSession{
-			ID:   uuid.New(),
-			Mode: db.TradingModePaper,
-			// TODO: Add a session_type or is_multi_asset column to trading_sessions in a follow-up
-			// migration. "PAPER" is a placeholder to distinguish multi-asset paper sessions from
-			// single-symbol sessions (which use the actual symbol, e.g. "BTCUSDT").
+			ID:             uuid.New(),
+			Mode:           db.TradingModePaper,
 			Symbol:         "PAPER",
 			Exchange:       "paper",
 			InitialCapital: s.config.Trading.InitialCapital,
@@ -542,9 +533,9 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 					return
 				}
 			} else {
-				log.Error().Err(err).Msg("Failed to create paper session")
+				log.Error().Err(err).Msg("failed to create paper session")
 				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "internal server error",
+					"error": "failed to create paper trading session",
 				})
 				return
 			}
@@ -599,6 +590,13 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+
+	// Capture close results for use in the final response (set inside market order block).
+	var (
+		wasClose       bool
+		actualCloseQty float64
+		remainingQty   float64
+	)
 
 	// 4. Immediate fill for market orders
 	if order.Type == db.OrderTypeMarket {
@@ -659,11 +657,73 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				return fmt.Errorf("failed to look up existing position: %w", err)
 			}
 
+			// Reject SELL when no open position exists (no short selling in paper mode).
+			if existingPos == nil && orderSide == db.OrderSideSell {
+				return errNoPosition
+			}
+
 			if existingPos != nil && existingPos.Side != posSide {
-				// Opposite-side trade on an existing open position. Proper close/reduce
-				// logic (netting, realized PnL calculation) is not yet implemented.
-				// Return a sentinel so the outer handler can respond with 422.
-				return errOppositeSide
+				// POSITION CLOSE — full or partial depending on quantities.
+				closeQty := req.Quantity
+				if closeQty > existingPos.Quantity {
+					closeQty = existingPos.Quantity // clamp: never over-sell
+				}
+				remainQty := existingPos.Quantity - closeQty
+				proportionalFees := existingPos.Fees * (closeQty / existingPos.Quantity)
+
+				// Mark order filled for the actual close quantity (may be clamped).
+				closeQuoteQty := closeQty * execPrice
+				if err := s.db.UpdateOrderStatusTx(ctx, tx, order.ID, db.OrderStatusFilled,
+					closeQty, closeQuoteQty, &now, nil, nil); err != nil {
+					return fmt.Errorf("failed to fill close order: %w", err)
+				}
+				order.Status = db.OrderStatusFilled
+				order.ExecutedQuantity = closeQty
+				order.ExecutedQuoteQuantity = closeQuoteQty
+				order.FilledAt = &now
+				order.UpdatedAt = now
+
+				// Insert trade fill record for the close.
+				closeCommission := closeQty * execPrice * commissionRate
+				// feesForClose = proportional slice of entry fees + exit commission so that
+				// realized P&L correctly accounts for both sides of the round-trip cost.
+				feesForClose := proportionalFees + closeCommission
+				closeCommAsset := commissionAsset
+				closeTrade := &db.Trade{
+					ID:              uuid.New(),
+					OrderID:         order.ID,
+					Symbol:          req.Symbol,
+					Exchange:        "paper",
+					Side:            orderSide,
+					Price:           execPrice,
+					Quantity:        closeQty,
+					QuoteQuantity:   closeQuoteQty,
+					Commission:      closeCommission,
+					CommissionAsset: &closeCommAsset,
+					ExecutedAt:      now,
+					IsMaker:         false,
+					CreatedAt:       now,
+				}
+				if err := s.db.InsertTradeTx(ctx, tx, closeTrade); err != nil {
+					return fmt.Errorf("failed to insert close trade fill: %w", err)
+				}
+
+				if remainQty < 1e-10 {
+					// Full close
+					if err := s.db.ClosePositionTx(ctx, tx, existingPos.ID, execPrice, "api_close", feesForClose); err != nil {
+						return fmt.Errorf("failed to close position: %w", err)
+					}
+				} else {
+					// Partial close
+					if _, err := s.db.PartialClosePositionTx(ctx, tx, existingPos, closeQty, execPrice, "api_partial_close", feesForClose); err != nil {
+						return fmt.Errorf("failed to partially close position: %w", err)
+					}
+				}
+
+				wasClose = true
+				actualCloseQty = closeQty
+				remainingQty = remainQty
+				return nil
 			}
 
 			// UpdateOrderStatus inside transaction
@@ -730,16 +790,10 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		})
 
 		if txErr != nil {
-			if errors.Is(txErr, errOppositeSide) {
-				// Opposite-side trade on an existing open position. Proper close/reduce
-				// logic (netting, realized PnL calculation) is not yet implemented.
-				// Reject the trade rather than silently corrupting position data.
-				log.Warn().
-					Str("symbol", req.Symbol).
-					Str("order_side", string(posSide)).
-					Msg("Opposite-side trade on existing position; position close logic not yet implemented")
+			if errors.Is(txErr, errNoPosition) {
+				log.Debug().Str("symbol", req.Symbol).Str("side", string(req.Side)).Msg("paper trade rejected: no open position to sell")
 				c.JSON(http.StatusUnprocessableEntity, gin.H{
-					"error": "position close/reduce not yet implemented; opposite-side trade rejected",
+					"error": fmt.Sprintf("no open position for %s", req.Symbol),
 				})
 				return
 			}
@@ -752,6 +806,26 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		// UPDATE that can be retried without risk of partial data corruption.
 		if err := s.db.AggregateSessionStats(ctx, *sessionID); err != nil {
 			log.Warn().Err(err).Msg("Failed to aggregate session stats after paper trade")
+		}
+
+		// Write equity snapshot (best-effort: don't fail the trade on snapshot errors).
+		if session, err := s.db.GetSession(ctx, *sessionID); err != nil {
+			log.Warn().Err(err).Msg("Failed to re-fetch session for equity snapshot")
+		} else {
+			openPositions, posErr := s.db.GetOpenPositions(ctx, *sessionID)
+			if posErr != nil {
+				log.Warn().Err(posErr).Str("session_id", sessionID.String()).Msg("equity snapshot: failed to fetch open positions, unrealizedPnL will be 0")
+			}
+			var sumUnrealized float64
+			for _, p := range openPositions {
+				if p.UnrealizedPnL != nil {
+					sumUnrealized += *p.UnrealizedPnL
+				}
+			}
+			currentEquity := session.InitialCapital + session.TotalPnL + sumUnrealized
+			if snapErr := s.db.InsertEquitySnapshot(ctx, *sessionID, currentEquity, session.TotalPnL, sumUnrealized); snapErr != nil {
+				log.Warn().Err(snapErr).Msg("Failed to write equity snapshot")
+			}
 		}
 	} else {
 		// Limit orders are not immediately filled; persist the order record in NEW status.
@@ -766,11 +840,24 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		log.Warn().Err(err).Msg("Failed to broadcast paper trade order update")
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
+	tradeResp := gin.H{
 		"order":        order,
-		"message":      "Paper trade order executed successfully",
 		"trading_mode": "paper",
-	})
+	}
+	tradeStatus := http.StatusCreated
+	if wasClose {
+		tradeResp["message"] = "Position closed successfully"
+		tradeResp["closed_quantity"] = actualCloseQty
+		tradeResp["remaining_quantity"] = remainingQty
+		tradeStatus = http.StatusOK // close returns 200, not 201
+		// Inform callers when the requested quantity was clamped to the open position size.
+		if req.Quantity > actualCloseQty {
+			tradeResp["warning"] = fmt.Sprintf("requested quantity %.8f clamped to open position size %.8f", req.Quantity, actualCloseQty)
+		}
+	} else {
+		tradeResp["message"] = "Paper trade order executed successfully"
+	}
+	c.JSON(tradeStatus, tradeResp)
 }
 
 // Trading control handlers
