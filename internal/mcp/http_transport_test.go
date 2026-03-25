@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/ajitpratap0/cryptofunk/internal/testhelpers"
 )
@@ -550,4 +551,75 @@ func TestStreamableHTTP_MultipleTools(t *testing.T) {
 	if len(listRPC.Result.Tools) != len(toolNames) {
 		t.Fatalf("expected %d tools, got %d", len(toolNames), len(listRPC.Result.Tools))
 	}
+}
+
+// TestPanicRecoveryMiddleware verifies that the panicRecoveryMiddleware:
+// 1. Returns HTTP 500 with a JSON-RPC -32603 body when the inner handler panics.
+// 2. Does not affect non-panicking handlers (pass-through).
+// 3. Continues to serve subsequent requests after a panic is recovered.
+func TestPanicRecoveryMiddleware(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	srv := New(Config{Name: "panic-test", Version: "0.0.1", Logger: logger})
+
+	// Build a panicRecoveryMiddleware-wrapped handler directly without HTTP server.
+	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	})
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	t.Run("panicking handler returns 500 JSON-RPC error", func(t *testing.T) {
+		wrapped := srv.panicRecoveryMiddleware(panicHandler)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+
+		assert.NotPanics(t, func() { wrapped.ServeHTTP(rec, req) })
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("expected 500, got %d", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `"code":-32603`) {
+			t.Errorf("expected JSON-RPC -32603 error body, got: %s", body)
+		}
+		if !strings.Contains(body, `"id":null`) {
+			t.Errorf("expected id:null in error body, got: %s", body)
+		}
+	})
+
+	t.Run("non-panicking handler passes through unchanged", func(t *testing.T) {
+		wrapped := srv.panicRecoveryMiddleware(okHandler)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("server continues serving after panic recovery", func(t *testing.T) {
+		wrapped := srv.panicRecoveryMiddleware(panicHandler)
+
+		// First request — panics
+		rec1 := httptest.NewRecorder()
+		assert.NotPanics(t, func() {
+			wrapped.ServeHTTP(rec1, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+		})
+		if rec1.Code != http.StatusInternalServerError {
+			t.Errorf("first request: expected 500, got %d", rec1.Code)
+		}
+
+		// Second request — also panics but is also recovered
+		rec2 := httptest.NewRecorder()
+		assert.NotPanics(t, func() {
+			wrapped.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+		})
+		if rec2.Code != http.StatusInternalServerError {
+			t.Errorf("second request: expected 500, got %d", rec2.Code)
+		}
+	})
 }

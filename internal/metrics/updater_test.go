@@ -289,9 +289,8 @@ func TestUpdater_MultipleStops(t *testing.T) {
 		updater.Stop()
 	})
 
-	// Second stop should panic (closing closed channel)
-	// This is expected behavior in Go
-	assert.Panics(t, func() {
+	// Second stop should NOT panic — Stop() is idempotent via sync.Once
+	assert.NotPanics(t, func() {
 		updater.Stop()
 	})
 }
