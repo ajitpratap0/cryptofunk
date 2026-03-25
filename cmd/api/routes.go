@@ -127,8 +127,22 @@ func (s *APIServer) setupRoutes() {
 	// Apply global rate limiting to all API requests
 	s.router.Use(s.rateLimiter.GlobalMiddleware())
 
-	// Prometheus metrics endpoint (no API prefix, no rate limiting)
-	s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
+	// Prometheus metrics endpoint (no API prefix, no rate limiting).
+	// Requires API key when auth is enabled (#120) to prevent leaking internal
+	// counters, queue depths, and trading stats to unauthenticated callers.
+	metricsAuthConfig := &api.AuthConfig{
+		Enabled:      s.config.API.Auth.Enabled,
+		HeaderName:   s.config.API.Auth.HeaderName,
+		RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+	}
+	if metricsAuthConfig.HeaderName == "" {
+		metricsAuthConfig.HeaderName = "X-API-Key"
+	}
+	if s.config.API.Auth.Enabled {
+		s.router.GET("/metrics", api.AuthMiddleware(s.apiKeyStore, metricsAuthConfig), gin.WrapH(metrics.Handler()))
+	} else {
+		s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
+	}
 
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
@@ -211,9 +225,12 @@ func (s *APIServer) setupRoutes() {
 		}
 
 		// Configuration routes (admin ops, apply control rate limiter)
+		// Both GET and PATCH require authentication (#121) — the config response
+		// includes internal service URLs and runtime settings that should not be
+		// publicly readable.
 		configGroup := v1.Group("/config")
 		{
-			configGroup.GET("", s.rateLimiter.ReadMiddleware(), s.handleGetConfig)
+			configGroup.GET("", s.rateLimiter.ReadMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig), s.handleGetConfig)
 			configGroup.PATCH("", s.rateLimiter.ControlMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig), s.handleUpdateConfig)
 		}
 
