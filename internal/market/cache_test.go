@@ -47,6 +47,7 @@ func TestNewCachedCoinGeckoClient(t *testing.T) {
 
 	if cachedClient == nil {
 		t.Fatal("Expected non-nil cached client")
+		return
 	}
 
 	if cachedClient.client != cgClient {
