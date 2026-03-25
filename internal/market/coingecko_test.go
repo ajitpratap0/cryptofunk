@@ -47,6 +47,7 @@ func TestNewCoinGeckoClient(t *testing.T) {
 
 			if client == nil {
 				t.Fatalf("Expected non-nil client for test case %q, but got nil", tt.name)
+				return
 			}
 
 			if client.timeout != defaultTimeout {
@@ -222,6 +223,7 @@ func TestGetPrice(t *testing.T) {
 
 			if result == nil {
 				t.Fatalf("Expected non-nil result for GetPrice(%q, %q), but got nil", tt.symbol, tt.vsCurrency)
+				return
 			}
 
 			if result.Symbol != tt.symbol {
@@ -304,6 +306,7 @@ func TestGetMarketChart(t *testing.T) {
 
 			if result == nil {
 				t.Fatalf("Expected non-nil result for GetMarketChart(%q, %d), but got nil", tt.symbol, tt.days)
+				return
 			}
 
 			if len(result.Prices) == 0 {
