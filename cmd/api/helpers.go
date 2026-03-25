@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,8 +23,8 @@ var startTime = time.Now()
 
 // maxPageSize is the upper bound on any paginated query's limit parameter.
 // Clients that pass a larger value are silently capped to this limit.
-// NOTE: must match maxFilteredOrders in internal/db/orders.go
-const maxPageSize = 1000
+// Defined as db.MaxFilteredOrders so both layers share a single source of truth.
+const maxPageSize = db.MaxFilteredOrders
 
 func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)

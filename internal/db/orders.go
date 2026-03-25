@@ -11,10 +11,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// maxFilteredOrders caps the number of rows returned by filter-based order queries.
+// MaxFilteredOrders caps the number of rows returned by filter-based order queries.
 // Full pagination for filtered queries is a TODO follow-up.
-// NOTE: must match maxPageSize in cmd/api/helpers.go
-const maxFilteredOrders = 1000
+const MaxFilteredOrders = 1000
 
 // OrderSide represents buy or sell (database enum)
 type OrderSide string
@@ -517,7 +516,7 @@ func (db *DB) GetOrdersBySession(ctx context.Context, sessionID uuid.UUID) ([]*O
 		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, sessionID, maxFilteredOrders+1)
+	rows, err := db.pool.Query(ctx, query, sessionID, MaxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by session: %w", err)
 	}
@@ -539,7 +538,7 @@ func (db *DB) GetOrdersBySymbol(ctx context.Context, symbol string) ([]*Order, e
 		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, symbol, maxFilteredOrders+1)
+	rows, err := db.pool.Query(ctx, query, symbol, MaxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by symbol: %w", err)
 	}
@@ -561,7 +560,7 @@ func (db *DB) GetOrdersByStatus(ctx context.Context, status OrderStatus) ([]*Ord
 		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, status, maxFilteredOrders+1)
+	rows, err := db.pool.Query(ctx, query, status, MaxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by status: %w", err)
 	}
