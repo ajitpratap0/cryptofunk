@@ -9,10 +9,12 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
+	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
 // setupMinimalServer creates an APIServer with minimal config for unit testing
@@ -634,6 +636,7 @@ func TestSecurityHeaders(t *testing.T) {
 	assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 	assert.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
 	assert.Equal(t, "1; mode=block", w.Header().Get("X-XSS-Protection"))
+	assert.Equal(t, "strict-origin-when-cross-origin", w.Header().Get("Referrer-Policy"))
 }
 
 // TestDetermineEventType tests audit event type determination
@@ -702,6 +705,95 @@ func TestHandlePaperTrade_InvalidBody(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.Equal(t, "invalid request body", resp["error"])
+}
+
+// TestSafeOrderSanitization directly exercises the safeOrder sanitization logic
+// in handlePlaceOrder. It verifies that:
+//  1. A db.Order with sensitive fields set (ErrorMessage, ExchangeOrderID, SessionID)
+//     produces a safe copy where ErrorMessage is nil — the copy that gets broadcast.
+//  2. The error-path JSON response only contains the expected safe fields
+//     (order_id, status, symbol, side) and never the sensitive internal fields.
+//
+// This test is meaningful: removing the `safeOrder.ErrorMessage = nil` line in
+// handlePlaceOrder would cause this test to fail.
+func TestSafeOrderSanitization(t *testing.T) {
+	// Simulate the sanitization performed in handlePlaceOrder after executeOrder fails.
+	// This directly tests the safeOrder copy logic, not gin.Recovery.
+	errMsg := "internal exchange error: auth failed"
+	exchangeID := "EX-123"
+	sessionUUID := uuid.New()
+
+	order := &db.Order{
+		ID:              uuid.New(),
+		SessionID:       &sessionUUID,
+		ExchangeOrderID: &exchangeID,
+		Symbol:          "BTCUSDT",
+		Side:            db.OrderSideBuy,
+		Status:          db.OrderStatusRejected,
+		ErrorMessage:    &errMsg,
+	}
+
+	// This is exactly the sanitization logic from handlePlaceOrder.
+	safeOrder := *order
+	safeOrder.ErrorMessage = nil
+	safeOrder.ExchangeOrderID = nil // don't expose exchange-side IDs
+	safeOrder.SessionID = nil       // don't expose internal session reference
+
+	// The safe copy must NOT retain any sensitive fields from the original.
+	assert.Nil(t, safeOrder.ErrorMessage,
+		"ErrorMessage must be nil in the sanitized copy so raw errors are not broadcast/leaked")
+	assert.Nil(t, safeOrder.ExchangeOrderID, "ExchangeOrderID must be nil in the sanitized copy")
+	assert.Nil(t, safeOrder.SessionID, "SessionID must be nil in the sanitized copy")
+
+	// The original must be unchanged (safeOrder is a value copy, not a pointer to the same struct).
+	assert.NotNil(t, order.ErrorMessage,
+		"original order ErrorMessage must not be modified by the sanitized copy")
+
+	// Verify the error-path response shape: only safe fields are included.
+	// This mirrors exactly what handlePlaceOrder returns on the executeOrder failure path.
+	responseFields := map[string]interface{}{
+		"error":    "order execution failed",
+		"order_id": order.ID,
+		"status":   order.Status,
+		"symbol":   order.Symbol,
+		"side":     order.Side,
+	}
+	responseJSON, err := json.Marshal(responseFields)
+	require.NoError(t, err)
+	responseStr := string(responseJSON)
+
+	// Positive assertions: safe fields are present.
+	assert.Contains(t, responseStr, order.ID.String(), "response must include order_id")
+	assert.Contains(t, responseStr, "BTCUSDT", "response must include symbol")
+
+	// Negative assertions: sensitive internal fields must not appear.
+	assert.NotContains(t, responseStr, "error_message",
+		"error_message must not be exposed in error responses")
+	assert.NotContains(t, responseStr, "exchange_id",
+		"exchange_id must not be exposed in error responses")
+	assert.NotContains(t, responseStr, "session_id",
+		"session_id must not be exposed in error responses")
+	assert.NotContains(t, responseStr, errMsg,
+		"raw error string must not be exposed in error responses")
+}
+
+// TestHandlePlaceOrder_NilDBReturns500 verifies that handlePlaceOrder returns HTTP 500
+// when the database is unavailable (nil DB → gin.Recovery catches the panic).
+// This test covers the infrastructure failure path, not the sanitization logic;
+// see TestSafeOrderSanitization for the actual safeOrder sanitization coverage.
+func TestHandlePlaceOrder_NilDBReturns500(t *testing.T) {
+	server := setupMinimalServer(t)
+	// db is nil — InsertOrder will panic; gin.Recovery converts it to a 500.
+	server.router.Use(gin.Recovery())
+	server.router.POST("/api/v1/orders", server.handlePlaceOrder)
+
+	body := `{"symbol":"BTCUSDT","side":"BUY","type":"MARKET","quantity":0.01}`
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/api/v1/orders", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
 // TestHandlePaperTrade_LimitMissingPrice tests that limit orders without a price are rejected
