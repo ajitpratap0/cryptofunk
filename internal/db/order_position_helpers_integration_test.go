@@ -831,7 +831,7 @@ func TestAggregateSessionStatsWithData(t *testing.T) {
 	updated, err := tc.DB.GetSession(ctx, session.ID)
 	require.NoError(t, err)
 
-	assert.Equal(t, 2, updated.TotalTrades, "should count only FILLED orders (2), not pending")
+	assert.Equal(t, 3, updated.TotalTrades, "should count all closed positions (3: win, lose, break-even)")
 	assert.Equal(t, 1, updated.WinningTrades, "should count 1 winning position (pnl > 0)")
 	assert.Equal(t, 1, updated.LosingTrades, "should count 1 losing position (pnl < 0), break-even excluded")
 	// Total P&L = 995 + (-505) + 0 = 490

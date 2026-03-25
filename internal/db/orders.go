@@ -11,6 +11,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// MaxFilteredOrders caps the number of rows returned by filter-based order queries.
+// Full pagination for filtered queries is a TODO follow-up.
+const MaxFilteredOrders = 1000
+
 // OrderSide represents buy or sell (database enum)
 type OrderSide string
 
@@ -509,9 +513,10 @@ func (db *DB) GetOrdersBySession(ctx context.Context, sessionID uuid.UUID) ([]*O
 		FROM orders
 		WHERE session_id = $1
 		ORDER BY created_at DESC
+		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, sessionID)
+	rows, err := db.pool.Query(ctx, query, sessionID, MaxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by session: %w", err)
 	}
@@ -530,9 +535,10 @@ func (db *DB) GetOrdersBySymbol(ctx context.Context, symbol string) ([]*Order, e
 		FROM orders
 		WHERE symbol = $1
 		ORDER BY created_at DESC
+		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, symbol)
+	rows, err := db.pool.Query(ctx, query, symbol, MaxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by symbol: %w", err)
 	}
@@ -551,9 +557,10 @@ func (db *DB) GetOrdersByStatus(ctx context.Context, status OrderStatus) ([]*Ord
 		FROM orders
 		WHERE status = $1
 		ORDER BY created_at DESC
+		LIMIT $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, status)
+	rows, err := db.pool.Query(ctx, query, status, MaxFilteredOrders+1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query orders by status: %w", err)
 	}
@@ -562,8 +569,22 @@ func (db *DB) GetOrdersByStatus(ctx context.Context, status OrderStatus) ([]*Ord
 	return scanOrders(rows)
 }
 
-// GetRecentOrders retrieves recent orders (limited)
+// GetRecentOrders returns the most recent orders, limited by limit.
+// limit=0 returns zero rows (preserving original LIMIT 0 semantics). The guard below
+// prevents delegating to GetRecentOrdersPaginated with limit=0, which would use
+// NULLIF($1, 0) → LIMIT NULL (unbounded). Use a positive limit for paginated access,
+// or GetRecentOrdersPaginated with limit=0 for unbounded results.
+// Deprecated: prefer GetRecentOrdersPaginated for new callers.
 func (db *DB) GetRecentOrders(ctx context.Context, limit int) ([]*Order, error) {
+	if limit == 0 {
+		return nil, nil // preserve old semantics: limit=0 returned zero rows
+	}
+	return db.GetRecentOrdersPaginated(ctx, limit, 0)
+}
+
+// GetRecentOrdersPaginated retrieves recent orders with limit/offset pagination.
+// limit=0 means no limit (returns all rows).
+func (db *DB) GetRecentOrdersPaginated(ctx context.Context, limit, offset int) ([]*Order, error) {
 	query := `
 		SELECT id, session_id, position_id, exchange_order_id, symbol, exchange,
 		       side, type, status, price, stop_price, quantity, executed_quantity,
@@ -571,10 +592,10 @@ func (db *DB) GetRecentOrders(ctx context.Context, limit int) ([]*Order, error) 
 		       canceled_at, error_message, metadata, created_at, updated_at
 		FROM orders
 		ORDER BY created_at DESC
-		LIMIT $1
+		LIMIT NULLIF($1, 0) OFFSET $2
 	`
 
-	rows, err := db.pool.Query(ctx, query, limit)
+	rows, err := db.pool.Query(ctx, query, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent orders: %w", err)
 	}
