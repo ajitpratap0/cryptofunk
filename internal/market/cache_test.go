@@ -86,6 +86,7 @@ func TestCachedGetPrice_CacheMiss(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 
 	if result.Symbol != "bitcoin" {
@@ -173,6 +174,7 @@ func TestCachedGetMarketChart_CacheMiss(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 
 	if len(result.Prices) == 0 {
@@ -256,6 +258,7 @@ func TestCachedGetCoinInfo(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 
 	if result.ID != "bitcoin" {
@@ -458,6 +461,7 @@ func TestCachedGetPrice_InvalidCachedData(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected non-nil result after cache unmarshal failure")
+		return
 	}
 }
 

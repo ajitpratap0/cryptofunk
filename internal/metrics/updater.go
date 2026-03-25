@@ -3,17 +3,25 @@ package metrics
 import (
 	"context"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
+// DefaultInitialCapital is the assumed portfolio start value for return metrics until per-session tracking is implemented.
+// TODO: wire actual session InitialCapital from config/DB — tracked in metrics/updater.go
+const DefaultInitialCapital = 10000.0
+
 // Updater periodically updates metrics from the database
 type Updater struct {
-	db       *pgxpool.Pool
-	interval time.Duration
-	stopCh   chan struct{}
+	db        *pgxpool.Pool
+	interval  time.Duration
+	stopCh    chan struct{}
+	stopOnce  sync.Once
+	startOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 // NewUpdater creates a new metrics updater
@@ -25,7 +33,8 @@ func NewUpdater(db *pgxpool.Pool, interval time.Duration) *Updater {
 	}
 }
 
-// Start begins the metrics update loop
+// Start begins the metrics update loop. Must be called at most once.
+// To run in the background with proper lifecycle tracking, use StartAsync instead.
 func (u *Updater) Start(ctx context.Context) {
 	ticker := time.NewTicker(u.interval)
 	defer ticker.Stop()
@@ -47,9 +56,26 @@ func (u *Updater) Start(ctx context.Context) {
 	}
 }
 
-// Stop stops the metrics updater
+// StartAsync increments the internal WaitGroup and launches the update loop
+// in a background goroutine. Stop() will block until the goroutine exits.
+// Safe to call multiple times — only the first call launches the goroutine.
+func (u *Updater) StartAsync(ctx context.Context) {
+	u.startOnce.Do(func() {
+		u.wg.Add(1)
+		go func() {
+			defer u.wg.Done()
+			u.Start(ctx)
+		}()
+	})
+}
+
+// Stop signals the metrics updater to halt and blocks until the background
+// goroutine (if started via StartAsync) fully exits. This prevents DB queries
+// from racing with a deferred database.Close() in the caller. Safe to call
+// multiple times.
 func (u *Updater) Stop() {
-	close(u.stopCh)
+	u.stopOnce.Do(func() { close(u.stopCh) })
+	u.wg.Wait()
 }
 
 // update fetches and updates all metrics
@@ -176,8 +202,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var dailyPnL float64
 	err := u.db.QueryRow(ctx, query).Scan(&dailyPnL)
 	if err == nil {
-		// Assuming initial capital of 10000 (should be configurable)
-		initialCapital := 10000.0
+		initialCapital := DefaultInitialCapital
 		DailyReturn.Set(dailyPnL / initialCapital)
 	}
 
@@ -192,7 +217,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var weeklyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&weeklyPnL)
 	if err == nil {
-		initialCapital := 10000.0
+		initialCapital := DefaultInitialCapital
 		WeeklyReturn.Set(weeklyPnL / initialCapital)
 	}
 
@@ -207,7 +232,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var monthlyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&monthlyPnL)
 	if err == nil {
-		initialCapital := 10000.0
+		initialCapital := DefaultInitialCapital
 		MonthlyReturn.Set(monthlyPnL / initialCapital)
 	}
 }
@@ -234,7 +259,7 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 	defer rows.Close()
 
 	var returns []float64
-	initialCapital := 10000.0
+	initialCapital := DefaultInitialCapital
 
 	for rows.Next() {
 		var date time.Time
@@ -244,29 +269,38 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 		}
 		returns = append(returns, pnl/initialCapital)
 	}
+	// rows.Err() must be checked: a network error mid-stream produces a partial
+	// dataset that would yield a misleading Sharpe ratio.
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("Failed to iterate Sharpe ratio rows")
+		return
+	}
 
-	if len(returns) > 1 {
-		// Calculate mean return
-		var sum float64
-		for _, r := range returns {
-			sum += r
-		}
-		mean := sum / float64(len(returns))
+	// Require at least 2 data points for sample variance (Bessel's correction uses len-1).
+	if len(returns) < 2 {
+		return
+	}
 
-		// Calculate standard deviation
-		var variance float64
-		for _, r := range returns {
-			diff := r - mean
-			variance += diff * diff
-		}
-		variance /= float64(len(returns))
-		stdDev := math.Sqrt(variance)
+	// Calculate mean return
+	var sum float64
+	for _, r := range returns {
+		sum += r
+	}
+	mean := sum / float64(len(returns))
 
-		// Sharpe ratio (assuming risk-free rate of 0)
-		if stdDev > 0 {
-			sharpe := mean / stdDev * math.Sqrt(252) // Annualized
-			SharpeRatio.Set(sharpe)
-		}
+	// Calculate standard deviation
+	var variance float64
+	for _, r := range returns {
+		diff := r - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(returns) - 1)
+	stdDev := math.Sqrt(variance)
+
+	// Sharpe ratio (assuming risk-free rate of 0)
+	if stdDev > 0 {
+		sharpe := mean / stdDev * math.Sqrt(252) // Annualized
+		SharpeRatio.Set(sharpe)
 	}
 }
 
