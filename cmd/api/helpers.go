@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -261,6 +262,23 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 	return nil, fmt.Errorf("orchestrator call failed after %d attempts: %w", maxRetries, lastErr)
 }
 
+// bindJSON binds JSON request body to obj and writes the appropriate error response on failure.
+// Returns true if binding succeeded; false if it wrote an error response and the caller should return.
+func bindJSON(c *gin.Context, obj any) bool {
+	if err := c.ShouldBindJSON(obj); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			log.Warn().Str("path", c.Request.URL.Path).Msg("request body too large (413)")
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+		} else {
+			log.Warn().Str("path", c.Request.URL.Path).Err(err).Msg("invalid request body (400)")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		}
+		return false
+	}
+	return true
+}
+
 // truncateString truncates a string to maxLen and adds "..." if truncated.
 // For maxLen < 4, returns the first maxLen characters without "...".
 func truncateString(s string, maxLen int) string {
@@ -317,6 +335,9 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 
 		// Enable XSS protection in older browsers (most modern browsers ignore this)
 		c.Header("X-XSS-Protection", "1; mode=block")
+
+		// Control referrer information sent with requests
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		c.Next()
 	}
