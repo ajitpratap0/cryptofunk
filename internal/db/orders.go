@@ -71,7 +71,6 @@ type Order struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt    time.Time              `json:"created_at"`
 	UpdatedAt    time.Time              `json:"updated_at"`}
-
 // Trade represents a database trade record (fill)
 type Trade struct {
 	ID              uuid.UUID              `json:"id"`
