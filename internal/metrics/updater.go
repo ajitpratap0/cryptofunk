@@ -99,17 +99,19 @@ func (u *Updater) update(ctx context.Context) {
 
 // updateTradingMetrics updates trading performance metrics
 func (u *Updater) updateTradingMetrics(ctx context.Context) {
-	// Calculate total P&L, win rate, total trades
+	// Calculate total P&L, win rate, total trades from closed positions.
+	// DB-001 fix: trades table has no pnl/status/exit_time columns; use positions.realized_pnl.
+	// DB-002 fix: positions has no status column; use exit_time IS NOT NULL for closed positions.
 	var totalPnL float64
 	var totalTrades, winningTrades int64
 
 	query := `
 		SELECT
-			COALESCE(SUM(pnl), 0) as total_pnl,
+			COALESCE(SUM(realized_pnl), 0) as total_pnl,
 			COUNT(*) as total_trades,
-			COUNT(*) FILTER (WHERE pnl > 0) as winning_trades
-		FROM trades
-		WHERE status = 'FILLED' AND exit_time IS NOT NULL
+			COUNT(*) FILTER (WHERE realized_pnl > 0) as winning_trades
+		FROM positions
+		WHERE exit_time IS NOT NULL
 	`
 
 	err := u.db.QueryRow(ctx, query).Scan(&totalPnL, &totalTrades, &winningTrades)
@@ -128,14 +130,14 @@ func (u *Updater) updateTradingMetrics(ctx context.Context) {
 		WinRate.Set(0)
 	}
 
-	// Calculate risk/reward ratio
+	// Calculate risk/reward ratio from closed positions
 	var avgWin, avgLoss float64
 	query = `
 		SELECT
-			COALESCE(AVG(pnl) FILTER (WHERE pnl > 0), 0) as avg_win,
-			COALESCE(ABS(AVG(pnl)) FILTER (WHERE pnl < 0), 0) as avg_loss
-		FROM trades
-		WHERE status = 'FILLED' AND exit_time IS NOT NULL
+			COALESCE(AVG(realized_pnl) FILTER (WHERE realized_pnl > 0), 0) as avg_win,
+			COALESCE(ABS(AVG(realized_pnl)) FILTER (WHERE realized_pnl < 0), 0) as avg_loss
+		FROM positions
+		WHERE exit_time IS NOT NULL
 	`
 
 	err = u.db.QueryRow(ctx, query).Scan(&avgWin, &avgLoss)
@@ -155,13 +157,14 @@ func (u *Updater) updateTradingMetrics(ctx context.Context) {
 
 // updateDrawdownMetrics calculates current drawdown
 func (u *Updater) updateDrawdownMetrics(ctx context.Context) {
+	// DB-001 fix: use positions.realized_pnl and positions.exit_time instead of trades columns.
 	query := `
 		WITH cumulative_pnl AS (
 			SELECT
 				exit_time,
-				SUM(pnl) OVER (ORDER BY exit_time) as cumulative_pnl
-			FROM trades
-			WHERE status = 'FILLED' AND exit_time IS NOT NULL
+				SUM(realized_pnl) OVER (ORDER BY exit_time) as cumulative_pnl
+			FROM positions
+			WHERE exit_time IS NOT NULL
 			ORDER BY exit_time
 		),
 		peak_pnl AS (
@@ -191,11 +194,14 @@ func (u *Updater) updateDrawdownMetrics(ctx context.Context) {
 
 // updateReturnMetrics calculates daily, weekly, and monthly returns
 func (u *Updater) updateReturnMetrics(ctx context.Context) {
+	// DB-001 fix: use positions.realized_pnl instead of non-existent trades.pnl.
+	// DB-002 fix: use positions.exit_time instead of non-existent trades.status/exit_time.
+
 	// Daily return
 	query := `
-		SELECT COALESCE(SUM(pnl), 0)
-		FROM trades
-		WHERE status = 'FILLED'
+		SELECT COALESCE(SUM(realized_pnl), 0)
+		FROM positions
+		WHERE exit_time IS NOT NULL
 		AND exit_time >= NOW() - INTERVAL '1 day'
 	`
 
@@ -208,9 +214,9 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 
 	// Weekly return
 	query = `
-		SELECT COALESCE(SUM(pnl), 0)
-		FROM trades
-		WHERE status = 'FILLED'
+		SELECT COALESCE(SUM(realized_pnl), 0)
+		FROM positions
+		WHERE exit_time IS NOT NULL
 		AND exit_time >= NOW() - INTERVAL '7 days'
 	`
 
@@ -223,9 +229,9 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 
 	// Monthly return
 	query = `
-		SELECT COALESCE(SUM(pnl), 0)
-		FROM trades
-		WHERE status = 'FILLED'
+		SELECT COALESCE(SUM(realized_pnl), 0)
+		FROM positions
+		WHERE exit_time IS NOT NULL
 		AND exit_time >= NOW() - INTERVAL '30 days'
 	`
 
@@ -239,13 +245,14 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 
 // updateSharpeRatio calculates the Sharpe ratio
 func (u *Updater) updateSharpeRatio(ctx context.Context) {
+	// DB-001 fix: use positions.realized_pnl and positions.exit_time instead of trades columns.
 	// Calculate daily returns for last 30 days
 	query := `
 		SELECT
 			DATE(exit_time) as trade_date,
-			SUM(pnl) as daily_pnl
-		FROM trades
-		WHERE status = 'FILLED'
+			SUM(realized_pnl) as daily_pnl
+		FROM positions
+		WHERE exit_time IS NOT NULL
 		AND exit_time >= NOW() - INTERVAL '30 days'
 		GROUP BY DATE(exit_time)
 		ORDER BY trade_date
@@ -303,9 +310,10 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 
 // updatePositionMetrics updates position-related metrics
 func (u *Updater) updatePositionMetrics(ctx context.Context) {
+	// DB-002 fix: positions has no status column; use exit_time IS NULL to identify open positions.
 	// Count open positions
 	var openCount int64
-	query := `SELECT COUNT(*) FROM positions WHERE status = 'OPEN'`
+	query := `SELECT COUNT(*) FROM positions WHERE exit_time IS NULL`
 	err := u.db.QueryRow(ctx, query).Scan(&openCount)
 	if err == nil {
 		OpenPositions.Set(float64(openCount))
@@ -317,7 +325,7 @@ func (u *Updater) updatePositionMetrics(ctx context.Context) {
 			symbol,
 			SUM(quantity * entry_price) as position_value
 		FROM positions
-		WHERE status = 'OPEN'
+		WHERE exit_time IS NULL
 		GROUP BY symbol
 	`
 
@@ -342,12 +350,14 @@ func (u *Updater) updatePositionMetrics(ctx context.Context) {
 
 // updateAgentMetrics updates agent-related metrics
 func (u *Updater) updateAgentMetrics(ctx context.Context) {
+	// DB-003 fix: agent_state_type enum has no 'ONLINE' value; valid values are
+	// STARTING, RUNNING, STOPPED, ERROR. Use 'RUNNING' to identify active agents.
 	// Count active agents
 	var activeCount int64
 	query := `
 		SELECT COUNT(*)
 		FROM agent_status
-		WHERE status = 'ONLINE'
+		WHERE status = 'RUNNING'
 		AND last_heartbeat >= NOW() - INTERVAL '1 minute'
 	`
 	err := u.db.QueryRow(ctx, query).Scan(&activeCount)
@@ -360,7 +370,7 @@ func (u *Updater) updateAgentMetrics(ctx context.Context) {
 		SELECT
 			agent_type,
 			CASE
-				WHEN status = 'ONLINE' AND last_heartbeat >= NOW() - INTERVAL '1 minute'
+				WHEN status = 'RUNNING' AND last_heartbeat >= NOW() - INTERVAL '1 minute'
 				THEN 1
 				ELSE 0
 			END as online
