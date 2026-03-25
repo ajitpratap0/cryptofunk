@@ -315,6 +315,22 @@ class ApiClient {
   }>> {
     return this.request('/performance/pairs')
   }
+
+  // Performance summary metrics (sharpe, sortino, win rate, etc.)
+  async getPerformanceSummary(): Promise<ApiResponse<{
+    sharpe_ratio?: number | null
+    sortino_ratio?: number | null
+    max_drawdown?: number | null
+    max_drawdown_percent?: number | null
+    calmar_ratio?: number | null
+    win_rate?: number | null
+    avg_win?: number | null
+    avg_loss?: number | null
+    profit_factor?: number | null
+    total_return?: number | null
+  }>> {
+    return this.request('/performance/summary')
+  }
 }
 
 export const apiClient = new ApiClient()

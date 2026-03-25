@@ -7,7 +7,6 @@ import {
   USE_MOCK_DATA,
   getMockTrades,
   getMockDashboard,
-  getMockEquityPoints,
   getMockOrders,
   getMockPositionsFromTrades,
   getMockUnifiedPortfolio,
@@ -311,7 +310,7 @@ export function useDashboardPnl() {
           data: {
             daily: 234.56,
             total: 12547.89,
-            equity: getMockEquityPoints(),
+            equity: [],
           },
           timestamp: new Date().toISOString(),
         }
@@ -331,8 +330,7 @@ export function useDashboardPnl() {
           data: {
             daily: raw.realized_pnl ?? 0,
             total: raw.total_pnl ?? 0,
-            // TODO: replace with real API data when backend provides equity_curve
-            equity: getMockEquityPoints(),
+            equity: [],
           },
           timestamp: response.timestamp,
         }

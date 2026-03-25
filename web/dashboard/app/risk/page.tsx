@@ -14,18 +14,8 @@ import { ExposurePie } from '@/components/charts/ExposurePie'
 import { CircuitBreakerStatus } from '@/components/risk/CircuitBreakerStatus'
 import { StatCard } from '@/components/ui/StatCard'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
-import { useRiskMetrics, useCircuitBreakers, useRiskExposure } from '@/hooks/usePerformance'
+import { useRiskMetrics, useCircuitBreakers, useRiskExposure, useRiskAlerts } from '@/hooks/usePerformance'
 import type { CircuitBreaker } from '@/lib/types'
-
-// ── Static Mock Data (no API equivalent yet) ───────────────────────
-
-const mockAlerts = [
-  { id: '1', severity: 'warning' as const, message: 'Max drawdown approaching threshold (78%)', timestamp: '2 min ago', asset: 'Portfolio' },
-  { id: '2', severity: 'info' as const, message: 'ETH/USDT correlation with BTC increasing', timestamp: '15 min ago', asset: 'ETH/USDT' },
-  { id: '3', severity: 'info' as const, message: 'Position rebalancing recommended', timestamp: '1 hr ago', asset: 'Portfolio' },
-  { id: '4', severity: 'resolved' as const, message: 'Daily loss limit recovered to safe zone', timestamp: '3 hrs ago', asset: 'Portfolio' },
-  { id: '5', severity: 'warning' as const, message: 'SOL/USDT volatility spike detected', timestamp: '5 hrs ago', asset: 'SOL/USDT' },
-]
 
 // ── Runtime type guards ─────────────────────────────────────────────
 
@@ -35,7 +25,7 @@ type RawRiskMetrics = {
   expected_shortfall: number | null
   open_positions: number
   total_exposure: number
-  var_unit?: 'dollar' | 'fractional'
+  var_unit?: 'dollar' | 'fractional' | 'percent'
 }
 
 type RawCircuitBreakers = {
@@ -82,6 +72,7 @@ export default function RiskPage() {
   const { data: metricsResponse, isError: metricsError, isLoading: metricsLoading, refetch: refetchMetrics } = useRiskMetrics()
   const { data: breakersResponse, isError: breakersError, isLoading: breakersLoading, refetch: refetchBreakers } = useCircuitBreakers()
   const { data: exposureResponse, isError: exposureError, isLoading: exposureLoading, refetch: refetchExposure } = useRiskExposure()
+  const { data: alerts = [], refetch: refetchAlerts } = useRiskAlerts()
 
   const isLoading = metricsLoading || breakersLoading || exposureLoading
   const hasError = metricsError || breakersError || exposureError
@@ -90,6 +81,7 @@ export default function RiskPage() {
     refetchMetrics()
     refetchBreakers()
     refetchExposure()
+    refetchAlerts()
   }
 
   // Warn once per distinct bad-shape response — not on every render
@@ -120,8 +112,16 @@ export default function RiskPage() {
 
   // var_unit: 'dollar' when VaR is scaled by portfolio value; 'fractional' when
   // no active sessions exist and the backend returns a raw fractional value (e.g. 0.023).
-  const varUnit = isRiskMetrics(rawMetrics) ? (rawMetrics.var_unit ?? 'dollar') : 'dollar'
-  const formatVar = (v: number) => varUnit === 'dollar' ? formatCurrency(v) : formatPercentage(v * 100)
+  const varUnit: 'dollar' | 'fractional' | 'percent' = isRiskMetrics(rawMetrics) ? (rawMetrics.var_unit ?? 'dollar') : 'dollar'
+  const formatVar = (v: number) => {
+    switch (varUnit) {
+      case 'dollar': return formatCurrency(v)
+      case 'percent': return `${(v * 100).toFixed(2)}%`
+      case 'fractional':
+      default:
+        return formatPercentage(v * 100)
+    }
+  }
 
   // Map API circuit breakers to component shape — guarded
   const circuitBreakers: CircuitBreaker[] = useMemo(() => {
@@ -265,7 +265,10 @@ export default function RiskPage() {
               <h3 className="font-semibold">Risk Alerts</h3>
             </div>
             <div className="space-y-3 max-h-[400px] overflow-y-auto">
-              {mockAlerts.map(alert => (
+              {alerts.length === 0 && (
+                <p className="text-sm text-muted-foreground">No active risk alerts.</p>
+              )}
+              {alerts.map(alert => (
                 <div
                   key={alert.id}
                   className={cn(
