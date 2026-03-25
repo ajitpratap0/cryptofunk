@@ -10,9 +10,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// defaultInitialCapital is a placeholder until configuration is wired through.
+// DefaultInitialCapital is the assumed portfolio start value for return metrics until per-session tracking is implemented.
 // TODO: wire actual session InitialCapital from config/DB — tracked in metrics/updater.go
-const defaultInitialCapital = 10000.0
+const DefaultInitialCapital = 10000.0
 
 // Updater periodically updates metrics from the database
 type Updater struct {
@@ -199,7 +199,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var dailyPnL float64
 	err := u.db.QueryRow(ctx, query).Scan(&dailyPnL)
 	if err == nil {
-		initialCapital := defaultInitialCapital
+		initialCapital := DefaultInitialCapital
 		DailyReturn.Set(dailyPnL / initialCapital)
 	}
 
@@ -214,7 +214,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var weeklyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&weeklyPnL)
 	if err == nil {
-		initialCapital := defaultInitialCapital
+		initialCapital := DefaultInitialCapital
 		WeeklyReturn.Set(weeklyPnL / initialCapital)
 	}
 
@@ -229,7 +229,7 @@ func (u *Updater) updateReturnMetrics(ctx context.Context) {
 	var monthlyPnL float64
 	err = u.db.QueryRow(ctx, query).Scan(&monthlyPnL)
 	if err == nil {
-		initialCapital := defaultInitialCapital
+		initialCapital := DefaultInitialCapital
 		MonthlyReturn.Set(monthlyPnL / initialCapital)
 	}
 }
@@ -256,7 +256,7 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 	defer rows.Close()
 
 	var returns []float64
-	initialCapital := defaultInitialCapital
+	initialCapital := DefaultInitialCapital
 
 	for rows.Next() {
 		var date time.Time
