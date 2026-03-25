@@ -16,11 +16,12 @@ const DefaultInitialCapital = 10000.0
 
 // Updater periodically updates metrics from the database
 type Updater struct {
-	db       *pgxpool.Pool
-	interval time.Duration
-	stopCh   chan struct{}
-	stopOnce sync.Once
-	wg       sync.WaitGroup
+	db        *pgxpool.Pool
+	interval  time.Duration
+	stopCh    chan struct{}
+	stopOnce  sync.Once
+	startOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 // NewUpdater creates a new metrics updater
@@ -57,13 +58,15 @@ func (u *Updater) Start(ctx context.Context) {
 
 // StartAsync increments the internal WaitGroup and launches the update loop
 // in a background goroutine. Stop() will block until the goroutine exits.
-// Call StartAsync exactly once before calling Stop().
+// Safe to call multiple times — only the first call launches the goroutine.
 func (u *Updater) StartAsync(ctx context.Context) {
-	u.wg.Add(1)
-	go func() {
-		defer u.wg.Done()
-		u.Start(ctx)
-	}()
+	u.startOnce.Do(func() {
+		u.wg.Add(1)
+		go func() {
+			defer u.wg.Done()
+			u.Start(ctx)
+		}()
+	})
 }
 
 // Stop signals the metrics updater to halt and blocks until the background
@@ -265,6 +268,12 @@ func (u *Updater) updateSharpeRatio(ctx context.Context) {
 			continue
 		}
 		returns = append(returns, pnl/initialCapital)
+	}
+	// rows.Err() must be checked: a network error mid-stream produces a partial
+	// dataset that would yield a misleading Sharpe ratio.
+	if err := rows.Err(); err != nil {
+		log.Error().Err(err).Msg("Failed to iterate Sharpe ratio rows")
+		return
 	}
 
 	// Require at least 2 data points for sample variance (Bessel's correction uses len-1).

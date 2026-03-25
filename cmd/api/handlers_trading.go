@@ -634,6 +634,8 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			order.ExecutedQuantity = req.Quantity
 			order.ExecutedQuoteQuantity = execQuoteQty
 			order.FilledAt = &now
+			// Sync in-memory struct to the timestamp stored in the DB (intentional:
+			// avoids divergence between the struct and the row UpdateOrderStatusTx wrote).
 			order.UpdatedAt = now
 
 			// InsertTrade inside transaction via DB-layer method.
