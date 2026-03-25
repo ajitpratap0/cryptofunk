@@ -175,8 +175,7 @@ func main() {
 	metricsUpdater := metrics.NewUpdater(database.Pool(), 5*time.Second)
 	log.Warn().Float64("initial_capital", metrics.DefaultInitialCapital).Msg("metrics/updater: initialCapital is hardcoded to 10000; return metrics will be incorrect for non-10k portfolios until this is made configurable")
 	metricsUpdater.StartAsync(ctx)
-	defer metricsUpdater.Stop()	// start() blocks until a SIGTERM/SIGINT signal is received and the graceful drain completes.	server.start()
-}
+	defer metricsUpdater.Stop()	// start() blocks until a SIGTERM/SIGINT signal is received and the graceful drain completes.	server.start()}
 
 func (s *APIServer) start() {
 	// Create HTTP server
