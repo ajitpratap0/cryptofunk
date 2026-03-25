@@ -589,7 +589,8 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			order.ExecutedQuantity = 0
 			order.ExecutedQuoteQuantity = 0
 			order.FilledAt = nil
-			order.UpdatedAt = now
+			order.AveragePrice = 0
+			order.UpdatedAt = time.Now()
 
 			// Insert the order as the first step so it is rolled back atomically
 			// with all fill rows if any later step fails.

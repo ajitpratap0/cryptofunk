@@ -61,6 +61,7 @@ type Order struct {
 	Quantity              float64                `json:"quantity"`
 	ExecutedQuantity      float64                `json:"executed_quantity"`
 	ExecutedQuoteQuantity float64                `json:"executed_quote_quantity"`
+	AveragePrice          float64                `json:"average_price"`
 	TimeInForce           *string                `json:"time_in_force"`
 	PlacedAt              time.Time              `json:"placed_at"`
 	FilledAt              *time.Time             `json:"filled_at"`
