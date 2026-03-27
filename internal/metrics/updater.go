@@ -79,6 +79,15 @@ func (u *Updater) Stop() {
 	u.wg.Wait()
 }
 
+// initialCapitalFromConfig reads the initial capital from Viper config,
+// falling back to DefaultInitialCapital when the value is not set (zero).
+func initialCapitalFromConfig() float64 {
+	if v := viper.GetFloat64("trading.initial_capital"); v > 0 {
+		return v
+	}
+	return DefaultInitialCapital
+}
+
 // update fetches and updates all metrics
 func (u *Updater) update(ctx context.Context) {
 	log.Debug().Msg("Updating metrics from database")

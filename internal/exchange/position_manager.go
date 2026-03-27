@@ -42,12 +42,9 @@ func NewPositionManagerWithContext(ctx context.Context, database *db.DB) *Positi
 	if feeRate == 0 {
 		feeRate = 0.001 // 0.1% fallback when viper is not initialized
 	}
-	return &PositionManager{
-		db:            database,
-		openPositions: make(map[string]*db.Position),
-		feeRate:       feeRate,
-		ctx:           ctx,
-	}
+	pm := NewPositionManagerWithFees(database, feeRate)
+	pm.ctx = ctx
+	return pm
 }
 
 // NewPositionManagerWithFees creates a new position manager with custom fee configuration
