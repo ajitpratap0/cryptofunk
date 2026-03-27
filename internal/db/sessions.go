@@ -289,6 +289,16 @@ func (db *DB) ListActiveSessionsPaginated(ctx context.Context, limit, offset int
 	return sessions, nil
 }
 
+// CountActiveSessions returns the total number of active (not stopped) trading sessions.
+func (db *DB) CountActiveSessions(ctx context.Context) (int, error) {
+	var count int
+	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM trading_sessions WHERE stopped_at IS NULL`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active sessions: %w", err)
+	}
+	return count, nil
+}
+
 // GetSessionsBySymbol retrieves all trading sessions for a specific symbol
 func (db *DB) GetSessionsBySymbol(ctx context.Context, symbol string) ([]*TradingSession, error) {
 	query := `

@@ -55,10 +55,21 @@ func (s *APIServer) handleListSessions(c *gin.Context) {
 		sessions = make([]*db.TradingSession, 0)
 	}
 
+	// Query the true total count from the DB (independent of any future
+	// pagination applied to the sessions slice above).
+	totalCount, err := s.db.CountActiveSessions(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to count active sessions")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve session count",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"sessions":    sessions,
 		"count":       len(sessions),
-		"total_count": len(sessions),
+		"total_count": totalCount,
 		"limit":       limit,
 		"offset":      offset,
 	})
@@ -321,7 +332,7 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// MARKET orders have no meaningful requested price — store NULL in the DB.
 	// LIMIT orders require a price (validated above) so always store it.
 	var price *float64
-	if (req.Type != "market" && req.Type != "MARKET") && req.Price != 0 {
+	if db.ConvertOrderType(req.Type) != db.OrderTypeMarket && req.Price != 0 {
 		price = &req.Price
 	}
 	order := &db.Order{
