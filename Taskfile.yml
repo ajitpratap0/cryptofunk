@@ -481,7 +481,7 @@ tasks:
         echo "  risk-analyzer-server    -> http://localhost:8092"
         ./{{.BINARY_DIR}}/technical-indicators-server --port 8093 &
         echo "  technical-indicators-server -> http://localhost:8093"
-        echo "All MCP servers started. Use 'pkill -f mcp-server' to stop them."
+        echo "All MCP servers started. Use 'pkill -f \"market-data-server|order-executor-server|risk-analyzer-server|technical-indicators-server|polymarket-server\"' to stop them."
 
   run-telegram-bot:
     desc: "Run Telegram bot"
