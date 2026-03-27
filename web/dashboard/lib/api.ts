@@ -1,9 +1,9 @@
-import { 
-  ApiResponse, 
-  Trade, 
-  Position, 
-  Order, 
-  Agent, 
+import {
+  ApiResponse,
+  Trade,
+  Position,
+  Order,
+  Agent,
   AgentDecision,
   DashboardStats,
   EquityPoint,
@@ -19,6 +19,21 @@ import {
   UnifiedPortfolio,
 } from './types'
 import { buildApiUrl } from './utils'
+
+// Shared interface for /api/v1/performance/summary response shape.
+// Used by ApiClient.getPerformanceSummary() and re-exported for hooks.
+export interface RawPerformanceSummary {
+  sharpe_ratio?: number | null
+  sortino_ratio?: number | null
+  max_drawdown?: number | null
+  max_drawdown_percent?: number | null
+  calmar_ratio?: number | null
+  win_rate?: number | null
+  avg_win?: number | null
+  avg_loss?: number | null
+  profit_factor?: number | null
+  total_return?: number | null
+}
 
 class ApiClient {
   private baseUrl: string
@@ -86,8 +101,8 @@ class ApiClient {
     return this.request('/dashboard/positions')
   }
 
-  async getDashboardPnl(): Promise<ApiResponse<{ daily: number; total: number; equity: EquityPoint[] }>> {
-    return this.request('/dashboard/pnl')
+  async getDashboardPnl(timeRange?: string): Promise<ApiResponse<{ daily: number; total: number; equity: EquityPoint[] }>> {
+    return this.request(timeRange ? `/dashboard/pnl?timeRange=${encodeURIComponent(timeRange)}` : '/dashboard/pnl')
   }
 
   async getDashboardStatus(): Promise<ApiResponse<SystemStatus>> {
@@ -317,18 +332,7 @@ class ApiClient {
   }
 
   // Performance summary metrics (sharpe, sortino, win rate, etc.)
-  async getPerformanceSummary(): Promise<ApiResponse<{
-    sharpe_ratio?: number | null
-    sortino_ratio?: number | null
-    max_drawdown?: number | null
-    max_drawdown_percent?: number | null
-    calmar_ratio?: number | null
-    win_rate?: number | null
-    avg_win?: number | null
-    avg_loss?: number | null
-    profit_factor?: number | null
-    total_return?: number | null
-  }>> {
+  async getPerformanceSummary(): Promise<ApiResponse<RawPerformanceSummary>> {
     return this.request('/performance/summary')
   }
 }

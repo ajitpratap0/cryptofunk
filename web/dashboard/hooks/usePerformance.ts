@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
+import type { RawPerformanceSummary } from '@/lib/api'
 import { REFRESH_INTERVALS } from '@/lib/constants'
 import type {
   PerformanceMetrics,
@@ -24,20 +25,6 @@ export const PERFORMANCE_QUERY_KEYS = {
   // does not unintentionally invalidate exposure queries.
   riskExposure: ['risk-exposure'],
 } as const
-
-// Raw shape returned by /api/v1/performance/summary
-interface RawPerformanceSummary {
-  sharpe_ratio?: number | null
-  sortino_ratio?: number | null
-  max_drawdown?: number | null
-  max_drawdown_percent?: number | null
-  calmar_ratio?: number | null
-  win_rate?: number | null
-  avg_win?: number | null
-  avg_loss?: number | null
-  profit_factor?: number | null
-  total_return?: number | null
-}
 
 // Performance Metrics
 export function usePerformanceMetrics() {
@@ -81,7 +68,7 @@ export function useEquityHistory(timeRange: TimeRange = '1m') {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.equityHistory(timeRange),
     queryFn: async () => {
-      const response = await apiClient.getDashboardPnl()
+      const response = await apiClient.getDashboardPnl(timeRange)
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to load equity history')
@@ -245,7 +232,7 @@ interface RawRiskAlert {
 // hook returns an empty list so the UI shows nothing rather than stale mocks.
 // TODO: replace with a dedicated /api/v1/risk/alerts endpoint when available.
 export function useRiskAlerts() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['risk', 'alerts'],
     queryFn: async (): Promise<RiskAlert[]> => {
       const response = await apiClient.getRiskMetrics()
@@ -267,6 +254,13 @@ export function useRiskAlerts() {
     staleTime: REFRESH_INTERVALS.risk,
     refetchInterval: REFRESH_INTERVALS.risk,
   })
+
+  return {
+    ...query,
+    // Convenience: data defaults to [] so callers can spread without null checks.
+    data: query.data ?? [],
+    isError: query.isError,
+  }
 }
 
 // Helper Functions

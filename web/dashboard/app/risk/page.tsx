@@ -72,10 +72,10 @@ export default function RiskPage() {
   const { data: metricsResponse, isError: metricsError, isLoading: metricsLoading, refetch: refetchMetrics } = useRiskMetrics()
   const { data: breakersResponse, isError: breakersError, isLoading: breakersLoading, refetch: refetchBreakers } = useCircuitBreakers()
   const { data: exposureResponse, isError: exposureError, isLoading: exposureLoading, refetch: refetchExposure } = useRiskExposure()
-  const { data: alerts = [], refetch: refetchAlerts } = useRiskAlerts()
+  const { data: alerts, isError: alertsError, refetch: refetchAlerts } = useRiskAlerts()
 
   const isLoading = metricsLoading || breakersLoading || exposureLoading
-  const hasError = metricsError || breakersError || exposureError
+  const hasError = metricsError || breakersError || exposureError || alertsError
 
   const handleRefresh = () => {
     refetchMetrics()
@@ -116,7 +116,7 @@ export default function RiskPage() {
   const formatVar = (v: number) => {
     switch (varUnit) {
       case 'dollar': return formatCurrency(v)
-      case 'percent': return `${(v * 100).toFixed(2)}%`
+      case 'percent': return formatPercentage(v * 100)
       case 'fractional':
       default:
         return formatPercentage(v * 100)
