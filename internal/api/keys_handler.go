@@ -218,7 +218,7 @@ func (h *KeysHandler) HandleCreateKey(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to create API key",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -255,7 +255,7 @@ func (h *KeysHandler) HandleListKeys(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to list API keys",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -302,7 +302,7 @@ func (h *KeysHandler) HandleGetKey(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to get API key",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -362,7 +362,7 @@ func (h *KeysHandler) HandleRotateKey(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to get API key",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -474,7 +474,7 @@ func (h *KeysHandler) HandleRevokeKey(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to get API key",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -497,7 +497,7 @@ func (h *KeysHandler) HandleRevokeKey(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to revoke API key",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -534,7 +534,7 @@ func (h *KeysHandler) HandleGetKeyHistory(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to get key history",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}

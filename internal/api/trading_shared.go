@@ -12,15 +12,35 @@
 package api
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 )
 
-// SanitizeError prevents internal database and driver error strings from being
-// leaked to HTTP clients (#116). Raw pgx / postgres error messages can reveal
-// table names, column names, and query fragments that aid attackers.
+// UserError is a sentinel type for errors that are safe to surface directly
+// to API clients. Only errors explicitly constructed as *UserError will have
+// their message forwarded; all other errors (DB errors, internal errors, etc.)
+// are replaced with a generic message.
+//
+// Example:
+//
+//	return nil, &api.UserError{Message: "symbol is required", Code: http.StatusBadRequest}
+type UserError struct {
+	Message string
+	Code    int
+}
+
+func (e *UserError) Error() string { return e.Message }
+
+// SanitizeError returns a safe message for API responses using an allowlist
+// (sentinel) approach rather than a denylist. Only errors that are explicitly
+// typed as *UserError are forwarded to the client; everything else — DB driver
+// errors, internal errors, pgx/pgconn messages — returns a generic string.
+//
+// This eliminates both false negatives (pgx wrapped errors leaking through
+// without known keywords) and false positives (legitimate messages suppressed
+// by over-broad keyword matching).
 //
 // Callers should use this wherever an error is returned in a 5xx JSON response:
 //
@@ -29,18 +49,12 @@ func SanitizeError(err error) string {
 	if err == nil {
 		return ""
 	}
-	msg := err.Error()
-	// Detect well-known DB driver prefixes / substrings
-	dbPrefixes := []string{
-		"ERROR:", "pgx:", "pgconn:", "pq:", "SQLSTATE",
-		"db:", "sql:", "exec", "query",
+	var userErr *UserError
+	if errors.As(err, &userErr) {
+		return userErr.Message // explicitly safe, user-facing message
 	}
-	for _, prefix := range dbPrefixes {
-		if strings.Contains(msg, prefix) {
-			return "internal server error"
-		}
-	}
-	return msg
+	// All other error types (DB errors, internal errors) → generic message
+	return "internal server error"
 }
 
 // ParseSessionID is a shared helper for parsing session IDs in trading requests.
