@@ -1,8 +1,10 @@
 -- Rollback: 020_performance_indexes
-DROP INDEX CONCURRENTLY IF EXISTS idx_positions_unrealized_pnl;
-DROP INDEX CONCURRENTLY IF EXISTS idx_trading_sessions_status;
-DROP INDEX CONCURRENTLY IF EXISTS idx_orders_session_id_created;
+-- NOTE: CONCURRENTLY is omitted because the migration runner executes inside a
+-- transaction (BEGIN/COMMIT), which is incompatible with DROP/CREATE INDEX CONCURRENTLY.
+DROP INDEX IF EXISTS idx_positions_unrealized_pnl;
+DROP INDEX IF EXISTS idx_trading_sessions_status;
+DROP INDEX IF EXISTS idx_orders_session_id_created;
 
 -- Restore original index
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_session
+CREATE INDEX IF NOT EXISTS idx_orders_session
     ON orders(session_id, placed_at DESC);

@@ -91,8 +91,9 @@ func main() {
 			DB:       cfg.Redis.DB,
 		})
 		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if pingErr := redisClient.Ping(pingCtx).Err(); pingErr != nil {
+		pingErr := redisClient.Ping(pingCtx).Err()
+		cancel() // cancel immediately after Ping to avoid context leak until process shutdown
+		if pingErr != nil {
 			logger.Warn().Err(pingErr).Msg("Redis unavailable; CoinGecko price cache disabled")
 			_ = redisClient.Close()
 		} else {

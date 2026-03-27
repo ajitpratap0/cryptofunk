@@ -71,7 +71,11 @@ func newWithConfig(ctx context.Context, dbCfg *appconfig.DatabaseConfig) (*DB, e
 		maxConns = int32(dbCfg.PoolSize)
 	}
 	config.MaxConns = maxConns
-	config.MinConns = 5
+	minConns := int32(5)
+	if minConns > maxConns {
+		minConns = maxConns
+	}
+	config.MinConns = minConns
 	config.MaxConnLifetime = time.Hour
 	config.MaxConnIdleTime = 30 * time.Minute
 	config.HealthCheckPeriod = time.Minute
