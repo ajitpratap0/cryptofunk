@@ -22,9 +22,23 @@ SET session_id = (
 )
 WHERE p.session_id IS NULL;
 
--- Delete positions that are still NULL after backfill (orphaned rows with no traceable session).
--- This is safe because these rows have no associated session and cannot appear in any dashboard.
-DELETE FROM positions WHERE session_id IS NULL;
+-- SAFETY: Only delete positions that are still NULL after backfill AND are not referenced by
+-- any order. The original broad DELETE (WHERE session_id IS NULL) was dangerous: on databases
+-- where position_id was never set on orders (pre-fix #128), the backfill UPDATE recovers zero
+-- rows, meaning ALL positions would be deleted. This guarded form only removes rows that have
+-- no order linkage whatsoever — i.e. genuinely orphaned rows with no traceability.
+-- Positions with NULL session_id that ARE referenced by orders are left in place so that no
+-- legitimate trading data is lost; they will be cleaned up manually after investigation.
+DELETE FROM positions
+WHERE session_id IS NULL
+  AND id NOT IN (
+      SELECT DISTINCT position_id
+      FROM orders
+      WHERE position_id IS NOT NULL
+  );
 
 -- Now apply the NOT NULL constraint.
+-- NOTE: If any rows with session_id IS NULL still exist (because they are order-referenced),
+-- this ALTER will fail with a constraint violation. In that case, investigate those rows and
+-- set their session_id before re-running, or remove the ALTER until the data is clean.
 ALTER TABLE positions ALTER COLUMN session_id SET NOT NULL;
