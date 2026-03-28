@@ -18,6 +18,18 @@ const (
 	PositionSideFlat  PositionSide = "FLAT"
 )
 
+// varLookbackDays is the rolling window used by GetAllClosedPositions and
+// GetClosedPositionReturns when collecting historical trade returns for VaR
+// calculations. 90 days provides roughly one calendar quarter of returns —
+// recent enough to reflect current volatility regimes while giving enough data
+// points for a statistically meaningful tail estimate.
+//
+// Trade-off: in a prolonged calm period this window may underestimate tail risk
+// compared to a longer lookback. If the strategy is highly seasonal or the
+// exchange has had low activity, consider extending this window or making it
+// configurable via the risk config struct.
+const varLookbackDays = 90
+
 // Position represents a trading position
 type Position struct {
 	ID            uuid.UUID    `db:"id"`
@@ -372,9 +384,9 @@ func (db *DB) GetClosedFeesBySessionIDs(ctx context.Context, sessionIDs []uuid.U
 	return total, nil
 }
 
-// GetAllClosedPositions returns positions closed within the last 90 days across all sessions,
-// ordered by exit_time DESC. A 90-day window ensures VaR calculations use recent,
-// relevant return data rather than an arbitrary row count.
+// GetAllClosedPositions returns positions closed within the last varLookbackDays days
+// across all sessions, ordered by exit_time DESC. See varLookbackDays for a discussion
+// of the scope trade-off.
 func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 	query := `
 		SELECT
@@ -384,12 +396,12 @@ func (db *DB) GetAllClosedPositions(ctx context.Context) ([]*Position, error) {
 			metadata, created_at, updated_at
 		FROM positions
 		WHERE exit_time IS NOT NULL
-		  AND exit_time > NOW() - INTERVAL '90 days'
+		  AND exit_time > NOW() - ($1 * INTERVAL '1 day')
 		  AND realized_pnl IS NOT NULL
 		ORDER BY exit_time DESC
 	`
 
-	rows, err := db.pool.Query(ctx, query)
+	rows, err := db.pool.Query(ctx, query, varLookbackDays)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query closed positions: %w", err)
 	}
@@ -407,28 +419,29 @@ type ClosedPositionReturn struct {
 }
 
 // GetClosedPositionReturns fetches only the columns required for VaR return calculations
-// (realized_pnl, entry_price, quantity) from positions closed within the last 90 days.
-// This narrows the projected column set compared to GetAllClosedPositions, reducing
-// per-row data transfer for the risk/metrics endpoint (issue #143).
+// (realized_pnl, entry_price, quantity) from positions closed within the last
+// varLookbackDays days. This projects fewer columns than GetAllClosedPositions,
+// reducing per-row data transfer for the risk/metrics endpoint (issue #143).
+// See varLookbackDays for a discussion of the scope trade-off.
 func (db *DB) GetClosedPositionReturns(ctx context.Context) ([]ClosedPositionReturn, error) {
 	query := `
 		SELECT realized_pnl, entry_price, quantity
 		FROM positions
 		WHERE exit_time IS NOT NULL
-		  AND exit_time > NOW() - INTERVAL '90 days'
+		  AND exit_time > NOW() - ($1 * INTERVAL '1 day')
 		  AND realized_pnl IS NOT NULL
 		  AND entry_price > 0
 		  AND quantity > 0
 		ORDER BY exit_time DESC
 	`
 
-	rows, err := db.pool.Query(ctx, query)
+	rows, err := db.pool.Query(ctx, query, varLookbackDays)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query closed position returns: %w", err)
 	}
 	defer rows.Close()
 
-	var results []ClosedPositionReturn
+	results := make([]ClosedPositionReturn, 0, 256)
 	for rows.Next() {
 		var r ClosedPositionReturn
 		if err := rows.Scan(&r.RealizedPnL, &r.EntryPrice, &r.Quantity); err != nil {

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -30,11 +31,7 @@ func New(ctx context.Context, cfg ...*appconfig.DatabaseConfig) (*DB, error) {
 	if len(cfg) > 0 {
 		dbCfg = cfg[0]
 	}
-	return newWithConfig(ctx, dbCfg)
-}
 
-// newWithConfig is the internal constructor that accepts an optional DatabaseConfig.
-func newWithConfig(ctx context.Context, dbCfg *appconfig.DatabaseConfig) (*DB, error) {
 	var databaseURL string
 
 	// Try to get database URL from Vault first
@@ -67,8 +64,8 @@ func newWithConfig(ctx context.Context, dbCfg *appconfig.DatabaseConfig) (*DB, e
 	// under concurrent API request load. The value is overridden by
 	// database.pool_size in the application config when a DatabaseConfig is supplied.
 	maxConns := int32(25)
-	if dbCfg != nil && dbCfg.PoolSize > 0 {
-		maxConns = int32(dbCfg.PoolSize)
+	if dbCfg != nil && dbCfg.PoolSize > 0 && dbCfg.PoolSize <= math.MaxInt32 {
+		maxConns = int32(dbCfg.PoolSize) //#nosec G115 -- bounds-checked above
 	}
 	config.MaxConns = maxConns
 	minConns := int32(5)

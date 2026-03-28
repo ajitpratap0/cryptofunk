@@ -32,7 +32,7 @@ func EstimateOHLCV(closes []float64) *OHLCVData {
 			halfRange = math.Abs(closes[i] - closes[i-1])
 		}
 		if i < n-1 {
-			change := math.Abs(closes[i+1] - closes[i])
+			change := math.Abs(closes[i+1] - closes[i]) //#nosec G602 -- i+1 is safe: loop guard i < n-1 ensures i+1 < n
 			if change > halfRange {
 				halfRange = change
 			}
