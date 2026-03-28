@@ -379,11 +379,16 @@ func (h *BacktestHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup,
 
 // ExecuteBacktestJob executes a backtest job (this would typically run in a worker).
 // Backtest execution is not yet implemented; the job is immediately marked as failed.
+// The function returns nil after persisting the failure state so that any retry
+// scheduler does not treat this as a transient error and re-queue the job — the
+// failure has already been recorded in the DB and surfaced to the UI.
 func ExecuteBacktestJob(ctx context.Context, job *backtest.BacktestJob, jobManager *backtest.JobManager) error {
 	log.Warn().Str("job_id", job.ID.String()).Msg("Backtest execution not yet implemented")
 	// Mark as failed so callers and UI don't show a perpetually-running job
 	if err := jobManager.UpdateJobStatus(ctx, job.ID, backtest.JobStatusFailed, "backtest execution not yet implemented"); err != nil {
 		return fmt.Errorf("failed to mark unimplemented backtest job as failed: %w", err)
 	}
-	return fmt.Errorf("backtest execution not yet implemented")
+	// Return nil: the failure is persisted to DB; returning an error here would
+	// cause retry schedulers to re-queue and re-fail the same job indefinitely.
+	return nil
 }
