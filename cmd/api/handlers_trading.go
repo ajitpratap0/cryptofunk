@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 
-	"github.com/ajitpratap0/cryptofunk/internal/api"
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
@@ -1034,8 +1033,7 @@ func (s *APIServer) handlePauseTrading(c *gin.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to call orchestrator pause endpoint")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to pause trading",
-			"details": api.SanitizeError(err),
+			"error": "failed to pause trading",
 		})
 		return
 	}
@@ -1094,8 +1092,7 @@ func (s *APIServer) handleResumeTrading(c *gin.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to call orchestrator resume endpoint")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to resume trading",
-			"details": api.SanitizeError(err),
+			"error": "failed to resume trading",
 		})
 		return
 	}

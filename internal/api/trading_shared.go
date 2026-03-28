@@ -25,10 +25,9 @@ import (
 //
 // Example:
 //
-//	return nil, &api.UserError{Message: "symbol is required", Code: http.StatusBadRequest}
+//	return nil, &api.UserError{Message: "symbol is required"}
 type UserError struct {
 	Message string
-	Code    int
 }
 
 func (e *UserError) Error() string { return e.Message }
