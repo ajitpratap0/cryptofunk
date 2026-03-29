@@ -735,6 +735,15 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				order.FilledAt = &now
 				order.UpdatedAt = now
 
+				// Link this close order to its position, mirroring the open/buy path.
+				// Without this call, orders.position_id is NULL for every position-close
+				// trade, breaking any join that traces a close order back to its position.
+				positionID := existingPos.ID
+				if err := s.db.UpdateOrderPositionIDTx(ctx, tx, order.ID, positionID); err != nil {
+					return fmt.Errorf("failed to link close order to position: %w", err)
+				}
+				order.PositionID = &positionID
+
 				// Insert trade fill record for the close.
 				closeCommission := closeQty * execPrice * commissionRate
 				// feesForClose = proportional slice of entry fees + exit commission so that
