@@ -1,20 +1,14 @@
 'use client'
 
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
+import type { RawPerformanceSummary } from '@/lib/api'
 import { REFRESH_INTERVALS } from '@/lib/constants'
-import { 
-  calculateSharpeRatio, 
-  calculateMaxDrawdown, 
-  calculateWinRate,
-  groupBy 
-} from '@/lib/utils'
 import type {
   PerformanceMetrics,
   EquityPoint,
   CandlestickData,
   TimeRange,
-  Trade,
 } from '@/lib/types'
 
 // Query Keys
@@ -37,61 +31,31 @@ export function usePerformanceMetrics() {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.metrics,
     queryFn: async () => {
-      try {
-        // Since we don't have a dedicated performance endpoint, compute from trades
-        const tradesResponse = await fetch('/api/mock-trades')
-        
-        if (!tradesResponse.ok) throw new Error('API error')
-        
-        const trades = await tradesResponse.json()
-        
-        // Calculate metrics from trades
-        const pnlValues = trades.filter((t: any) => t.status === 'closed').map((t: any) => t.pnl)
-        const winningTrades = pnlValues.filter((p: number) => p > 0)
-        const losingTrades = pnlValues.filter((p: number) => p < 0)
-        
-        const metrics: PerformanceMetrics = {
-          sharpeRatio: calculateSharpeRatio(pnlValues),
-          sortinoRatio: calculateSharpeRatio(pnlValues.filter((p: number) => p < 0)),
-          maxDrawdown: 0.08, // Would need equity curve to calculate properly
-          maxDrawdownPercent: 8.0,
-          calmarRatio: 1.45,
-          winRate: calculateWinRate(trades),
-          avgWin: winningTrades.length > 0 ? 
-            winningTrades.reduce((sum: number, p: number) => sum + p, 0) / winningTrades.length : 0,
-          avgLoss: losingTrades.length > 0 ?
-            losingTrades.reduce((sum: number, p: number) => sum + p, 0) / losingTrades.length : 0,
-          profitFactor: losingTrades.length > 0 ?
-            Math.abs(winningTrades.reduce((sum: number, p: number) => sum + p, 0)) /
-            Math.abs(losingTrades.reduce((sum: number, p: number) => sum + p, 0)) : 0,
-          totalReturn: 15.67,
-        }
-        
-        return {
-          success: true,
-          data: metrics,
-          timestamp: new Date().toISOString(),
-        }
-      } catch {
-        // Return mock data if API fails
-        const mockMetrics: PerformanceMetrics = {
-          sharpeRatio: 1.87,
-          sortinoRatio: 2.34,
-          maxDrawdown: 0.08,
-          maxDrawdownPercent: 8.0,
-          calmarRatio: 1.45,
-          winRate: 68.4,
-          avgWin: 245.67,
-          avgLoss: -156.89,
-          profitFactor: 1.56,
-          totalReturn: 15.67,
-        }
-        
-        return {
-          success: true,
-          data: mockMetrics,
-          timestamp: new Date().toISOString(),
-        }
+      const response = await apiClient.getPerformanceSummary()
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch performance metrics')
+      }
+
+      const raw = response.data as unknown as RawPerformanceSummary
+
+      const metrics: PerformanceMetrics = {
+        sharpeRatio: raw?.sharpe_ratio ?? 0,
+        sortinoRatio: raw?.sortino_ratio ?? 0,
+        maxDrawdown: raw?.max_drawdown ?? 0,
+        maxDrawdownPercent: raw?.max_drawdown_percent ?? 0,
+        calmarRatio: raw?.calmar_ratio ?? 0,
+        winRate: raw?.win_rate ?? 0,
+        avgWin: raw?.avg_win ?? 0,
+        avgLoss: raw?.avg_loss ?? 0,
+        profitFactor: raw?.profit_factor ?? 0,
+        totalReturn: raw?.total_return ?? 0,
+      }
+
+      return {
+        success: true as const,
+        data: metrics,
+        timestamp: response.timestamp,
       }
     },
     staleTime: REFRESH_INTERVALS.performance,
@@ -104,24 +68,22 @@ export function useEquityHistory(timeRange: TimeRange = '1m') {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.equityHistory(timeRange),
     queryFn: async () => {
-      try {
-        const response = await apiClient.getDashboardPnl()
-        
-        if (!response.success) throw new Error('API error')
-        
-        return {
-          success: true,
-          data: response.data.equity || [],
-          timestamp: new Date().toISOString(),
-        }
-      } catch {
-        // Return mock data if API fails
-        const points = generateMockEquityHistory(timeRange)
-        return {
-          success: true,
-          data: points,
-          timestamp: new Date().toISOString(),
-        }
+      const response = await apiClient.getDashboardPnl(timeRange)
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to load equity history')
+      }
+
+      // API may return equity curve; fall back to empty array (no mock data)
+      const equity: EquityPoint[] =
+        response.data && Array.isArray((response.data as { equity?: EquityPoint[] }).equity)
+          ? (response.data as { equity: EquityPoint[] }).equity
+          : []
+
+      return {
+        success: true as const,
+        data: equity,
+        timestamp: new Date().toISOString(),
       }
     },
     staleTime: REFRESH_INTERVALS.performance,
@@ -248,42 +210,60 @@ export function useRiskExposure() {
   })
 }
 
-// Helper Functions
-function generateMockEquityHistory(timeRange: TimeRange): EquityPoint[] {
-  const points: EquityPoint[] = []
-  const baseEquity = 80000
-  let currentEquity = baseEquity
-  
-  // Determine number of points and interval based on time range
-  const timeRangeConfig = {
-    '1h': { points: 60, intervalMs: 60000 }, // 1 minute intervals
-    '4h': { points: 240, intervalMs: 60000 }, // 1 minute intervals
-    '1d': { points: 288, intervalMs: 300000 }, // 5 minute intervals
-    '1w': { points: 336, intervalMs: 1800000 }, // 30 minute intervals
-    '1m': { points: 720, intervalMs: 3600000 }, // 1 hour intervals
-    '3m': { points: 720, intervalMs: 10800000 }, // 3 hour intervals
-    '1y': { points: 365, intervalMs: 86400000 }, // 1 day intervals
-  }
-  
-  const config = timeRangeConfig[timeRange]
-  const now = Date.now()
-  
-  for (let i = config.points; i >= 0; i--) {
-    const timestamp = new Date(now - (i * config.intervalMs)).toISOString()
-    
-    // Generate some realistic equity movement
-    const change = (Math.random() - 0.5) * 1000 * (i / config.points + 0.1)
-    currentEquity += change
-    
-    points.push({
-      timestamp,
-      equity: Math.max(currentEquity, baseEquity * 0.7), // Don't go below 70% of initial
-      pnl: change,
-    })
-  }
-  
-  return points
+// Risk Alert shape returned by the API (derived from circuit breaker + metrics state)
+export interface RiskAlert {
+  id: string
+  severity: 'warning' | 'info' | 'resolved'
+  message: string
+  timestamp: string
+  asset: string
 }
+
+interface RawRiskAlert {
+  id?: string
+  severity?: string
+  message?: string
+  timestamp?: string
+  asset?: string
+}
+
+// Risk Alerts — fetched from /api/v1/risk/metrics alerts field.
+// The backend may not yet expose a dedicated alerts array; in that case the
+// hook returns an empty list so the UI shows nothing rather than stale mocks.
+// TODO: replace with a dedicated /api/v1/risk/alerts endpoint when available.
+export function useRiskAlerts() {
+  const query = useQuery({
+    queryKey: ['risk', 'alerts'],
+    queryFn: async (): Promise<RiskAlert[]> => {
+      const response = await apiClient.getRiskMetrics()
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch risk alerts')
+      }
+      const raw = response.data as unknown as { alerts?: RawRiskAlert[] }
+      if (!raw?.alerts || !Array.isArray(raw.alerts)) {
+        return []
+      }
+      return raw.alerts.map((a, i) => ({
+        id: a.id ?? String(i),
+        severity: (a.severity === 'warning' || a.severity === 'resolved' ? a.severity : 'info') as RiskAlert['severity'],
+        message: a.message ?? '',
+        timestamp: a.timestamp ?? '',
+        asset: a.asset ?? 'Portfolio',
+      }))
+    },
+    staleTime: REFRESH_INTERVALS.risk,
+    refetchInterval: REFRESH_INTERVALS.risk,
+  })
+
+  return {
+    ...query,
+    // Convenience: data defaults to [] so callers can spread without null checks.
+    data: query.data ?? [],
+    isError: query.isError,
+  }
+}
+
+// Helper Functions
 
 function generateMockCandlestickData(symbol: string, timeRange: string): CandlestickData[] {
   const data: CandlestickData[] = []
