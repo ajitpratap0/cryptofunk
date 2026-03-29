@@ -503,6 +503,20 @@ func (db *DB) GetOrderByID(ctx context.Context, orderID uuid.UUID) (*Order, erro
 	return db.GetOrder(ctx, orderID)
 }
 
+// UpdateOrderPositionIDTx links an order to a position within an existing transaction.
+// This is called after a position is created/updated so the orders.position_id FK is populated.
+func (db *DB) UpdateOrderPositionIDTx(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, positionID uuid.UUID) error {
+	const q = `UPDATE orders SET position_id = $1, updated_at = NOW() WHERE id = $2`
+	result, err := tx.Exec(ctx, q, positionID, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to set order position_id: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found: %s", orderID)
+	}
+	return nil
+}
+
 // GetOrdersBySession retrieves all orders for a specific session
 func (db *DB) GetOrdersBySession(ctx context.Context, sessionID uuid.UUID) ([]*Order, error) {
 	query := `
