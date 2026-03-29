@@ -378,6 +378,15 @@ func (s *APIServer) createWebSocketUpgrader() websocket.Upgrader {
 }
 
 func (s *APIServer) handleWebSocket(c *gin.Context) {
+	// Validate that the request is a proper WebSocket upgrade request before
+	// calling Upgrade (which writes a plain-text HTTP error on failure).
+	if !websocket.IsWebSocketUpgrade(c.Request) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "WebSocket upgrade required: missing or invalid Upgrade header",
+		})
+		return
+	}
+
 	// Create upgrader with configured origins
 	upgrader := s.createWebSocketUpgrader()
 
@@ -385,6 +394,8 @@ func (s *APIServer) handleWebSocket(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to upgrade WebSocket connection")
+		// Note: gorilla/websocket has already written an HTTP error response at
+		// this point (e.g. 403 for a rejected origin). We cannot overwrite it.
 		return
 	}
 

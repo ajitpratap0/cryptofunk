@@ -229,8 +229,7 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 				Str("path", c.Request.URL.Path).
 				Msg("Auth: No API key provided")
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "API key required",
-				"message": "Provide API key via X-API-Key header or Authorization: Bearer <key>",
+				"error": "API key required",
 			})
 			c.Abort()
 			return

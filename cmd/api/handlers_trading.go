@@ -50,11 +50,28 @@ func (s *APIServer) handleListSessions(c *gin.Context) {
 		return
 	}
 
+	// Ensure the slice is never marshalled as JSON null when empty.
+	if sessions == nil {
+		sessions = make([]*db.TradingSession, 0)
+	}
+
+	// Query the true total count from the DB (independent of any future
+	// pagination applied to the sessions slice above).
+	totalCount, err := s.db.CountActiveSessions(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to count active sessions")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve session count",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"sessions": sessions,
-		"count":    len(sessions),
-		"limit":    limit,
-		"offset":   offset,
+		"sessions":    sessions,
+		"count":       len(sessions),
+		"total_count": totalCount,
+		"limit":       limit,
+		"offset":      offset,
 	})
 }
 
@@ -71,10 +88,17 @@ func (s *APIServer) handleGetSession(c *gin.Context) {
 	ctx := c.Request.Context()
 	session, err := s.db.GetSession(ctx, sessionID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "session not found",
-			"id":    idStr,
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "session not found",
+				"id":    idStr,
+			})
+		} else {
+			log.Error().Err(err).Str("session_id", idStr).Msg("failed to get session")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
@@ -113,6 +137,11 @@ func (s *APIServer) handleListPositions(c *gin.Context) {
 			"error": "failed to retrieve positions",
 		})
 		return
+	}
+
+	// Ensure the slice is never marshalled as JSON null when empty.
+	if positions == nil {
+		positions = make([]*db.Position, 0)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -209,6 +238,11 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 		return
 	}
 
+	// Ensure the slice is never marshalled as JSON null when empty.
+	if orders == nil {
+		orders = make([]*db.Order, 0)
+	}
+
 	if sessionIDStr != "" || symbol != "" || status != "" {
 		// Sentinel pattern: DB was asked for maxFilteredOrders+1 rows.
 		// If more than maxFilteredOrders came back, the result was truncated.
@@ -295,9 +329,11 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	s.sessionMu.Unlock()
 
 	// Create a tracking record with a known UUID so we can return it to the caller.
-	price := &req.Price
-	if req.Price == 0 {
-		price = nil
+	// MARKET orders have no meaningful requested price — store NULL in the DB.
+	// LIMIT orders require a price (validated above) so always store it.
+	var price *float64
+	if db.ConvertOrderType(req.Type) != db.OrderTypeMarket && req.Price != 0 {
+		price = &req.Price
 	}
 	order := &db.Order{
 		ID:        uuid.New(),
