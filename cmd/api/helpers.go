@@ -373,9 +373,9 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 		// HTTP Strict Transport Security (#119): tell browsers to use HTTPS for 1 year
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
-		// Content Security Policy (#119): restrict resource loading to same origin
-		// NOTE: May need relaxation for WebSocket connections or CDN-hosted assets
-		c.Header("Content-Security-Policy", "default-src 'self'")
+		// Content Security Policy: restrict resource loading to same origin.
+		// connect-src includes wss: to allow secure WebSocket connections from the dashboard.
+		c.Header("Content-Security-Policy", "default-src 'self'; connect-src 'self' wss:")
 
 		c.Next()
 	}

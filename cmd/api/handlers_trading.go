@@ -175,10 +175,17 @@ func (s *APIServer) handleGetPosition(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  "position not found",
-			"symbol": symbol,
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":  "position not found",
+				"symbol": symbol,
+			})
+		} else {
+			log.Error().Err(err).Str("symbol", symbol).Msg("failed to get position")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
@@ -287,10 +294,17 @@ func (s *APIServer) handleGetOrder(c *gin.Context) {
 
 	order, err := s.db.GetOrderByID(ctx, orderID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":    "order not found",
-			"order_id": orderIDStr,
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":    "order not found",
+				"order_id": orderIDStr,
+			})
+		} else {
+			log.Error().Err(err).Str("order_id", orderIDStr).Msg("failed to get order")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
@@ -720,6 +734,15 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				order.ExecutedQuoteQuantity = closeQuoteQty
 				order.FilledAt = &now
 				order.UpdatedAt = now
+
+				// Link this close order to its position, mirroring the open/buy path.
+				// Without this call, orders.position_id is NULL for every position-close
+				// trade, breaking any join that traces a close order back to its position.
+				positionID := existingPos.ID
+				if err := s.db.UpdateOrderPositionIDTx(ctx, tx, order.ID, positionID); err != nil {
+					return fmt.Errorf("failed to link close order to position: %w", err)
+				}
+				order.PositionID = &positionID
 
 				// Insert trade fill record for the close.
 				closeCommission := closeQty * execPrice * commissionRate

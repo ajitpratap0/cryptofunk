@@ -311,7 +311,8 @@ func (s *APIServer) setupRoutes() {
 	s.router.GET("/readiness", func(c *gin.Context) {
 		// Ping the DB to verify readiness
 		if err := s.db.Pool().Ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "error": err.Error()})
+			log.Error().Err(err).Msg("readiness check: database ping failed")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "error": "database unavailable"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
