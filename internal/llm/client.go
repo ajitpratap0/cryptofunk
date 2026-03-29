@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/sony/gobreaker"
+	"github.com/spf13/viper"
 
 	"github.com/ajitpratap0/cryptofunk/internal/risk"
 )
@@ -51,7 +52,10 @@ func NewClient(config ClientConfig) *Client {
 		config.Endpoint = "http://localhost:8080/v1/chat/completions"
 	}
 	if config.Model == "" {
-		config.Model = "claude-sonnet-4-20250514"
+		config.Model = viper.GetString("llm.primary_model")
+		if config.Model == "" {
+			config.Model = "claude-sonnet-4-20250514" // fallback when viper is not initialized
+		}
 	}
 	if config.Temperature == 0 {
 		config.Temperature = 0.7

@@ -22,6 +22,9 @@ import (
 const maxRequestBodyBytes = 1 << 20 // 1 MB
 
 func (s *APIServer) setupMiddleware() {
+	// Recovery middleware must be first so panics in ALL subsequent middleware and handlers are caught
+	s.router.Use(gin.Recovery())
+
 	// Limit request bodies to 1 MB to prevent OOM attacks
 	s.router.Use(func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
@@ -87,9 +90,6 @@ func (s *APIServer) setupMiddleware() {
 
 	// Request logging middleware
 	s.router.Use(requestLogger())
-
-	// Recovery middleware
-	s.router.Use(gin.Recovery())
 }
 
 func (s *APIServer) setupRoutes() {
@@ -303,6 +303,19 @@ func (s *APIServer) setupRoutes() {
 		// TC-003: Safety guard routes
 		safety.RegisterRoutes(v1, s.safetyGuard)
 	}
+
+	// K8s probe endpoints (no rate limiting, no auth)
+	s.router.GET("/liveness", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	s.router.GET("/readiness", func(c *gin.Context) {
+		// Ping the DB to verify readiness
+		if err := s.db.Pool().Ping(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
 
 	// Root endpoint
 	s.router.GET("/", func(c *gin.Context) {

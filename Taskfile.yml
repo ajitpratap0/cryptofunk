@@ -434,6 +434,55 @@ tasks:
       - echo "Starting API server..."
       - ./{{.BINARY_DIR}}/api
 
+  run-market-data-server:
+    desc: "Run market data MCP server (port 8090)"
+    deps:
+      - build-server-market-data
+    cmds:
+      - echo "Starting market-data-server on port 8090..."
+      - ./{{.BINARY_DIR}}/market-data-server --port 8090
+
+  run-order-executor-server:
+    desc: "Run order executor MCP server (port 8091)"
+    deps:
+      - build-server-order-executor
+    cmds:
+      - echo "Starting order-executor-server on port 8091..."
+      - ./{{.BINARY_DIR}}/order-executor-server --port 8091
+
+  run-risk-analyzer-server:
+    desc: "Run risk analyzer MCP server (port 8092)"
+    deps:
+      - build-server-risk-analyzer
+    cmds:
+      - echo "Starting risk-analyzer-server on port 8092..."
+      - ./{{.BINARY_DIR}}/risk-analyzer-server --port 8092
+
+  run-technical-indicators-server:
+    desc: "Run technical indicators MCP server (port 8093)"
+    deps:
+      - build-server-technical-indicators
+    cmds:
+      - echo "Starting technical-indicators-server on port 8093..."
+      - ./{{.BINARY_DIR}}/technical-indicators-server --port 8093
+
+  run-all-mcp-servers:
+    desc: "Start all MCP servers in background (market-data:8090, order-executor:8091, risk-analyzer:8092, technical-indicators:8093)"
+    deps:
+      - build-servers
+    cmds:
+      - |
+        echo "Starting all MCP servers in background..."
+        ./{{.BINARY_DIR}}/market-data-server --port 8090 &
+        echo "  market-data-server      -> http://localhost:8090"
+        ./{{.BINARY_DIR}}/order-executor-server --port 8091 &
+        echo "  order-executor-server   -> http://localhost:8091"
+        ./{{.BINARY_DIR}}/risk-analyzer-server --port 8092 &
+        echo "  risk-analyzer-server    -> http://localhost:8092"
+        ./{{.BINARY_DIR}}/technical-indicators-server --port 8093 &
+        echo "  technical-indicators-server -> http://localhost:8093"
+        echo "All MCP servers started. Use 'pkill -f \"market-data-server|order-executor-server|risk-analyzer-server|technical-indicators-server|polymarket-server\"' to stop them."
+
   run-telegram-bot:
     desc: "Run Telegram bot"
     deps:

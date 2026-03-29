@@ -39,7 +39,7 @@ func TestBindJSONBodyTooLarge(t *testing.T) {
 	// JSON encoding exceeds maxRequestBodyBytes.
 	padding := strings.Repeat("x", int(maxRequestBodyBytes)+1)
 	payload := `{"data":"` + padding + `"}`
-	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(payload))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -61,7 +61,7 @@ func TestBindJSONMalformed(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString(`{invalid json`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", bytes.NewBufferString(`{invalid json`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -83,7 +83,7 @@ func TestBindJSONValid(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString(`{"key":"value"}`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", bytes.NewBufferString(`{"key":"value"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -116,7 +116,7 @@ func TestParseIntQuery(t *testing.T) {
 		t.Run(fmt.Sprintf("limit/%s", tc.queryValue), func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodGet, "/?limit="+tc.queryValue, nil)
+			c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?limit="+tc.queryValue, nil)
 
 			got := parseIntQuery(c, "limit", 50, 1)
 			assert.Equal(t, tc.want, got)
@@ -139,7 +139,7 @@ func TestParseIntQuery(t *testing.T) {
 		t.Run(fmt.Sprintf("offset/%s", tc.queryValue), func(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodGet, "/?offset="+tc.queryValue, nil)
+			c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?offset="+tc.queryValue, nil)
 
 			got := parseIntQuery(c, "offset", 0, 0)
 			assert.Equal(t, tc.want, got)

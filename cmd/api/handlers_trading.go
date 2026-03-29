@@ -799,6 +799,10 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			}
 
 			// Create or average into existing position inside transaction via DB-layer methods.
+			// Issue #128: populate order.position_id so the FK is set at fill time.
+			// Issue #129: entry_price on new positions already stores the fill price (execPrice),
+			// which serves as average_price on open; UpdatePositionAveragingTx updates it on add.
+			var positionID uuid.UUID
 			if existingPos == nil {
 				entryReason := "paper_trade_api"
 				pos := &db.Position{
@@ -817,13 +821,22 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				if err := s.db.CreatePositionTx(ctx, tx, pos); err != nil {
 					return fmt.Errorf("failed to create position for paper trade: %w", err)
 				}
+				positionID = pos.ID
 			} else {
 				totalQty := existingPos.Quantity + req.Quantity
 				weightedAvg := (existingPos.Quantity*existingPos.EntryPrice + req.Quantity*execPrice) / totalQty
 				if err := s.db.UpdatePositionAveragingTx(ctx, tx, existingPos.ID, weightedAvg, totalQty, commission); err != nil {
 					return fmt.Errorf("failed to update position for paper trade: %w", err)
 				}
+				positionID = existingPos.ID
 			}
+
+			// Link this order to its position (Issue #128).
+			if err := s.db.UpdateOrderPositionIDTx(ctx, tx, order.ID, positionID); err != nil {
+				return fmt.Errorf("failed to link order to position: %w", err)
+			}
+			order.PositionID = &positionID
+
 			return nil
 		})
 

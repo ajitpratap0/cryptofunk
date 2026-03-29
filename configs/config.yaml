@@ -15,7 +15,7 @@ database:
   password: "${POSTGRES_PASSWORD}"
   database: "cryptofunk"
   ssl_mode: "disable"
-  pool_size: 10
+  pool_size: 25  # raised from 10 (issue #142); tune per deployment
 
 redis:
   host: "localhost"
@@ -245,7 +245,7 @@ exchanges:
 
 api:
   host: "0.0.0.0"
-  port: 8081
+  port: 8080  # API server listens on 8080; orchestrator is on 8081
   orchestrator_url: "http://localhost:8081"  # URL for orchestrator control endpoints
 
   # Authentication Configuration

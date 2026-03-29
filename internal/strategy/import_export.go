@@ -215,7 +215,7 @@ func Import(data []byte, opts ImportOptions) (*StrategyConfig, error) {
 		if err := json.Unmarshal(data, &strategy); err != nil {
 			// If JSON parsing fails, fall back to YAML (handles edge cases)
 			if yamlErr := yaml.Unmarshal(data, &strategy); yamlErr != nil {
-				parseErr = fmt.Errorf("failed to parse as JSON (%v) or YAML (%v)", err, yamlErr)
+				parseErr = fmt.Errorf("failed to parse as JSON (%w) or YAML (%w)", err, yamlErr)
 			}
 		}
 	} else {
@@ -223,7 +223,7 @@ func Import(data []byte, opts ImportOptions) (*StrategyConfig, error) {
 		if err := yaml.Unmarshal(data, &strategy); err != nil {
 			// Try JSON as fallback (in case whitespace check was wrong)
 			if jsonErr := json.Unmarshal(data, &strategy); jsonErr != nil {
-				parseErr = fmt.Errorf("failed to parse as YAML (%v) or JSON (%v)", err, jsonErr)
+				parseErr = fmt.Errorf("failed to parse as YAML (%w) or JSON (%w)", err, jsonErr)
 			}
 		}
 	}
