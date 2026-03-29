@@ -48,7 +48,7 @@ func (h *DecisionAnalyticsHandler) handleGetAnalytics(c *gin.Context) {
 
 	analytics, err := h.db.GetDecisionAnalytics(c.Request.Context(), since)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": SanitizeError(err)})
 		return
 	}
 
@@ -70,7 +70,7 @@ func (h *DecisionAnalyticsHandler) handleGetOutcomes(c *gin.Context) {
 
 	outcomes, err := h.db.GetDecisionsWithOutcomes(c.Request.Context(), limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": SanitizeError(err)})
 		return
 	}
 
@@ -84,7 +84,7 @@ func (h *DecisionAnalyticsHandler) handleResolveOutcomes(c *gin.Context) {
 	polyResolved, binanceResolved, err := h.resolver.ResolveAll(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":               err.Error(),
+			"error":               SanitizeError(err),
 			"polymarket_resolved": polyResolved,
 			"binance_resolved":    binanceResolved,
 		})

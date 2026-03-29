@@ -564,7 +564,7 @@ func (h *StrategyHandler) UpdateCurrentStrategy(c *gin.Context) {
 
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "Failed to persist strategy",
-				"details": err.Error(),
+				"details": SanitizeError(err),
 			})
 			return
 		}
@@ -1176,7 +1176,7 @@ func (h *StrategyHandler) CloneStrategy(c *gin.Context) {
 		log.Err(err).Msg("Cloned strategy validation failed")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Cloned strategy validation failed",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -1241,7 +1241,7 @@ func (h *StrategyHandler) MergeStrategies(c *gin.Context) {
 		log.Err(err).Msg("Failed to merge strategies")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to merge strategies",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
