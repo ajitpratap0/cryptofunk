@@ -175,10 +175,17 @@ func (s *APIServer) handleGetPosition(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  "position not found",
-			"symbol": symbol,
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":  "position not found",
+				"symbol": symbol,
+			})
+		} else {
+			log.Error().Err(err).Str("symbol", symbol).Msg("failed to get position")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
@@ -287,10 +294,17 @@ func (s *APIServer) handleGetOrder(c *gin.Context) {
 
 	order, err := s.db.GetOrderByID(ctx, orderID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":    "order not found",
-			"order_id": orderIDStr,
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":    "order not found",
+				"order_id": orderIDStr,
+			})
+		} else {
+			log.Error().Err(err).Str("order_id", orderIDStr).Msg("failed to get order")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
 		return
 	}
 
