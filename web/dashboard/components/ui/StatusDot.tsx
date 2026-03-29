@@ -118,7 +118,7 @@ export function SystemStatusIndicator({
   services, 
   className 
 }: SystemStatusIndicatorProps) {
-  const serviceEntries = Object.entries(services)
+  const serviceEntries = Object.entries(services ?? {})
   const upServices = serviceEntries.filter(([, status]) => status === 'up').length
   const totalServices = serviceEntries.length
 

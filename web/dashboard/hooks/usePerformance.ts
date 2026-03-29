@@ -152,21 +152,21 @@ export function usePairPerformance() {
 }
 
 // Candlestick Data
+// NOTE: The /market/candlestick endpoint is not yet implemented server-side.
+// When the backend adds it, this hook will work automatically via apiClient.
+// Until then, the catch block returns generated mock data.
 export function useCandlestickData(symbol: string, timeRange: string = '1d') {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.candlestick(symbol, timeRange),
     queryFn: async () => {
       try {
-        // Try to get actual market data
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/market/candlestick/${symbol}?timeRange=${timeRange}`
-        )
-        if (!response.ok) throw new Error('API error')
-        return await response.json()
+        const response = await apiClient.getMarketCandlestick(symbol, timeRange)
+        if (!response.success) throw new Error(response.error || 'API error')
+        return response
       } catch {
-        // Return mock data if API fails
+        // Return mock data until the backend endpoint is implemented
         const mockData = generateMockCandlestickData(symbol, timeRange)
-        
+
         return {
           success: true,
           data: mockData,

@@ -7,7 +7,7 @@ import { DrawdownChart } from '@/components/charts/DrawdownChart'
 import { StatCard } from '@/components/ui/StatCard'
 import { useEquityHistory, usePerformanceMetrics, usePairPerformance, useCandlestickData, useDrawdownAnalysis } from '@/hooks/usePerformance'
 import { useDecisionAnalytics, useDecisionOutcomes } from '@/hooks/useDecisionTracking'
-import { TimeRange } from '@/lib/types'
+import { TimeRange, CandlestickData } from '@/lib/types'
 import { formatPercentage, formatCurrency, cn } from '@/lib/utils'
 import { 
   TrendingUp,
@@ -33,7 +33,7 @@ export default function PerformancePage() {
 
   const metrics = metricsData?.data
   const pairPerformance = pairData?.data || []
-  const candlestickChartData = candlestickData?.data || []
+  const candlestickChartData: CandlestickData[] = candlestickData?.data as CandlestickData[] || []
   
   const timeRangeOptions: { value: TimeRange; label: string }[] = [
     { value: '1h', label: '1H' },

@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Settings, Wifi, WifiOff, Sun, Moon, Globe, Info } from 'lucide-react'
+import { useTheme } from 'next-themes'
+import { Settings, Wifi, WifiOff, Sun, Moon, Monitor, Globe, Info } from 'lucide-react'
 
 export default function SettingsPage() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
   const [wsStatus, setWsStatus] = useState<'connected' | 'disconnected'>('disconnected')
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
@@ -26,12 +28,8 @@ export default function SettingsPage() {
   }, [wsUrl])
 
   useEffect(() => {
-    if (theme === 'light') {
-      document.documentElement.classList.remove('dark')
-    } else {
-      document.documentElement.classList.add('dark')
-    }
-  }, [theme])
+    setMounted(true)
+  }, [])
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -97,21 +95,26 @@ export default function SettingsPage() {
       {/* Theme */}
       <div className="bg-card border border-border rounded-lg p-6 space-y-4">
         <h2 className="text-lg font-semibold flex items-center gap-2">
-          {theme === 'dark' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+          {mounted && theme === 'light' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           Appearance
         </h2>
         <div className="flex gap-3">
-          {(['dark', 'light'] as const).map((t) => (
+          {([
+            { value: 'light', label: 'Light', icon: <Sun className="h-4 w-4" /> },
+            { value: 'dark', label: 'Dark', icon: <Moon className="h-4 w-4" /> },
+            { value: 'system', label: 'System', icon: <Monitor className="h-4 w-4" /> },
+          ] as const).map((t) => (
             <button
-              key={t}
-              onClick={() => setTheme(t)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${
-                theme === t
+              key={t.value}
+              onClick={() => setTheme(t.value)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                mounted && theme === t.value
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               }`}
             >
-              {t}
+              {t.icon}
+              {t.label}
             </button>
           ))}
         </div>

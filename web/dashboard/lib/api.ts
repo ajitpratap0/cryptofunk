@@ -17,6 +17,7 @@ import {
   PolymarketPerformance,
   PaperTradeRequest,
   UnifiedPortfolio,
+  CandlestickData,
 } from './types'
 import { buildApiUrl } from './utils'
 
@@ -48,9 +49,16 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     try {
       const url = buildApiUrl(endpoint)
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      }
+      const apiKey = process.env.NEXT_PUBLIC_API_KEY
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey
+      }
       const response = await fetch(url, {
         headers: {
-          'Content-Type': 'application/json',
+          ...headers,
           ...options.headers,
         },
         ...options,
@@ -107,6 +115,14 @@ class ApiClient {
 
   async getDashboardStatus(): Promise<ApiResponse<SystemStatus>> {
     return this.request('/dashboard/status')
+  }
+
+  // Market Data
+  // NOTE: /market/candlestick endpoint is not yet implemented server-side.
+  // This method exists so the dashboard hook uses the standard apiClient
+  // (correct base URL + auth headers) and will work once the backend adds it.
+  async getMarketCandlestick(symbol: string, timeRange: string = '1d'): Promise<ApiResponse<CandlestickData[]>> {
+    return this.request(`/market/candlestick/${encodeURIComponent(symbol)}?timeRange=${encodeURIComponent(timeRange)}`)
   }
 
   // Trading Controls
@@ -339,19 +355,36 @@ class ApiClient {
 
 export const apiClient = new ApiClient()
 
+// Build common headers including API key when available
+function buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra }
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey
+  }
+  return headers
+}
+
 // Decision Analytics API
 export async function fetchDecisionAnalytics(since = '30d'): Promise<ApiResponse<import('./types').DecisionAnalytics>> {
-  const res = await fetch(buildApiUrl(`/decisions/analytics?since=${since}`))
+  const res = await fetch(buildApiUrl(`/decisions/analytics?since=${since}`), {
+    headers: buildHeaders(),
+  })
   return res.json()
 }
 
 export async function fetchDecisionOutcomes(limit = 50): Promise<ApiResponse<import('./types').DecisionWithOutcome[]>> {
-  const res = await fetch(buildApiUrl(`/decisions/outcomes?limit=${limit}`))
+  const res = await fetch(buildApiUrl(`/decisions/outcomes?limit=${limit}`), {
+    headers: buildHeaders(),
+  })
   return res.json()
 }
 
 export async function triggerOutcomeResolution(): Promise<{ success: boolean; polymarket_resolved: number; binance_resolved: number }> {
-  const res = await fetch(buildApiUrl('/admin/resolve-outcomes'), { method: 'POST' })
+  const res = await fetch(buildApiUrl('/admin/resolve-outcomes'), {
+    method: 'POST',
+    headers: buildHeaders(),
+  })
   return res.json()
 }
 
