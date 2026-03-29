@@ -33,6 +33,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -137,6 +138,14 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		if err := json.Unmarshal(permissions, &apiKey.Permissions); err != nil {
 			return nil, fmt.Errorf("invalid permissions JSON: %w", err)
 		}
+	}
+
+	// Constant-time comparison to prevent timing oracle attacks (#122)
+	// Even though the lookup was done via SQL, we verify the hash in Go as well
+	// to ensure no optimisation or short-circuit can leak key material through
+	// response-time differences.
+	if subtle.ConstantTimeCompare([]byte(apiKey.KeyHash), []byte(keyHash)) != 1 {
+		return nil, nil
 	}
 
 	// Check if key is revoked

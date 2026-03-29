@@ -147,9 +147,20 @@ func main() {
 		log.Info().Str("mode", cfg.Trading.Mode).Msg("Paper trading mode: using mock exchange")
 	}
 
+	// Create router and configure trusted proxies (#117).
+	// Setting nil means Gin will not trust any X-Forwarded-For header, so
+	// c.ClientIP() returns the real remote address instead of a spoofable header.
+	// In production behind a known reverse proxy (e.g. nginx or an AWS ALB),
+	// replace nil with the specific proxy IP(s):
+	//   router.SetTrustedProxies([]string{"10.0.0.1"})
+	router := gin.Default()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		log.Warn().Err(err).Msg("Failed to configure trusted proxies")
+	}
+
 	// Create API server
 	server := &APIServer{
-		router:             gin.Default(),
+		router:             router,
 		db:                 database,
 		config:             cfg,
 		hub:                hub,
