@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,6 +15,11 @@ import (
 
 	"github.com/ajitpratap0/cryptofunk/internal/backtest"
 )
+
+// ErrBacktestNotImplemented is returned by ExecuteBacktestJob to signal that
+// backtest execution is a stub. Callers can use errors.Is to distinguish this
+// from a transient failure without re-queuing the job.
+var ErrBacktestNotImplemented = errors.New("backtest execution not yet implemented")
 
 // BacktestHandler handles HTTP requests for backtesting
 type BacktestHandler struct {
@@ -378,17 +384,18 @@ func (h *BacktestHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup,
 }
 
 // ExecuteBacktestJob executes a backtest job (this would typically run in a worker).
-// Backtest execution is not yet implemented; the job is immediately marked as failed.
-// The function returns nil after persisting the failure state so that any retry
-// scheduler does not treat this as a transient error and re-queue the job — the
-// failure has already been recorded in the DB and surfaced to the UI.
+// Backtest execution is not yet implemented; the job is immediately marked as failed
+// and ErrBacktestNotImplemented is returned so callers can distinguish this stub
+// path from a transient error. The DB failure state is persisted before the return,
+// so retry schedulers that check errors.Is(err, ErrBacktestNotImplemented) should
+// not re-queue the job.
 func ExecuteBacktestJob(ctx context.Context, job *backtest.BacktestJob, jobManager *backtest.JobManager) error {
 	log.Warn().Str("job_id", job.ID.String()).Msg("Backtest execution not yet implemented")
 	// Mark as failed so callers and UI don't show a perpetually-running job
 	if err := jobManager.UpdateJobStatus(ctx, job.ID, backtest.JobStatusFailed, "backtest execution not yet implemented"); err != nil {
 		return fmt.Errorf("failed to mark unimplemented backtest job as failed: %w", err)
 	}
-	// Return nil: the failure is persisted to DB; returning an error here would
-	// cause retry schedulers to re-queue and re-fail the same job indefinitely.
-	return nil
+	// Return the sentinel so callers can distinguish the not-implemented stub from
+	// a successful execution, without triggering indefinite re-queuing.
+	return ErrBacktestNotImplemented
 }
