@@ -63,7 +63,9 @@ var defaultOrchestratorClient = &http.Client{
 // NOTE: Rate limiting code moved to middleware.go for better organization
 
 func main() {
-	// Setup logging
+	// Bootstrap logging before config is loaded.
+	// Default to console format so development is human-readable.
+	// This will be reconfigured below once the full config is available.
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	// Load and validate configuration
@@ -72,6 +74,15 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load or validate configuration")
 	}
+
+	// Reconfigure logger now that we have the full config.
+	// In production (or when LOG_FORMAT=json) emit structured JSON for log aggregators.
+	// In development, keep the human-readable console format.
+	logFormat := "console"
+	if cfg.App.Environment == envProduction || cfg.App.Environment == "prod" || os.Getenv("LOG_FORMAT") == "json" {
+		logFormat = "json"
+	}
+	config.InitLogger(cfg.App.LogLevel, logFormat)
 
 	// CRITICAL SECURITY CHECK: Prevent production deployment with API auth disabled
 	// This validation MUST happen before any server initialization
@@ -202,6 +213,11 @@ func (s *APIServer) start() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// Register signal handler BEFORE starting the server to avoid missing SIGTERM
+	// that arrives very shortly after process startup (e.g. from K8s pod eviction).
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	// Start server in goroutine
 	go func() {
 		log.Info().
@@ -215,8 +231,6 @@ func (s *APIServer) start() {
 	}()
 
 	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Info().Msg("Shutting down API server...")

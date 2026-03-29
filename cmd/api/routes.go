@@ -304,6 +304,19 @@ func (s *APIServer) setupRoutes() {
 		safety.RegisterRoutes(v1, s.safetyGuard)
 	}
 
+	// K8s probe endpoints (no rate limiting, no auth)
+	s.router.GET("/liveness", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	s.router.GET("/readiness", func(c *gin.Context) {
+		// Ping the DB to verify readiness
+		if err := s.db.Pool().Ping(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
+
 	// Root endpoint
 	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{

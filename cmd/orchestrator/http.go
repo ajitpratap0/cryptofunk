@@ -337,10 +337,11 @@ func (h *HTTPServer) checkDatabase(ctx context.Context) HealthCheckResult {
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
+		log.Error().Err(err).Msg("database health check failed")
 		result = HealthCheckResult{
 			Component: "database",
 			Status:    "failed",
-			Message:   err.Error(),
+			Message:   "database unavailable",
 			Latency:   latency,
 		}
 		h.recordHealthCheckMetrics(result)
