@@ -99,7 +99,7 @@ func (h *BacktestHandler) RunBacktest(c *gin.Context) {
 		log.Error().Err(err).Msg("Failed to create backtest job")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to create backtest job",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -197,7 +197,7 @@ func (h *BacktestHandler) ListBacktests(c *gin.Context) {
 		log.Error().Err(err).Msg("Failed to list backtest jobs")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to list backtest jobs",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -263,7 +263,7 @@ func (h *BacktestHandler) DeleteBacktest(c *gin.Context) {
 		log.Error().Err(err).Str("job_id", idStr).Msg("Failed to delete backtest job")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to delete backtest job",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
@@ -323,7 +323,7 @@ func (h *BacktestHandler) CancelBacktest(c *gin.Context) {
 		log.Error().Err(err).Str("job_id", idStr).Msg("Failed to cancel backtest job")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to cancel backtest job",
-			"details": err.Error(),
+			"details": SanitizeError(err),
 		})
 		return
 	}
