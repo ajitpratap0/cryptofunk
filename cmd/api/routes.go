@@ -127,8 +127,25 @@ func (s *APIServer) setupRoutes() {
 	// Apply global rate limiting to all API requests
 	s.router.Use(s.rateLimiter.GlobalMiddleware())
 
-	// Prometheus metrics endpoint (no API prefix, no rate limiting)
-	s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
+	// Single auth config shared by all protected endpoints (metrics and API v1).
+	// Consolidating the previously duplicated metricsAuthConfig here (#193).
+	authConfig := &api.AuthConfig{
+		Enabled:      s.config.API.Auth.Enabled,
+		HeaderName:   s.config.API.Auth.HeaderName,
+		RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+	}
+	if authConfig.HeaderName == "" {
+		authConfig.HeaderName = "X-API-Key" // Default header name
+	}
+
+	// Prometheus metrics endpoint (no API prefix, no rate limiting).
+	// Requires API key when auth is enabled (#120) to prevent leaking internal
+	// counters, queue depths, and trading stats to unauthenticated callers.
+	if s.config.API.Auth.Enabled {
+		s.router.GET("/metrics", api.AuthMiddleware(s.apiKeyStore, authConfig), gin.WrapH(metrics.Handler()))
+	} else {
+		s.router.GET("/metrics", gin.WrapH(metrics.Handler()))
+	}
 
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
@@ -163,16 +180,6 @@ func (s *APIServer) setupRoutes() {
 		{
 			positions.GET("", s.handleListPositions)
 			positions.GET("/:symbol", s.handleGetPosition)
-		}
-
-		// Create authentication config for protected endpoints
-		authConfig := &api.AuthConfig{
-			Enabled:      s.config.API.Auth.Enabled,
-			HeaderName:   s.config.API.Auth.HeaderName,
-			RequireHTTPS: s.config.API.Auth.RequireHTTPS,
-		}
-		if authConfig.HeaderName == "" {
-			authConfig.HeaderName = "X-API-Key" // Default header name
 		}
 
 		// Order routes (mixed read/write, apply appropriate limiters + authentication)
@@ -211,10 +218,15 @@ func (s *APIServer) setupRoutes() {
 		}
 
 		// Configuration routes (admin ops, apply control rate limiter)
+		// Both GET and PATCH require authentication (#121) — the config response
+		// includes internal service URLs and runtime settings that should not be
+		// publicly readable.
 		configGroup := v1.Group("/config")
 		{
-			configGroup.GET("", s.rateLimiter.ReadMiddleware(), s.handleGetConfig)
-			configGroup.PATCH("", s.rateLimiter.ControlMiddleware(), api.AuthMiddleware(s.apiKeyStore, authConfig), s.handleUpdateConfig)
+			// Auth runs before rate limit so unauthenticated requests are rejected
+			// before consuming rate-limit budget (#193).
+			configGroup.GET("", api.AuthMiddleware(s.apiKeyStore, authConfig), s.rateLimiter.ReadMiddleware(), s.handleGetConfig)
+			configGroup.PATCH("", api.AuthMiddleware(s.apiKeyStore, authConfig), s.rateLimiter.ControlMiddleware(), s.handleUpdateConfig)
 		}
 
 		// Decision explainability routes (T307) with rate limiting and optional auth
