@@ -91,6 +91,10 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 	}
 
 	if dataPoints >= 10 {
+		// Pre-sort returns once here so that CalculateVaR (called twice, for 95% and
+		// 99% confidence levels) skips its own O(n log n) sort on each call.
+		sort.Float64s(returns)
+
 		// CalculateVaR requires []interface{} not []float64
 		returnsIface := make([]interface{}, dataPoints)
 		for i, v := range returns {
@@ -233,23 +237,20 @@ func (h *RiskHandler) GetExposure(c *gin.Context) {
 // collectClosedReturns gathers fractional returns from all closed positions.
 // Each return is RealizedPnL / (EntryPrice * Quantity) so values are dimensionless
 // fractions (e.g. 0.023 = 2.3%) suitable for VaR calculations.
+// Uses GetClosedPositionReturns to project only the 3 columns needed (issue #143).
 func (h *RiskHandler) collectClosedReturns(ctx context.Context) ([]float64, error) {
-	positions, err := h.db.GetAllClosedPositions(ctx)
+	rows, err := h.db.GetClosedPositionReturns(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var returns []float64
-	for _, p := range positions {
-		// RealizedPnL is non-nil here: GetAllClosedPositions filters realized_pnl IS NOT NULL.
-		// This guard is retained as defense-in-depth against future query changes.
-		if p.RealizedPnL != nil {
-			notional := p.EntryPrice * p.Quantity
-			if notional == 0 {
-				continue
-			}
-			returns = append(returns, *p.RealizedPnL/notional)
+	returns := make([]float64, 0, len(rows))
+	for _, r := range rows {
+		notional := r.EntryPrice * r.Quantity
+		if notional == 0 {
+			continue
 		}
+		returns = append(returns, r.RealizedPnL/notional)
 	}
 	return returns, nil
 }

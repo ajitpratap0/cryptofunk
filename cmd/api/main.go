@@ -100,7 +100,7 @@ func main() {
 	// Initialize database with signal-derived context
 	ctx, ctxCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer ctxCancel()
-	database, err := db.New(ctx)
+	database, err := db.New(ctx, &cfg.Database)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/adshao/go-binance/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -79,6 +80,31 @@ func main() {
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to initialize CoinGecko client, using Binance only")
 		coingeckoClient = nil
+	}
+
+	// Wire Redis cache to CoinGecko client when Redis is reachable (issue #141).
+	// The cache TTL is taken from mcp.external.coingecko.cache_ttl (seconds).
+	if coingeckoClient != nil {
+		redisClient := redis.NewClient(&redis.Options{
+			Addr:     fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		pingErr := redisClient.Ping(pingCtx).Err()
+		cancel() // cancel immediately after Ping to avoid context leak until process shutdown
+		if pingErr != nil {
+			logger.Warn().Err(pingErr).Msg("Redis unavailable; CoinGecko price cache disabled")
+			_ = redisClient.Close()
+		} else {
+			cacheTTL := time.Duration(cfg.MCP.External.CoinGecko.CacheTTL) * time.Second
+			if cacheTTL <= 0 {
+				cacheTTL = 60 * time.Second
+			}
+			priceCache := market.NewRedisPriceCache(redisClient, cacheTTL)
+			coingeckoClient.SetCache(priceCache)
+			logger.Info().Dur("ttl", cacheTTL).Msg("Redis price cache enabled for CoinGecko client")
+		}
 	}
 
 	preferCoinGecko := coingeckoClient != nil && os.Getenv("PREFER_COINGECKO") != "false"

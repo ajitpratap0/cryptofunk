@@ -575,7 +575,7 @@ func (a *BaseAgent) CallMCPTool(ctx context.Context, serverName string, toolName
 		newSession, reconnErr := a.reconnectMCPServer(ctx, *serverConfig)
 		if reconnErr != nil {
 			a.metrics.MCPErrorsTotal.Inc()
-			return nil, fmt.Errorf("tool call failed: %w (reconnect failed: %v)", err, reconnErr)
+			return nil, fmt.Errorf("tool call failed: %w (reconnect failed: %w)", err, reconnErr)
 		}
 		// Retry with fresh session
 		retryCtx, retryCancel := context.WithTimeout(ctx, mcpToolCallTimeout)
