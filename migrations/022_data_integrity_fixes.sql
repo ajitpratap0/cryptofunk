@@ -1,0 +1,44 @@
+-- Migration 022: data-integrity fixes from 2026-03-25 audit
+-- Fixes issues: #133 (DB-007 trades.session_id), #133 (DB-009 positions.session_id NOT NULL)
+
+-- DB-007: Add session_id column to trades table so P&L can be queried directly per session.
+-- The column is nullable because existing rows have no session context and the MCP
+-- order-executor does not yet pass a session_id when inserting trades.
+-- A follow-up code change in the order-executor will begin populating this column.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES trading_sessions(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_trades_session ON trades (session_id, executed_at DESC);
+
+-- DB-009: Enforce NOT NULL on positions.session_id.
+-- First backfill any NULLs by joining to the orders table via position_id FK.
+-- This recovers session context for positions that were created before Issue #128 was fixed.
+UPDATE positions p
+SET session_id = (
+    SELECT o.session_id
+    FROM orders o
+    WHERE o.position_id = p.id
+      AND o.session_id IS NOT NULL
+    LIMIT 1
+)
+WHERE p.session_id IS NULL;
+
+-- SAFETY: Only delete positions that are still NULL after backfill AND are not referenced by
+-- any order. The original broad DELETE (WHERE session_id IS NULL) was dangerous: on databases
+-- where position_id was never set on orders (pre-fix #128), the backfill UPDATE recovers zero
+-- rows, meaning ALL positions would be deleted. This guarded form only removes rows that have
+-- no order linkage whatsoever — i.e. genuinely orphaned rows with no traceability.
+-- Positions with NULL session_id that ARE referenced by orders are left in place so that no
+-- legitimate trading data is lost; they will be cleaned up manually after investigation.
+DELETE FROM positions
+WHERE session_id IS NULL
+  AND id NOT IN (
+      SELECT DISTINCT position_id
+      FROM orders
+      WHERE position_id IS NOT NULL
+  );
+
+-- Now apply the NOT NULL constraint.
+-- NOTE: If any rows with session_id IS NULL still exist (because they are order-referenced),
+-- this ALTER will fail with a constraint violation. In that case, investigate those rows and
+-- set their session_id before re-running, or remove the ALTER until the data is clean.
+ALTER TABLE positions ALTER COLUMN session_id SET NOT NULL;
