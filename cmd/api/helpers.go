@@ -374,8 +374,8 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 		// Content Security Policy: restrict resource loading to same origin.
-		// connect-src includes ws: and wss: to allow WebSocket connections from the dashboard.
-		c.Header("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss:")
+		// connect-src includes wss: to allow secure WebSocket connections from the dashboard.
+		c.Header("Content-Security-Policy", "default-src 'self'; connect-src 'self' wss:")
 
 		c.Next()
 	}
