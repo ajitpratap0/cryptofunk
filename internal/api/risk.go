@@ -91,10 +91,6 @@ func (h *RiskHandler) GetMetrics(c *gin.Context) {
 	}
 
 	if dataPoints >= 10 {
-		// Pre-sort returns once here so that CalculateVaR (called twice, for 95% and
-		// 99% confidence levels) skips its own O(n log n) sort on each call.
-		sort.Float64s(returns)
-
 		// CalculateVaR requires []interface{} not []float64
 		returnsIface := make([]interface{}, dataPoints)
 		for i, v := range returns {
