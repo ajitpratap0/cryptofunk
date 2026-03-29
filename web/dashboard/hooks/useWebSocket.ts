@@ -87,17 +87,23 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
         // Attempt to reconnect if enabled and we haven't exceeded max attempts
         if (
-          reconnect && 
-          shouldReconnectRef.current && 
+          reconnect &&
+          shouldReconnectRef.current &&
           reconnectAttemptsRef.current < maxReconnectAttempts
         ) {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttemptsRef.current += 1
-            updateState({ 
-              reconnectAttempts: reconnectAttemptsRef.current 
+            updateState({
+              reconnectAttempts: reconnectAttemptsRef.current
             })
             connect()
           }, reconnectInterval)
+        } else if (reconnect && shouldReconnectRef.current && reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          // Max retries exhausted — surface error so consumers can react
+          updateState({
+            connectionStatus: 'error',
+            error: `WebSocket connection failed after ${maxReconnectAttempts} attempt${maxReconnectAttempts === 1 ? '' : 's'}`,
+          })
         }
       }
 
