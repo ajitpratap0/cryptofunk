@@ -67,6 +67,9 @@ func New(ctx context.Context, cfg ...*appconfig.DatabaseConfig) (*DB, error) {
 	if dbCfg != nil && dbCfg.PoolSize > 0 && dbCfg.PoolSize <= math.MaxInt32 {
 		maxConns = int32(dbCfg.PoolSize) //#nosec G115 -- bounds-checked above
 	}
+	if maxConns > 10 {
+		log.Warn().Int32("max_conns", maxConns).Msg("high DB pool size: multiple callers sharing this default may exhaust postgres max_connections (default 100)")
+	}
 	config.MaxConns = maxConns
 	minConns := int32(5)
 	if minConns > maxConns {
