@@ -155,7 +155,7 @@ func main() {
 	//   router.SetTrustedProxies([]string{"10.0.0.1"})
 	router := gin.Default()
 	if err := router.SetTrustedProxies(nil); err != nil {
-		log.Warn().Err(err).Msg("Failed to configure trusted proxies")
+		log.Fatal().Err(err).Msg("Failed to configure trusted proxies")
 	}
 
 	// Create API server
