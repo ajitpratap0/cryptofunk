@@ -97,6 +97,7 @@ func main() {
 			logger.Warn().Err(pingErr).Msg("Redis unavailable; CoinGecko price cache disabled")
 			_ = redisClient.Close()
 		} else {
+			defer redisClient.Close()
 			cacheTTL := time.Duration(cfg.MCP.External.CoinGecko.CacheTTL) * time.Second
 			if cacheTTL <= 0 {
 				cacheTTL = 60 * time.Second
