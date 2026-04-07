@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import { StatCard } from '@/components/ui/StatCard'
 import { EquityCurve } from '@/components/charts/EquityCurve'
 import { AgentPerformanceBar } from '@/components/charts/AgentPerformanceBar'
@@ -57,20 +58,32 @@ export default function DashboardContent() {
   // Surface backend failures so '$0 P&L / 0 trades / no agents' is never
   // confused with 'backend is down' or 'auth failed'. The data hooks throw
   // on failure, so react-query exposes the error via `isError`/`error`.
-  const failedQueries: Array<{ name: string; message: string }> = []
-  const pushIfError = (name: string, q: { isError: boolean; error: unknown }) => {
-    if (q.isError) {
-      failedQueries.push({
+  const failedQueries = useMemo(() => {
+    const queries: Array<[string, { isError: boolean; error: unknown }]> = [
+      ['dashboard', dashboardQuery],
+      ['pnl', pnlQuery],
+      ['trades', tradesQuery],
+      ['agents', agentsQuery],
+      ['status', statusQuery],
+    ]
+    return queries
+      .filter(([, q]) => q.isError)
+      .map(([name, q]) => ({
         name,
         message: q.error instanceof Error ? q.error.message : 'unknown error',
-      })
-    }
-  }
-  pushIfError('dashboard', dashboardQuery)
-  pushIfError('pnl', pnlQuery)
-  pushIfError('trades', tradesQuery)
-  pushIfError('agents', agentsQuery)
-  pushIfError('status', statusQuery)
+      }))
+  }, [
+    dashboardQuery.isError,
+    dashboardQuery.error,
+    pnlQuery.isError,
+    pnlQuery.error,
+    tradesQuery.isError,
+    tradesQuery.error,
+    agentsQuery.isError,
+    agentsQuery.error,
+    statusQuery.isError,
+    statusQuery.error,
+  ])
 
   return (
     <>

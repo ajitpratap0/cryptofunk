@@ -152,14 +152,14 @@ export function usePairPerformance() {
 }
 
 // Candlestick Data
-// The /market/candlestick endpoint is not yet implemented server-side
-// (TODO: track via backend issue). When the backend adds it, this hook
-// works automatically via apiClient. Errors are surfaced to the caller —
-// the UI is responsible for rendering an empty / error state.
+//
+// The /market/candlestick endpoint is pending backend implementation. When
+// it ships, this hook works automatically via apiClient. Errors are surfaced
+// to the caller — the UI renders an empty / error state.
 //
 // For local development against a stub backend, set
 // NEXT_PUBLIC_USE_MOCK_CANDLES=true to fall back to generated data. The
-// mock fallback is logged so it cannot silently mask real API failures.
+// fallback logs a warning so it cannot silently mask real API failures.
 export function useCandlestickData(symbol: string, timeRange: string = '1d') {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.candlestick(symbol, timeRange),
@@ -169,8 +169,7 @@ export function useCandlestickData(symbol: string, timeRange: string = '1d') {
         return response
       }
 
-      const useMock = process.env.NEXT_PUBLIC_USE_MOCK_CANDLES === 'true'
-      if (useMock) {
+      if (process.env.NEXT_PUBLIC_USE_MOCK_CANDLES === 'true') {
         console.warn(
           `[useCandlestickData] candlestick fetch failed for ${symbol} (${timeRange}); ` +
             `serving NEXT_PUBLIC_USE_MOCK_CANDLES fallback. error=${response.error ?? 'unknown'}`
@@ -179,7 +178,6 @@ export function useCandlestickData(symbol: string, timeRange: string = '1d') {
           success: true as const,
           data: generateMockCandlestickData(symbol, timeRange),
           timestamp: new Date().toISOString(),
-          isMock: true,
         }
       }
 

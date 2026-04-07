@@ -9,22 +9,19 @@ const ok = <T,>(data: T) => ({
   isError: false,
   error: null,
 })
+const err = (message: string) => ({
+  data: undefined,
+  isLoading: false,
+  isError: true,
+  error: new Error(message),
+})
 
 vi.mock('@/hooks/useTradeData', () => ({
-  useDashboard: () =>
-    ok({
-      totalPnl: 0,
-      winRate: 0,
-      activePositions: 0,
-      totalTrades: 0,
-      equity: 0,
-      availableBalance: 0,
-      marginUsed: 0,
-    }),
+  useDashboard: () => err('HTTP 401 unauthorized — check NEXT_PUBLIC_API_KEY'),
   useDashboardPnl: () => ok({ daily: 0, total: 0, equity: [] }),
   useTrades: () => ok([]),
   useUnifiedPortfolio: () => ({ data: undefined }),
-  useSystemStatus: () => ok({ status: 'healthy', services: {} }),
+  useSystemStatus: () => err('down'),
 }))
 
 vi.mock('@/hooks/useAgents', () => ({
@@ -38,17 +35,13 @@ function wrap(children: ReactNode) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
-describe('DashboardContent (happy path)', () => {
-  it('mounts and renders core sections', () => {
+describe('DashboardContent (error path)', () => {
+  it('renders an error banner and falls back to unknown status', () => {
     render(wrap(<DashboardContent />))
 
-    expect(screen.getByText('Total P&L')).toBeInTheDocument()
-    expect(screen.getByText('Win Rate')).toBeInTheDocument()
-    expect(screen.getByText('Active Positions')).toBeInTheDocument()
-    expect(screen.getByText('Equity Curve')).toBeInTheDocument()
-    expect(screen.getByText('Recent Trades')).toBeInTheDocument()
-    expect(screen.getByText(/healthy/i)).toBeInTheDocument()
-
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/dashboard:.*401/)
+    expect(alert).toHaveTextContent(/status:.*down/)
+    expect(screen.getByText(/unknown/i)).toBeInTheDocument()
   })
 })

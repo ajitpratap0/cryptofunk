@@ -4,9 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // PR #201. A regression here silently breaks the entire dashboard when
 // the backend has auth.enabled=true, so the contract is worth pinning.
 
-const ORIGINAL_KEY = process.env.NEXT_PUBLIC_API_KEY
-const ORIGINAL_URL = process.env.NEXT_PUBLIC_API_URL
-
 async function loadApi() {
   vi.resetModules()
   return await import('@/lib/api')
@@ -20,21 +17,18 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   })
 }
 
+beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://test.local')
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
+})
+
 describe('apiClient X-API-Key header', () => {
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_API_URL = 'http://test.local'
-  })
-
-  afterEach(() => {
-    if (ORIGINAL_KEY === undefined) delete process.env.NEXT_PUBLIC_API_KEY
-    else process.env.NEXT_PUBLIC_API_KEY = ORIGINAL_KEY
-    if (ORIGINAL_URL === undefined) delete process.env.NEXT_PUBLIC_API_URL
-    else process.env.NEXT_PUBLIC_API_URL = ORIGINAL_URL
-    vi.restoreAllMocks()
-  })
-
   it('attaches X-API-Key when NEXT_PUBLIC_API_KEY is set', async () => {
-    process.env.NEXT_PUBLIC_API_KEY = 'test-key-123'
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', 'test-key-123')
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValue(jsonResponse({ success: true, data: { status: 'ok' } }))
@@ -49,7 +43,7 @@ describe('apiClient X-API-Key header', () => {
   })
 
   it('omits X-API-Key when NEXT_PUBLIC_API_KEY is unset', async () => {
-    delete process.env.NEXT_PUBLIC_API_KEY
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', '')
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValue(jsonResponse({ success: true, data: { status: 'ok' } }))
@@ -63,7 +57,7 @@ describe('apiClient X-API-Key header', () => {
   })
 
   it('caller-supplied headers cannot drop X-API-Key', async () => {
-    process.env.NEXT_PUBLIC_API_KEY = 'guarded'
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', 'guarded')
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValue(jsonResponse({ success: true, data: {} }))
@@ -79,7 +73,7 @@ describe('apiClient X-API-Key header', () => {
   })
 
   it('returns success:false with a friendly message on 401', async () => {
-    process.env.NEXT_PUBLIC_API_KEY = 'wrong'
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', 'wrong')
     vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('unauthorized', { status: 401 })
     )
@@ -93,18 +87,8 @@ describe('apiClient X-API-Key header', () => {
 })
 
 describe('getMarketCandlestick URL encoding', () => {
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_API_URL = 'http://test.local'
-    delete process.env.NEXT_PUBLIC_API_KEY
-  })
-
-  afterEach(() => {
-    if (ORIGINAL_KEY === undefined) delete process.env.NEXT_PUBLIC_API_KEY
-    else process.env.NEXT_PUBLIC_API_KEY = ORIGINAL_KEY
-    vi.restoreAllMocks()
-  })
-
   it('percent-encodes symbols containing slashes', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', '')
     const fetchSpy = vi
       .spyOn(global, 'fetch')
       .mockResolvedValue(jsonResponse({ success: true, data: [] }))
@@ -119,18 +103,8 @@ describe('getMarketCandlestick URL encoding', () => {
 })
 
 describe('decision analytics fetchers', () => {
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_API_URL = 'http://test.local'
-    process.env.NEXT_PUBLIC_API_KEY = 'k'
-  })
-
-  afterEach(() => {
-    if (ORIGINAL_KEY === undefined) delete process.env.NEXT_PUBLIC_API_KEY
-    else process.env.NEXT_PUBLIC_API_KEY = ORIGINAL_KEY
-    vi.restoreAllMocks()
-  })
-
   it('fetchDecisionAnalytics surfaces 500 as success:false instead of returning the error body', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', 'k')
     vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response('boom', { status: 500 })
     )
@@ -143,9 +117,12 @@ describe('decision analytics fetchers', () => {
   })
 
   it('triggerOutcomeResolution sends X-API-Key on POST', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_KEY', 'k')
     const fetchSpy = vi
       .spyOn(global, 'fetch')
-      .mockResolvedValue(jsonResponse({ success: true, data: { polymarket_resolved: 0, binance_resolved: 0 } }))
+      .mockResolvedValue(
+        jsonResponse({ success: true, data: { polymarket_resolved: 0, binance_resolved: 0 } })
+      )
 
     const { triggerOutcomeResolution } = await loadApi()
     await triggerOutcomeResolution()
