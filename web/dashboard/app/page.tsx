@@ -29,8 +29,9 @@ function DashboardSkeleton() {
         ))}
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="h-80 rounded-lg bg-muted/50 animate-pulse" />
-        <div className="h-80 rounded-lg bg-muted/50 animate-pulse" />
+        {/* Match the loaded card height: p-6 (48) + h2+mb-4 (~48) + chart (300) ≈ 396px */}
+        <div className="h-[396px] rounded-lg bg-muted/50 animate-pulse" />
+        <div className="h-[396px] rounded-lg bg-muted/50 animate-pulse" />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {Array.from({ length: 3 }).map((_, i) => (

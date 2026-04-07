@@ -11,6 +11,12 @@ interface StatCardProps {
   changeType?: 'percentage' | 'currency' | 'number'
   icon?: ReactNode
   sparklineData?: number[]
+  /**
+   * Hint that this card will eventually render a sparkline. Set this on
+   * cards whose `sparklineData` is fetched async — the loading skeleton
+   * uses it to reserve sparkline space and avoid CLS once data arrives.
+   */
+  hasSparkline?: boolean
   formatAs?: 'currency' | 'percentage' | 'number' | 'custom'
   prefix?: string
   suffix?: string
@@ -28,6 +34,7 @@ export function StatCard({
   changeType = 'number',
   icon,
   sparklineData,
+  hasSparkline = false,
   formatAs = 'number',
   prefix,
   suffix,
@@ -85,6 +92,9 @@ export function StatCard({
   }
 
   if (loading) {
+    // Reserve sparkline space when the parent indicates one is coming, so
+    // the skeleton and loaded card have the same height (no CLS on data).
+    const reserveSparkline = hasSparkline || sparklineData !== undefined
     return (
       <div className={cn("metric-card min-h-[120px]", className)}>
         <div className="flex items-center justify-between">
@@ -99,7 +109,7 @@ export function StatCard({
             <div className="skeleton h-4 w-16" />
           </div>
         )}
-        {sparklineData && <div className="skeleton h-8 w-full mt-4" />}
+        {reserveSparkline && <div className="skeleton h-8 w-full mt-4" />}
       </div>
     )
   }

@@ -117,6 +117,7 @@ export default function DashboardContent() {
           formatAs="currency"
           icon={<DollarSign className="h-5 w-5" />}
           sparklineData={pnlSparkline}
+          hasSparkline
           loading={dashboardLoading}
         />
 
