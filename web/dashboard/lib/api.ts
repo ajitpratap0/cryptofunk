@@ -77,8 +77,10 @@ class ApiClient {
       const url = buildApiUrl(endpoint)
       const response = await fetch(url, {
         ...options,
-        // Spread caller headers first so our auth/content-type headers win
-        // and a caller can never accidentally drop X-API-Key.
+        // Caller headers are spread first so our headers (X-API-Key,
+        // Content-Type) always win. This guarantees auth cannot be dropped,
+        // but it also means callers cannot override Content-Type from this
+        // path — e.g. multipart uploads would need a separate code path.
         headers: {
           ...(options.headers as Record<string, string> | undefined),
           ...buildHeaders({ 'Content-Type': 'application/json' }),

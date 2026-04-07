@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import DashboardContent from '@/components/dashboard/DashboardContent'
+import { CHART_CARD_HEIGHT_CLASS } from '@/lib/constants'
 
 export default function DashboardPage() {
   return (
@@ -29,9 +30,8 @@ function DashboardSkeleton() {
         ))}
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* Match the loaded card height: p-6 (48) + h2+mb-4 (~48) + chart (300) ≈ 396px */}
-        <div className="h-[396px] rounded-lg bg-muted/50 animate-pulse" />
-        <div className="h-[396px] rounded-lg bg-muted/50 animate-pulse" />
+        <div className={`${CHART_CARD_HEIGHT_CLASS} rounded-lg bg-muted/50 animate-pulse`} />
+        <div className={`${CHART_CARD_HEIGHT_CLASS} rounded-lg bg-muted/50 animate-pulse`} />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {Array.from({ length: 3 }).map((_, i) => (

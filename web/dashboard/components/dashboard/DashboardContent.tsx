@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react'
 import { StatCard } from '@/components/ui/StatCard'
+import { CHART_HEIGHT } from '@/lib/constants'
 import { EquityCurve } from '@/components/charts/EquityCurve'
 import { AgentPerformanceBar } from '@/components/charts/AgentPerformanceBar'
 import { TradesTable } from '@/components/trades/TradesTable'
@@ -72,6 +73,9 @@ export default function DashboardContent() {
         name,
         message: q.error instanceof Error ? q.error.message : 'unknown error',
       }))
+    // Depend on the underlying primitives, not the query objects themselves —
+    // react-query returns a fresh result object on every render, which would
+    // bust this memo every time and defeat the point.
   }, [
     dashboardQuery.isError,
     dashboardQuery.error,
@@ -111,7 +115,7 @@ export default function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         <StatCard
           title="Total P&L"
-          value={stats?.totalPnl || 0}
+          value={stats?.totalPnl ?? 0}
           change={pnl?.daily}
           changeType="currency"
           formatAs="currency"
@@ -123,7 +127,7 @@ export default function DashboardContent() {
 
         <StatCard
           title="Win Rate"
-          value={stats?.winRate || 0}
+          value={stats?.winRate ?? 0}
           formatAs="percentage"
           icon={<Target className="h-5 w-5" />}
           trend={stats?.winRate && stats.winRate > 60 ? 'up' : stats?.winRate && stats.winRate < 40 ? 'down' : 'neutral'}
@@ -132,7 +136,7 @@ export default function DashboardContent() {
 
         <StatCard
           title="Active Positions"
-          value={stats?.activePositions || 0}
+          value={stats?.activePositions ?? 0}
           formatAs="number"
           icon={<Activity className="h-5 w-5" />}
           loading={dashboardLoading}
@@ -140,7 +144,7 @@ export default function DashboardContent() {
 
         <StatCard
           title="Total Trades"
-          value={stats?.totalTrades || 0}
+          value={stats?.totalTrades ?? 0}
           formatAs="number"
           icon={<TrendingUp className="h-5 w-5" />}
           loading={dashboardLoading}
@@ -154,7 +158,7 @@ export default function DashboardContent() {
           <h2 className="text-xl font-semibold mb-4">Equity Curve</h2>
           <EquityCurve
             data={pnl?.equity || []}
-            height={300}
+            height={CHART_HEIGHT}
             loading={pnlLoading}
           />
         </div>
@@ -165,7 +169,7 @@ export default function DashboardContent() {
           <AgentPerformanceBar
             agents={agents}
             metric="pnl"
-            height={300}
+            height={CHART_HEIGHT}
             showLegend={false}
             loading={agentsLoading}
           />
@@ -266,7 +270,7 @@ export default function DashboardContent() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Daily P&L</span>
               <span className={`font-mono font-medium ${
-                pnl?.daily && pnl.daily > 0 ? 'text-profit' : 'text-loss'
+                pnl?.daily && pnl.daily > 0 ? 'text-profit' : pnl?.daily && pnl.daily < 0 ? 'text-loss' : 'text-muted-foreground'
               }`}>
                 {pnl?.daily ? formatCurrency(pnl.daily) : '--'}
               </span>
@@ -274,7 +278,7 @@ export default function DashboardContent() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Return Today</span>
               <span className={`font-mono font-medium ${
-                pnl?.daily && pnl.daily > 0 ? 'text-profit' : 'text-loss'
+                pnl?.daily && pnl.daily > 0 ? 'text-profit' : pnl?.daily && pnl.daily < 0 ? 'text-loss' : 'text-muted-foreground'
               }`}>
                 {pnl?.daily && stats?.equity ?
                   formatPercentage((pnl.daily / stats.equity) * 100) : '--'}
