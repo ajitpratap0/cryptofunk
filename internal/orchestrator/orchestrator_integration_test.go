@@ -4,7 +4,8 @@
 // The split_vote_no_consensus subtest is skipped under CI (CI=true) due to a
 // flaky race in NATS publish ordering on shared CI runners; run locally with
 // the integration tag to exercise the full suite:
-//   go test -v -tags=integration ./internal/orchestrator/...
+//
+//	go test -v -tags=integration ./internal/orchestrator/...
 package orchestrator_test
 
 import (
