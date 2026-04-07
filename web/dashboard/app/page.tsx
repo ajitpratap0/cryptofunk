@@ -4,7 +4,7 @@ import DashboardContent from '@/components/dashboard/DashboardContent'
 export default function DashboardPage() {
   return (
     <div className="space-y-6">
-      {/* Static header — renders instantly via SSR (LCP element) */}
+      {/* Static header rendered outside Suspense so it appears before data loads */}
       <div>
         <h1 className="text-3xl font-bold">Portfolio Overview</h1>
         <p className="text-muted-foreground">
@@ -12,7 +12,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Data-dependent content — streams in after hydration */}
+      {/* Data-dependent content streamed via Suspense */}
       <Suspense fallback={<DashboardSkeleton />}>
         <DashboardContent />
       </Suspense>

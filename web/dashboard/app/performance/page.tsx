@@ -33,7 +33,7 @@ export default function PerformancePage() {
 
   const metrics = metricsData?.data
   const pairPerformance = pairData?.data || []
-  const candlestickChartData: CandlestickData[] = candlestickData?.data as CandlestickData[] || []
+  const candlestickChartData: CandlestickData[] = candlestickData?.data ?? []
   
   const timeRangeOptions: { value: TimeRange; label: string }[] = [
     { value: '1h', label: '1H' },

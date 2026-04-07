@@ -18,12 +18,18 @@ import {
 } from 'lucide-react'
 
 export default function DashboardContent() {
-  const { data: dashboardData, isLoading: dashboardLoading } = useDashboard()
-  const { data: pnlData, isLoading: pnlLoading } = useDashboardPnl()
-  const { data: tradesData, isLoading: tradesLoading } = useTrades()
-  const { data: agentsData, isLoading: agentsLoading } = useAgents()
+  const dashboardQuery = useDashboard()
+  const pnlQuery = useDashboardPnl()
+  const tradesQuery = useTrades()
+  const agentsQuery = useAgents()
   const { data: unifiedData } = useUnifiedPortfolio()
-  const { data: statusData, isLoading: statusLoading } = useSystemStatus()
+  const statusQuery = useSystemStatus()
+
+  const { data: dashboardData, isLoading: dashboardLoading } = dashboardQuery
+  const { data: pnlData, isLoading: pnlLoading } = pnlQuery
+  const { data: tradesData, isLoading: tradesLoading } = tradesQuery
+  const { data: agentsData, isLoading: agentsLoading } = agentsQuery
+  const { data: statusData } = statusQuery
 
   const stats = dashboardData?.data
   const pnl = pnlData?.data
@@ -38,22 +44,57 @@ export default function DashboardContent() {
   // Get recent trades (last 10)
   const recentTrades = trades.slice(0, 10)
 
-  const systemStatus = statusData?.data ?? {
-    status: 'healthy' as const,
-    services: {} as Record<string, 'up' | 'down' | 'degraded'>,
+  // Default to 'unknown' (not 'healthy') so a status fetch failure is visible
+  // instead of silently masking real outages on a trading dashboard.
+  const systemStatus: {
+    status: 'healthy' | 'degraded' | 'down' | 'unknown'
+    services: Record<string, 'up' | 'down' | 'degraded'>
+  } = statusData?.data ?? {
+    status: 'unknown',
+    services: {},
   }
+
+  // Surface backend failures so '$0 P&L / 0 trades / no agents' is never
+  // confused with 'backend is down' or 'auth failed'. The data hooks throw
+  // on failure, so react-query exposes the error via `isError`/`error`.
+  const failedQueries: Array<{ name: string; message: string }> = []
+  const pushIfError = (name: string, q: { isError: boolean; error: unknown }) => {
+    if (q.isError) {
+      failedQueries.push({
+        name,
+        message: q.error instanceof Error ? q.error.message : 'unknown error',
+      })
+    }
+  }
+  pushIfError('dashboard', dashboardQuery)
+  pushIfError('pnl', pnlQuery)
+  pushIfError('trades', tradesQuery)
+  pushIfError('agents', agentsQuery)
+  pushIfError('status', statusQuery)
 
   return (
     <>
-      {/* System Status — data-dependent, stays in Client Component */}
-      <div className="flex justify-end -mt-6 mb-6">
+      <div className="flex justify-end mb-6">
         <SystemStatusIndicator
           status={systemStatus.status}
           services={systemStatus.services}
         />
       </div>
 
-      {/* Summary Cards */}
+      {failedQueries.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-lg border border-loss/40 bg-loss/10 p-4 text-sm text-loss"
+        >
+          <div className="font-semibold mb-1">Some dashboard data failed to load</div>
+          <ul className="list-disc list-inside space-y-0.5">
+            {failedQueries.map((q) => (
+              <li key={q.name}>{q.name}: {q.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         <StatCard
           title="Total P&L"

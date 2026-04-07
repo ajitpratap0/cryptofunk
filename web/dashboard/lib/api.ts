@@ -36,6 +36,31 @@ export interface RawPerformanceSummary {
   total_return?: number | null
 }
 
+// One-time warning if NEXT_PUBLIC_API_KEY is unset on the client.
+// Without it the dashboard will get cascading 401s with no obvious cause.
+let warnedMissingApiKey = false
+function warnIfMissingApiKey(): void {
+  if (warnedMissingApiKey) return
+  if (typeof window === 'undefined') return
+  if (!process.env.NEXT_PUBLIC_API_KEY) {
+    warnedMissingApiKey = true
+    console.warn(
+      '[api] NEXT_PUBLIC_API_KEY is not set — API requests will be unauthenticated ' +
+        'and will fail if the backend has auth.enabled=true. See web/dashboard/.env.example.'
+    )
+  }
+}
+
+function describeHttpStatus(status: number): string {
+  if (status === 401 || status === 403) {
+    return `HTTP ${status} unauthorized — check NEXT_PUBLIC_API_KEY`
+  }
+  if (status >= 500) {
+    return `HTTP ${status} backend unavailable`
+  }
+  return `HTTP ${status}`
+}
+
 class ApiClient {
   private baseUrl: string
 
@@ -44,32 +69,28 @@ class ApiClient {
   }
 
   private async request<T>(
-    endpoint: string, 
+    endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
+    warnIfMissingApiKey()
     try {
       const url = buildApiUrl(endpoint)
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      }
-      const apiKey = process.env.NEXT_PUBLIC_API_KEY
-      if (apiKey) {
-        headers['X-API-Key'] = apiKey
-      }
       const response = await fetch(url, {
-        headers: {
-          ...headers,
-          ...options.headers,
-        },
         ...options,
+        // Spread caller headers first so our auth/content-type headers win
+        // and a caller can never accidentally drop X-API-Key.
+        headers: {
+          ...(options.headers as Record<string, string> | undefined),
+          ...buildHeaders({ 'Content-Type': 'application/json' }),
+        },
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        throw new Error(describeHttpStatus(response.status))
       }
 
       const data: unknown = await response.json()
-      
+
       // Handle cases where the API doesn't wrap responses
       if (typeof data === 'object' && data !== null && 'success' in data) {
         return data as ApiResponse<T>
@@ -118,9 +139,8 @@ class ApiClient {
   }
 
   // Market Data
-  // NOTE: /market/candlestick endpoint is not yet implemented server-side.
-  // This method exists so the dashboard hook uses the standard apiClient
-  // (correct base URL + auth headers) and will work once the backend adds it.
+  // See useCandlestickData() in hooks/usePerformance.ts for the contract:
+  // the /market/candlestick endpoint is pending backend implementation.
   async getMarketCandlestick(symbol: string, timeRange: string = '1d'): Promise<ApiResponse<CandlestickData[]>> {
     return this.request(`/market/candlestick/${encodeURIComponent(symbol)}?timeRange=${encodeURIComponent(timeRange)}`)
   }
@@ -355,7 +375,9 @@ class ApiClient {
 
 export const apiClient = new ApiClient()
 
-// Build common headers including API key when available
+// Build common headers, including the API key when set.
+// NOTE: NEXT_PUBLIC_* is shipped to the client bundle — never put a privileged
+// production key in NEXT_PUBLIC_API_KEY. See web/dashboard/.env.example.
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
   const apiKey = process.env.NEXT_PUBLIC_API_KEY
@@ -365,27 +387,69 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers
 }
 
+// Shared helper for the standalone decision-analytics fetchers below.
+// Uses the same auth + status semantics as ApiClient.request so a 401/500
+// is never silently coerced into `{success:true, data:<error body>}`.
+async function jsonRequest<T>(
+  endpoint: string,
+  init: RequestInit = {}
+): Promise<ApiResponse<T>> {
+  warnIfMissingApiKey()
+  try {
+    const res = await fetch(buildApiUrl(endpoint), {
+      ...init,
+      headers: {
+        ...(init.headers as Record<string, string> | undefined),
+        ...buildHeaders({ 'Content-Type': 'application/json' }),
+      },
+    })
+    if (!res.ok) {
+      throw new Error(describeHttpStatus(res.status))
+    }
+    const data: unknown = await res.json()
+    if (typeof data === 'object' && data !== null && 'success' in data) {
+      return data as ApiResponse<T>
+    }
+    return {
+      success: true,
+      data: data as T,
+      timestamp: new Date().toISOString(),
+    }
+  } catch (error) {
+    console.error(`API request failed: ${endpoint}`, error)
+    return {
+      success: false,
+      data: null as unknown as T,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    }
+  }
+}
+
 // Decision Analytics API
-export async function fetchDecisionAnalytics(since = '30d'): Promise<ApiResponse<import('./types').DecisionAnalytics>> {
-  const res = await fetch(buildApiUrl(`/decisions/analytics?since=${since}`), {
-    headers: buildHeaders(),
-  })
-  return res.json()
+export async function fetchDecisionAnalytics(
+  since = '30d'
+): Promise<ApiResponse<import('./types').DecisionAnalytics>> {
+  return jsonRequest<import('./types').DecisionAnalytics>(
+    `/decisions/analytics?since=${encodeURIComponent(since)}`
+  )
 }
 
-export async function fetchDecisionOutcomes(limit = 50): Promise<ApiResponse<import('./types').DecisionWithOutcome[]>> {
-  const res = await fetch(buildApiUrl(`/decisions/outcomes?limit=${limit}`), {
-    headers: buildHeaders(),
-  })
-  return res.json()
+export async function fetchDecisionOutcomes(
+  limit = 50
+): Promise<ApiResponse<import('./types').DecisionWithOutcome[]>> {
+  return jsonRequest<import('./types').DecisionWithOutcome[]>(
+    `/decisions/outcomes?limit=${limit}`
+  )
 }
 
-export async function triggerOutcomeResolution(): Promise<{ success: boolean; polymarket_resolved: number; binance_resolved: number }> {
-  const res = await fetch(buildApiUrl('/admin/resolve-outcomes'), {
-    method: 'POST',
-    headers: buildHeaders(),
-  })
-  return res.json()
+export async function triggerOutcomeResolution(): Promise<
+  ApiResponse<{ polymarket_resolved: number; binance_resolved: number }>
+> {
+  return jsonRequest<{ polymarket_resolved: number; binance_resolved: number }>(
+    '/admin/resolve-outcomes',
+    { method: 'POST' }
+  )
 }
 
 export default ApiClient
