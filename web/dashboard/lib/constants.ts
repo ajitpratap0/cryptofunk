@@ -33,6 +33,13 @@ export const COLORS = {
 } as const;
 
 // Chart Colors
+// Chart sizing — keep skeleton placeholders and chart cards in sync to
+// prevent CLS. CHART_HEIGHT is the inner chart height passed to Recharts;
+// CHART_CARD_HEIGHT is the outer card height (chart + p-6 + heading + mb-4)
+// used by the dashboard skeleton.
+export const CHART_HEIGHT = 300
+export const CHART_CARD_HEIGHT_CLASS = 'h-[396px]'
+
 export const CHART_COLORS = [
   '#8b5cf6', '#22c55e', '#ef4444', '#f59e0b', 
   '#3b82f6', '#ec4899', '#10b981', '#f97316',

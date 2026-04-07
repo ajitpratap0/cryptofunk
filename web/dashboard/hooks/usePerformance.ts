@@ -152,27 +152,36 @@ export function usePairPerformance() {
 }
 
 // Candlestick Data
+//
+// The /market/candlestick endpoint is pending backend implementation. When
+// it ships, this hook works automatically via apiClient. Errors are surfaced
+// to the caller — the UI renders an empty / error state.
+//
+// For local development against a stub backend, set
+// NEXT_PUBLIC_USE_MOCK_CANDLES=true to fall back to generated data. The
+// fallback logs a warning so it cannot silently mask real API failures.
 export function useCandlestickData(symbol: string, timeRange: string = '1d') {
   return useQuery({
     queryKey: PERFORMANCE_QUERY_KEYS.candlestick(symbol, timeRange),
     queryFn: async () => {
-      try {
-        // Try to get actual market data
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/market/candlestick/${symbol}?timeRange=${timeRange}`
+      const response = await apiClient.getMarketCandlestick(symbol, timeRange)
+      if (response.success) {
+        return response
+      }
+
+      if (process.env.NEXT_PUBLIC_USE_MOCK_CANDLES === 'true') {
+        console.warn(
+          `[useCandlestickData] candlestick fetch failed for ${symbol} (${timeRange}); ` +
+            `serving NEXT_PUBLIC_USE_MOCK_CANDLES fallback. error=${response.error ?? 'unknown'}`
         )
-        if (!response.ok) throw new Error('API error')
-        return await response.json()
-      } catch {
-        // Return mock data if API fails
-        const mockData = generateMockCandlestickData(symbol, timeRange)
-        
         return {
-          success: true,
-          data: mockData,
+          success: true as const,
+          data: generateMockCandlestickData(symbol, timeRange),
           timestamp: new Date().toISOString(),
         }
       }
+
+      throw new Error(response.error || 'Failed to fetch candlestick data')
     },
     enabled: !!symbol,
     staleTime: 30000, // 30 seconds for price data

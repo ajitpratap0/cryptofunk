@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ThemeProvider } from 'next-themes'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { ToastProvider } from '@/components/ui/Toast'
@@ -41,26 +42,28 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <div className="min-h-screen bg-background">
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-          />
-          <div className={`min-h-screen flex flex-col transition-all duration-300 ${
-            sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'
-          }`}>
-            <Header
-              onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-              sidebarCollapsed={sidebarCollapsed}
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <div className="min-h-screen bg-background">
+            <Sidebar
+              collapsed={sidebarCollapsed}
+              onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
-            <main className="flex-1 p-6">
-              {children}
-            </main>
+            <div className={`min-h-screen flex flex-col transition-all duration-300 ${
+              sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'
+            }`}>
+              <Header
+                onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+                sidebarCollapsed={sidebarCollapsed}
+              />
+              <main className="flex-1 p-6">
+                {children}
+              </main>
+            </div>
           </div>
-        </div>
-      </ToastProvider>
-    </QueryClientProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }

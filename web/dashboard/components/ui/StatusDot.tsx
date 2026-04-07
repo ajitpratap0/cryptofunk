@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils'
 
-type Status = 'connected' | 'disconnected' | 'connecting' | 'error' | 'active' | 'idle' | 'warning' | 'healthy' | 'degraded' | 'down' | 'disabled' | 'stopped' | 'running'
+type Status = 'connected' | 'disconnected' | 'connecting' | 'error' | 'active' | 'idle' | 'warning' | 'healthy' | 'degraded' | 'down' | 'disabled' | 'stopped' | 'running' | 'unknown'
 
 interface StatusDotProps {
   status: Status
@@ -26,6 +26,7 @@ const statusConfig: Record<Status, { color: string; label: string }> = {
   disabled: { color: 'bg-muted-foreground', label: 'Disabled' },
   stopped: { color: 'bg-muted-foreground', label: 'Stopped' },
   running: { color: 'bg-profit', label: 'Running' },
+  unknown: { color: 'bg-muted-foreground', label: 'Unknown' },
 }
 
 const sizeConfig = {
@@ -108,7 +109,7 @@ export function ConnectionStatus({ isConnected, lastUpdate, className }: Connect
 }
 
 interface SystemStatusIndicatorProps {
-  status: 'healthy' | 'degraded' | 'down'
+  status: 'healthy' | 'degraded' | 'down' | 'unknown'
   services: Record<string, 'up' | 'down' | 'degraded'>
   className?: string
 }
@@ -118,7 +119,7 @@ export function SystemStatusIndicator({
   services, 
   className 
 }: SystemStatusIndicatorProps) {
-  const serviceEntries = Object.entries(services)
+  const serviceEntries = Object.entries(services ?? {})
   const upServices = serviceEntries.filter(([, status]) => status === 'up').length
   const totalServices = serviceEntries.length
 
