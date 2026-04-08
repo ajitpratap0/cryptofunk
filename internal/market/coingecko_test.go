@@ -396,7 +396,7 @@ func TestGetCoinInfo(t *testing.T) {
 
 			if result == nil {
 				t.Fatalf("Expected non-nil result for GetCoinInfo(%q), but got nil", tt.coinID)
-				return // staticcheck SA5011 flow hint: Fatalf halts, but the linter can't always see that
+				return // runtime.Goexit() from Fatalf stops this goroutine; return silences staticcheck SA5011
 			}
 
 			if result.ID != tt.coinID {

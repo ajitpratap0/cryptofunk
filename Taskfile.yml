@@ -508,6 +508,11 @@ tasks:
     cmds:
       - |
         set -e
+        # Declare the PID vars up front and register the trap BEFORE launching
+        # any children so that a crash in the first server cleans up the rest.
+        MD_PID=""; OE_PID=""; RA_PID=""; TI_PID=""
+        trap 'echo "Stopping MCP servers..."; kill $MD_PID $OE_PID $RA_PID $TI_PID 2>/dev/null || true' EXIT INT TERM
+
         echo "Starting MCP servers in background..."
         ./{{.BINARY_DIR}}/market-data-server --port 8090 &
         MD_PID=$!
@@ -521,28 +526,28 @@ tasks:
         echo "  order-executor-server       -> http://localhost:8091 (pid $OE_PID)"
         echo "  risk-analyzer-server        -> http://localhost:8092 (pid $RA_PID)"
         echo "  technical-indicators-server -> http://localhost:8093 (pid $TI_PID)"
-        trap "echo 'Stopping MCP servers...'; kill $MD_PID $OE_PID $RA_PID $TI_PID 2>/dev/null || true" EXIT INT TERM
-        # Wait for each server to bind its port instead of a fixed sleep.
-        # nc is in POSIX and available on macOS + every Linux distro we target;
-        # falls back to bash /dev/tcp if nc is missing.
-        wait_for_port() {
-          local port=$1
-          local name=$2
-          for _ in $(seq 1 40); do
-            if command -v nc >/dev/null 2>&1; then
-              nc -z localhost "$port" 2>/dev/null && return 0
-            else
-              (exec 3<>/dev/tcp/localhost/"$port") 2>/dev/null && return 0
+
+        # Poll each server's /health endpoint (HTTP 200) rather than a bare TCP
+        # bind — TCP accept happens before the HTTP handler is ready, so a pure
+        # TCP check can race the orchestrator connecting mid-initialization.
+        # 10s budget per server (40 * 0.25s).
+        wait_for_health() {
+          port=$1
+          name=$2
+          for i in $(seq 1 40); do
+            if curl -sf "http://localhost:$port/health" >/dev/null 2>&1; then
+              return 0
             fi
             sleep 0.25
           done
-          echo "timed out waiting for $name on port $port" >&2
+          echo "timed out waiting for $name /health on port $port" >&2
           return 1
         }
-        wait_for_port 8090 market-data
-        wait_for_port 8091 order-executor
-        wait_for_port 8092 risk-analyzer
-        wait_for_port 8093 technical-indicators
+        wait_for_health 8090 market-data
+        wait_for_health 8091 order-executor
+        wait_for_health 8092 risk-analyzer
+        wait_for_health 8093 technical-indicators
+
         if [ "{{.TRADING_MODE}}" = "live" ]; then
           echo "⚠️  Starting LIVE trading mode..."
         else

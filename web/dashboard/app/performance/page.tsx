@@ -282,7 +282,7 @@ export default function PerformancePage() {
                       {pnl > 0 ? '+' : ''}{formatCurrency(pnl)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      realized P&amp;L
+                      realized P&L
                     </div>
                   </div>
                 </div>

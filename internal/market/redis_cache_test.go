@@ -46,7 +46,7 @@ func TestNewRedisPriceCache(t *testing.T) {
 			} else {
 				if cache == nil {
 					t.Fatal("Expected non-nil cache for valid client, but got nil")
-					return // staticcheck SA5011 flow hint: Fatal halts, but the linter can't always see that
+					return // runtime.Goexit() from Fatal stops this goroutine; return silences staticcheck SA5011
 				}
 				if cache.ttl == 0 {
 					t.Errorf("Expected non-zero TTL, but got zero (input TTL: %v)", tt.ttl)

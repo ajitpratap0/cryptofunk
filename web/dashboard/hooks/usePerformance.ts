@@ -137,6 +137,10 @@ export function useDrawdownAnalysis() {
 // aggregates realized P&L and trade count per symbol; win_rate and avg_return
 // are NOT provided and must be computed later or added to the API.
 //
+// Field names are intentionally snake_case so they map directly to the JSON
+// payload the Go server emits — do NOT rename to camelCase without also adding
+// a mapping layer, or the response will silently deserialize to undefined.
+//
 // realized_pnl and trade_count are modelled as nullable because the SQL
 // aggregate can return NULL for symbols with no closed positions and JSON
 // marshaling preserves that — consumers must guard with `?? 0`.
