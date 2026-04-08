@@ -25,14 +25,32 @@ export default function PerformancePage() {
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('1m')
   const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
 
-  const { data: equityData, isLoading: equityLoading } = useEquityHistory(selectedTimeRange)
-  const { data: metricsData, isLoading: metricsLoading } = usePerformanceMetrics()
-  const { data: pairData, isLoading: pairLoading } = usePairPerformance()
+  const { data: equityData, isLoading: equityLoading, isError: equityError, error: equityErrorObj, refetch: refetchEquity } = useEquityHistory(selectedTimeRange)
+  const { data: metricsData, isLoading: metricsLoading, isError: metricsError, error: metricsErrorObj, refetch: refetchMetrics } = usePerformanceMetrics()
+  const { data: pairData, isLoading: pairLoading, isError: pairError, error: pairErrorObj, refetch: refetchPair } = usePairPerformance()
   const { data: candlestickData, isLoading: candlestickLoading } = useCandlestickData(selectedSymbol, '5m')
   const { data: drawdownData, isLoading: drawdownLoading } = useDrawdownAnalysis()
 
   const metrics = metricsData?.data
   const pairPerformance = pairData?.data || []
+
+  // Surface backend failures to the user. We aggregate the three primary
+  // queries (summary metrics, equity history, pair performance) and show a
+  // single banner with a retry that refetches all three. We deliberately
+  // exclude the candlestick and drawdown queries: candlestick has its own
+  // NEXT_PUBLIC_USE_MOCK_CANDLES fallback and drawdown is derived from
+  // equity, so surfacing those separately would be noisy.
+  const hasError = metricsError || equityError || pairError
+  const firstErrorMessage =
+    (metricsError && (metricsErrorObj instanceof Error ? metricsErrorObj.message : 'Failed to load performance metrics')) ||
+    (equityError && (equityErrorObj instanceof Error ? equityErrorObj.message : 'Failed to load equity history')) ||
+    (pairError && (pairErrorObj instanceof Error ? pairErrorObj.message : 'Failed to load pair performance')) ||
+    ''
+  const retryAll = () => {
+    if (metricsError) refetchMetrics()
+    if (equityError) refetchEquity()
+    if (pairError) refetchPair()
+  }
   const candlestickChartData: CandlestickData[] = candlestickData?.data ?? []
   
   const timeRangeOptions: { value: TimeRange; label: string }[] = [
@@ -101,6 +119,30 @@ export default function PerformancePage() {
           </div>
         </div>
       </div>
+
+      {/* Error banner — shown when any of the primary performance queries fail */}
+      {hasError && (
+        <div
+          role="alert"
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border border-loss/30 bg-loss/10 text-sm"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-loss mt-0.5 flex-shrink-0" />
+            <div>
+              <div className="font-medium text-loss">Failed to load performance data</div>
+              <div className="text-muted-foreground mt-0.5">
+                {firstErrorMessage || 'One or more performance API calls failed.'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={retryAll}
+            className="px-3 py-1.5 text-sm font-medium rounded-md bg-background border border-border hover:bg-muted transition-colors self-start sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Performance Metrics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">

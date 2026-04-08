@@ -100,7 +100,14 @@ func main() {
 	// Initialize database with signal-derived context
 	ctx, ctxCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer ctxCancel()
-	database, err := db.New(ctx, &cfg.Database)
+
+	// Bound the DB pool initialization by a dedicated connect timeout so the
+	// process fails fast when Postgres is slow or unreachable instead of
+	// blocking indefinitely on the long-lived signal context. The DB itself
+	// keeps using the signal-derived context for the rest of its lifetime.
+	dbInitCtx, dbInitCancel := context.WithTimeout(ctx, 30*time.Second)
+	database, err := db.New(dbInitCtx, &cfg.Database)
+	dbInitCancel()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
 	}
