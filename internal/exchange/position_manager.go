@@ -13,6 +13,13 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/db"
 )
 
+// DefaultCommissionRate is the fallback commission rate (0.1%, Binance standard
+// taker fee) used when viper has not been initialized with a
+// trading.commission_rate setting — e.g. isolated unit tests. Production
+// binaries read the value from config (internal/config/config.go registers the
+// viper default under the trading.commission_rate key).
+const DefaultCommissionRate = 0.001
+
 // PositionManager handles position tracking and P&L calculation
 type PositionManager struct {
 	db               *db.DB
@@ -24,25 +31,28 @@ type PositionManager struct {
 	ctx              context.Context // Parent context for background DB operations
 }
 
+// resolveCommissionRate reads trading.commission_rate from viper, falling back
+// to DefaultCommissionRate when the key is unset (test paths). Both
+// constructors go through this helper so the literal default only lives in one
+// place.
+func resolveCommissionRate() float64 {
+	if viper.IsSet("trading.commission_rate") {
+		return viper.GetFloat64("trading.commission_rate")
+	}
+	return DefaultCommissionRate
+}
+
 // NewPositionManager creates a new position manager with default fee rate.
 // The fee rate is read from config key trading.commission_rate (default 0.001 = 0.1%).
 // Uses context.Background() for DB operations. Prefer NewPositionManagerWithContext.
 func NewPositionManager(database *db.DB) *PositionManager {
-	feeRate := 0.001 // default
-	if viper.IsSet("trading.commission_rate") {
-		feeRate = viper.GetFloat64("trading.commission_rate")
-	}
-	return NewPositionManagerWithFees(database, feeRate)
+	return NewPositionManagerWithFees(database, resolveCommissionRate())
 }
 
 // NewPositionManagerWithContext creates a new position manager with a parent context for DB operations.
 // The fee rate is read from config key trading.commission_rate (default 0.001 = 0.1%).
 func NewPositionManagerWithContext(ctx context.Context, database *db.DB) *PositionManager {
-	feeRate := 0.001 // default
-	if viper.IsSet("trading.commission_rate") {
-		feeRate = viper.GetFloat64("trading.commission_rate")
-	}
-	pm := NewPositionManagerWithFees(database, feeRate)
+	pm := NewPositionManagerWithFees(database, resolveCommissionRate())
 	pm.ctx = ctx
 	return pm
 }

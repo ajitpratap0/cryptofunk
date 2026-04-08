@@ -5,7 +5,7 @@ import { CandlestickChart } from '@/components/charts/CandlestickChart'
 import { EquityCurve } from '@/components/charts/EquityCurve'
 import { DrawdownChart } from '@/components/charts/DrawdownChart'
 import { StatCard } from '@/components/ui/StatCard'
-import { useEquityHistory, usePerformanceMetrics, usePairPerformance, useCandlestickData, useDrawdownAnalysis } from '@/hooks/usePerformance'
+import { useEquityHistory, usePerformanceMetrics, usePairPerformance, useCandlestickData, useDrawdownAnalysis, type PairPerformance } from '@/hooks/usePerformance'
 import { useDecisionAnalytics, useDecisionOutcomes } from '@/hooks/useDecisionTracking'
 import { TimeRange, CandlestickData } from '@/lib/types'
 import { formatPercentage, formatCurrency, cn } from '@/lib/utils'
@@ -259,31 +259,35 @@ export default function PerformancePage() {
           <h3 className="text-lg font-semibold mb-4">Performance by Pair</h3>
           
           <div className="space-y-3">
-            {pairPerformance.map((pair: any, index: number) => (
-              <div key={pair.pair} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <div>
-                  <div className="font-medium">{pair.pair}</div>
-                  <div className="text-sm text-muted-foreground">
-                    {pair.trades} trades • {formatPercentage(pair.winRate)} win rate
+            {pairPerformance.map((pair: PairPerformance) => {
+              // Backend may omit realized_pnl/trade_count for pairs with no
+              // closed positions — coerce nullish values to 0 so the UI
+              // doesn't render "NaN" or "$null".
+              const pnl = pair.realized_pnl ?? 0
+              const trades = pair.trade_count ?? 0
+              return (
+                <div key={pair.symbol} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                  <div>
+                    <div className="font-medium">{pair.symbol}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {trades} {trades === 1 ? 'trade' : 'trades'}
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div className={cn(
+                      "font-bold",
+                      pnl > 0 ? "text-profit" : pnl < 0 ? "text-loss" : "text-muted-foreground"
+                    )}>
+                      {pnl > 0 ? '+' : ''}{formatCurrency(pnl)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      realized P&L
+                    </div>
                   </div>
                 </div>
-                
-                <div className="text-right">
-                  <div className={cn(
-                    "font-bold",
-                    pair.pnl > 0 ? "text-profit" : pair.pnl < 0 ? "text-loss" : "text-muted-foreground"
-                  )}>
-                    {pair.pnl > 0 ? '+' : ''}{formatCurrency(pair.pnl)}
-                  </div>
-                  <div className={cn(
-                    "text-sm",
-                    pair.avgReturn > 0 ? "text-profit" : "text-loss"
-                  )}>
-                    {pair.avgReturn > 0 ? '+' : ''}{formatPercentage(pair.avgReturn)} avg
-                  </div>
-                </div>
-              </div>
-            ))}
+              )
+            })}
 
             {pairLoading && (
               <div className="space-y-3">

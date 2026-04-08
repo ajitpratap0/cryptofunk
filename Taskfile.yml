@@ -491,22 +491,90 @@ tasks:
       - echo "Starting Telegram bot..."
       - ./{{.BINARY_DIR}}/telegram-bot
 
+  # _start-trading is the shared implementation behind run-paper and run-live.
+  # It boots the four core MCP servers (market-data, order-executor,
+  # risk-analyzer, technical-indicators) in the background, waits until each
+  # one binds its port, then execs the orchestrator in the requested mode.
+  # A trap ensures the background servers are killed on Ctrl-C / crash so we
+  # don't leave zombie processes holding the ports.
+  #
+  # NOTE: polymarket-server (port 8094) is intentionally excluded — it is not
+  # part of build-servers and only the polymarket-agent dials it. Add it here
+  # if/when it becomes a required dependency of the default paper/live flow.
+  _start-trading:
+    internal: true
+    requires:
+      vars: [TRADING_MODE]
+    cmds:
+      - |
+        set -e
+        # Declare the PID vars up front and register the trap BEFORE launching
+        # any children so that a crash in the first server cleans up the rest.
+        MD_PID=""; OE_PID=""; RA_PID=""; TI_PID=""
+        trap 'echo "Stopping MCP servers..."; kill $MD_PID $OE_PID $RA_PID $TI_PID 2>/dev/null || true' EXIT INT TERM
+
+        echo "Starting MCP servers in background..."
+        ./{{.BINARY_DIR}}/market-data-server --port 8090 &
+        MD_PID=$!
+        ./{{.BINARY_DIR}}/order-executor-server --port 8091 &
+        OE_PID=$!
+        ./{{.BINARY_DIR}}/risk-analyzer-server --port 8092 &
+        RA_PID=$!
+        ./{{.BINARY_DIR}}/technical-indicators-server --port 8093 &
+        TI_PID=$!
+        echo "  market-data-server          -> http://localhost:8090 (pid $MD_PID)"
+        echo "  order-executor-server       -> http://localhost:8091 (pid $OE_PID)"
+        echo "  risk-analyzer-server        -> http://localhost:8092 (pid $RA_PID)"
+        echo "  technical-indicators-server -> http://localhost:8093 (pid $TI_PID)"
+
+        # Poll each server's /health endpoint (HTTP 200) rather than a bare TCP
+        # bind — TCP accept happens before the HTTP handler is ready, so a pure
+        # TCP check can race the orchestrator connecting mid-initialization.
+        # 10s budget per server (40 * 0.25s).
+        wait_for_health() {
+          port=$1
+          name=$2
+          for i in $(seq 1 40); do
+            if curl -sf "http://localhost:$port/health" >/dev/null 2>&1; then
+              return 0
+            fi
+            sleep 0.25
+          done
+          echo "timed out waiting for $name /health on port $port" >&2
+          return 1
+        }
+        wait_for_health 8090 market-data
+        wait_for_health 8091 order-executor
+        wait_for_health 8092 risk-analyzer
+        wait_for_health 8093 technical-indicators
+
+        if [ "{{.TRADING_MODE}}" = "live" ]; then
+          echo "⚠️  Starting LIVE trading mode..."
+        else
+          echo "Starting paper trading mode..."
+        fi
+        ./{{.BINARY_DIR}}/orchestrator --mode={{.TRADING_MODE}}
+
   run-paper:
-    desc: "Start in paper trading mode"
+    desc: "Start paper trading mode (starts all MCP servers + orchestrator)"
     deps:
       - build-orchestrator
+      - build-servers
     cmds:
-      - echo "Starting paper trading mode..."
-      - ./{{.BINARY_DIR}}/orchestrator --mode=paper
+      - task: _start-trading
+        vars:
+          TRADING_MODE: paper
 
   run-live:
-    desc: "Start in live trading mode (CAUTION!)"
+    desc: "Start live trading mode (CAUTION! starts all MCP servers + orchestrator)"
     prompt: "⚠️  Starting LIVE trading mode! Real money will be used. Continue?"
     deps:
       - build-orchestrator
+      - build-servers
     cmds:
-      - echo "⚠️  Starting LIVE trading mode..."
-      - ./{{.BINARY_DIR}}/orchestrator --mode=live
+      - task: _start-trading
+        vars:
+          TRADING_MODE: live
 
   # ===========================================
   # Development Workflow
