@@ -16,8 +16,8 @@ import (
 // DefaultCommissionRate is the fallback commission rate (0.1%, Binance standard
 // taker fee) used when viper has not been initialized with a
 // trading.commission_rate setting — e.g. isolated unit tests. Production
-// binaries read the value from config (see internal/config/config.go:451 where
-// the viper default is registered).
+// binaries read the value from config (internal/config/config.go registers the
+// viper default under the trading.commission_rate key).
 const DefaultCommissionRate = 0.001
 
 // PositionManager handles position tracking and P&L calculation

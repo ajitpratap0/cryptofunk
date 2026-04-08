@@ -259,28 +259,35 @@ export default function PerformancePage() {
           <h3 className="text-lg font-semibold mb-4">Performance by Pair</h3>
           
           <div className="space-y-3">
-            {pairPerformance.map((pair: PairPerformance) => (
-              <div key={pair.symbol} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <div>
-                  <div className="font-medium">{pair.symbol}</div>
-                  <div className="text-sm text-muted-foreground">
-                    {pair.trade_count} {pair.trade_count === 1 ? 'trade' : 'trades'}
+            {pairPerformance.map((pair: PairPerformance) => {
+              // Backend may omit realized_pnl/trade_count for pairs with no
+              // closed positions — coerce nullish values to 0 so the UI
+              // doesn't render "NaN" or "$null".
+              const pnl = pair.realized_pnl ?? 0
+              const trades = pair.trade_count ?? 0
+              return (
+                <div key={pair.symbol} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                  <div>
+                    <div className="font-medium">{pair.symbol}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {trades} {trades === 1 ? 'trade' : 'trades'}
+                    </div>
                   </div>
-                </div>
 
-                <div className="text-right">
-                  <div className={cn(
-                    "font-bold",
-                    pair.realized_pnl > 0 ? "text-profit" : pair.realized_pnl < 0 ? "text-loss" : "text-muted-foreground"
-                  )}>
-                    {pair.realized_pnl > 0 ? '+' : ''}{formatCurrency(pair.realized_pnl)}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    realized P&amp;L
+                  <div className="text-right">
+                    <div className={cn(
+                      "font-bold",
+                      pnl > 0 ? "text-profit" : pnl < 0 ? "text-loss" : "text-muted-foreground"
+                    )}>
+                      {pnl > 0 ? '+' : ''}{formatCurrency(pnl)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      realized P&amp;L
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
 
             {pairLoading && (
               <div className="space-y-3">
