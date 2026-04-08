@@ -132,6 +132,16 @@ export function useDrawdownAnalysis() {
   })
 }
 
+// PairPerformance matches the shape returned by GET /api/v1/performance/pairs
+// (see internal/db/positions.go PairPerformance struct). The backend currently
+// aggregates realized P&L and trade count per symbol; win_rate and avg_return
+// are NOT provided and must be computed later or added to the API.
+export interface PairPerformance {
+  symbol: string
+  realized_pnl: number
+  trade_count: number
+}
+
 // Pair Performance
 export function usePairPerformance() {
   return useQuery({
@@ -140,9 +150,9 @@ export function usePairPerformance() {
       const response = await apiClient.getPairPerformance()
       if (!response.success) throw new Error(response.error || 'Failed to fetch pair performance')
       const raw: unknown = response.data
-      const pairs =
+      const pairs: PairPerformance[] =
         raw && typeof raw === 'object' && 'pairs' in raw
-          ? (raw as { pairs: Array<{ symbol: string; realized_pnl: number; trade_count: number }> }).pairs
+          ? (raw as { pairs: PairPerformance[] }).pairs
           : []
       return { success: true as const, data: pairs, timestamp: response.timestamp }
     },

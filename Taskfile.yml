@@ -492,21 +492,54 @@ tasks:
       - ./{{.BINARY_DIR}}/telegram-bot
 
   run-paper:
-    desc: "Start in paper trading mode"
+    desc: "Start paper trading mode (starts all MCP servers + orchestrator)"
     deps:
       - build-orchestrator
+      - build-servers
     cmds:
-      - echo "Starting paper trading mode..."
-      - ./{{.BINARY_DIR}}/orchestrator --mode=paper
+      - |
+        echo "Starting MCP servers in background..."
+        ./{{.BINARY_DIR}}/market-data-server --port 8090 &
+        MD_PID=$!
+        ./{{.BINARY_DIR}}/order-executor-server --port 8091 &
+        OE_PID=$!
+        ./{{.BINARY_DIR}}/risk-analyzer-server --port 8092 &
+        RA_PID=$!
+        ./{{.BINARY_DIR}}/technical-indicators-server --port 8093 &
+        TI_PID=$!
+        echo "  market-data-server         -> http://localhost:8090 (pid $MD_PID)"
+        echo "  order-executor-server      -> http://localhost:8091 (pid $OE_PID)"
+        echo "  risk-analyzer-server       -> http://localhost:8092 (pid $RA_PID)"
+        echo "  technical-indicators-server-> http://localhost:8093 (pid $TI_PID)"
+        # Shut everything down when the orchestrator exits (Ctrl-C, crash, etc.)
+        trap "echo 'Stopping MCP servers...'; kill $MD_PID $OE_PID $RA_PID $TI_PID 2>/dev/null" EXIT INT TERM
+        # Give the servers a moment to bind their ports before the orchestrator
+        # starts dialing them.
+        sleep 1
+        echo "Starting paper trading mode..."
+        ./{{.BINARY_DIR}}/orchestrator --mode=paper
 
   run-live:
-    desc: "Start in live trading mode (CAUTION!)"
+    desc: "Start live trading mode (CAUTION! starts all MCP servers + orchestrator)"
     prompt: "⚠️  Starting LIVE trading mode! Real money will be used. Continue?"
     deps:
       - build-orchestrator
+      - build-servers
     cmds:
-      - echo "⚠️  Starting LIVE trading mode..."
-      - ./{{.BINARY_DIR}}/orchestrator --mode=live
+      - |
+        echo "⚠️  Starting MCP servers in background..."
+        ./{{.BINARY_DIR}}/market-data-server --port 8090 &
+        MD_PID=$!
+        ./{{.BINARY_DIR}}/order-executor-server --port 8091 &
+        OE_PID=$!
+        ./{{.BINARY_DIR}}/risk-analyzer-server --port 8092 &
+        RA_PID=$!
+        ./{{.BINARY_DIR}}/technical-indicators-server --port 8093 &
+        TI_PID=$!
+        trap "echo 'Stopping MCP servers...'; kill $MD_PID $OE_PID $RA_PID $TI_PID 2>/dev/null" EXIT INT TERM
+        sleep 1
+        echo "⚠️  Starting LIVE trading mode..."
+        ./{{.BINARY_DIR}}/orchestrator --mode=live
 
   # ===========================================
   # Development Workflow
