@@ -532,7 +532,7 @@ tasks:
             if command -v nc >/dev/null 2>&1; then
               nc -z localhost "$port" 2>/dev/null && return 0
             else
-              (exec 3<>/dev/tcp/localhost/"$port") 2>/dev/null && { exec 3>&-; return 0; }
+              (exec 3<>/dev/tcp/localhost/"$port") 2>/dev/null && return 0
             fi
             sleep 0.25
           done

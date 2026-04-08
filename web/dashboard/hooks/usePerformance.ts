@@ -136,10 +136,14 @@ export function useDrawdownAnalysis() {
 // (see internal/db/positions.go PairPerformance struct). The backend currently
 // aggregates realized P&L and trade count per symbol; win_rate and avg_return
 // are NOT provided and must be computed later or added to the API.
+//
+// realized_pnl and trade_count are modelled as nullable because the SQL
+// aggregate can return NULL for symbols with no closed positions and JSON
+// marshaling preserves that — consumers must guard with `?? 0`.
 export interface PairPerformance {
   symbol: string
-  realized_pnl: number
-  trade_count: number
+  realized_pnl: number | null
+  trade_count: number | null
 }
 
 // Pair Performance
