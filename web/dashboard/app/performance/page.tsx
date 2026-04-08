@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { CandlestickChart } from '@/components/charts/CandlestickChart'
 import { EquityCurve } from '@/components/charts/EquityCurve'
 import { DrawdownChart } from '@/components/charts/DrawdownChart'
@@ -25,9 +25,27 @@ export default function PerformancePage() {
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('1m')
   const [selectedSymbol, setSelectedSymbol] = useState('BTC/USDT')
 
-  const { data: equityData, isLoading: equityLoading, isError: equityError, error: equityErrorObj, refetch: refetchEquity } = useEquityHistory(selectedTimeRange)
-  const { data: metricsData, isLoading: metricsLoading, isError: metricsError, error: metricsErrorObj, refetch: refetchMetrics } = usePerformanceMetrics()
-  const { data: pairData, isLoading: pairLoading, isError: pairError, error: pairErrorObj, refetch: refetchPair } = usePairPerformance()
+  const {
+    data: equityData,
+    isLoading: equityLoading,
+    isError: equityError,
+    error: equityErrorObj,
+    refetch: refetchEquity,
+  } = useEquityHistory(selectedTimeRange)
+  const {
+    data: metricsData,
+    isLoading: metricsLoading,
+    isError: metricsError,
+    error: metricsErrorObj,
+    refetch: refetchMetrics,
+  } = usePerformanceMetrics()
+  const {
+    data: pairData,
+    isLoading: pairLoading,
+    isError: pairError,
+    error: pairErrorObj,
+    refetch: refetchPair,
+  } = usePairPerformance()
   const { data: candlestickData, isLoading: candlestickLoading } = useCandlestickData(selectedSymbol, '5m')
   const { data: drawdownData, isLoading: drawdownLoading } = useDrawdownAnalysis()
 
@@ -46,11 +64,11 @@ export default function PerformancePage() {
     (equityError && (equityErrorObj instanceof Error ? equityErrorObj.message : 'Failed to load equity history')) ||
     (pairError && (pairErrorObj instanceof Error ? pairErrorObj.message : 'Failed to load pair performance')) ||
     ''
-  const retryAll = () => {
+  const retryAll = useCallback(() => {
     if (metricsError) refetchMetrics()
     if (equityError) refetchEquity()
     if (pairError) refetchPair()
-  }
+  }, [metricsError, equityError, pairError, refetchMetrics, refetchEquity, refetchPair])
   const candlestickChartData: CandlestickData[] = candlestickData?.data ?? []
   
   const timeRangeOptions: { value: TimeRange; label: string }[] = [

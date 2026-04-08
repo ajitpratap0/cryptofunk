@@ -101,10 +101,13 @@ func main() {
 	ctx, ctxCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer ctxCancel()
 
-	// Bound the DB pool initialization by a dedicated connect timeout so the
-	// process fails fast when Postgres is slow or unreachable instead of
-	// blocking indefinitely on the long-lived signal context. The DB itself
-	// keeps using the signal-derived context for the rest of its lifetime.
+	// Bound the initial connection attempt by a dedicated 30s timeout so the
+	// process fails fast when Postgres is slow or unreachable. pgxpool.New
+	// only uses the context for the initial AcquireConn; the pool itself is
+	// torn down by database.Close() on shutdown, not by any stored context,
+	// so it's safe to cancel dbInitCtx immediately after db.New returns
+	// instead of deferring — the defer pattern would keep the cancel func
+	// alive for the lifetime of main() without any benefit.
 	dbInitCtx, dbInitCancel := context.WithTimeout(ctx, 30*time.Second)
 	database, err := db.New(dbInitCtx, &cfg.Database)
 	dbInitCancel()
