@@ -137,6 +137,14 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 	// Check if we have an existing position for this symbol
 	existingPos, hasPosition := pm.openPositions[order.Symbol]
 
+	// Capture the pre-existing position ID so we can link the order to it even
+	// if the position is fully closed (removed from openPositions) by the time
+	// we reach the linking step at the bottom.
+	var positionIDForOrder uuid.UUID
+	if hasPosition {
+		positionIDForOrder = existingPos.ID
+	}
+
 	if order.Side == OrderSideBuy {
 		// BUY order
 		if hasPosition {
@@ -157,6 +165,7 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 						if err != nil {
 							return err
 						}
+						positionIDForOrder = pm.openPositions[order.Symbol].ID
 					}
 				} else {
 					// Partially closing SHORT position
@@ -178,6 +187,7 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 			if err != nil {
 				return err
 			}
+			positionIDForOrder = pm.openPositions[order.Symbol].ID
 		}
 	} else {
 		// SELL order
@@ -199,6 +209,7 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 						if err != nil {
 							return err
 						}
+						positionIDForOrder = pm.openPositions[order.Symbol].ID
 					}
 				} else {
 					// Partially closing LONG position
@@ -220,6 +231,23 @@ func (pm *PositionManager) OnOrderFilled(ctx context.Context, order *Order, fill
 			if err != nil {
 				return err
 			}
+			positionIDForOrder = pm.openPositions[order.Symbol].ID
+		}
+	}
+
+	// Link the order to the position it created/affected so
+	// orders.position_id FK is populated and joins work (DB-004 / #128).
+	if pm.db != nil && positionIDForOrder != uuid.Nil {
+		orderID, parseErr := uuid.Parse(order.ID)
+		if parseErr != nil {
+			log.Warn().Err(parseErr).Str("order_id", order.ID).Msg("Cannot link order to position: invalid order UUID")
+		} else if err := pm.db.UpdateOrderPositionID(ctx, orderID, positionIDForOrder); err != nil {
+			log.Error().Err(err).
+				Str("order_id", order.ID).
+				Str("position_id", positionIDForOrder.String()).
+				Msg("Failed to link order to position")
+			// Non-fatal: the position operation succeeded; a missing FK is
+			// a data-quality issue but shouldn't fail the fill processing.
 		}
 	}
 

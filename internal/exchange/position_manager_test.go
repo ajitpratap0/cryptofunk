@@ -353,3 +353,89 @@ func TestGetOpenPositions(t *testing.T) {
 	positions := pm.GetOpenPositions()
 	assert.Equal(t, 2, len(positions))
 }
+
+// TestOnOrderFilled_LinksOrderToPosition exercises the order→position FK
+// linking code path added for DB-004 (#128). With a nil DB the actual
+// UpdateOrderPositionID call is skipped, but we verify that:
+// (a) OnOrderFilled doesn't panic,
+// (b) the position is created and tracked in memory, and
+// (c) the position ID is non-nil so the linking branch would fire with a real DB.
+func TestOnOrderFilled_LinksOrderToPosition(t *testing.T) {
+	t.Run("BUY opens new LONG", func(t *testing.T) {
+		pm := NewPositionManager(nil) // nil DB — linking is skipped, no panic
+		sessionID := uuid.New()
+		pm.SetSession(&sessionID)
+
+		order := &Order{
+			ID:       uuid.New().String(),
+			Symbol:   "BTC/USD",
+			Side:     OrderSideBuy,
+			Quantity: 1.0,
+		}
+		fills := []Fill{{Price: 50000.0, Quantity: 1.0, Timestamp: time.Now()}}
+
+		err := pm.OnOrderFilled(t.Context(), order, fills)
+		require.NoError(t, err)
+
+		pos, exists := pm.GetPosition("BTC/USD")
+		require.True(t, exists, "position should be created")
+		assert.Equal(t, db.PositionSideLong, pos.Side)
+		assert.NotEqual(t, uuid.Nil, pos.ID, "position ID should be set for FK linking")
+	})
+
+	t.Run("SELL opens new SHORT", func(t *testing.T) {
+		pm := NewPositionManager(nil)
+		sessionID := uuid.New()
+		pm.SetSession(&sessionID)
+
+		order := &Order{
+			ID:       uuid.New().String(),
+			Symbol:   "ETH/USD",
+			Side:     OrderSideSell,
+			Quantity: 2.0,
+		}
+		fills := []Fill{{Price: 3000.0, Quantity: 2.0, Timestamp: time.Now()}}
+
+		err := pm.OnOrderFilled(t.Context(), order, fills)
+		require.NoError(t, err)
+
+		pos, exists := pm.GetPosition("ETH/USD")
+		require.True(t, exists, "position should be created")
+		assert.Equal(t, db.PositionSideShort, pos.Side)
+		assert.NotEqual(t, uuid.Nil, pos.ID)
+	})
+
+	t.Run("BUY fully closes SHORT and opens LONG remainder", func(t *testing.T) {
+		pm := NewPositionManager(nil)
+		sessionID := uuid.New()
+		pm.SetSession(&sessionID)
+
+		// Pre-existing SHORT
+		pm.openPositions["BTC/USD"] = &db.Position{
+			ID:         uuid.New(),
+			SessionID:  &sessionID,
+			Symbol:     "BTC/USD",
+			Side:       db.PositionSideShort,
+			EntryPrice: 50000.0,
+			Quantity:   1.0,
+			EntryTime:  time.Now(),
+		}
+
+		order := &Order{
+			ID:       uuid.New().String(),
+			Symbol:   "BTC/USD",
+			Side:     OrderSideBuy,
+			Quantity: 3.0, // 1 to close SHORT + 2 remainder opens LONG
+		}
+		fills := []Fill{{Price: 49000.0, Quantity: 3.0, Timestamp: time.Now()}}
+
+		err := pm.OnOrderFilled(t.Context(), order, fills)
+		require.NoError(t, err)
+
+		pos, exists := pm.GetPosition("BTC/USD")
+		require.True(t, exists, "remainder LONG should exist")
+		assert.Equal(t, db.PositionSideLong, pos.Side)
+		assert.InDelta(t, 2.0, pos.Quantity, 0.001)
+		assert.NotEqual(t, uuid.Nil, pos.ID, "new LONG position should have an ID for FK linking")
+	})
+}
