@@ -157,26 +157,38 @@ func (s *APIServer) setupRoutes() {
 		// WebSocket endpoint (no rate limiting - uses connection limits)
 		v1.GET("/ws", s.handleWebSocket)
 
-		// Agent routes (read-only, apply read rate limiter)
+		// Agent routes (read-only, apply read rate limiter + auth)
+		// QA-003 (#146): all read-only trading data endpoints now require
+		// authentication when enabled, closing the asymmetric trust boundary
+		// where /sessions and /positions were public but /orders was gated.
 		agents := v1.Group("/agents")
 		agents.Use(s.rateLimiter.ReadMiddleware())
+		if s.config.API.Auth.Enabled {
+			agents.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
 		{
 			agents.GET("", s.handleListAgents)
 			agents.GET("/:name", s.handleGetAgent)
 			agents.GET("/:name/status", s.handleGetAgentStatus)
 		}
 
-		// Session routes (read-only, apply read rate limiter)
+		// Session routes (read-only, apply read rate limiter + auth)
 		sessions := v1.Group("/sessions")
 		sessions.Use(s.rateLimiter.ReadMiddleware())
+		if s.config.API.Auth.Enabled {
+			sessions.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
 		{
 			sessions.GET("", s.handleListSessions)
 			sessions.GET("/:id", s.handleGetSession)
 		}
 
-		// Position routes (read-only, apply read rate limiter)
+		// Position routes (read-only, apply read rate limiter + auth)
 		positions := v1.Group("/positions")
 		positions.Use(s.rateLimiter.ReadMiddleware())
+		if s.config.API.Auth.Enabled {
+			positions.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
 		{
 			positions.GET("", s.handleListPositions)
 			positions.GET("/:symbol", s.handleGetPosition)
@@ -251,14 +263,19 @@ func (s *APIServer) setupRoutes() {
 		backtestHandler := api.NewBacktestHandler(s.db.Pool())
 		backtestHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.OrderMiddleware())
 
-		// Dashboard routes (TC-002) with rate limiting
-		// Provides user dashboard with trading control, positions, P&L, and system status
-		// Use an HTTP client to the orchestrator so the dashboard can report agent counts
-		// even though the API and orchestrator run as separate processes.
+		// Dashboard routes (TC-002) with rate limiting + auth
+		// QA-004 (#147): dashboard exposes positions, PnL, and trading controls
+		// — all require authentication when enabled. Auth is applied at the
+		// group level so it runs before the rate limiters (unauthenticated
+		// requests are rejected before consuming rate-limit budget).
 		orchestratorURL := s.getOrchestratorURL()
 		orchClient := api.NewOrchestratorClient(orchestratorURL)
 		dashboardHandler := api.NewDashboardHandlerWithOrchestrator(s.db, orchClient, config.Version)
-		dashboardHandler.RegisterRoutesWithRateLimiter(v1, s.rateLimiter.ReadMiddleware(), s.rateLimiter.ControlMiddleware())
+		dashboardGroup := v1.Group("")
+		if s.config.API.Auth.Enabled {
+			dashboardGroup.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
+		}
+		dashboardHandler.RegisterRoutesWithRateLimiter(dashboardGroup, s.rateLimiter.ReadMiddleware(), s.rateLimiter.ControlMiddleware())
 
 		// Trades routes — fill records from the trades table
 		tradesHandler := api.NewTradesHandler(s.db)
