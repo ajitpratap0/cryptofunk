@@ -517,6 +517,22 @@ func (db *DB) UpdateOrderPositionIDTx(ctx context.Context, tx pgx.Tx, orderID uu
 	return nil
 }
 
+// UpdateOrderPositionID links an order to a position using the connection pool.
+// Use this from code paths that don't already have a transaction open (e.g.
+// position_manager.OnOrderFilled). For transactional callers, prefer
+// UpdateOrderPositionIDTx.
+func (db *DB) UpdateOrderPositionID(ctx context.Context, orderID uuid.UUID, positionID uuid.UUID) error {
+	const q = `UPDATE orders SET position_id = $1, updated_at = NOW() WHERE id = $2`
+	result, err := db.pool.Exec(ctx, q, positionID, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to set order position_id: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found: %s", orderID)
+	}
+	return nil
+}
+
 // GetOrdersBySession retrieves all orders for a specific session
 func (db *DB) GetOrdersBySession(ctx context.Context, sessionID uuid.UUID) ([]*Order, error) {
 	query := `
