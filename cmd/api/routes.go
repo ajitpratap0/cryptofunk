@@ -157,38 +157,40 @@ func (s *APIServer) setupRoutes() {
 		// WebSocket endpoint (no rate limiting - uses connection limits)
 		v1.GET("/ws", s.handleWebSocket)
 
-		// Agent routes (read-only, apply read rate limiter + auth)
+		// Agent routes (read-only, auth then rate limiter)
 		// QA-003 (#146): all read-only trading data endpoints now require
 		// authentication when enabled, closing the asymmetric trust boundary
 		// where /sessions and /positions were public but /orders was gated.
+		// Auth runs before the rate limiter so unauthenticated requests are
+		// rejected before consuming rate-limit budget.
 		agents := v1.Group("/agents")
-		agents.Use(s.rateLimiter.ReadMiddleware())
 		if s.config.API.Auth.Enabled {
 			agents.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
 		}
+		agents.Use(s.rateLimiter.ReadMiddleware())
 		{
 			agents.GET("", s.handleListAgents)
 			agents.GET("/:name", s.handleGetAgent)
 			agents.GET("/:name/status", s.handleGetAgentStatus)
 		}
 
-		// Session routes (read-only, apply read rate limiter + auth)
+		// Session routes (read-only, auth then rate limiter)
 		sessions := v1.Group("/sessions")
-		sessions.Use(s.rateLimiter.ReadMiddleware())
 		if s.config.API.Auth.Enabled {
 			sessions.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
 		}
+		sessions.Use(s.rateLimiter.ReadMiddleware())
 		{
 			sessions.GET("", s.handleListSessions)
 			sessions.GET("/:id", s.handleGetSession)
 		}
 
-		// Position routes (read-only, apply read rate limiter + auth)
+		// Position routes (read-only, auth then rate limiter)
 		positions := v1.Group("/positions")
-		positions.Use(s.rateLimiter.ReadMiddleware())
 		if s.config.API.Auth.Enabled {
 			positions.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))
 		}
+		positions.Use(s.rateLimiter.ReadMiddleware())
 		{
 			positions.GET("", s.handleListPositions)
 			positions.GET("/:symbol", s.handleGetPosition)
@@ -271,6 +273,9 @@ func (s *APIServer) setupRoutes() {
 		orchestratorURL := s.getOrchestratorURL()
 		orchClient := api.NewOrchestratorClient(orchestratorURL)
 		dashboardHandler := api.NewDashboardHandlerWithOrchestrator(s.db, orchClient, config.Version)
+		// Empty-string group inherits v1's path prefix; it only scopes the
+		// middleware (auth) to the routes that RegisterRoutesWithRateLimiter
+		// mounts inside it (/dashboard/*), not to all of /api/v1.
 		dashboardGroup := v1.Group("")
 		if s.config.API.Auth.Enabled {
 			dashboardGroup.Use(api.AuthMiddleware(s.apiKeyStore, authConfig))

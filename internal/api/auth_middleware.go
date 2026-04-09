@@ -72,9 +72,10 @@ type AuthConfig struct {
 // DefaultAuthConfig returns the default auth configuration
 func DefaultAuthConfig() *AuthConfig {
 	return &AuthConfig{
-		Enabled:      false, // Disabled by default for development
-		HeaderName:   "X-API-Key",
-		RequireHTTPS: true,
+		Enabled:             false, // Disabled by default for development
+		HeaderName:          "X-API-Key",
+		RequireHTTPS:        true,
+		TrustForwardedProto: false, // Only enable behind a trusted reverse proxy (K8s ingress, ALB)
 	}
 }
 
@@ -200,7 +201,7 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 		if config.RequireHTTPS && c.Request.TLS == nil {
 			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
 			host := c.Request.Host
-			isLocalhost := strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1")
+			isLocalhost := strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]")
 			if !forwardedHTTPS && !isLocalhost {
 				log.Warn().
 					Str("host", host).
