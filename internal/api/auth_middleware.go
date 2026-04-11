@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -118,6 +119,21 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 	rehashAPIKeyAsync(s.db, s.pepper, keyID, plaintextKey)
 }
 
+// inFlightRehashes dedupes concurrent rehash attempts across all
+// APIKeyStore / KeyManager instances in a process. When a legacy key is
+// validated many times concurrently before the first rehash completes,
+// the second-and-later callers all observe the same "hash_algorithm =
+// 'sha256'" row and would each spawn a goroutine issuing an identical
+// UPDATE. The subsequent UPDATEs are harmless (they'll find 0 matching
+// rows because the first one flipped the algorithm) but wasting DB
+// connections and log noise. This guard keeps at most one in-flight
+// rehash per key ID.
+//
+// Package-level so the store and the key manager share the same map —
+// a key validated through both the middleware and the key-management
+// endpoint still only produces one UPDATE.
+var inFlightRehashes sync.Map // map[uuid.UUID]struct{}
+
 // rehashAPIKeyAsync fires an async UPDATE that replaces a legacy
 // sha256-hashed key_hash row with the HMAC-SHA256 equivalent, so the row
 // stops being vulnerable to precomputed rainbow tables (SEC-009 / #123).
@@ -129,8 +145,18 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 // are logged rather than returned because this is best-effort migration:
 // the legacy hash still works if we don't manage to upgrade it, and the
 // same key will be retried on the next successful validation.
+//
+// Dedupes concurrent rehash attempts for the same key ID via
+// inFlightRehashes — a hot key validated 100x concurrently only spawns
+// one UPDATE.
 func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaintextKey string) {
 	if pepper == "" || db == nil {
+		return
+	}
+	// LoadOrStore atomically claims the key ID. If a rehash is already
+	// in flight for this key, skip — it will complete (or fail) and
+	// subsequent validations will see the rehashed row.
+	if _, alreadyInFlight := inFlightRehashes.LoadOrStore(keyID, struct{}{}); alreadyInFlight {
 		return
 	}
 	newHash := MustHashAPIKeyHMAC(pepper, plaintextKey)
@@ -138,6 +164,7 @@ func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaint
 	// detached from the request context so it completes even if the
 	// caller cancels. The 5s timeout below bounds the work independently.
 	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
+		defer inFlightRehashes.Delete(id)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, err := db.Exec(ctx, `

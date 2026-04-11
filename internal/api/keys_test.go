@@ -1466,6 +1466,16 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 	// refresh and the opportunistic rehash. MatchExpectationsInOrder(false)
 	// lets those async Exec calls land on the expected matchers in any
 	// order alongside the synchronous probe queries.
+	//
+	// Async ordering note: goroutines from iteration N may still be
+	// running when iteration N+1 registers its expectations, so a late
+	// async UPDATE can consume a matcher meant for the next iteration.
+	// In practice the benchmark loop is slow enough relative to goroutine
+	// scheduling that this doesn't cause failures, but if the benchmark
+	// ever starts reporting flaky counts investigate this first — a
+	// stricter fix would be to drain rehashes between iterations via
+	// the inFlightRehashes map, or to run the benchmark with b.N=1 and
+	// a wall-clock loop.
 	mock.MatchExpectationsInOrder(false)
 
 	const pepper = "bench-pepper-32-bytes-of-material"
