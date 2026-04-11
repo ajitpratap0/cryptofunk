@@ -527,7 +527,21 @@ func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashbo
 	}
 
 	h.applyAgentAndOrchestratorStatus(ctx, &status)
+	rollupSystemStatus(&status)
 	return status
+}
+
+// rollupSystemStatus computes the top-level status.Status from the already
+// populated component fields. Shared by getSystemStatus and buildSystemStatus
+// so the dashboard and /status endpoint report identical values for the two
+// operationally important failure modes (DB down → unhealthy, no active
+// agents → degraded).
+func rollupSystemStatus(status *SystemStatusInfo) {
+	if !status.DatabaseOK {
+		status.Status = systemStatusUnhealthy
+	} else if status.ActiveAgents == 0 {
+		status.Status = systemStatusDegraded
+	}
 }
 
 // applyAgentAndOrchestratorStatus fills status.ActiveAgents,
@@ -1059,14 +1073,7 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 	}
 
 	h.applyAgentAndOrchestratorStatus(ctx, &status)
-
-	// Set overall status based on components
-	if !status.DatabaseOK {
-		status.Status = systemStatusUnhealthy
-	} else if status.ActiveAgents == 0 {
-		status.Status = systemStatusDegraded
-	}
-
+	rollupSystemStatus(&status)
 	return status
 }
 

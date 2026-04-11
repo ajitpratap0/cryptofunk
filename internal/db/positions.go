@@ -279,9 +279,13 @@ func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64
 		// Either the row doesn't exist, or it was already closed. Do a
 		// targeted lookup to return the precise error so callers can
 		// distinguish the two cases; this only fires on the error path.
+		// Wrap the underlying GetPosition error with %w so transient
+		// infra failures (connection drop, timeout) aren't silently
+		// reshaped into a "not found" business error that callers might
+		// retry or ignore.
 		existing, getErr := db.GetPosition(ctx, id)
 		if getErr != nil {
-			return fmt.Errorf("position not found: %s", id)
+			return fmt.Errorf("position not found %s: %w", id, getErr)
 		}
 		if existing.ExitTime != nil {
 			return fmt.Errorf("position already closed: %s", id)
