@@ -110,7 +110,10 @@ func (s *APIServer) setupRoutes() {
 	// rotation silently falls back to sha256 probes for existing keys,
 	// which would otherwise leave no trail in the logs).
 	if keyPepper == "" {
-		log.Info().Str("algo", "sha256").Msg("API key pepper not configured — legacy raw SHA-256 scheme in use (SEC-009)")
+		// Warn rather than Info because running without a pepper is a
+		// documented security degradation — alert pipelines that filter
+		// below Warn will miss an Info log here.
+		log.Warn().Str("algo", "sha256").Msg("API key pepper not configured — legacy raw SHA-256 scheme in use; set CRYPTOFUNK_API_AUTH_KEY_PEPPER to enable HMAC (SEC-009)")
 	} else {
 		log.Info().
 			Str("algo", "hmac-sha256").

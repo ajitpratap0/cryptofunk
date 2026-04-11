@@ -47,7 +47,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog/log"
 )
 
@@ -117,105 +116,99 @@ type APIKeyStore struct {
 	pepper  string // HMAC pepper for new keys; empty = legacy SHA-256 only
 }
 
-// rehashLegacyKey is a thin wrapper that delegates to the package-level
-// rehashAPIKeyHelper so APIKeyStore and KeyManager share one rehash
-// implementation instead of each carrying a copy.
-func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
-	rehashAPIKeyAsync(s.db, s.pepper, keyID, plaintextKey)
-}
-
 // inFlightRehashes dedupes concurrent rehash attempts across all
 // APIKeyStore / KeyManager instances in a process. When a legacy key is
 // validated many times concurrently before the first rehash completes,
 // the second-and-later callers all observe the same "hash_algorithm =
 // 'sha256'" row and would each spawn a goroutine issuing an identical
 // UPDATE. The subsequent UPDATEs are harmless (they'll find 0 matching
-// rows because the first one flipped the algorithm) but wasting DB
+// rows because the first one flipped the algorithm) but waste DB
 // connections and log noise. This guard keeps at most one in-flight
 // rehash per key ID.
 //
 // Package-level so the store and the key manager share the same map —
 // a key validated through both the middleware and the key-management
-// endpoint still only produces one UPDATE.
+// endpoint still only produces one UPDATE. Known limitation: two
+// parallel subtests that use the same fixture UUID can silently
+// suppress each other's rehash. The current tests use uuid.New() per
+// subtest so this doesn't bite, but a future struct-field refactor
+// would give full test isolation.
 var inFlightRehashes sync.Map // map[uuid.UUID]struct{}
 
 // asyncKeyOpsWG tracks every background goroutine spawned by key
-// validation paths: the opportunistic rehash (rehashAPIKeyAsync) AND
-// the last_used_at refresh fired at the end of a successful
-// ValidateKey. Tests drain this WaitGroup before tearing down pgxmock
-// so async UPDATEs don't race the mock teardown.
+// validation paths — runAsyncKeyOps serialises the opportunistic
+// rehash and the last_used_at refresh into one goroutine. Tests
+// drain this WaitGroup via waitForRehashesForTest before tearing
+// down pgxmock so the async UPDATE doesn't race the mock teardown.
 //
 // Production shutdown note: main.go does NOT call asyncKeyOpsWG.Wait()
 // on SIGTERM today. The goroutines carry their own 5s context timeout
 // so a deployment drain window of >=5s lets them complete cleanly. If
 // sub-5s terminations become a concern (tight rolling deploys, pod
 // evictions), wire asyncKeyOpsWG.Wait() with a bounded timeout into
-// the graceful shutdown path.
+// the graceful shutdown path (see TODO in cmd/api/main.go shutdown).
 var asyncKeyOpsWG sync.WaitGroup
 
 // waitForRehashesForTest blocks until every async key-op goroutine
-// (rehash + last_used_at updates) has returned. Test-only: used by
+// spawned by runAsyncKeyOps has returned. Test-only: used by
 // pgxmock-based unit tests to prevent the async UPDATE from racing
-// mock.Close(). The name is retained even though the WG now covers
-// last_used_at as well, because test call sites already use it and
-// "WaitForAsyncKeyOps" is a mouthful.
+// mock.Close().
 func waitForRehashesForTest() {
 	asyncKeyOpsWG.Wait()
 }
 
-// rehashAPIKeyAsync fires an async UPDATE that replaces a legacy
-// sha256-hashed key_hash row with the HMAC-SHA256 equivalent, so the row
-// stops being vulnerable to precomputed rainbow tables (SEC-009 / #123).
-// Shared by APIKeyStore.rehashLegacyKey (auth middleware hot path) and
-// KeyManager.rehashLegacyKey (key-management endpoint path) — keeping the
-// SQL, logging, and context lifetime in one place.
+// runAsyncKeyOps is the single shared async post-validation worker
+// for both APIKeyStore.ValidateKey and KeyManager.ValidateAPIKey. It
+// spawns ONE goroutine that:
+//  1. Runs the opportunistic rehash when needRehash is true (gated
+//     by inFlightRehashes so only one goroutine at a time touches a
+//     given key ID).
+//  2. Runs the last_used_at refresh unconditionally for successful
+//     validations.
 //
-// The function returns immediately after spawning the goroutine. Errors
-// are logged rather than returned because this is best-effort migration:
-// the legacy hash still works if we don't manage to upgrade it, and the
-// same key will be retried on the next successful validation.
+// Serialising both UPDATEs in one goroutine gives deterministic
+// execution order (pgxmock in-order expectations are stable), and
+// having one helper shared between the two validation paths
+// eliminates the drift risk where adding a third async op to one
+// path leaves the other stale.
 //
-// Dedupes concurrent rehash attempts for the same key ID via
-// inFlightRehashes — a hot key validated 100x concurrently only spawns
-// one UPDATE.
-func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaintextKey string) {
-	if pepper == "" || db == nil {
+// gosec G118 and contextcheck suppressed: the goroutine is
+// intentionally detached from the request context so these
+// fire-and-forget writes complete even if the request is cancelled.
+// The 5s context.WithTimeout below bounds the work independently.
+func runAsyncKeyOps(db KeyManagerDB, keyID uuid.UUID, needRehash bool, rehashHash string) {
+	if db == nil {
 		return
 	}
-	// LoadOrStore atomically claims the key ID. If a rehash is already
-	// in flight for this key, skip — it will complete (or fail) and
-	// subsequent validations will see the rehashed row.
-	if _, alreadyInFlight := inFlightRehashes.LoadOrStore(keyID, struct{}{}); alreadyInFlight {
-		return
-	}
-	newHash := mustHashAPIKeyHMAC(pepper, plaintextKey)
 	asyncKeyOpsWG.Add(1)
-	// gosec G118 and contextcheck suppressed: the rehash is intentionally
-	// detached from the request context so it completes even if the
-	// caller cancels. The 5s timeout below bounds the work independently.
-	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
+	go func() { //nolint:gosec,contextcheck
 		defer asyncKeyOpsWG.Done()
-		defer inFlightRehashes.Delete(id)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, err := db.Exec(ctx, `
-			UPDATE api_keys
-			SET key_hash = $1, hash_algorithm = $2
-			WHERE id = $3 AND hash_algorithm = $4
-		`, hash, HashAlgoHMACSHA256, id, HashAlgoSHA256)
-		if err != nil {
-			log.Warn().Err(err).Str("key_id", id.String()).Msg("Failed to rehash legacy API key to HMAC")
-			return
-		}
-		log.Info().Str("key_id", id.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
-	}(keyID, newHash)
-}
 
-// rehashExecutor is the minimal DB surface rehashAPIKeyAsync needs. Both
-// *pgxpool.Pool (used by APIKeyStore) and KeyManagerDB (used by
-// KeyManager via an interface) satisfy it without any wrapping.
-type rehashExecutor interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+		if needRehash {
+			// Claim the in-flight slot; skip the rehash step if
+			// another goroutine is already rehashing this key.
+			if _, alreadyInFlight := inFlightRehashes.LoadOrStore(keyID, struct{}{}); !alreadyInFlight {
+				_, rerr := db.Exec(ctx, `
+					UPDATE api_keys
+					SET key_hash = $1, hash_algorithm = $2
+					WHERE id = $3 AND hash_algorithm = $4
+				`, rehashHash, HashAlgoHMACSHA256, keyID, HashAlgoSHA256)
+				inFlightRehashes.Delete(keyID)
+				if rerr != nil {
+					log.Warn().Err(rerr).Str("key_id", keyID.String()).Msg("Failed to rehash legacy API key to HMAC")
+				} else {
+					log.Info().Str("key_id", keyID.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
+				}
+			}
+		}
+
+		_, luErr := db.Exec(ctx, "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND is_active = TRUE", keyID)
+		if luErr != nil {
+			log.Debug().Err(luErr).Str("key_id", keyID.String()).Msg("Failed to update last_used_at")
+		}
+	}()
 }
 
 // NewAPIKeyStore creates a new API key store using the legacy raw-SHA-256
@@ -418,27 +411,20 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		return nil, nil
 	}
 
-	// SEC-009: opportunistically upgrade a legacy sha256 row to hmac-sha256
-	// on first successful validation after a pepper is configured. Fire and
-	// forget — validation still succeeds if the upgrade races or errors,
-	// and the row will be retried on the next use.
-	if s.pepper != "" && matched.algorithm == HashAlgoSHA256 {
-		s.rehashLegacyKey(apiKey.ID, key)
+	// Compute the rehash hash before spawning the goroutine so we can
+	// drop the reference to the plaintext key on the stack afterwards.
+	var rehashHash string
+	needRehash := s.pepper != "" && matched.algorithm == HashAlgoSHA256
+	if needRehash {
+		rehashHash = mustHashAPIKeyHMAC(s.pepper, key)
 	}
-
-	// Update last used timestamp asynchronously with timeout context.
-	// Using a detached context with timeout to avoid leaking the request
-	// context. Registered with asyncKeyOpsWG so tests can drain before
-	// tearing down pgxmock.
-	apiKeyID := apiKey.ID // Capture value to avoid closure over pointer
-	asyncKeyOpsWG.Add(1)
-	go func() { //nolint:gosec,contextcheck
-		defer asyncKeyOpsWG.Done()
-		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		updateQuery := `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`
-		_, _ = s.db.Exec(updateCtx, updateQuery, apiKeyID)
-	}()
+	// Single async goroutine chains the opportunistic rehash (when
+	// applicable) and the last_used_at update — same pattern as
+	// KeyManager.ValidateAPIKey in keys.go. Serialising both UPDATEs
+	// in one goroutine gives deterministic execution order (useful
+	// for in-order pgxmock tests) and makes the async behaviour
+	// identical across both validation paths.
+	runAsyncKeyOps(s.db, apiKey.ID, needRehash, rehashHash)
 
 	return &apiKey, nil
 }

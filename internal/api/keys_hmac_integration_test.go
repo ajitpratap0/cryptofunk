@@ -41,6 +41,7 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 	const pepper = "test-pepper-sec009-integration"
 
 	t.Run("new keys stored with hmac-sha256 algorithm", func(t *testing.T) {
+		t.Cleanup(waitForRehashesForTest)
 		km := NewKeyManagerWithPepper(pool, pepper)
 		created, err := km.CreateAPIKey(ctx, "user-hmac-new", "HMAC New", nil, 0)
 		require.NoError(t, err)
@@ -63,6 +64,7 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 	})
 
 	t.Run("legacy sha256 row validates with pepper-configured validator", func(t *testing.T) {
+		t.Cleanup(waitForRehashesForTest)
 		// Create a key with NO pepper → gets stored as sha256.
 		legacyKM := NewKeyManagerWithPepper(pool, "")
 		legacy, err := legacyKM.CreateAPIKey(ctx, "user-legacy", "Legacy Key", nil, 0)
@@ -97,6 +99,7 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 	})
 
 	t.Run("key created under one pepper does not validate under another", func(t *testing.T) {
+		t.Cleanup(waitForRehashesForTest)
 		kmA := NewKeyManagerWithPepper(pool, "pepper-A")
 		created, err := kmA.CreateAPIKey(ctx, "user-pepper-a", "Pepper A Key", nil, 0)
 		require.NoError(t, err)
@@ -110,6 +113,7 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 	})
 
 	t.Run("ValidateAPIKey in KeyManager probes both algorithms", func(t *testing.T) {
+		t.Cleanup(waitForRehashesForTest)
 		// Create a legacy key, then verify a pepper-configured KeyManager
 		// can still ValidateAPIKey it (sanity for the keys.go path).
 		legacyKM := NewKeyManagerWithPepper(pool, "")
@@ -123,12 +127,15 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 		assert.Equal(t, "Legacy KM", details.Name)
 	})
 
-	// Drain async goroutines between subtests so last_used_at / rehash
-	// updates from earlier subtests don't race the pool lifecycle of
-	// the next subtest.
+	// Each subtest registers t.Cleanup(waitForRehashesForTest) at the
+	// top so the drain call is robust against future refactors — a
+	// statement-level waitForRehashesForTest() between subtests can
+	// be accidentally deleted, but a Cleanup registered with the
+	// subtest's t is tied to the subtest's lifecycle.
 	waitForRehashesForTest()
 
 	t.Run("pepper rotation invalidates HMAC keys after opportunistic rehash", func(t *testing.T) {
+		t.Cleanup(waitForRehashesForTest)
 		// The documented operator footgun: a key created and then rehashed
 		// to hmac-sha256 under pepper-A stops working when the service is
 		// restarted with pepper-B. Verifies the invalidation is silent at
