@@ -139,17 +139,26 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 2: Split vote with risk veto
 	t.Run("risk_agent_veto", func(t *testing.T) {
-		// Drain any stale BTC/USDT decisions left over from the previous subtest.
-		// BTC/USDT signals remain valid for MaxSignalAge (5 min), so the orchestrator
-		// may keep generating decisions for them; we must skip those here.
-	drainLoop:
-		for {
-			select {
-			case <-decisionChan:
-			default:
-				break drainLoop
-			}
+		drainDecisions(decisionChan)
+
+		// Re-send heartbeats so the orchestrator still considers these agents
+		// active. Under -race on CI, enough wall time may have elapsed between
+		// test case 1 and test case 2 that the health checker marks them stale.
+		vetoAgents := []struct {
+			name   string
+			typ    string
+			weight float64
+		}{
+			{"technical-agent", "analysis", 0.25},
+			{"orderbook-agent", "analysis", 0.20},
+			{"trend-agent", "strategy", 0.30},
+			{"arbitrage-agent", "strategy", 0.20},
+			{"risk-agent", "risk", 1.00},
 		}
+		for _, a := range vetoAgents {
+			sendHeartbeat(t, nc, config.HeartbeatTopic, a.name, a.typ, a.weight)
+		}
+		time.Sleep(200 * time.Millisecond)
 
 		// 4 agents vote BUY
 		buyAgents := []string{"technical-agent", "orderbook-agent", "trend-agent", "arbitrage-agent"}
@@ -204,6 +213,10 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 
 	// Test Case 3: Low confidence - should result in HOLD
 	t.Run("low_confidence_hold", func(t *testing.T) {
+		// Drain stale decisions from earlier subtests (BTC/USDT, ETH/USDT)
+		// so we don't pick them up below.
+		drainDecisions(decisionChan)
+
 		// Register agents with heartbeats first
 		agents := []struct {
 			name   string
@@ -219,7 +232,9 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			sendHeartbeat(t, nc, config.HeartbeatTopic, agent.name, agent.typ, agent.weight)
 		}
 
-		time.Sleep(200 * time.Millisecond)
+		// Give the orchestrator enough time to process heartbeats and register
+		// the new agents. 200ms was too tight under -race on CI runners.
+		time.Sleep(500 * time.Millisecond)
 
 		// All agents vote with low confidence
 		for _, agent := range agents {
@@ -235,13 +250,21 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			sendSignal(t, nc, config.SignalTopic, signal)
 		}
 
-		// Wait for decision
-		select {
-		case decision := <-decisionChan:
-			assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
-			assert.Less(t, decision.Confidence, config.MinConfidence)
-		case <-time.After(5 * time.Second):
-			t.Fatal("Timeout waiting for decision")
+		// Wait for a SOL/USDT decision. Earlier subtests may still produce
+		// BTC/USDT or ETH/USDT decisions from stale signals — skip those.
+		deadline := time.After(15 * time.Second)
+		for {
+			select {
+			case decision := <-decisionChan:
+				if decision.Symbol != "SOL/USDT" {
+					continue // skip stale decisions from earlier subtests
+				}
+				assert.Equal(t, orchestrator.SignalActionHold, decision.Action)
+				assert.Less(t, decision.Confidence, config.MinConfidence)
+				return
+			case <-deadline:
+				t.Fatal("Timeout waiting for SOL/USDT decision")
+			}
 		}
 	})
 
@@ -257,11 +280,7 @@ func TestIntegration_MultiAgentCoordination(t *testing.T) {
 			t.Skip("skipping flaky split_vote_no_consensus under CI; run locally with -tags=integration")
 		}
 
-		// Drain any leftover decisions from previous subtests to avoid a stale
-		// decision being picked up by this subtest's select.
-		for len(decisionChan) > 0 {
-			<-decisionChan
-		}
+		drainDecisions(decisionChan)
 
 		// Half vote BUY, half vote SELL
 		buyAgents := []string{"technical-agent", "trend-agent"}
@@ -519,6 +538,10 @@ func sendHeartbeat(t *testing.T, nc *nats.Conn, topic, agentName, agentType stri
 	require.NoError(t, err)
 	err = nc.Publish(topic, data)
 	require.NoError(t, err)
+	// Flush so the embedded NATS server delivers the heartbeat before the
+	// orchestrator's next tick. Without this, buffered publishes can race
+	// the 1s StepInterval under -race on slow CI runners.
+	require.NoError(t, nc.Flush())
 }
 
 func sendSignal(t *testing.T, nc *nats.Conn, topic string, signal *orchestrator.AgentSignal) {
@@ -527,4 +550,18 @@ func sendSignal(t *testing.T, nc *nats.Conn, topic string, signal *orchestrator.
 	require.NoError(t, err)
 	err = nc.Publish(topic, data)
 	require.NoError(t, err)
+	require.NoError(t, nc.Flush())
+}
+
+// drainDecisions empties the decision channel of any stale decisions from
+// earlier subtests. Call this at the start of each subtest that reads from
+// decisionChan to avoid picking up decisions for symbols from a prior case.
+func drainDecisions(ch <-chan *orchestrator.TradingDecision) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
 }

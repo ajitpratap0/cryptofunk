@@ -260,7 +260,10 @@ api:
   auth:
     enabled: true                # Set to false only in local development
     header_name: "X-API-Key"     # Header name for API key (also supports Authorization: Bearer <key>)
-    require_https: true          # Require HTTPS in production (localhost/127.0.0.1 are exempt)
+    require_https: true              # Require HTTPS in production (localhost/127.0.0.1/[::1] are exempt)
+    trust_forwarded_proto: false     # Set true only behind a trusted reverse proxy (K8s ingress, ALB)
+                                     # that strips and re-sets X-Forwarded-Proto. When false (default),
+                                     # the header is ignored to prevent bypass over plain HTTP.
 
   # CORS Configuration
   # Controls which origins can access the API from browsers

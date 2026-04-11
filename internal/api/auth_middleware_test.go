@@ -65,6 +65,95 @@ func TestDefaultAuthConfig(t *testing.T) {
 	assert.False(t, config.Enabled)
 	assert.Equal(t, "X-API-Key", config.HeaderName)
 	assert.True(t, config.RequireHTTPS)
+	assert.False(t, config.TrustForwardedProto)
+}
+
+// TestTrustForwardedProto_SEC004 verifies that the X-Forwarded-Proto header
+// is only trusted when TrustForwardedProto is explicitly enabled, preventing
+// the HTTPS bypass described in SEC-004 / #118.
+func TestTrustForwardedProto_SEC004(t *testing.T) {
+	// The HTTPS enforcement check runs BEFORE key validation in the
+	// middleware, so we can use a nil-DB store — the test either gets 403
+	// (HTTPS blocked) or proceeds past the HTTPS gate to key validation
+	// (which returns 401 because there's no DB). Status != 403 proves
+	// the HTTPS check passed.
+	store := NewAPIKeyStore(nil, true)
+
+	okHandler := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
+
+	t.Run("spoofed_header_blocked_when_trust_disabled", func(t *testing.T) {
+		config := &AuthConfig{
+			Enabled:             true,
+			HeaderName:          "X-API-Key",
+			RequireHTTPS:        true,
+			TrustForwardedProto: false,
+		}
+
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.Use(AuthMiddleware(store, config))
+		router.GET("/secure", okHandler)
+
+		req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+		req.Header.Set("X-API-Key", "any-key")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Host = "api.example.com"
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"spoofed X-Forwarded-Proto should be rejected when TrustForwardedProto=false")
+	})
+
+	t.Run("forwarded_proto_trusted_when_enabled", func(t *testing.T) {
+		config := &AuthConfig{
+			Enabled:             true,
+			HeaderName:          "X-API-Key",
+			RequireHTTPS:        true,
+			TrustForwardedProto: true,
+		}
+
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.Use(AuthMiddleware(store, config))
+		router.GET("/secure", okHandler)
+
+		req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+		req.Header.Set("X-API-Key", "any-key")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Host = "api.example.com"
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.NotEqual(t, http.StatusForbidden, w.Code,
+			"X-Forwarded-Proto: https should be trusted when TrustForwardedProto=true (expect 401 from key validation, not 403)")
+	})
+
+	t.Run("ipv6_loopback_allowed", func(t *testing.T) {
+		config := &AuthConfig{
+			Enabled:             true,
+			HeaderName:          "X-API-Key",
+			RequireHTTPS:        true,
+			TrustForwardedProto: false,
+		}
+
+		gin.SetMode(gin.TestMode)
+		router := gin.New()
+		router.Use(AuthMiddleware(store, config))
+		router.GET("/secure", okHandler)
+
+		req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+		req.Header.Set("X-API-Key", "any-key")
+		req.Host = "[::1]:8080"
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.NotEqual(t, http.StatusForbidden, w.Code,
+			"IPv6 loopback should be allowed even without HTTPS (expect 401, not 403)")
+	})
 }
 
 // =============================================================================
