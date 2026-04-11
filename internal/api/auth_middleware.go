@@ -63,17 +63,19 @@ type APIKey struct {
 
 // AuthConfig contains authentication configuration
 type AuthConfig struct {
-	Enabled      bool   `mapstructure:"enabled"`
-	HeaderName   string `mapstructure:"header_name"`   // Default: "X-API-Key" or "Authorization"
-	RequireHTTPS bool   `mapstructure:"require_https"` // Require HTTPS in production
+	Enabled             bool   `mapstructure:"enabled"`
+	HeaderName          string `mapstructure:"header_name"`           // Default: "X-API-Key" or "Authorization"
+	RequireHTTPS        bool   `mapstructure:"require_https"`         // Require HTTPS in production
+	TrustForwardedProto bool   `mapstructure:"trust_forwarded_proto"` // Trust X-Forwarded-Proto from reverse proxy (default false)
 }
 
 // DefaultAuthConfig returns the default auth configuration
 func DefaultAuthConfig() *AuthConfig {
 	return &AuthConfig{
-		Enabled:      false, // Disabled by default for development
-		HeaderName:   "X-API-Key",
-		RequireHTTPS: true,
+		Enabled:             false, // Disabled by default for development
+		HeaderName:          "X-API-Key",
+		RequireHTTPS:        true,
+		TrustForwardedProto: false, // Only enable behind a trusted reverse proxy (K8s ingress, ALB)
 	}
 }
 
@@ -191,11 +193,16 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 			return
 		}
 
-		// Check HTTPS requirement in production
-		if config.RequireHTTPS && c.Request.TLS == nil && c.GetHeader("X-Forwarded-Proto") != "https" {
-			// Allow localhost for development
+		// Check HTTPS requirement in production.
+		// Only trust X-Forwarded-Proto when TrustForwardedProto is explicitly
+		// enabled (e.g. behind a K8s ingress or ALB that terminates TLS).
+		// Without that flag the header is user-spoofable over plain HTTP and
+		// bypasses the check entirely (SEC-004 / #118).
+		if config.RequireHTTPS && c.Request.TLS == nil {
+			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
 			host := c.Request.Host
-			if !strings.HasPrefix(host, "localhost") && !strings.HasPrefix(host, "127.0.0.1") {
+			isLocalhost := strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]")
+			if !forwardedHTTPS && !isLocalhost {
 				log.Warn().
 					Str("host", host).
 					Str("ip", c.ClientIP()).

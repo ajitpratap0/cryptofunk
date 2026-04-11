@@ -503,11 +503,29 @@ func (db *DB) GetOrderByID(ctx context.Context, orderID uuid.UUID) (*Order, erro
 	return db.GetOrder(ctx, orderID)
 }
 
+// updateOrderPositionIDSQL is shared by the Tx and non-Tx variants so the
+// query text stays in sync if the schema changes.
+const updateOrderPositionIDSQL = `UPDATE orders SET position_id = $1, updated_at = NOW() WHERE id = $2`
+
 // UpdateOrderPositionIDTx links an order to a position within an existing transaction.
 // This is called after a position is created/updated so the orders.position_id FK is populated.
 func (db *DB) UpdateOrderPositionIDTx(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, positionID uuid.UUID) error {
-	const q = `UPDATE orders SET position_id = $1, updated_at = NOW() WHERE id = $2`
-	result, err := tx.Exec(ctx, q, positionID, orderID)
+	result, err := tx.Exec(ctx, updateOrderPositionIDSQL, positionID, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to set order position_id: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found: %s", orderID)
+	}
+	return nil
+}
+
+// UpdateOrderPositionID links an order to a position using the connection pool.
+// Use this from code paths that don't already have a transaction open (e.g.
+// position_manager.OnOrderFilled). For transactional callers, prefer
+// UpdateOrderPositionIDTx.
+func (db *DB) UpdateOrderPositionID(ctx context.Context, orderID uuid.UUID, positionID uuid.UUID) error {
+	result, err := db.pool.Exec(ctx, updateOrderPositionIDSQL, positionID, orderID)
 	if err != nil {
 		return fmt.Errorf("failed to set order position_id: %w", err)
 	}

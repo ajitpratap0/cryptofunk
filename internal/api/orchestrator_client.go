@@ -29,11 +29,24 @@ func NewOrchestratorClient(baseURL string) *OrchestratorClient {
 	}
 }
 
-// GetActiveAgentCount calls the orchestrator /health endpoint and returns
+// orchestratorRequestTimeout bounds every outbound orchestrator call so that a
+// hung orchestrator never pins an API handler goroutine indefinitely.
+const orchestratorRequestTimeout = 5 * time.Second
+
+// GetActiveAgentCount is the non-context-aware variant retained for the
+// OrchestratorInterface contract. Prefer GetActiveAgentCountCtx from request
+// handlers so client disconnects cancel the outbound call.
+func (c *OrchestratorClient) GetActiveAgentCount() int {
+	return c.GetActiveAgentCountCtx(context.Background())
+}
+
+// GetActiveAgentCountCtx calls the orchestrator /health endpoint and returns
 // the active_agents count. Returns -1 when the orchestrator is unreachable,
 // allowing callers to distinguish "zero agents" from "orchestrator unavailable".
-func (c *OrchestratorClient) GetActiveAgentCount() int {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// The provided ctx is used as the parent of a 5s timeout so that a client
+// disconnect (c.Request.Context() cancel) aborts the in-flight HTTP call.
+func (c *OrchestratorClient) GetActiveAgentCountCtx(ctx context.Context) int {
+	ctx, cancel := context.WithTimeout(ctx, orchestratorRequestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
@@ -63,9 +76,17 @@ func (c *OrchestratorClient) GetActiveAgentCount() int {
 	return result.ActiveAgents
 }
 
-// Pause calls the orchestrator /pause endpoint.
+// Pause is the non-context-aware variant retained for the OrchestratorInterface
+// contract. Prefer PauseCtx from request handlers.
 func (c *OrchestratorClient) Pause() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	return c.PauseCtx(context.Background())
+}
+
+// PauseCtx calls the orchestrator /pause endpoint using the caller's context
+// as the parent of a 5s timeout. Pass c.Request.Context() so HTTP client
+// disconnects cancel the outbound call.
+func (c *OrchestratorClient) PauseCtx(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, orchestratorRequestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/pause", nil)
@@ -85,9 +106,17 @@ func (c *OrchestratorClient) Pause() error {
 	return nil
 }
 
-// Resume calls the orchestrator /resume endpoint.
+// Resume is the non-context-aware variant retained for the OrchestratorInterface
+// contract. Prefer ResumeCtx from request handlers.
 func (c *OrchestratorClient) Resume() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	return c.ResumeCtx(context.Background())
+}
+
+// ResumeCtx calls the orchestrator /resume endpoint using the caller's context
+// as the parent of a 5s timeout. Pass c.Request.Context() so HTTP client
+// disconnects cancel the outbound call.
+func (c *OrchestratorClient) ResumeCtx(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, orchestratorRequestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/resume", nil)
@@ -107,10 +136,18 @@ func (c *OrchestratorClient) Resume() error {
 	return nil
 }
 
-// IsPaused calls the orchestrator /api/v1/status endpoint and returns the paused state.
-// Returns false on any error (graceful degradation).
+// IsPaused is the non-context-aware variant retained for the
+// OrchestratorInterface contract. Prefer IsPausedCtx from request handlers.
 func (c *OrchestratorClient) IsPaused() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	return c.IsPausedCtx(context.Background())
+}
+
+// IsPausedCtx calls the orchestrator /api/v1/status endpoint and returns the
+// paused state. Returns false on any error (graceful degradation). The
+// provided ctx is used as the parent of a 5s timeout so client disconnects
+// cancel the outbound call.
+func (c *OrchestratorClient) IsPausedCtx(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, orchestratorRequestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/status", nil)

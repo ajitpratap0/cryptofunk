@@ -142,12 +142,64 @@ type DashboardRepositoryInterface interface {
 	GetAllAgentStatuses(ctx context.Context) ([]*db.AgentStatus, error)
 }
 
-// OrchestratorInterface defines methods for orchestrator control
+// OrchestratorInterface defines methods for orchestrator control. Implementations
+// that cross a process boundary should also implement contextualOrchestrator so
+// handlers can propagate request cancellation to outbound calls.
 type OrchestratorInterface interface {
 	Pause() error
 	Resume() error
 	IsPaused() bool
 	GetActiveAgentCount() int
+}
+
+// contextualOrchestrator is an optional extension implemented by orchestrator
+// clients that make cross-process calls. When the handler's orchestrator
+// satisfies this interface, handlers call the Ctx variants with
+// c.Request.Context() so HTTP client disconnects abort the outbound RPC and
+// don't pin goroutines for the full 5s timeout. In-process implementations
+// (e.g. the real *orchestrator.Orchestrator in tests) only need to satisfy
+// OrchestratorInterface.
+type contextualOrchestrator interface {
+	PauseCtx(ctx context.Context) error
+	ResumeCtx(ctx context.Context) error
+	IsPausedCtx(ctx context.Context) bool
+	GetActiveAgentCountCtx(ctx context.Context) int
+}
+
+// pauseOrchestrator calls PauseCtx if the orchestrator supports it, falling
+// back to the non-context method otherwise.
+func pauseOrchestrator(ctx context.Context, orch OrchestratorInterface) error {
+	if ctxOrch, ok := orch.(contextualOrchestrator); ok {
+		return ctxOrch.PauseCtx(ctx)
+	}
+	return orch.Pause()
+}
+
+// resumeOrchestrator calls ResumeCtx if the orchestrator supports it, falling
+// back to the non-context method otherwise.
+func resumeOrchestrator(ctx context.Context, orch OrchestratorInterface) error {
+	if ctxOrch, ok := orch.(contextualOrchestrator); ok {
+		return ctxOrch.ResumeCtx(ctx)
+	}
+	return orch.Resume()
+}
+
+// isPausedOrchestrator queries pause state using the request context when the
+// orchestrator supports it.
+func isPausedOrchestrator(ctx context.Context, orch OrchestratorInterface) bool {
+	if ctxOrch, ok := orch.(contextualOrchestrator); ok {
+		return ctxOrch.IsPausedCtx(ctx)
+	}
+	return orch.IsPaused()
+}
+
+// getActiveAgentCountOrchestrator reads the active-agent count using the
+// request context when the orchestrator supports it.
+func getActiveAgentCountOrchestrator(ctx context.Context, orch OrchestratorInterface) int {
+	if ctxOrch, ok := orch.(contextualOrchestrator); ok {
+		return ctxOrch.GetActiveAgentCountCtx(ctx)
+	}
+	return orch.GetActiveAgentCount()
 }
 
 // =============================================================================
@@ -549,7 +601,7 @@ func (h *DashboardHandler) PauseTrading(c *gin.Context) {
 		return
 	}
 
-	if err := h.orchestrator.Pause(); err != nil {
+	if err := pauseOrchestrator(c.Request.Context(), h.orchestrator); err != nil {
 		log.Error().Err(err).Msg("Failed to pause trading")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Failed to pause trading",
@@ -584,7 +636,7 @@ func (h *DashboardHandler) ResumeTrading(c *gin.Context) {
 		return
 	}
 
-	if err := h.orchestrator.Resume(); err != nil {
+	if err := resumeOrchestrator(c.Request.Context(), h.orchestrator); err != nil {
 		log.Error().Err(err).Msg("Failed to resume trading")
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Failed to resume trading",
@@ -631,7 +683,7 @@ func (h *DashboardHandler) getTradingStatus(ctx context.Context) (TradingStatusI
 
 	// Check pause state
 	if h.orchestrator != nil {
-		status.IsPaused = h.orchestrator.IsPaused()
+		status.IsPaused = isPausedOrchestrator(ctx, h.orchestrator)
 	} else {
 		// Fallback to database
 		isPaused, err := h.repo.IsTradingPaused(ctx)
@@ -822,7 +874,7 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 
 	// Get agent count from orchestrator (or fall back to database)
 	if h.orchestrator != nil {
-		count := h.orchestrator.GetActiveAgentCount()
+		count := getActiveAgentCountOrchestrator(ctx, h.orchestrator)
 		if count >= 0 {
 			status.ActiveAgents = count
 			status.Components["orchestrator"] = "healthy"
