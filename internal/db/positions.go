@@ -282,10 +282,12 @@ func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64
 		// Wrap the underlying GetPosition error with %w so transient
 		// infra failures (connection drop, timeout) aren't silently
 		// reshaped into a "not found" business error that callers might
-		// retry or ignore.
+		// retry or ignore. The message makes the cause explicit so
+		// operators don't mistake a network blip for a data integrity
+		// problem.
 		existing, getErr := db.GetPosition(ctx, id)
 		if getErr != nil {
-			return fmt.Errorf("position not found %s: %w", id, getErr)
+			return fmt.Errorf("failed to look up position %s after close-update miss: %w", id, getErr)
 		}
 		if existing.ExitTime != nil {
 			return fmt.Errorf("position already closed: %s", id)

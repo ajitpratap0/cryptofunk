@@ -21,19 +21,15 @@ import (
 
 // Component health status strings used across the dashboard system status.
 // systemStatus* values apply to the top-level status.Status field;
-// component* values apply to entries in status.Components[]. They share the
-// same underlying literals (healthyLiteral, unhealthyLiteral) routed through
-// a private const so a future rename of the wire format propagates to both
-// families automatically instead of requiring coordinated edits.
+// component* values apply to entries in status.Components[]. Both families
+// intentionally share the "healthy" and "unhealthy" wire format — see the
+// note on DashboardData / SystemStatusInfo for the JSON contract.
 const (
-	healthyLiteral   = "healthy"
-	unhealthyLiteral = "unhealthy"
-
-	systemStatusHealthy   = healthyLiteral
+	systemStatusHealthy   = "healthy"
 	systemStatusDegraded  = "degraded"
-	systemStatusUnhealthy = unhealthyLiteral
-	componentHealthy      = healthyLiteral
-	componentUnhealthy    = unhealthyLiteral
+	systemStatusUnhealthy = "unhealthy"
+	componentHealthy      = "healthy"
+	componentUnhealthy    = "unhealthy"
 	componentUnavailable  = "unavailable"
 )
 
@@ -324,14 +320,18 @@ type dashboardBundle struct {
 // fetchDashboardBundle runs the independent queries GetDashboard needs in
 // parallel: active sessions, all open positions, a DB ping, and the
 // orchestrator's pause state. Returns the first hard error encountered by
-// any of the essential queries (sessions/positions); pingErr and
-// isPausedErr are surfaced via the bundle for non-fatal downstream use.
+// any of the essential queries (sessions/positions); the Ping error is
+// surfaced via bundle.pingErr for non-fatal downstream use.
 //
-// PERF-001 (#134): replaces the previous pattern where getTradingStatus,
-// getPositionSummary, and getPnLSummary each re-queried ListActiveSessions
-// and GetAllOpenPositions serially, totalling 6-8 serial round-trips per
-// dashboard request. This reduces the critical path to one parallel batch
-// of 3-4 queries followed by a single serial GetClosedFeesBySessionIDs.
+// PERF-001 (#134): replaces the previous pattern where the per-view helpers
+// each re-queried ListActiveSessions and GetAllOpenPositions serially,
+// totalling 6-8 serial round-trips per dashboard request. This reduces the
+// critical path to one parallel batch of 3-4 queries followed by a single
+// serial GetClosedFeesBySessionIDs.
+//
+// Concurrency note: each wg.Add is placed immediately next to its goroutine
+// launch (rather than a single up-front wg.Add(N)) so future edits can add
+// or remove parallel queries without hunting for a matching counter.
 func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboardBundle, error) {
 	var (
 		bundle      dashboardBundle
@@ -340,8 +340,7 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 		wg          sync.WaitGroup
 	)
 
-	wg.Add(3)
-
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		s, err := h.repo.ListActiveSessions(ctx)
@@ -352,6 +351,7 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 		bundle.sessions = s
 	}()
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		p, err := h.repo.GetAllOpenPositions(ctx)
@@ -362,15 +362,16 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 		bundle.positions = p
 	}()
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		bundle.pingErr = h.repo.Ping(ctx)
 	}()
 
 	// Pause state — orchestrator RPC if available, DB fallback otherwise.
-	// Run in a fourth goroutine only when orchestrator is configured, since
-	// the DB fallback would duplicate IsTradingPaused which we can resolve
-	// lazily in the main goroutine if needed.
+	// Only launch a goroutine when orchestrator is configured, since the
+	// DB fallback runs after wg.Wait() to avoid double-querying
+	// IsTradingPaused from two code paths.
 	if h.orchestrator != nil {
 		wg.Add(1)
 		go func() {
@@ -490,8 +491,12 @@ func (h *DashboardHandler) buildPnLSummary(ctx context.Context, bundle *dashboar
 		if p.UnrealizedPnL != nil {
 			pnl.UnrealizedPnL += *p.UnrealizedPnL
 		}
-		// RealizedPnL from open positions is intentionally omitted — see the
-		// note in getPnLSummary for rationale.
+		// RealizedPnL from open positions is intentionally omitted here.
+		// After a position closes (SELL), it no longer appears in
+		// GetAllOpenPositions, so summing RealizedPnL from open positions
+		// would always be 0 once trades complete. TotalPnL from session
+		// records (already summed above) is the authoritative source for
+		// realized P&L.
 		pnl.TotalFees += p.Fees
 	}
 
