@@ -357,7 +357,7 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	probes := make([]hashProbe, 0, 2)
 	if km.pepper != "" {
 		probes = append(probes, hashProbe{
-			hash:      HashAPIKeyHMAC(km.pepper, plaintextKey),
+			hash:      MustHashAPIKeyHMAC(km.pepper, plaintextKey),
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
@@ -408,7 +408,11 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	}
 
 	if !found {
-		if errors.Is(lastErr, pgx.ErrNoRows) {
+		// Treat "empty candidate list" as not-found for robustness: if a
+		// future refactor ever produces no probes, we return ErrKeyNotFound
+		// instead of wrapping a nil error and giving callers a misleading
+		// "failed to query key: <nil>" string.
+		if lastErr == nil || errors.Is(lastErr, pgx.ErrNoRows) {
 			return nil, ErrKeyNotFound
 		}
 		return nil, fmt.Errorf("failed to query key: %w", lastErr)

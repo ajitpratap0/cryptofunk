@@ -68,24 +68,24 @@ func TestDefaultAuthConfig(t *testing.T) {
 	assert.False(t, config.TrustForwardedProto)
 }
 
-// TestHashAPIKeyHMAC_SEC009 verifies the HMAC pepper helper produces
+// TestMustHashAPIKeyHMAC_SEC009 verifies the HMAC pepper helper produces
 // distinct outputs for different peppers and matches the stdlib HMAC
 // contract. Adding a server-side pepper is the core mitigation for
 // SEC-009 / #123 — a stolen DB dump is no longer enough to run rainbow
 // tables against the stored hashes.
-func TestHashAPIKeyHMAC_SEC009(t *testing.T) {
+func TestMustHashAPIKeyHMAC_SEC009(t *testing.T) {
 	t.Run("different peppers produce different hashes for same key", func(t *testing.T) {
 		key := "the-same-plaintext-key"
-		h1 := HashAPIKeyHMAC("pepper-A", key)
-		h2 := HashAPIKeyHMAC("pepper-B", key)
+		h1 := MustHashAPIKeyHMAC("pepper-A", key)
+		h2 := MustHashAPIKeyHMAC("pepper-B", key)
 		assert.NotEqual(t, h1, h2, "distinct peppers must produce distinct hashes")
 		assert.Len(t, h1, 64, "HMAC-SHA256 hex output is always 64 chars")
 		assert.Len(t, h2, 64)
 	})
 
 	t.Run("same pepper is deterministic", func(t *testing.T) {
-		h1 := HashAPIKeyHMAC("secret", "my-key")
-		h2 := HashAPIKeyHMAC("secret", "my-key")
+		h1 := MustHashAPIKeyHMAC("secret", "my-key")
+		h2 := MustHashAPIKeyHMAC("secret", "my-key")
 		assert.Equal(t, h1, h2, "HMAC with the same pepper+key must be deterministic")
 	})
 
@@ -94,19 +94,19 @@ func TestHashAPIKeyHMAC_SEC009(t *testing.T) {
 		sha := HashAPIKey(key)
 		// Variable name is hmacHash (not 'hmac') so it doesn't shadow the
 		// crypto/hmac package if this test ever imports it directly.
-		hmacHash := HashAPIKeyHMAC("some-pepper", key)
+		hmacHash := MustHashAPIKeyHMAC("some-pepper", key)
 		assert.NotEqual(t, sha, hmacHash, "HMAC with a non-empty pepper must not equal raw SHA-256")
 	})
 
 	t.Run("panics on empty pepper", func(t *testing.T) {
-		// Documents the invariant: HashAPIKeyHMAC intentionally rejects
+		// Documents the invariant: MustHashAPIKeyHMAC intentionally rejects
 		// empty peppers because HMAC-SHA256 with a zero-length key has
 		// no entropy and is equivalent to a published constant. Any
 		// future "fix" that removes the panic without understanding the
 		// security implication will fail this test.
 		assert.Panics(t, func() {
-			_ = HashAPIKeyHMAC("", "any-key")
-		}, "HashAPIKeyHMAC must panic on empty pepper to prevent silent downgrade")
+			_ = MustHashAPIKeyHMAC("", "any-key")
+		}, "MustHashAPIKeyHMAC must panic on empty pepper to prevent silent downgrade")
 	})
 }
 
@@ -124,7 +124,7 @@ func TestHashAPIKeyForStorage_SEC009(t *testing.T) {
 	t.Run("non-empty pepper returns hmac-sha256", func(t *testing.T) {
 		hash, algo := HashAPIKeyForStorage("my-pepper", "some-key")
 		assert.Equal(t, HashAlgoHMACSHA256, algo)
-		assert.Equal(t, HashAPIKeyHMAC("my-pepper", "some-key"), hash)
+		assert.Equal(t, MustHashAPIKeyHMAC("my-pepper", "some-key"), hash)
 		// And it must NOT match the legacy scheme.
 		assert.NotEqual(t, HashAPIKey("some-key"), hash)
 	})

@@ -1263,7 +1263,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-hmac-hit"
-		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := MustHashAPIKeyHMAC(pepper, plaintext)
 
 		rows := pgxmock.NewRows([]string{
 			"id", "name", "user_id", "permissions", "is_active", "revoked",
@@ -1292,7 +1292,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-legacy"
-		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := MustHashAPIKeyHMAC(pepper, plaintext)
 		legacyHash := HashAPIKey(plaintext)
 
 		// First probe (HMAC) returns ErrNoRows.
@@ -1327,7 +1327,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-transient"
-		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := MustHashAPIKeyHMAC(pepper, plaintext)
 
 		// HMAC probe returns a connection error — NOT ErrNoRows. The
 		// validator must propagate this instead of falling through to
@@ -1462,11 +1462,16 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer mock.Close()
+	// A successful validation fires two async UPDATEs: the last_used_at
+	// refresh and the opportunistic rehash. MatchExpectationsInOrder(false)
+	// lets those async Exec calls land on the expected matchers in any
+	// order alongside the synchronous probe queries.
+	mock.MatchExpectationsInOrder(false)
 
 	const pepper = "bench-pepper-32-bytes-of-material"
 	km := NewKeyManagerWithPepper(mock, pepper)
 	plaintextKey := "benchmark-legacy-key"
-	hmacHash := HashAPIKeyHMAC(pepper, plaintextKey)
+	hmacHash := MustHashAPIKeyHMAC(pepper, plaintextKey)
 	legacyHash := HashAPIKey(plaintextKey)
 	ctx := context.Background()
 
@@ -1493,8 +1498,16 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 		mock.ExpectQuery("SELECT id, name, user_id").
 			WithArgs(legacyHash, HashAlgoSHA256).
 			WillReturnRows(rows)
-		b.StartTimer()
 
+		// Async last_used_at update + async rehash — both are
+		// fire-and-forget; we accept them with a permissive matcher so
+		// they don't log "unexpected call" noise during the benchmark.
+		mock.ExpectExec("UPDATE api_keys").
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+		mock.ExpectExec("UPDATE api_keys").
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+		b.StartTimer()
 		_, _ = km.ValidateAPIKey(ctx, plaintextKey)
 	}
 }

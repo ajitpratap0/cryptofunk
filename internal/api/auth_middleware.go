@@ -133,7 +133,7 @@ func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaint
 	if pepper == "" || db == nil {
 		return
 	}
-	newHash := HashAPIKeyHMAC(pepper, plaintextKey)
+	newHash := MustHashAPIKeyHMAC(pepper, plaintextKey)
 	// gosec G118 and contextcheck suppressed: the rehash is intentionally
 	// detached from the request context so it completes even if the
 	// caller cancels. The 5s timeout below bounds the work independently.
@@ -186,22 +186,26 @@ func HashAPIKey(key string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// HashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as the
-// key_hash column. An attacker with a stolen DB dump can no longer run
-// rainbow tables against the stored hashes without also obtaining the
-// pepper.
+// MustHashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as
+// the key_hash column. An attacker with a stolen DB dump can no longer
+// run rainbow tables against the stored hashes without also obtaining
+// the pepper.
 //
-// Panics on an empty pepper: HMAC-SHA256 with a zero-length key is
-// technically valid but has no entropy and is equivalent to a published
-// constant — it provides NONE of the rainbow-table protection this
-// function exists to deliver. Production code routes through
-// HashAPIKeyForStorage which dispatches to HashAPIKey (legacy sha256)
-// when no pepper is configured, so this panic only fires when a caller
-// reaches HashAPIKeyHMAC directly with an empty pepper — which is a
-// programming bug, not a runtime condition.
-func HashAPIKeyHMAC(pepper, key string) string {
+// The Must prefix follows Go convention for helpers that panic on
+// invalid input instead of returning an error. Panics on an empty
+// pepper: HMAC-SHA256 with a zero-length key is technically valid but
+// has no entropy and is equivalent to a published constant — it
+// provides NONE of the rainbow-table protection this function exists
+// to deliver. Production code routes through HashAPIKeyForStorage
+// which dispatches to HashAPIKey (legacy sha256) when no pepper is
+// configured, so this panic only fires when a caller reaches
+// MustHashAPIKeyHMAC directly with an empty pepper — which is a
+// programming bug, not a runtime condition. Callers inside this
+// package that build probe lists already gate on pepper != "" before
+// reaching this function.
+func MustHashAPIKeyHMAC(pepper, key string) string {
 	if pepper == "" {
-		panic("HashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
+		panic("MustHashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
 	}
 	mac := hmac.New(sha256.New, []byte(pepper))
 	mac.Write([]byte(key))
@@ -217,7 +221,7 @@ func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
 	if pepper == "" {
 		return HashAPIKey(key), HashAlgoSHA256
 	}
-	return HashAPIKeyHMAC(pepper, key), HashAlgoHMACSHA256
+	return MustHashAPIKeyHMAC(pepper, key), HashAlgoHMACSHA256
 }
 
 // ValidateKey checks if an API key is valid and returns the associated key record
@@ -235,6 +239,17 @@ func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
 // errors (ErrKeyNotFound, ErrKeyRevoked, ...) because the
 // key-management endpoints need to explain WHY a key was rejected.
 // Unifying the two conventions is a separate refactor.
+//
+// Timing channel note: during the migration window a legacy sha256 key
+// takes two DB round-trips (HMAC miss, then sha256 hit) while an
+// HMAC-stored key takes one. A sub-millisecond observer could in
+// principle distinguish the two code paths. The risk is low because
+// network RTT and PostgreSQL query planning noise dominate the
+// difference, and the migration window closes as keys drain forward
+// (the drain is observable via the "Upgraded legacy API key hash to
+// hmac-sha256" log lines). This is an accepted temporary degradation,
+// not a long-term condition — the steady state after migration is one
+// probe, one round-trip.
 func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, error) {
 	if s.db == nil {
 		return nil, nil
@@ -248,7 +263,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	candidates := make([]hashProbe, 0, 2)
 	if s.pepper != "" {
 		candidates = append(candidates, hashProbe{
-			hash:      HashAPIKeyHMAC(s.pepper, key),
+			hash:      MustHashAPIKeyHMAC(s.pepper, key),
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
