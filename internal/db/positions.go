@@ -364,14 +364,16 @@ func (db *DB) BulkUpdateUnrealizedPnL(ctx context.Context, updates []UnrealizedP
 		values[i] = u.UnrealizedPnL
 	}
 
+	// unnest(uuid[], float8[]) is the multi-argument form — PostgreSQL zips
+	// the arrays together and errors out if their lengths disagree. This
+	// enforces the "ids and values must be parallel" invariant at the
+	// database layer instead of silently truncating to the shorter array
+	// the way separate SELECT-list unnest calls would.
 	const query = `
 		UPDATE positions AS p
 		SET unrealized_pnl = u.unrealized_pnl,
 		    updated_at = NOW()
-		FROM (
-			SELECT unnest($1::uuid[]) AS id,
-			       unnest($2::float8[]) AS unrealized_pnl
-		) AS u
+		FROM unnest($1::uuid[], $2::float8[]) AS u(id, unrealized_pnl)
 		WHERE p.id = u.id AND p.exit_time IS NULL
 	`
 

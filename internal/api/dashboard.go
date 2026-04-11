@@ -20,12 +20,17 @@ import (
 // =============================================================================
 
 // Component health status strings used across the dashboard system status.
+// systemStatus* values apply to the top-level status.Status field;
+// component* values apply to entries in status.Components[]. They currently
+// share the same string literals but are kept categorically distinct so a
+// future rename of one family doesn't silently change the other.
 const (
-	systemStatusHealthy  = "healthy"
-	systemStatusDegraded = "degraded"
-	componentHealthy     = "healthy"
-	componentUnhealthy   = "unhealthy"
-	componentUnavailable = "unavailable"
+	systemStatusHealthy   = "healthy"
+	systemStatusDegraded  = "degraded"
+	systemStatusUnhealthy = "unhealthy"
+	componentHealthy      = "healthy"
+	componentUnhealthy    = "unhealthy"
+	componentUnavailable  = "unavailable"
 )
 
 // DashboardData represents the main dashboard response with all key metrics
@@ -295,12 +300,16 @@ func (h *DashboardHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup
 // dashboardBundle is the pre-fetched state a single dashboard request
 // needs. Populated in parallel by fetchDashboardBundle so the four
 // summary views are built from shared data instead of re-querying.
+//
+// Non-essential query errors (Ping, pause-state fallback) are logged at
+// fetch time and surfaced here only through the data fields (pingErr,
+// isPaused) — the handler treats them as degraded-but-usable state rather
+// than aborting the whole dashboard response.
 type dashboardBundle struct {
-	sessions    []*db.TradingSession
-	positions   []*db.Position
-	pingErr     error
-	isPaused    bool
-	isPausedErr error // non-nil only when falling back to repo.IsTradingPaused
+	sessions  []*db.TradingSession
+	positions []*db.Position
+	pingErr   error
+	isPaused  bool
 }
 
 // fetchDashboardBundle runs the independent queries GetDashboard needs in
@@ -372,10 +381,12 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 	}
 
 	// DB fallback for pause state only if orchestrator wasn't wired.
+	// Matches getTradingStatus's historical behaviour: on fallback error we
+	// log and return isPaused=false rather than failing the whole dashboard.
 	if h.orchestrator == nil {
 		paused, err := h.repo.IsTradingPaused(ctx)
 		if err != nil {
-			bundle.isPausedErr = err
+			log.Warn().Err(err).Msg("Failed to read pause state from database; defaulting to not paused")
 		} else {
 			bundle.isPaused = paused
 		}
@@ -515,34 +526,43 @@ func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashbo
 		status.Components["database"] = componentHealthy
 	}
 
+	h.applyAgentAndOrchestratorStatus(ctx, &status)
+	return status
+}
+
+// applyAgentAndOrchestratorStatus fills status.ActiveAgents,
+// status.Components["orchestrator"], and status.AgentSummary using the
+// orchestrator RPC when available, falling back to GetAllAgentStatuses
+// from the database. Shared by getSystemStatus and buildSystemStatus so
+// the fallback policy lives in one place.
+func (h *DashboardHandler) applyAgentAndOrchestratorStatus(ctx context.Context, status *SystemStatusInfo) {
+	loadAgentsFromDB := func() {
+		agents, err := h.repo.GetAllAgentStatuses(ctx)
+		if err != nil {
+			return
+		}
+		status.ActiveAgents = len(agents)
+		status.AgentSummary = make(map[string]int)
+		for _, agent := range agents {
+			status.AgentSummary[agent.Status]++
+		}
+	}
+
 	if h.orchestrator != nil {
 		count := getActiveAgentCountOrchestrator(ctx, h.orchestrator)
 		if count >= 0 {
 			status.ActiveAgents = count
 			status.Components["orchestrator"] = componentHealthy
-		} else {
-			status.Components["orchestrator"] = componentUnavailable
-			agents, err := h.repo.GetAllAgentStatuses(ctx)
-			if err == nil {
-				status.ActiveAgents = len(agents)
-				status.AgentSummary = make(map[string]int)
-				for _, agent := range agents {
-					status.AgentSummary[agent.Status]++
-				}
-			}
+			return
 		}
-	} else {
-		agents, err := h.repo.GetAllAgentStatuses(ctx)
-		if err == nil {
-			status.ActiveAgents = len(agents)
-			status.AgentSummary = make(map[string]int)
-			for _, agent := range agents {
-				status.AgentSummary[agent.Status]++
-			}
-		}
+		status.Components["orchestrator"] = componentUnavailable
+		loadAgentsFromDB()
+		return
 	}
 
-	return status
+	// No orchestrator client configured — fall back to database.
+	loadAgentsFromDB()
+	status.Components["orchestrator"] = componentUnavailable
 }
 
 // GetPositions returns all current open positions
@@ -1016,7 +1036,10 @@ func (h *DashboardHandler) calculateSessionPnL(session *db.TradingSession, posit
 	return pnl
 }
 
-// getSystemStatus returns the current system status
+// getSystemStatus returns the current system status (non-dashboard path).
+// Unlike buildSystemStatus it issues its own DB ping since there's no
+// pre-fetched bundle. Callers that go through GetDashboard should use
+// buildSystemStatus to avoid duplicating the ping.
 func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo {
 	status := SystemStatusInfo{
 		Status:     systemStatusHealthy,
@@ -1035,40 +1058,11 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 		status.Components["database"] = componentHealthy
 	}
 
-	// Get agent count from orchestrator (or fall back to database)
-	if h.orchestrator != nil {
-		count := getActiveAgentCountOrchestrator(ctx, h.orchestrator)
-		if count >= 0 {
-			status.ActiveAgents = count
-			status.Components["orchestrator"] = componentHealthy
-		} else {
-			// Orchestrator unreachable (-1 sentinel), fall back to DB
-			status.Components["orchestrator"] = componentUnavailable
-			agents, err := h.repo.GetAllAgentStatuses(ctx)
-			if err == nil {
-				status.ActiveAgents = len(agents)
-				status.AgentSummary = make(map[string]int)
-				for _, agent := range agents {
-					status.AgentSummary[agent.Status]++
-				}
-			}
-		}
-	} else {
-		// No orchestrator client configured, use database
-		agents, err := h.repo.GetAllAgentStatuses(ctx)
-		if err == nil {
-			status.ActiveAgents = len(agents)
-			status.AgentSummary = make(map[string]int)
-			for _, agent := range agents {
-				status.AgentSummary[agent.Status]++
-			}
-		}
-		status.Components["orchestrator"] = componentUnavailable
-	}
+	h.applyAgentAndOrchestratorStatus(ctx, &status)
 
 	// Set overall status based on components
 	if !status.DatabaseOK {
-		status.Status = componentUnhealthy
+		status.Status = systemStatusUnhealthy
 	} else if status.ActiveAgents == 0 {
 		status.Status = systemStatusDegraded
 	}
