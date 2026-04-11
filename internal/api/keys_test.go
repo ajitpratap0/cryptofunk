@@ -1272,7 +1272,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-hmac-hit"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 
 		rows := pgxmock.NewRows([]string{
 			"id", "name", "user_id", "permissions", "is_active", "revoked",
@@ -1306,7 +1306,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-legacy"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 		legacyHash := HashAPIKey(plaintext)
 
 		// First probe (HMAC) returns ErrNoRows.
@@ -1353,7 +1353,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-transient"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 
 		// HMAC probe returns a connection error — NOT ErrNoRows. The
 		// validator must propagate this instead of falling through to
@@ -1445,7 +1445,19 @@ func BenchmarkValidateAPIKey(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer mock.Close()
+	// Teardown order: drain in-flight rehash goroutines, then assert all
+	// expected mock interactions fired (under StopTimer so the assertion
+	// cost is not measured), THEN close the mock. Asserting after Close
+	// would silently hide missed expectations because pgxmock drops its
+	// internal state on Close.
+	b.Cleanup(func() {
+		b.StopTimer()
+		waitForRehashesForTest()
+		if err := mock.ExpectationsWereMet(); err != nil {
+			b.Errorf("unfulfilled pgxmock expectations: %v", err)
+		}
+		mock.Close()
+	})
 
 	km := NewKeyManager(mock)
 	plaintextKey := "benchmark-key"
@@ -1498,7 +1510,19 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer mock.Close()
+	// Teardown order: drain in-flight rehash goroutines, then assert all
+	// expected mock interactions fired (under StopTimer so the assertion
+	// cost is not measured), THEN close the mock. Asserting after Close
+	// would silently hide missed expectations because pgxmock drops its
+	// internal state on Close.
+	b.Cleanup(func() {
+		b.StopTimer()
+		waitForRehashesForTest()
+		if err := mock.ExpectationsWereMet(); err != nil {
+			b.Errorf("unfulfilled pgxmock expectations: %v", err)
+		}
+		mock.Close()
+	})
 	// Each iteration drains the async goroutine from the previous
 	// one via waitForRehashesForTest() inside a b.StopTimer() block
 	// so the drain time is NOT counted in the benchmark measurement.
@@ -1508,7 +1532,7 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 	const pepper = "bench-pepper-32-bytes-of-material"
 	km := NewKeyManagerWithPepper(mock, pepper)
 	plaintextKey := "benchmark-legacy-key"
-	hmacHash := mustHashAPIKeyHMAC(pepper, plaintextKey)
+	hmacHash := hmacAPIKeyHash(pepper, plaintextKey)
 	legacyHash := HashAPIKey(plaintextKey)
 	ctx := context.Background()
 

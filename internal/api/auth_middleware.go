@@ -251,26 +251,27 @@ func HashAPIKey(key string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// mustHashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as
+// hmacAPIKeyHash computes HMAC-SHA256(pepper, key) for storing as
 // the key_hash column. An attacker with a stolen DB dump can no longer
 // run rainbow tables against the stored hashes without also obtaining
 // the pepper.
 //
-// The Must prefix follows Go convention for helpers that panic on
-// invalid input instead of returning an error. Panics on an empty
-// pepper: HMAC-SHA256 with a zero-length key is technically valid but
-// has no entropy and is equivalent to a published constant — it
-// provides NONE of the rainbow-table protection this function exists
-// to deliver. Production code routes through HashAPIKeyForStorage
-// which dispatches to HashAPIKey (legacy sha256) when no pepper is
-// configured, so this panic only fires when a caller reaches
-// mustHashAPIKeyHMAC directly with an empty pepper — which is a
-// programming bug, not a runtime condition. Callers inside this
-// package that build probe lists already gate on pepper != "" before
-// reaching this function.
-func mustHashAPIKeyHMAC(pepper, key string) string {
+// Panics on an empty pepper: HMAC-SHA256 with a zero-length key is
+// technically valid but has no entropy and is equivalent to a
+// published constant — it provides NONE of the rainbow-table
+// protection this function exists to deliver. Production code routes
+// through HashAPIKeyForStorage which dispatches to HashAPIKey (legacy
+// sha256) when no pepper is configured, so this panic only fires when
+// a caller reaches hmacAPIKeyHash directly with an empty pepper —
+// which is a programming bug, not a runtime condition. Callers inside
+// this package that build probe lists already gate on pepper != ""
+// before reaching this function. (The conventional Must-prefix is
+// reserved for exported helpers; this function is unexported and
+// panics for the same reason a Must-helper would, but keeping the
+// prefix off unexported names matches standard-library convention.)
+func hmacAPIKeyHash(pepper, key string) string {
 	if pepper == "" {
-		panic("mustHashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
+		panic("hmacAPIKeyHash called with empty pepper — route through HashAPIKeyForStorage instead")
 	}
 	mac := hmac.New(sha256.New, []byte(pepper))
 	// hash.Hash.Write never returns an error per the io.Writer contract
@@ -288,7 +289,7 @@ func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
 	if pepper == "" {
 		return HashAPIKey(key), HashAlgoSHA256
 	}
-	return mustHashAPIKeyHMAC(pepper, key), HashAlgoHMACSHA256
+	return hmacAPIKeyHash(pepper, key), HashAlgoHMACSHA256
 }
 
 // ValidateKey checks if an API key is valid and returns the associated key record
@@ -334,7 +335,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	var hmacHash string
 	candidates := make([]hashProbe, 0, 2)
 	if s.pepper != "" {
-		hmacHash = mustHashAPIKeyHMAC(s.pepper, key)
+		hmacHash = hmacAPIKeyHash(s.pepper, key)
 		candidates = append(candidates, hashProbe{
 			hash:      hmacHash,
 			algorithm: HashAlgoHMACSHA256,

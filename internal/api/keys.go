@@ -364,7 +364,7 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	var hmacHash string
 	probes := make([]hashProbe, 0, 2)
 	if km.pepper != "" {
-		hmacHash = mustHashAPIKeyHMAC(km.pepper, plaintextKey)
+		hmacHash = hmacAPIKeyHash(km.pepper, plaintextKey)
 		probes = append(probes, hashProbe{
 			hash:      hmacHash,
 			algorithm: HashAlgoHMACSHA256,

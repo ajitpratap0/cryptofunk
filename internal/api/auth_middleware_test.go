@@ -76,19 +76,19 @@ func TestDefaultAuthConfig(t *testing.T) {
 // contract. Adding a server-side pepper is the core mitigation for
 // SEC-009 / #123 — a stolen DB dump is no longer enough to run rainbow
 // tables against the stored hashes.
-func TestMustHashAPIKeyHMAC_SEC009(t *testing.T) {
+func TestHmacAPIKeyHash_SEC009(t *testing.T) {
 	t.Run("different peppers produce different hashes for same key", func(t *testing.T) {
 		key := "the-same-plaintext-key"
-		h1 := mustHashAPIKeyHMAC("pepper-A", key)
-		h2 := mustHashAPIKeyHMAC("pepper-B", key)
+		h1 := hmacAPIKeyHash("pepper-A", key)
+		h2 := hmacAPIKeyHash("pepper-B", key)
 		assert.NotEqual(t, h1, h2, "distinct peppers must produce distinct hashes")
 		assert.Len(t, h1, 64, "HMAC-SHA256 hex output is always 64 chars")
 		assert.Len(t, h2, 64)
 	})
 
 	t.Run("same pepper is deterministic", func(t *testing.T) {
-		h1 := mustHashAPIKeyHMAC("secret", "my-key")
-		h2 := mustHashAPIKeyHMAC("secret", "my-key")
+		h1 := hmacAPIKeyHash("secret", "my-key")
+		h2 := hmacAPIKeyHash("secret", "my-key")
 		assert.Equal(t, h1, h2, "HMAC with the same pepper+key must be deterministic")
 	})
 
@@ -97,19 +97,19 @@ func TestMustHashAPIKeyHMAC_SEC009(t *testing.T) {
 		sha := HashAPIKey(key)
 		// Variable name is hmacHash (not 'hmac') so it doesn't shadow the
 		// crypto/hmac package if this test ever imports it directly.
-		hmacHash := mustHashAPIKeyHMAC("some-pepper", key)
+		hmacHash := hmacAPIKeyHash("some-pepper", key)
 		assert.NotEqual(t, sha, hmacHash, "HMAC with a non-empty pepper must not equal raw SHA-256")
 	})
 
 	t.Run("panics on empty pepper", func(t *testing.T) {
-		// Documents the invariant: mustHashAPIKeyHMAC intentionally rejects
+		// Documents the invariant: hmacAPIKeyHash intentionally rejects
 		// empty peppers because HMAC-SHA256 with a zero-length key has
 		// no entropy and is equivalent to a published constant. Any
 		// future "fix" that removes the panic without understanding the
 		// security implication will fail this test.
 		assert.Panics(t, func() {
-			_ = mustHashAPIKeyHMAC("", "any-key")
-		}, "mustHashAPIKeyHMAC must panic on empty pepper to prevent silent downgrade")
+			_ = hmacAPIKeyHash("", "any-key")
+		}, "hmacAPIKeyHash must panic on empty pepper to prevent silent downgrade")
 	})
 }
 
@@ -127,7 +127,7 @@ func TestHashAPIKeyForStorage_SEC009(t *testing.T) {
 	t.Run("non-empty pepper returns hmac-sha256", func(t *testing.T) {
 		hash, algo := HashAPIKeyForStorage("my-pepper", "some-key")
 		assert.Equal(t, HashAlgoHMACSHA256, algo)
-		assert.Equal(t, mustHashAPIKeyHMAC("my-pepper", "some-key"), hash)
+		assert.Equal(t, hmacAPIKeyHash("my-pepper", "some-key"), hash)
 		// And it must NOT match the legacy scheme.
 		assert.NotEqual(t, HashAPIKey("some-key"), hash)
 	})
@@ -882,7 +882,7 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 
 		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
 		plaintext := "middleware-key-hmac-hit"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 
 		mock.ExpectQuery("SELECT id, key_hash, name").
 			WithArgs(hmacHash, HashAlgoHMACSHA256).
@@ -907,7 +907,7 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 
 		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
 		plaintext := "middleware-key-legacy"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 		legacyHash := HashAPIKey(plaintext)
 
 		// First probe (HMAC) returns ErrNoRows.
@@ -952,7 +952,7 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 
 		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
 		plaintext := "middleware-key-transient"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 
 		mock.ExpectQuery("SELECT id, key_hash, name").
 			WithArgs(hmacHash, HashAlgoHMACSHA256).
@@ -975,7 +975,7 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 
 		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
 		plaintext := "middleware-key-not-found"
-		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
 		legacyHash := HashAPIKey(plaintext)
 
 		mock.ExpectQuery("SELECT id, key_hash, name").
