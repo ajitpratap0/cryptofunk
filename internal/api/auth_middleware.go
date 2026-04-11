@@ -219,7 +219,11 @@ type rehashExecutor interface {
 }
 
 // NewAPIKeyStore creates a new API key store using the legacy raw-SHA-256
-// hash scheme. Prefer NewAPIKeyStoreWithPepper in production.
+// hash scheme.
+//
+// Deprecated: prefer NewAPIKeyStoreWithPepper in production. Raw SHA-256
+// without a pepper is vulnerable to precomputed rainbow tables if the DB
+// is stolen — see SEC-009 (#123).
 func NewAPIKeyStore(db KeyManagerDB, enabled bool) *APIKeyStore {
 	return NewAPIKeyStoreWithPepper(db, enabled, "")
 }
@@ -268,7 +272,9 @@ func mustHashAPIKeyHMAC(pepper, key string) string {
 		panic("mustHashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
 	}
 	mac := hmac.New(sha256.New, []byte(pepper))
-	mac.Write([]byte(key))
+	// hash.Hash.Write never returns an error per the io.Writer contract
+	// for in-memory hashes; discard the return explicitly for linters.
+	_, _ = mac.Write([]byte(key))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 

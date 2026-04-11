@@ -21,5 +21,6 @@
 --      back. A silent rollback will look like a platform-wide auth
 --      outage to anyone holding a previously-working key.
 
+ALTER TABLE api_keys DROP CONSTRAINT IF EXISTS api_keys_hash_algorithm_check;
 DROP INDEX IF EXISTS idx_api_keys_hash_algo;
 ALTER TABLE api_keys DROP COLUMN IF EXISTS hash_algorithm;

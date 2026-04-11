@@ -275,5 +275,15 @@ func (s *APIServer) start() {
 		os.Exit(1)
 	}
 
+	// TODO(SEC-009): wire api.WaitForAsyncKeyOps (or its exported
+	// sibling when one lands) into this drain path so in-flight
+	// opportunistic-rehash and last_used_at goroutines complete before
+	// os.Exit instead of being killed with the process. Currently the
+	// 5s per-goroutine context.WithTimeout inside the goroutines
+	// bounds the DB operation, not the process lifetime — a SIGTERM
+	// with a <5s drain window will abandon them. The goroutines are
+	// best-effort (the next validation retries), so this is not a
+	// correctness issue, just a cleanliness one.
+
 	log.Info().Msg("API server stopped")
 }

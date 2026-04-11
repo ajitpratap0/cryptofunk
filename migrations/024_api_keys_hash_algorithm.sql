@@ -40,6 +40,22 @@ END $$;
 ALTER TABLE api_keys
     ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(32) NOT NULL DEFAULT 'sha256';
 
+-- Enforce the algorithm marker at the database layer so a direct SQL
+-- INSERT (bypassing the application) or a future refactor that adds a
+-- third scheme can't silently land an unexpected value in the column.
+-- Postgres allows ADD CONSTRAINT to be idempotent via a DO block.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name = 'api_keys' AND constraint_name = 'api_keys_hash_algorithm_check'
+    ) THEN
+        ALTER TABLE api_keys
+            ADD CONSTRAINT api_keys_hash_algorithm_check
+            CHECK (hash_algorithm IN ('sha256', 'hmac-sha256'));
+    END IF;
+END $$;
+
 -- Backfill: existing rows are all SHA-256 (the column default handles this
 -- for IF NOT EXISTS on a fresh schema, but an explicit UPDATE is a no-op
 -- safety net for environments where the column already existed with NULLs).

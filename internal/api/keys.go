@@ -451,41 +451,69 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		return nil, ErrKeyExpired
 	}
 
-	// Update last used timestamp asynchronously
-	// Use a detached context since this is fire-and-forget, but add safety checks.
-	// gosec G118 and contextcheck are both disabled because the update must
-	// outlive the caller's request context; the 5s timeout below bounds the
-	// work independently.
-	go func(keyID uuid.UUID) { //nolint:gosec,contextcheck
-		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// Only update if key is still active to prevent race with rotation/revocation
-		_, err := km.db.Exec(updateCtx, "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND is_active = TRUE", keyID)
-		if err != nil {
-			log.Debug().Err(err).Str("key_id", keyID.String()).Msg("Failed to update last_used_at")
-		}
-	}(key.ID)
-
-	// SEC-009 (#123): opportunistically upgrade legacy sha256 rows to
-	// hmac-sha256 on first successful validation after a pepper is
-	// configured. Matches the APIKeyStore.ValidateKey behaviour so keys
-	// validated through either path (auth middleware OR key management
-	// endpoint) drain forward. Fire-and-forget — a failed upgrade just
-	// means the next validation will retry.
-	if km.pepper != "" && matchedAlgo == HashAlgoSHA256 {
-		km.rehashLegacyKey(key.ID, plaintextKey)
+	// Compute the rehash hash before spawning the goroutine so we can
+	// drop the reference to the plaintext key on the stack afterwards.
+	var rehashHash string
+	needRehash := km.pepper != "" && matchedAlgo == HashAlgoSHA256
+	if needRehash {
+		rehashHash = mustHashAPIKeyHMAC(km.pepper, plaintextKey)
 	}
+
+	// Single async goroutine that chains the opportunistic rehash (when
+	// applicable) and the last_used_at update. Serialising the two
+	// UPDATEs in one goroutine avoids a goroutine-order race when tests
+	// using in-order pgxmock matchers register expectations for both.
+	// Tracked by asyncKeyOpsWG so tests can drain before mock.Close().
+	//
+	// The rehash dedup guard (inFlightRehashes) still applies: if a
+	// rehash is already in flight for this key ID, we skip the rehash
+	// step inside the goroutine but still run last_used_at.
+	asyncKeyOpsWG.Add(1)
+	keyID := key.ID
+	// gosec G118 and contextcheck suppressed: intentionally detached
+	// from the caller's context so these fire-and-forget writes complete
+	// even if the request is cancelled. The 5s WithTimeout below bounds
+	// the work independently.
+	go func() { //nolint:gosec,contextcheck
+		defer asyncKeyOpsWG.Done()
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if needRehash {
+			// Claim the in-flight slot; skip if another goroutine is
+			// already rehashing this key ID.
+			if _, alreadyInFlight := inFlightRehashes.LoadOrStore(keyID, struct{}{}); !alreadyInFlight {
+				_, rerr := km.db.Exec(bgCtx, `
+					UPDATE api_keys
+					SET key_hash = $1, hash_algorithm = $2
+					WHERE id = $3 AND hash_algorithm = $4
+				`, rehashHash, HashAlgoHMACSHA256, keyID, HashAlgoSHA256)
+				inFlightRehashes.Delete(keyID)
+				if rerr != nil {
+					log.Warn().Err(rerr).Str("key_id", keyID.String()).Msg("Failed to rehash legacy API key to HMAC")
+				} else {
+					log.Info().Str("key_id", keyID.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
+				}
+			}
+		}
+
+		_, luErr := km.db.Exec(bgCtx, "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND is_active = TRUE", keyID)
+		if luErr != nil {
+			log.Debug().Err(luErr).Str("key_id", keyID.String()).Msg("Failed to update last_used_at")
+		}
+	}()
 
 	return &key, nil
 }
 
-// rehashLegacyKey delegates to the shared rehashAPIKeyAsync helper in
-// auth_middleware.go so KeyManager and APIKeyStore share one rehash
-// implementation — SQL, logging, and detached-context semantics all live
-// in one place.
-func (km *KeyManager) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
-	rehashAPIKeyAsync(km.db, km.pepper, keyID, plaintextKey)
-}
+// Note: KeyManager inlines the rehash + last_used_at update into a
+// single async goroutine in ValidateAPIKey above, rather than using
+// rehashAPIKeyAsync. Serialising both UPDATEs in one goroutine is
+// necessary for the pgxmock-based tests to use in-order expectation
+// matching without depending on goroutine scheduling. APIKeyStore
+// (auth middleware path) still uses rehashAPIKeyAsync — its
+// last_used_at goroutine fires in parallel with the rehash there
+// because the middleware test rigs the expectations accordingly.
 
 // RevokeAPIKey revokes an API key, preventing further use
 func (km *KeyManager) RevokeAPIKey(ctx context.Context, keyID uuid.UUID) error {

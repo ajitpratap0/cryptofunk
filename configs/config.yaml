@@ -270,6 +270,13 @@ api:
                                      # random string loaded from your secret manager. Rotating the
                                      # pepper invalidates every HMAC-hashed key; legacy sha256 rows
                                      # keep working until opportunistically rehashed on next use.
+                                     #
+                                     # Before rotating, measure the blast radius:
+                                     #   SELECT hash_algorithm, COUNT(*)
+                                     #   FROM api_keys WHERE revoked = FALSE AND is_active = TRUE
+                                     #   GROUP BY hash_algorithm;
+                                     # Rows with hash_algorithm='hmac-sha256' will be invalidated
+                                     # by a rotation; rows with 'sha256' survive.
 
   # CORS Configuration
   # Controls which origins can access the API from browsers

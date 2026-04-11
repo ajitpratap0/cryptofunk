@@ -45,8 +45,10 @@ type KeysHandler struct {
 }
 
 // NewKeysHandler creates a new KeysHandler. The returned handler manages
-// keys with the legacy SHA-256 hash scheme; prefer NewKeysHandlerWithPepper
-// in production so new keys use HMAC with the server pepper (#123).
+// keys with the legacy SHA-256 hash scheme.
+//
+// Deprecated: prefer NewKeysHandlerWithPepper in production so new keys
+// use HMAC with the server pepper (SEC-009 / #123).
 func NewKeysHandler(db *pgxpool.Pool) *KeysHandler {
 	return &KeysHandler{
 		keyManager: NewKeyManager(db),

@@ -431,11 +431,19 @@ func TestValidateAPIKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock, err := pgxmock.NewPool()
 			require.NoError(t, err)
-			defer mock.Close()
 
 			km := NewKeyManager(mock)
 			keyHash := HashAPIKey(tt.plaintextKey)
 			tt.setupMock(mock, keyHash)
+			// Subtests that return a successful row will spawn an
+			// async last_used_at goroutine via keys.go. Set up a
+			// permissive ExpectExec so it doesn't log noise, and
+			// drain before Close().
+			if tt.wantErr == nil && tt.name != "database error" {
+				mock.ExpectExec("UPDATE api_keys SET last_used_at").
+					WithArgs(pgxmock.AnyArg()).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+			}
 
 			ctx := context.Background()
 			details, err := km.ValidateAPIKey(ctx, tt.plaintextKey)
@@ -447,6 +455,8 @@ func TestValidateAPIKey(t *testing.T) {
 			}
 
 			tt.validate(t, details)
+			waitForRehashesForTest()
+			mock.Close()
 			assert.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
@@ -1258,7 +1268,6 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 	t.Run("HMAC probe hits first", func(t *testing.T) {
 		mock, err := pgxmock.NewPool()
 		require.NoError(t, err)
-		defer mock.Close()
 
 		km := NewKeyManagerWithPepper(mock, pepper)
 
@@ -1276,18 +1285,23 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		mock.ExpectQuery("SELECT id, name, user_id").
 			WithArgs(hmacHash, HashAlgoHMACSHA256).
 			WillReturnRows(rows)
+		// Async last_used_at update (no rehash on HMAC-hit path).
+		mock.ExpectExec("UPDATE api_keys SET last_used_at").
+			WithArgs(pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 		details, err := km.ValidateAPIKey(context.Background(), plaintext)
 		require.NoError(t, err)
 		require.NotNil(t, details)
 		assert.Equal(t, "HMAC Key", details.Name)
+		waitForRehashesForTest()
+		mock.Close()
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
 	t.Run("HMAC probe misses, SHA-256 fallback hits", func(t *testing.T) {
 		mock, err := pgxmock.NewPool()
 		require.NoError(t, err)
-		defer mock.Close()
 
 		km := NewKeyManagerWithPepper(mock, pepper)
 
@@ -1312,10 +1326,22 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 			WithArgs(legacyHash, HashAlgoSHA256).
 			WillReturnRows(rows)
 
+		// keys.go serialises rehash + last_used_at in ONE goroutine,
+		// so both UPDATEs arrive in deterministic order: rehash first
+		// (4 args), then last_used_at (1 arg).
+		mock.ExpectExec("UPDATE api_keys SET key_hash").
+			WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+		mock.ExpectExec("UPDATE api_keys SET last_used_at").
+			WithArgs(pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
 		details, err := km.ValidateAPIKey(context.Background(), plaintext)
 		require.NoError(t, err)
 		require.NotNil(t, details)
 		assert.Equal(t, "Legacy Key", details.Name)
+		waitForRehashesForTest()
+		mock.Close()
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -1444,10 +1470,19 @@ func BenchmarkValidateAPIKey(b *testing.B) {
 		mock.ExpectQuery("SELECT id, name, user_id").
 			WithArgs(keyHash, HashAlgoSHA256).
 			WillReturnRows(rows)
+		// Expect the single serialized async UPDATE (keys.go runs
+		// rehash + last_used_at in one goroutine; for the no-pepper
+		// path only last_used_at fires).
+		mock.ExpectExec("UPDATE api_keys SET last_used_at").
+			WithArgs(pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 		b.StartTimer()
 
 		_, _ = km.ValidateAPIKey(ctx, plaintextKey)
-		// Drain async last_used_at update before next iteration.
+
+		// Drain the async UPDATE under b.StopTimer() so the drain
+		// time is NOT counted in the benchmark measurement.
+		b.StopTimer()
 		waitForRehashesForTest()
 	}
 }
@@ -1464,12 +1499,11 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer mock.Close()
-	// Each iteration drains the async goroutines from the previous one
-	// via waitForRehashesForTest() (inside the b.StopTimer() block) so
-	// there's no cross-iteration goroutine leakage. In-order expectation
-	// matching is fine because both async UPDATEs (rehash + last_used_at)
-	// have fully completed before the next iteration registers its
-	// expectations.
+	// Each iteration drains the async goroutine from the previous
+	// one via waitForRehashesForTest() inside a b.StopTimer() block
+	// so the drain time is NOT counted in the benchmark measurement.
+	// keys.go serialises the rehash + last_used_at UPDATEs in ONE
+	// goroutine, so in-order expectation matching is deterministic.
 
 	const pepper = "bench-pepper-32-bytes-of-material"
 	km := NewKeyManagerWithPepper(mock, pepper)
@@ -1514,8 +1548,10 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 
 		b.StartTimer()
 		_, _ = km.ValidateAPIKey(ctx, plaintextKey)
-		// Drain async UPDATEs before next iteration so the mock
-		// matchers don't get consumed out of order.
+
+		// Drain async UPDATEs under b.StopTimer() so the drain time
+		// is not measured.
+		b.StopTimer()
 		waitForRehashesForTest()
 	}
 }
