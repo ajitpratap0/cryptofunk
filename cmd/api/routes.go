@@ -105,16 +105,29 @@ func (s *APIServer) setupRoutes() {
 	// stored with hash_algorithm='hmac-sha256' and legacy rows get
 	// opportunistically upgraded on first successful validation.
 	keyPepper := s.config.API.Auth.KeyPepper
-	// Warn when a pepper is set but too short. The intent is to make a
-	// misconfiguration loud at startup — operators following the
-	// documented guidance generate 32+ random bytes from a CSPRNG, so a
-	// short value almost certainly indicates the env var was set by hand
-	// with an insecure value. Not fatal: even a short pepper is better
-	// than none, and we don't want a typo to block startup.
-	if keyPepper != "" && len(keyPepper) < 32 {
-		log.Warn().
+	// Log the pepper configuration at startup so operators can correlate
+	// a deploy with any unexpected key-rejection spike (accidental pepper
+	// rotation silently falls back to sha256 probes for existing keys,
+	// which would otherwise leave no trail in the logs).
+	if keyPepper == "" {
+		log.Info().Str("algo", "sha256").Msg("API key pepper not configured — legacy raw SHA-256 scheme in use (SEC-009)")
+	} else {
+		log.Info().
+			Str("algo", "hmac-sha256").
 			Int("pepper_len", len(keyPepper)).
-			Msg("api.auth.key_pepper is shorter than 32 bytes — regenerate from a CSPRNG for full SEC-009 protection")
+			Msg("API key pepper configured — new keys will use HMAC-SHA256 (SEC-009)")
+		// Warn when a pepper is set but too short. The intent is to make
+		// a misconfiguration loud at startup — operators following the
+		// documented guidance generate 32+ random bytes from a CSPRNG,
+		// so a short value almost certainly indicates the env var was
+		// set by hand with an insecure value. Not fatal: even a short
+		// pepper is better than none, and we don't want a typo to block
+		// startup.
+		if len(keyPepper) < 32 {
+			log.Warn().
+				Int("pepper_len", len(keyPepper)).
+				Msg("api.auth.key_pepper is shorter than 32 bytes — regenerate from a CSPRNG for full SEC-009 protection")
+		}
 	}
 	s.apiKeyStore = api.NewAPIKeyStoreWithPepper(s.db.Pool(), s.config.API.Auth.Enabled, keyPepper)
 

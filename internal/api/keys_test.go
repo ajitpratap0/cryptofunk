@@ -1260,9 +1260,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		require.NoError(t, err)
 		defer mock.Close()
 
-		km := NewKeyManagerWithPool(nil)
-		km.db = mock
-		km.pepper = pepper
+		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-hmac-hit"
 		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
@@ -1291,9 +1289,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		require.NoError(t, err)
 		defer mock.Close()
 
-		km := NewKeyManagerWithPool(nil)
-		km.db = mock
-		km.pepper = pepper
+		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-legacy"
 		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
@@ -1328,9 +1324,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		require.NoError(t, err)
 		defer mock.Close()
 
-		km := NewKeyManagerWithPool(nil)
-		km.db = mock
-		km.pepper = pepper
+		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-transient"
 		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
@@ -1449,6 +1443,55 @@ func BenchmarkValidateAPIKey(b *testing.B) {
 
 		mock.ExpectQuery("SELECT id, name, user_id").
 			WithArgs(keyHash, HashAlgoSHA256).
+			WillReturnRows(rows)
+		b.StartTimer()
+
+		_, _ = km.ValidateAPIKey(ctx, plaintextKey)
+	}
+}
+
+// BenchmarkValidateAPIKey_HMACLegacyFallback measures the migration-window
+// cost per validation: every request probes the HMAC hash first, misses
+// (because the row is still sha256), then hits the legacy probe. Two DB
+// round-trips per validation until the opportunistic rehash drains the
+// fleet. This benchmark exists to make that cost observable in CI before
+// the migration completes so operators can size accordingly.
+func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer mock.Close()
+
+	const pepper = "bench-pepper-32-bytes-of-material"
+	km := NewKeyManagerWithPepper(mock, pepper)
+	plaintextKey := "benchmark-legacy-key"
+	hmacHash := HashAPIKeyHMAC(pepper, plaintextKey)
+	legacyHash := HashAPIKey(plaintextKey)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		keyID := uuid.New()
+		now := time.Now()
+		permissionsJSON := []byte(`["read:decisions"]`)
+
+		// First probe: HMAC hash — miss (legacy row).
+		mock.ExpectQuery("SELECT id, name, user_id").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnError(pgx.ErrNoRows)
+
+		// Second probe: SHA-256 — hit, returns the row.
+		rows := pgxmock.NewRows([]string{
+			"id", "name", "user_id", "permissions", "is_active", "revoked",
+			"created_at", "expires_at", "last_used_at", "rotated_from",
+		}).AddRow(
+			keyID, "Key", "user", permissionsJSON, true, false,
+			now, nil, nil, nil,
+		)
+		mock.ExpectQuery("SELECT id, name, user_id").
+			WithArgs(legacyHash, HashAlgoSHA256).
 			WillReturnRows(rows)
 		b.StartTimer()
 

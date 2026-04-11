@@ -85,7 +85,10 @@ func NewKeyManagerWithPool(db *pgxpool.Pool) *KeyManager {
 // pepper. New keys created through CreateAPIKey / RotateAPIKey will be
 // stored with hash_algorithm='hmac-sha256'; validation still accepts legacy
 // 'sha256' rows for the rollout window (SEC-009 / #123).
-func NewKeyManagerWithPepper(db *pgxpool.Pool, pepper string) *KeyManager {
+//
+// Accepts the KeyManagerDB interface so tests can pass pgxmock while
+// production passes a *pgxpool.Pool (which satisfies the interface).
+func NewKeyManagerWithPepper(db KeyManagerDB, pepper string) *KeyManager {
 	return &KeyManager{
 		db:     db,
 		pepper: pepper,
@@ -338,10 +341,12 @@ func (km *KeyManager) RotateAPIKey(
 	}, nil
 }
 
-// ValidateAPIKey checks if an API key is valid
-// This is a more comprehensive check than the basic auth middleware
-//
-// # Returns the key details if valid, or an appropriate error
+// ValidateAPIKey checks if an API key is valid. This is a more
+// comprehensive check than the basic auth middleware, returning typed
+// errors (ErrKeyNotFound, ErrKeyRevoked, ErrKeyInactive, ErrKeyExpired)
+// so the key-management endpoints can tell the caller WHY a key was
+// rejected. The middleware path (APIKeyStore.ValidateKey) instead
+// returns (nil, nil) for any rejection — see the note on that method.
 //
 // SEC-009 (#123): probes both the HMAC hash (when a pepper is configured)
 // and the legacy SHA-256 hash so existing keys keep working during the

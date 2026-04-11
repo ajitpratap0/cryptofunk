@@ -157,7 +157,7 @@ func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaint
 // *pgxpool.Pool (used by APIKeyStore) and KeyManagerDB (used by
 // KeyManager via an interface) satisfy it without any wrapping.
 type rehashExecutor interface {
-	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 // NewAPIKeyStore creates a new API key store using the legacy raw-SHA-256
@@ -257,19 +257,21 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		algorithm: HashAlgoSHA256,
 	})
 
+	// hash_algorithm is NOT NULL DEFAULT 'sha256' (migration 024) and the
+	// WHERE clause already filters on it, so no COALESCE is needed and we
+	// don't need to scan it back out either — matched.algorithm holds the
+	// value already.
 	const query = `
 		SELECT id, key_hash, name, user_id, permissions, last_used_at,
-		       created_at, expires_at, revoked, COALESCE(is_active, TRUE) as is_active,
-		       COALESCE(hash_algorithm, 'sha256') as hash_algorithm
+		       created_at, expires_at, revoked, COALESCE(is_active, TRUE) as is_active
 		FROM api_keys
 		WHERE key_hash = $1 AND hash_algorithm = $2
 	`
 
 	var (
-		apiKey     APIKey
-		storedAlgo string
-		matched    hashProbe
-		found      bool
+		apiKey  APIKey
+		matched hashProbe
+		found   bool
 	)
 
 	for _, c := range candidates {
@@ -285,7 +287,6 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 			&apiKey.ExpiresAt,
 			&apiKey.Revoked,
 			&apiKey.IsActive,
-			&storedAlgo,
 		)
 		if err == nil {
 			if len(permissions) > 0 {
