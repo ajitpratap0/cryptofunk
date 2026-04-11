@@ -21,15 +21,19 @@ import (
 
 // Component health status strings used across the dashboard system status.
 // systemStatus* values apply to the top-level status.Status field;
-// component* values apply to entries in status.Components[]. They currently
-// share the same string literals but are kept categorically distinct so a
-// future rename of one family doesn't silently change the other.
+// component* values apply to entries in status.Components[]. They share the
+// same underlying literals (healthyLiteral, unhealthyLiteral) routed through
+// a private const so a future rename of the wire format propagates to both
+// families automatically instead of requiring coordinated edits.
 const (
-	systemStatusHealthy   = "healthy"
+	healthyLiteral   = "healthy"
+	unhealthyLiteral = "unhealthy"
+
+	systemStatusHealthy   = healthyLiteral
 	systemStatusDegraded  = "degraded"
-	systemStatusUnhealthy = "unhealthy"
-	componentHealthy      = "healthy"
-	componentUnhealthy    = "unhealthy"
+	systemStatusUnhealthy = unhealthyLiteral
+	componentHealthy      = healthyLiteral
+	componentUnhealthy    = unhealthyLiteral
 	componentUnavailable  = "unavailable"
 )
 
@@ -301,6 +305,11 @@ func (h *DashboardHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup
 // needs. Populated in parallel by fetchDashboardBundle so the four
 // summary views are built from shared data instead of re-querying.
 //
+// Concurrency contract: every field is written exactly once from a
+// fetchDashboardBundle goroutine BEFORE wg.Wait() returns. After the
+// synchronization point established by wg.Wait(), all reads are safe
+// with no further locking. Do not write to any field after that point.
+//
 // Non-essential query errors (Ping, pause-state fallback) are logged at
 // fetch time and surfaced here only through the data fields (pingErr,
 // isPaused) — the handler treats them as degraded-but-usable state rather
@@ -519,7 +528,6 @@ func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashbo
 
 	if bundle.pingErr != nil {
 		status.DatabaseOK = false
-		status.Status = systemStatusDegraded
 		status.Components["database"] = componentUnhealthy
 	} else {
 		status.DatabaseOK = true
@@ -1065,7 +1073,6 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 	// Check database
 	if err := h.repo.Ping(ctx); err != nil {
 		status.DatabaseOK = false
-		status.Status = systemStatusDegraded
 		status.Components["database"] = componentUnhealthy
 	} else {
 		status.DatabaseOK = true

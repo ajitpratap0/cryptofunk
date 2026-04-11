@@ -409,36 +409,46 @@ func (pm *PositionManager) averagePosition(ctx context.Context, position *db.Pos
 // the authoritative entry_price/side/quantity in memory), then issues a
 // single BulkUpdateUnrealizedPnL call instead of one SELECT+UPDATE per
 // position. For N positions, this is 1 round-trip instead of 2N.
+//
+// Atomicity contract: in-memory position.UnrealizedPnL pointers are
+// mutated only AFTER the DB call succeeds. If the bulk update fails we
+// return the error with the in-memory view unchanged, so memory and DB
+// never diverge. Callers that retry should re-read prices before the
+// next attempt since the computed P&Ls are time-sensitive.
 func (pm *PositionManager) UpdateUnrealizedPnL(ctx context.Context, prices map[string]float64) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	updates := make([]db.UnrealizedPnLUpdate, 0, len(pm.openPositions))
+	type pending struct {
+		position      *db.Position
+		unrealizedPnL float64
+	}
+
+	// Compute into a temporary buffer without mutating any in-memory state.
+	pendings := make([]pending, 0, len(pm.openPositions))
 	for symbol, position := range pm.openPositions {
 		currentPrice, ok := prices[symbol]
 		if !ok {
 			continue
 		}
 
-		// Compute in-process using the in-memory position.
 		var unrealizedPnL float64
 		if position.Side == db.PositionSideLong {
 			unrealizedPnL = (currentPrice - position.EntryPrice) * position.Quantity
 		} else {
 			unrealizedPnL = (position.EntryPrice - currentPrice) * position.Quantity
 		}
-
-		// Update in-memory first so failures to persist don't desync the
-		// in-memory view from what's computed.
-		position.UnrealizedPnL = &unrealizedPnL
-
-		updates = append(updates, db.UnrealizedPnLUpdate{
-			ID:            position.ID,
-			UnrealizedPnL: unrealizedPnL,
-		})
+		pendings = append(pendings, pending{position: position, unrealizedPnL: unrealizedPnL})
 	}
 
-	if pm.db != nil && len(updates) > 0 {
+	if pm.db != nil && len(pendings) > 0 {
+		updates := make([]db.UnrealizedPnLUpdate, len(pendings))
+		for i, p := range pendings {
+			updates[i] = db.UnrealizedPnLUpdate{
+				ID:            p.position.ID,
+				UnrealizedPnL: p.unrealizedPnL,
+			}
+		}
 		if err := pm.db.BulkUpdateUnrealizedPnL(ctx, updates); err != nil {
 			log.Error().
 				Err(err).
@@ -446,6 +456,13 @@ func (pm *PositionManager) UpdateUnrealizedPnL(ctx context.Context, prices map[s
 				Msg("Failed to bulk-update unrealized P&L")
 			return err
 		}
+	}
+
+	// DB call succeeded (or was skipped because pm.db == nil) — now it's
+	// safe to publish the computed values to the in-memory positions.
+	for i := range pendings {
+		pnl := pendings[i].unrealizedPnL
+		pendings[i].position.UnrealizedPnL = &pnl
 	}
 
 	return nil
