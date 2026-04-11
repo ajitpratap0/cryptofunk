@@ -19,6 +19,15 @@ import (
 // Dashboard Types
 // =============================================================================
 
+// Component health status strings used across the dashboard system status.
+const (
+	systemStatusHealthy  = "healthy"
+	systemStatusDegraded = "degraded"
+	componentHealthy     = "healthy"
+	componentUnhealthy   = "unhealthy"
+	componentUnavailable = "unavailable"
+)
+
 // DashboardData represents the main dashboard response with all key metrics
 type DashboardData struct {
 	TradingStatus   TradingStatusInfo   `json:"trading_status"`
@@ -491,7 +500,7 @@ func (h *DashboardHandler) buildPnLSummary(ctx context.Context, bundle *dashboar
 // additional GetAllAgentStatuses query when the orchestrator is unreachable.
 func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashboardBundle) SystemStatusInfo {
 	status := SystemStatusInfo{
-		Status:     "healthy",
+		Status:     systemStatusHealthy,
 		Uptime:     time.Since(h.startTime).String(),
 		Version:    h.version,
 		Components: make(map[string]string),
@@ -499,20 +508,20 @@ func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashbo
 
 	if bundle.pingErr != nil {
 		status.DatabaseOK = false
-		status.Status = "degraded"
-		status.Components["database"] = "unhealthy"
+		status.Status = systemStatusDegraded
+		status.Components["database"] = componentUnhealthy
 	} else {
 		status.DatabaseOK = true
-		status.Components["database"] = "healthy"
+		status.Components["database"] = componentHealthy
 	}
 
 	if h.orchestrator != nil {
 		count := getActiveAgentCountOrchestrator(ctx, h.orchestrator)
 		if count >= 0 {
 			status.ActiveAgents = count
-			status.Components["orchestrator"] = "healthy"
+			status.Components["orchestrator"] = componentHealthy
 		} else {
-			status.Components["orchestrator"] = "unavailable"
+			status.Components["orchestrator"] = componentUnavailable
 			agents, err := h.repo.GetAllAgentStatuses(ctx)
 			if err == nil {
 				status.ActiveAgents = len(agents)
@@ -859,52 +868,6 @@ func (h *DashboardHandler) ResumeTrading(c *gin.Context) {
 // Helper Methods
 // =============================================================================
 
-// getTradingStatus returns the current trading status
-func (h *DashboardHandler) getTradingStatus(ctx context.Context) (TradingStatusInfo, error) {
-	status := TradingStatusInfo{
-		Mode: "PAPER", // Default
-	}
-
-	// Get active sessions
-	sessions, err := h.repo.ListActiveSessions(ctx)
-	if err != nil {
-		return status, err
-	}
-
-	status.ActiveSessions = len(sessions)
-	status.IsActive = len(sessions) > 0
-
-	// Get latest session info
-	if len(sessions) > 0 {
-		latestSession := sessions[0]
-		status.CurrentSession = &latestSession.ID
-		status.Mode = string(latestSession.Mode)
-	}
-
-	// Check pause state
-	if h.orchestrator != nil {
-		status.IsPaused = isPausedOrchestrator(ctx, h.orchestrator)
-	} else {
-		// Fallback to database
-		isPaused, err := h.repo.IsTradingPaused(ctx)
-		if err == nil {
-			status.IsPaused = isPaused
-		}
-	}
-
-	return status, nil
-}
-
-// getPositionSummary returns a summary of all positions
-func (h *DashboardHandler) getPositionSummary(ctx context.Context) (PositionSummaryInfo, error) {
-	positions, err := h.repo.GetAllOpenPositions(ctx)
-	if err != nil {
-		return PositionSummaryInfo{}, err
-	}
-
-	return h.calculatePositionSummary(positions), nil
-}
-
 // calculatePositionSummary calculates summary statistics for positions
 func (h *DashboardHandler) calculatePositionSummary(positions []*db.Position) PositionSummaryInfo {
 	summary := PositionSummaryInfo{}
@@ -1056,7 +1019,7 @@ func (h *DashboardHandler) calculateSessionPnL(session *db.TradingSession, posit
 // getSystemStatus returns the current system status
 func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo {
 	status := SystemStatusInfo{
-		Status:     "healthy",
+		Status:     systemStatusHealthy,
 		Uptime:     time.Since(h.startTime).String(),
 		Version:    h.version,
 		Components: make(map[string]string),
@@ -1065,11 +1028,11 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 	// Check database
 	if err := h.repo.Ping(ctx); err != nil {
 		status.DatabaseOK = false
-		status.Status = "degraded"
-		status.Components["database"] = "unhealthy"
+		status.Status = systemStatusDegraded
+		status.Components["database"] = componentUnhealthy
 	} else {
 		status.DatabaseOK = true
-		status.Components["database"] = "healthy"
+		status.Components["database"] = componentHealthy
 	}
 
 	// Get agent count from orchestrator (or fall back to database)
@@ -1077,10 +1040,10 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 		count := getActiveAgentCountOrchestrator(ctx, h.orchestrator)
 		if count >= 0 {
 			status.ActiveAgents = count
-			status.Components["orchestrator"] = "healthy"
+			status.Components["orchestrator"] = componentHealthy
 		} else {
 			// Orchestrator unreachable (-1 sentinel), fall back to DB
-			status.Components["orchestrator"] = "unavailable"
+			status.Components["orchestrator"] = componentUnavailable
 			agents, err := h.repo.GetAllAgentStatuses(ctx)
 			if err == nil {
 				status.ActiveAgents = len(agents)
@@ -1100,14 +1063,14 @@ func (h *DashboardHandler) getSystemStatus(ctx context.Context) SystemStatusInfo
 				status.AgentSummary[agent.Status]++
 			}
 		}
-		status.Components["orchestrator"] = "unavailable"
+		status.Components["orchestrator"] = componentUnavailable
 	}
 
 	// Set overall status based on components
 	if !status.DatabaseOK {
-		status.Status = "unhealthy"
+		status.Status = componentUnhealthy
 	} else if status.ActiveAgents == 0 {
-		status.Status = "degraded"
+		status.Status = systemStatusDegraded
 	}
 
 	return status
