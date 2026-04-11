@@ -190,17 +190,25 @@ func runAsyncKeyOps(db KeyManagerDB, keyID uuid.UUID, needRehash bool, rehashHas
 			// Claim the in-flight slot; skip the rehash step if
 			// another goroutine is already rehashing this key.
 			if _, alreadyInFlight := inFlightRehashes.LoadOrStore(keyID, struct{}{}); !alreadyInFlight {
-				_, rerr := db.Exec(ctx, `
-					UPDATE api_keys
-					SET key_hash = $1, hash_algorithm = $2
-					WHERE id = $3 AND hash_algorithm = $4
-				`, rehashHash, HashAlgoHMACSHA256, keyID, HashAlgoSHA256)
-				inFlightRehashes.Delete(keyID)
-				if rerr != nil {
-					log.Warn().Err(rerr).Str("key_id", keyID.String()).Msg("Failed to rehash legacy API key to HMAC")
-				} else {
-					log.Info().Str("key_id", keyID.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
-				}
+				// defer the delete so a panic in db.Exec (nil pool
+				// under teardown, driver bug, etc.) doesn't leak
+				// the slot and permanently silence future rehashes
+				// of this key ID. inFlightRehashes is a
+				// package-level sync.Map so a leaked entry would
+				// persist for the process lifetime.
+				func() {
+					defer inFlightRehashes.Delete(keyID)
+					_, rerr := db.Exec(ctx, `
+						UPDATE api_keys
+						SET key_hash = $1, hash_algorithm = $2
+						WHERE id = $3 AND hash_algorithm = $4
+					`, rehashHash, HashAlgoHMACSHA256, keyID, HashAlgoSHA256)
+					if rerr != nil {
+						log.Warn().Err(rerr).Str("key_id", keyID.String()).Msg("Failed to rehash legacy API key to HMAC")
+					} else {
+						log.Info().Str("key_id", keyID.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
+					}
+				}()
 			}
 		}
 

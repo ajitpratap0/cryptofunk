@@ -897,6 +897,7 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 		require.NotNil(t, apiKey)
 		assert.Equal(t, "Test Key", apiKey.Name)
 		waitForRehashesForTest()
+		assert.NoError(t, mock.ExpectationsWereMet())
 		mock.Close()
 	})
 
@@ -936,6 +937,7 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 		require.NotNil(t, apiKey, "legacy sha256 row must validate via fallback probe")
 		assert.Equal(t, "Test Key", apiKey.Name)
 		waitForRehashesForTest()
+		assert.NoError(t, mock.ExpectationsWereMet())
 		mock.Close()
 	})
 

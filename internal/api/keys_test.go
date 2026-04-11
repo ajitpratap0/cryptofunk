@@ -456,8 +456,8 @@ func TestValidateAPIKey(t *testing.T) {
 
 			tt.validate(t, details)
 			waitForRehashesForTest()
-			mock.Close()
 			assert.NoError(t, mock.ExpectationsWereMet())
+			mock.Close()
 		})
 	}
 }
@@ -1295,8 +1295,8 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		require.NotNil(t, details)
 		assert.Equal(t, "HMAC Key", details.Name)
 		waitForRehashesForTest()
-		mock.Close()
 		assert.NoError(t, mock.ExpectationsWereMet())
+		mock.Close()
 	})
 
 	t.Run("HMAC probe misses, SHA-256 fallback hits", func(t *testing.T) {
@@ -1341,8 +1341,8 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		require.NotNil(t, details)
 		assert.Equal(t, "Legacy Key", details.Name)
 		waitForRehashesForTest()
-		mock.Close()
 		assert.NoError(t, mock.ExpectationsWereMet())
+		mock.Close()
 	})
 
 	t.Run("HMAC probe DB error propagates, no fallback", func(t *testing.T) {
