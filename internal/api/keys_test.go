@@ -1243,6 +1243,116 @@ func TestValidateAPIKeyInvalidPermissionsJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse permissions")
 }
 
+// TestKeyManager_ValidateAPIKey_HMAC_SEC009 exercises the pepper-aware
+// ValidateAPIKey path in keys.go without testcontainers. Asserts that:
+//  1. When a pepper is configured, the validator probes the HMAC hash first
+//     and matches a key stored with hash_algorithm='hmac-sha256'.
+//  2. When the HMAC probe misses (legacy row), the validator falls back
+//     to the SHA-256 probe and still returns the key.
+//  3. A non-ErrNoRows DB error from the first probe is propagated instead
+//     of silently falling through to the legacy probe — this is the
+//     critical security property introduced by the round-1 fix.
+func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
+	const pepper = "unit-test-pepper"
+
+	t.Run("HMAC probe hits first", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		km := NewKeyManagerWithPool(nil)
+		km.db = mock
+		km.pepper = pepper
+
+		plaintext := "api-key-hmac-hit"
+		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
+
+		rows := pgxmock.NewRows([]string{
+			"id", "name", "user_id", "permissions", "is_active", "revoked",
+			"created_at", "expires_at", "last_used_at", "rotated_from",
+		}).AddRow(
+			uuid.New(), "HMAC Key", "user", []byte(`["read"]`), true, false,
+			time.Now(), nil, nil, nil,
+		)
+		// Expect the HMAC probe — and NOT the legacy probe.
+		mock.ExpectQuery("SELECT id, name, user_id").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnRows(rows)
+
+		details, err := km.ValidateAPIKey(context.Background(), plaintext)
+		require.NoError(t, err)
+		require.NotNil(t, details)
+		assert.Equal(t, "HMAC Key", details.Name)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("HMAC probe misses, SHA-256 fallback hits", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		km := NewKeyManagerWithPool(nil)
+		km.db = mock
+		km.pepper = pepper
+
+		plaintext := "api-key-legacy"
+		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
+		legacyHash := HashAPIKey(plaintext)
+
+		// First probe (HMAC) returns ErrNoRows.
+		mock.ExpectQuery("SELECT id, name, user_id").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnError(pgx.ErrNoRows)
+
+		// Second probe (SHA-256) returns the key row.
+		rows := pgxmock.NewRows([]string{
+			"id", "name", "user_id", "permissions", "is_active", "revoked",
+			"created_at", "expires_at", "last_used_at", "rotated_from",
+		}).AddRow(
+			uuid.New(), "Legacy Key", "user", []byte(`["read"]`), true, false,
+			time.Now(), nil, nil, nil,
+		)
+		mock.ExpectQuery("SELECT id, name, user_id").
+			WithArgs(legacyHash, HashAlgoSHA256).
+			WillReturnRows(rows)
+
+		details, err := km.ValidateAPIKey(context.Background(), plaintext)
+		require.NoError(t, err)
+		require.NotNil(t, details)
+		assert.Equal(t, "Legacy Key", details.Name)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("HMAC probe DB error propagates, no fallback", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		km := NewKeyManagerWithPool(nil)
+		km.db = mock
+		km.pepper = pepper
+
+		plaintext := "api-key-transient"
+		hmacHash := HashAPIKeyHMAC(pepper, plaintext)
+
+		// HMAC probe returns a connection error — NOT ErrNoRows. The
+		// validator must propagate this instead of falling through to
+		// the legacy probe (which would defeat the HMAC guarantee for
+		// transient DB failures).
+		mock.ExpectQuery("SELECT id, name, user_id").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnError(errors.New("connection refused"))
+
+		details, err := km.ValidateAPIKey(context.Background(), plaintext)
+		require.Error(t, err)
+		assert.Nil(t, details)
+		assert.Contains(t, err.Error(), "connection refused")
+		// Critically: the mock should have NO unmet expectations — the
+		// legacy probe must not have been attempted.
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
 func TestGetKeyRotationHistoryInvalidPermissionsJSON(t *testing.T) {
 	mock, err := pgxmock.NewPool()
 	require.NoError(t, err)

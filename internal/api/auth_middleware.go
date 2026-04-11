@@ -37,6 +37,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -44,6 +45,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -119,7 +121,11 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 		return
 	}
 	newHash := HashAPIKeyHMAC(s.pepper, plaintextKey)
-	go func(id uuid.UUID, hash string) { //nolint:gosec
+	// contextcheck is disabled for this goroutine because the rehash is
+	// intentionally detached from the request context — we want it to
+	// complete even if the caller cancels. The independent 5s timeout
+	// below bounds the work.
+	go func(id uuid.UUID, hash string) { //nolint:contextcheck
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, err := s.db.Exec(ctx, `
@@ -135,12 +141,10 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 	}(keyID, newHash)
 }
 
-// NewAPIKeyStore creates a new API key store
+// NewAPIKeyStore creates a new API key store using the legacy raw-SHA-256
+// hash scheme. Prefer NewAPIKeyStoreWithPepper in production.
 func NewAPIKeyStore(db *pgxpool.Pool, enabled bool) *APIKeyStore {
-	return &APIKeyStore{
-		db:      db,
-		enabled: enabled,
-	}
+	return NewAPIKeyStoreWithPepper(db, enabled, "")
 }
 
 // NewAPIKeyStoreWithPepper creates a new API key store configured with an
@@ -166,10 +170,20 @@ func HashAPIKey(key string) string {
 // HashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as the
 // key_hash column. An attacker with a stolen DB dump can no longer run
 // rainbow tables against the stored hashes without also obtaining the
-// pepper. An empty pepper still returns a hash but is equivalent to a
-// published constant — callers must reject empty peppers before reaching
-// this function.
+// pepper.
+//
+// Panics on an empty pepper: HMAC-SHA256 with a zero-length key is
+// technically valid but has no entropy and is equivalent to a published
+// constant — it provides NONE of the rainbow-table protection this
+// function exists to deliver. Production code routes through
+// HashAPIKeyForStorage which dispatches to HashAPIKey (legacy sha256)
+// when no pepper is configured, so this panic only fires when a caller
+// reaches HashAPIKeyHMAC directly with an empty pepper — which is a
+// programming bug, not a runtime condition.
 func HashAPIKeyHMAC(pepper, key string) string {
+	if pepper == "" {
+		panic("HashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
+	}
 	mac := hmac.New(sha256.New, []byte(pepper))
 	mac.Write([]byte(key))
 	return hex.EncodeToString(mac.Sum(nil))
@@ -246,20 +260,26 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 			&apiKey.IsActive,
 			&storedAlgo,
 		)
-		if err != nil {
-			// Key not found for this algorithm — try the next candidate.
-			// pgx returns ErrNoRows but we don't distinguish here because
-			// any error at this step means "not valid under this algo".
-			continue
-		}
-		if len(permissions) > 0 {
-			if err := json.Unmarshal(permissions, &apiKey.Permissions); err != nil {
-				return nil, fmt.Errorf("invalid permissions JSON: %w", err)
+		if err == nil {
+			if len(permissions) > 0 {
+				if uerr := json.Unmarshal(permissions, &apiKey.Permissions); uerr != nil {
+					return nil, fmt.Errorf("invalid permissions JSON: %w", uerr)
+				}
 			}
+			matched = c
+			found = true
+			break
 		}
-		matched = c
-		found = true
-		break
+		// Only ErrNoRows means "this algorithm didn't find a match — try
+		// the next candidate". Any other error (connection timeout, pool
+		// exhausted, query failure) is fatal and must NOT fall through
+		// to the legacy probe: doing so would let a transient DB error
+		// on the HMAC path silently bypass the HMAC guarantee by
+		// letting the sha256 probe take over. Propagate the error so
+		// the caller can reject the request.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("validate api key (%s): %w", c.algorithm, err)
+		}
 	}
 
 	if !found {

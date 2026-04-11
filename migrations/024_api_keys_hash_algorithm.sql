@@ -5,8 +5,9 @@
 --   'sha256'      — legacy (raw SHA-256 of the plaintext key, vulnerable to
 --                   precomputed rainbow tables if the DB is stolen)
 --   'hmac-sha256' — HMAC-SHA256 keyed with a server-side pepper loaded from
---                   CRYPTOFUNK_API_KEY_PEPPER. Protects against DB-only theft
---                   because an attacker needs both the DB dump AND the pepper.
+--                   CRYPTOFUNK_API_AUTH_KEY_PEPPER (maps to api.auth.key_pepper
+--                   via viper). Protects against DB-only theft because an
+--                   attacker needs both the DB dump AND the pepper.
 --
 -- Existing rows are marked 'sha256' so validation continues to work during
 -- the rollout window. New keys created after the application is upgraded
