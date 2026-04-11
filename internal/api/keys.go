@@ -355,10 +355,16 @@ func (km *KeyManager) RotateAPIKey(
 func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (*APIKeyDetails, error) {
 	legacyHash := HashAPIKey(plaintextKey)
 
+	// hmacHash is cached here so a later rehash of a legacy-hit key
+	// doesn't recompute it — HMAC-SHA256 is non-trivial work on every
+	// migration-window validation and would run twice per call
+	// without this cache.
+	var hmacHash string
 	probes := make([]hashProbe, 0, 2)
 	if km.pepper != "" {
+		hmacHash = mustHashAPIKeyHMAC(km.pepper, plaintextKey)
 		probes = append(probes, hashProbe{
-			hash:      mustHashAPIKeyHMAC(km.pepper, plaintextKey),
+			hash:      hmacHash,
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
@@ -451,12 +457,13 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		return nil, ErrKeyExpired
 	}
 
-	// Compute the rehash hash before spawning the goroutine so we can
-	// drop the reference to the plaintext key on the stack afterwards.
-	var rehashHash string
+	// Reuse hmacHash computed above for the HMAC probe — no need to
+	// recompute, which would double the HMAC-SHA256 cost on the
+	// legacy-fallback hot path during the migration window.
 	needRehash := km.pepper != "" && matchedAlgo == HashAlgoSHA256
+	var rehashHash string
 	if needRehash {
-		rehashHash = mustHashAPIKeyHMAC(km.pepper, plaintextKey)
+		rehashHash = hmacHash
 	}
 	// Shared async post-validation worker. Same helper powers
 	// APIKeyStore.ValidateKey (auth middleware path), so both

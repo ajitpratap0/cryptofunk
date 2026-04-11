@@ -132,7 +132,6 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 	// statement-level waitForRehashesForTest() between subtests can
 	// be accidentally deleted, but a Cleanup registered with the
 	// subtest's t is tied to the subtest's lifecycle.
-	waitForRehashesForTest()
 
 	t.Run("pepper rotation invalidates HMAC keys after opportunistic rehash", func(t *testing.T) {
 		t.Cleanup(waitForRehashesForTest)

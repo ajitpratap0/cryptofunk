@@ -318,11 +318,17 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	// When a pepper is set we try the HMAC hash first (the steady-state hot
 	// path) and fall back to the legacy SHA-256. When no pepper is set we
 	// only try the legacy hash.
+	//
+	// hmacHash is cached here so a later rehash of a legacy-hit key doesn't
+	// recompute it — HMAC-SHA256 is non-trivial work on every migration-
+	// window validation and would run twice per call without this cache.
 	legacyHash := HashAPIKey(key)
+	var hmacHash string
 	candidates := make([]hashProbe, 0, 2)
 	if s.pepper != "" {
+		hmacHash = mustHashAPIKeyHMAC(s.pepper, key)
 		candidates = append(candidates, hashProbe{
-			hash:      mustHashAPIKeyHMAC(s.pepper, key),
+			hash:      hmacHash,
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
@@ -411,12 +417,13 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		return nil, nil
 	}
 
-	// Compute the rehash hash before spawning the goroutine so we can
-	// drop the reference to the plaintext key on the stack afterwards.
-	var rehashHash string
+	// Reuse hmacHash computed above for the HMAC probe — no need to
+	// recompute, which would double the HMAC-SHA256 cost on the
+	// legacy-fallback hot path during the migration window.
 	needRehash := s.pepper != "" && matched.algorithm == HashAlgoSHA256
+	var rehashHash string
 	if needRehash {
-		rehashHash = mustHashAPIKeyHMAC(s.pepper, key)
+		rehashHash = hmacHash
 	}
 	// Single async goroutine chains the opportunistic rehash (when
 	// applicable) and the last_used_at update — same pattern as
