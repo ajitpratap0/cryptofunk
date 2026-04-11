@@ -126,6 +126,7 @@ func TestCreateAPIKey(t *testing.T) {
 				mock.ExpectQuery("INSERT INTO api_keys").
 					WithArgs(
 						pgxmock.AnyArg(), // key_hash
+						pgxmock.AnyArg(), // hash_algorithm (SEC-009)
 						"Admin Key",
 						"admin-user",
 						pgxmock.AnyArg(), // permissions JSON
@@ -157,6 +158,7 @@ func TestCreateAPIKey(t *testing.T) {
 				mock.ExpectQuery("INSERT INTO api_keys").
 					WithArgs(
 						pgxmock.AnyArg(), // key_hash
+						pgxmock.AnyArg(), // hash_algorithm (SEC-009)
 						"No Expiry Key",
 						"regular-user",
 						pgxmock.AnyArg(), // permissions JSON
@@ -186,6 +188,7 @@ func TestCreateAPIKey(t *testing.T) {
 				mock.ExpectQuery("INSERT INTO api_keys").
 					WithArgs(
 						pgxmock.AnyArg(), // key_hash
+						pgxmock.AnyArg(), // hash_algorithm (SEC-009)
 						"Default Perms Key",
 						"default-perms-user",
 						pgxmock.AnyArg(), // permissions JSON (defaults to ["read:decisions"])
@@ -209,7 +212,8 @@ func TestCreateAPIKey(t *testing.T) {
 			setupMock: func(mock pgxmock.PgxPoolIface) {
 				mock.ExpectQuery("INSERT INTO api_keys").
 					WithArgs(
-						pgxmock.AnyArg(),
+						pgxmock.AnyArg(), // key_hash
+						pgxmock.AnyArg(), // hash_algorithm (SEC-009)
 						"Fail Key",
 						"user",
 						pgxmock.AnyArg(),
@@ -279,7 +283,7 @@ func TestValidateAPIKey(t *testing.T) {
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnRows(rows)
 			},
 			wantErr: nil,
@@ -297,7 +301,7 @@ func TestValidateAPIKey(t *testing.T) {
 			plaintextKey: "nonexistent-key",
 			setupMock: func(mock pgxmock.PgxPoolIface, keyHash string) {
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnError(pgx.ErrNoRows)
 			},
 			wantErr: ErrKeyNotFound,
@@ -322,7 +326,7 @@ func TestValidateAPIKey(t *testing.T) {
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnRows(rows)
 			},
 			wantErr: ErrKeyRevoked,
@@ -347,7 +351,7 @@ func TestValidateAPIKey(t *testing.T) {
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnRows(rows)
 			},
 			wantErr: ErrKeyInactive,
@@ -373,7 +377,7 @@ func TestValidateAPIKey(t *testing.T) {
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnRows(rows)
 			},
 			wantErr: ErrKeyExpired,
@@ -398,7 +402,7 @@ func TestValidateAPIKey(t *testing.T) {
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnRows(rows)
 			},
 			wantErr: nil,
@@ -413,7 +417,7 @@ func TestValidateAPIKey(t *testing.T) {
 			plaintextKey: "error-key",
 			setupMock: func(mock pgxmock.PgxPoolIface, keyHash string) {
 				mock.ExpectQuery("SELECT id, name, user_id").
-					WithArgs(keyHash).
+					WithArgs(keyHash, HashAlgoSHA256).
 					WillReturnError(errors.New("connection timeout"))
 			},
 			wantErr: nil, // Error is wrapped, so we check for non-nil
@@ -791,6 +795,7 @@ func TestRotateAPIKey(t *testing.T) {
 				mock.ExpectQuery("INSERT INTO api_keys").
 					WithArgs(
 						pgxmock.AnyArg(), // key_hash
+						pgxmock.AnyArg(), // hash_algorithm (SEC-009)
 						"Original Key (rotated)",
 						"user-123",
 						permissionsJSON,
@@ -840,7 +845,8 @@ func TestRotateAPIKey(t *testing.T) {
 					AddRow(newKeyID, now)
 				mock.ExpectQuery("INSERT INTO api_keys").
 					WithArgs(
-						pgxmock.AnyArg(),
+						pgxmock.AnyArg(), // key_hash
+						pgxmock.AnyArg(), // hash_algorithm (SEC-009)
 						"Admin Key (rotated)",
 						"admin",
 						permissionsJSON,
@@ -1226,7 +1232,7 @@ func TestValidateAPIKeyInvalidPermissionsJSON(t *testing.T) {
 	)
 
 	mock.ExpectQuery("SELECT id, name, user_id").
-		WithArgs(keyHash).
+		WithArgs(keyHash, HashAlgoSHA256).
 		WillReturnRows(rows)
 
 	ctx := context.Background()
@@ -1332,7 +1338,7 @@ func BenchmarkValidateAPIKey(b *testing.B) {
 		)
 
 		mock.ExpectQuery("SELECT id, name, user_id").
-			WithArgs(keyHash).
+			WithArgs(keyHash, HashAlgoSHA256).
 			WillReturnRows(rows)
 		b.StartTimer()
 

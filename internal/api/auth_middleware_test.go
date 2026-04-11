@@ -66,6 +66,56 @@ func TestDefaultAuthConfig(t *testing.T) {
 	assert.Equal(t, "X-API-Key", config.HeaderName)
 	assert.True(t, config.RequireHTTPS)
 	assert.False(t, config.TrustForwardedProto)
+	assert.Equal(t, "", config.KeyPepper)
+}
+
+// TestHashAPIKeyHMAC_SEC009 verifies the HMAC pepper helper produces
+// distinct outputs for different peppers and matches the stdlib HMAC
+// contract. Adding a server-side pepper is the core mitigation for
+// SEC-009 / #123 — a stolen DB dump is no longer enough to run rainbow
+// tables against the stored hashes.
+func TestHashAPIKeyHMAC_SEC009(t *testing.T) {
+	t.Run("different peppers produce different hashes for same key", func(t *testing.T) {
+		key := "the-same-plaintext-key"
+		h1 := HashAPIKeyHMAC("pepper-A", key)
+		h2 := HashAPIKeyHMAC("pepper-B", key)
+		assert.NotEqual(t, h1, h2, "distinct peppers must produce distinct hashes")
+		assert.Len(t, h1, 64, "HMAC-SHA256 hex output is always 64 chars")
+		assert.Len(t, h2, 64)
+	})
+
+	t.Run("same pepper is deterministic", func(t *testing.T) {
+		h1 := HashAPIKeyHMAC("secret", "my-key")
+		h2 := HashAPIKeyHMAC("secret", "my-key")
+		assert.Equal(t, h1, h2, "HMAC with the same pepper+key must be deterministic")
+	})
+
+	t.Run("HMAC differs from raw SHA-256 for the same key", func(t *testing.T) {
+		key := "my-api-key"
+		sha := HashAPIKey(key)
+		hmac := HashAPIKeyHMAC("some-pepper", key)
+		assert.NotEqual(t, sha, hmac, "HMAC with a non-empty pepper must not equal raw SHA-256")
+	})
+}
+
+// TestHashAPIKeyForStorage_SEC009 covers the dispatch helper used by
+// CreateAPIKey / RotateAPIKey. Empty pepper → legacy SHA-256; non-empty
+// pepper → HMAC-SHA256. The returned algorithm marker drives the
+// api_keys.hash_algorithm column value.
+func TestHashAPIKeyForStorage_SEC009(t *testing.T) {
+	t.Run("empty pepper returns sha256", func(t *testing.T) {
+		hash, algo := HashAPIKeyForStorage("", "some-key")
+		assert.Equal(t, HashAlgoSHA256, algo)
+		assert.Equal(t, HashAPIKey("some-key"), hash)
+	})
+
+	t.Run("non-empty pepper returns hmac-sha256", func(t *testing.T) {
+		hash, algo := HashAPIKeyForStorage("my-pepper", "some-key")
+		assert.Equal(t, HashAlgoHMACSHA256, algo)
+		assert.Equal(t, HashAPIKeyHMAC("my-pepper", "some-key"), hash)
+		// And it must NOT match the legacy scheme.
+		assert.NotEqual(t, HashAPIKey("some-key"), hash)
+	})
 }
 
 // TestTrustForwardedProto_SEC004 verifies that the X-Forwarded-Proto header

@@ -32,6 +32,7 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -67,6 +68,13 @@ type AuthConfig struct {
 	HeaderName          string `mapstructure:"header_name"`           // Default: "X-API-Key" or "Authorization"
 	RequireHTTPS        bool   `mapstructure:"require_https"`         // Require HTTPS in production
 	TrustForwardedProto bool   `mapstructure:"trust_forwarded_proto"` // Trust X-Forwarded-Proto from reverse proxy (default false)
+	// KeyPepper is a server-side secret mixed with each plaintext API key
+	// via HMAC-SHA256 before it hits the database. When empty, keys fall
+	// back to the legacy raw-SHA-256 scheme — acceptable for local dev but
+	// vulnerable to rainbow-table attacks if the DB is stolen. Set this in
+	// production via CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long random string;
+	// rotating it invalidates every existing HMAC-hashed key.
+	KeyPepper string `mapstructure:"key_pepper"`
 }
 
 // DefaultAuthConfig returns the default auth configuration
@@ -79,10 +87,52 @@ func DefaultAuthConfig() *AuthConfig {
 	}
 }
 
+// Hash-algorithm marker strings stored in api_keys.hash_algorithm. See
+// migrations/024_api_keys_hash_algorithm.sql.
+const (
+	HashAlgoSHA256     = "sha256"      // Legacy raw SHA-256, no pepper.
+	HashAlgoHMACSHA256 = "hmac-sha256" // HMAC-SHA256 with server-side pepper.
+)
+
+// candidateHash is one (hash, algorithm) pair probed by ValidateKey.
+type candidateHash struct {
+	hash      string
+	algorithm string
+}
+
 // APIKeyStore handles API key storage and validation
 type APIKeyStore struct {
 	db      *pgxpool.Pool
 	enabled bool
+	pepper  string // HMAC pepper for new keys; empty = legacy SHA-256 only
+}
+
+// rehashLegacyKey replaces a SHA-256-hashed key_hash row with the
+// HMAC-SHA256 equivalent so the row stops being vulnerable to rainbow
+// tables (SEC-009 / #123). Runs asynchronously so a slow UPDATE doesn't
+// delay the caller, and errors are logged rather than returned because
+// this is best-effort migration: the legacy hash still works if we
+// don't manage to upgrade it, and the same key will be retried on the
+// next successful validation.
+func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
+	if s.pepper == "" || s.db == nil {
+		return
+	}
+	newHash := HashAPIKeyHMAC(s.pepper, plaintextKey)
+	go func(id uuid.UUID, hash string) { //nolint:gosec
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := s.db.Exec(ctx, `
+			UPDATE api_keys
+			SET key_hash = $1, hash_algorithm = $2
+			WHERE id = $3 AND hash_algorithm = $4
+		`, hash, HashAlgoHMACSHA256, id, HashAlgoSHA256)
+		if err != nil {
+			log.Warn().Err(err).Str("key_id", id.String()).Msg("Failed to rehash legacy API key to HMAC")
+			return
+		}
+		log.Info().Str("key_id", id.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
+	}(keyID, newHash)
 }
 
 // NewAPIKeyStore creates a new API key store
@@ -93,60 +143,134 @@ func NewAPIKeyStore(db *pgxpool.Pool, enabled bool) *APIKeyStore {
 	}
 }
 
-// HashAPIKey creates a SHA-256 hash of an API key
+// NewAPIKeyStoreWithPepper creates a new API key store configured with an
+// HMAC pepper for new keys. Legacy SHA-256 rows in api_keys remain valid
+// and are opportunistically rehashed on first successful validation.
+func NewAPIKeyStoreWithPepper(db *pgxpool.Pool, enabled bool, pepper string) *APIKeyStore {
+	return &APIKeyStore{
+		db:      db,
+		enabled: enabled,
+		pepper:  pepper,
+	}
+}
+
+// HashAPIKey creates a raw SHA-256 hash of an API key. Retained for
+// backwards compatibility with legacy keys and tests; new callers should
+// prefer HashAPIKeyForStorage which routes through the configured pepper
+// when one is available. SEC-009 (#123).
 func HashAPIKey(key string) string {
 	hash := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(hash[:])
 }
 
+// HashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as the
+// key_hash column. An attacker with a stolen DB dump can no longer run
+// rainbow tables against the stored hashes without also obtaining the
+// pepper. An empty pepper still returns a hash but is equivalent to a
+// published constant — callers must reject empty peppers before reaching
+// this function.
+func HashAPIKeyHMAC(pepper, key string) string {
+	mac := hmac.New(sha256.New, []byte(pepper))
+	mac.Write([]byte(key))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// HashAPIKeyForStorage returns the hash that should be written to
+// api_keys.key_hash for a newly created key along with the algorithm
+// marker for the api_keys.hash_algorithm column. When pepper is empty we
+// fall back to the legacy sha256 scheme so development environments keep
+// working; production deployments must set a pepper (SEC-009 / #123).
+func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
+	if pepper == "" {
+		return HashAPIKey(key), HashAlgoSHA256
+	}
+	return HashAPIKeyHMAC(pepper, key), HashAlgoHMACSHA256
+}
+
 // ValidateKey checks if an API key is valid and returns the associated key record
 // TB-006: Now also checks is_active status for rotation support
+// SEC-009 (#123): Probes both the HMAC-pepper hash (when a pepper is
+// configured) and the legacy raw SHA-256 hash so existing keys keep working
+// during the rollout. On a successful legacy-hash match, the key is
+// opportunistically rehashed to HMAC so the fleet drains to the new scheme
+// as keys are used.
 func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, error) {
 	if s.db == nil {
 		return nil, nil
 	}
 
-	keyHash := HashAPIKey(key)
+	// Build the candidate (hash, algorithm) pairs to probe in priority order.
+	// When a pepper is set we try the HMAC hash first (the steady-state hot
+	// path) and fall back to the legacy SHA-256. When no pepper is set we
+	// only try the legacy hash.
+	legacyHash := HashAPIKey(key)
+	candidates := make([]candidateHash, 0, 2)
+	if s.pepper != "" {
+		candidates = append(candidates, candidateHash{
+			hash:      HashAPIKeyHMAC(s.pepper, key),
+			algorithm: HashAlgoHMACSHA256,
+		})
+	}
+	candidates = append(candidates, candidateHash{
+		hash:      legacyHash,
+		algorithm: HashAlgoSHA256,
+	})
 
-	query := `
+	const query = `
 		SELECT id, key_hash, name, user_id, permissions, last_used_at,
-		       created_at, expires_at, revoked, COALESCE(is_active, TRUE) as is_active
+		       created_at, expires_at, revoked, COALESCE(is_active, TRUE) as is_active,
+		       COALESCE(hash_algorithm, 'sha256') as hash_algorithm
 		FROM api_keys
-		WHERE key_hash = $1
+		WHERE key_hash = $1 AND hash_algorithm = $2
 	`
 
-	var apiKey APIKey
-	var permissions []byte
-
-	err := s.db.QueryRow(ctx, query, keyHash).Scan(
-		&apiKey.ID,
-		&apiKey.KeyHash,
-		&apiKey.Name,
-		&apiKey.UserID,
-		&permissions,
-		&apiKey.LastUsedAt,
-		&apiKey.CreatedAt,
-		&apiKey.ExpiresAt,
-		&apiKey.Revoked,
-		&apiKey.IsActive,
+	var (
+		apiKey     APIKey
+		storedAlgo string
+		matched    candidateHash
+		found      bool
 	)
 
-	if err != nil {
-		return nil, err // Key not found or DB error
-	}
-
-	// Unmarshal permissions JSON into slice
-	if len(permissions) > 0 {
-		if err := json.Unmarshal(permissions, &apiKey.Permissions); err != nil {
-			return nil, fmt.Errorf("invalid permissions JSON: %w", err)
+	for _, c := range candidates {
+		var permissions []byte
+		err := s.db.QueryRow(ctx, query, c.hash, c.algorithm).Scan(
+			&apiKey.ID,
+			&apiKey.KeyHash,
+			&apiKey.Name,
+			&apiKey.UserID,
+			&permissions,
+			&apiKey.LastUsedAt,
+			&apiKey.CreatedAt,
+			&apiKey.ExpiresAt,
+			&apiKey.Revoked,
+			&apiKey.IsActive,
+			&storedAlgo,
+		)
+		if err != nil {
+			// Key not found for this algorithm — try the next candidate.
+			// pgx returns ErrNoRows but we don't distinguish here because
+			// any error at this step means "not valid under this algo".
+			continue
 		}
+		if len(permissions) > 0 {
+			if err := json.Unmarshal(permissions, &apiKey.Permissions); err != nil {
+				return nil, fmt.Errorf("invalid permissions JSON: %w", err)
+			}
+		}
+		matched = c
+		found = true
+		break
 	}
 
-	// Constant-time comparison to prevent timing oracle attacks (#122)
-	// Even though the lookup was done via SQL, we verify the hash in Go as well
-	// to ensure no optimisation or short-circuit can leak key material through
-	// response-time differences.
-	if subtle.ConstantTimeCompare([]byte(apiKey.KeyHash), []byte(keyHash)) != 1 {
+	if !found {
+		return nil, nil
+	}
+
+	// Constant-time comparison to prevent timing oracle attacks (#122).
+	// Even though the lookup was done via SQL, we verify the hash in Go as
+	// well to ensure no optimisation or short-circuit can leak key material
+	// through response-time differences.
+	if subtle.ConstantTimeCompare([]byte(apiKey.KeyHash), []byte(matched.hash)) != 1 {
 		return nil, nil
 	}
 
@@ -163,6 +287,14 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	// Check if key is expired
 	if apiKey.ExpiresAt != nil && apiKey.ExpiresAt.Before(time.Now()) {
 		return nil, nil
+	}
+
+	// SEC-009: opportunistically upgrade a legacy sha256 row to hmac-sha256
+	// on first successful validation after a pepper is configured. Fire and
+	// forget — validation still succeeds if the upgrade races or errors,
+	// and the row will be retried on the next use.
+	if s.pepper != "" && matched.algorithm == HashAlgoSHA256 {
+		s.rehashLegacyKey(apiKey.ID, key)
 	}
 
 	// Update last used timestamp asynchronously with timeout context

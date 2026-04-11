@@ -101,7 +101,10 @@ func (s *APIServer) setupRoutes() {
 
 	// Initialize API key store for authentication
 	// Auth is disabled by default for development - enable via config.yaml: api.auth.enabled = true
-	s.apiKeyStore = api.NewAPIKeyStore(s.db.Pool(), s.config.API.Auth.Enabled)
+	// SEC-009 (#123): pass the configured HMAC pepper so new keys are
+	// stored with hash_algorithm='hmac-sha256' and legacy rows get
+	// opportunistically upgraded on first successful validation.
+	s.apiKeyStore = api.NewAPIKeyStoreWithPepper(s.db.Pool(), s.config.API.Auth.Enabled, s.config.API.Auth.KeyPepper)
 
 	isProduction := s.config.App.Environment == envProduction
 
@@ -130,9 +133,11 @@ func (s *APIServer) setupRoutes() {
 	// Single auth config shared by all protected endpoints (metrics and API v1).
 	// Consolidating the previously duplicated metricsAuthConfig here (#193).
 	authConfig := &api.AuthConfig{
-		Enabled:      s.config.API.Auth.Enabled,
-		HeaderName:   s.config.API.Auth.HeaderName,
-		RequireHTTPS: s.config.API.Auth.RequireHTTPS,
+		Enabled:             s.config.API.Auth.Enabled,
+		HeaderName:          s.config.API.Auth.HeaderName,
+		RequireHTTPS:        s.config.API.Auth.RequireHTTPS,
+		TrustForwardedProto: s.config.API.Auth.TrustForwardedProto,
+		KeyPepper:           s.config.API.Auth.KeyPepper,
 	}
 	if authConfig.HeaderName == "" {
 		authConfig.HeaderName = "X-API-Key" // Default header name
@@ -289,7 +294,7 @@ func (s *APIServer) setupRoutes() {
 		// TB-006: API Key Management routes
 		// These endpoints allow users to manage their API keys (create, rotate, revoke)
 		// All key management operations require authentication
-		keysHandler := api.NewKeysHandler(s.db.Pool())
+		keysHandler := api.NewKeysHandlerWithPepper(s.db.Pool(), s.config.API.Auth.KeyPepper)
 		s.keyManager = keysHandler.GetKeyManager()
 
 		// Start the expired key cleanup worker (runs every hour)

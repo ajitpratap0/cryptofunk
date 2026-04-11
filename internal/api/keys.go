@@ -52,6 +52,7 @@ type KeyManagerDB interface {
 // KeyManager handles API key lifecycle operations
 type KeyManager struct {
 	db            KeyManagerDB
+	pepper        string // HMAC pepper; empty = legacy SHA-256 scheme
 	cleanupCancel context.CancelFunc
 	cleanupWG     sync.WaitGroup
 	mu            sync.Mutex
@@ -69,6 +70,17 @@ func NewKeyManager(db KeyManagerDB) *KeyManager {
 func NewKeyManagerWithPool(db *pgxpool.Pool) *KeyManager {
 	return &KeyManager{
 		db: db,
+	}
+}
+
+// NewKeyManagerWithPepper creates a new KeyManager configured with an HMAC
+// pepper. New keys created through CreateAPIKey / RotateAPIKey will be
+// stored with hash_algorithm='hmac-sha256'; validation still accepts legacy
+// 'sha256' rows for the rollout window (SEC-009 / #123).
+func NewKeyManagerWithPepper(db *pgxpool.Pool, pepper string) *KeyManager {
+	return &KeyManager{
+		db:     db,
+		pepper: pepper,
 	}
 }
 
@@ -131,8 +143,10 @@ func (km *KeyManager) CreateAPIKey(
 	}
 	plaintextKey := hex.EncodeToString(keyBytes)
 
-	// Hash the key for storage
-	keyHash := HashAPIKey(plaintextKey)
+	// Hash the key for storage. When a pepper is configured the row is
+	// stored with hash_algorithm='hmac-sha256'; otherwise it falls back to
+	// the legacy raw SHA-256 so dev environments keep working (SEC-009).
+	keyHash, hashAlgo := HashAPIKeyForStorage(km.pepper, plaintextKey)
 
 	// Default permissions if not specified
 	if permissions == nil {
@@ -154,15 +168,15 @@ func (km *KeyManager) CreateAPIKey(
 
 	// Insert the key
 	query := `
-		INSERT INTO api_keys (key_hash, name, user_id, permissions, expires_at, is_active)
-		VALUES ($1, $2, $3, $4, $5, TRUE)
+		INSERT INTO api_keys (key_hash, hash_algorithm, name, user_id, permissions, expires_at, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, TRUE)
 		RETURNING id, created_at
 	`
 
 	var id uuid.UUID
 	var createdAt time.Time
 
-	err = km.db.QueryRow(ctx, query, keyHash, name, userID, permissionsJSON, expiresAt).
+	err = km.db.QueryRow(ctx, query, keyHash, hashAlgo, name, userID, permissionsJSON, expiresAt).
 		Scan(&id, &createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert API key: %w", err)
@@ -253,7 +267,11 @@ func (km *KeyManager) RotateAPIKey(
 		return nil, fmt.Errorf("failed to generate random key: %w", err)
 	}
 	plaintextKey := hex.EncodeToString(keyBytes)
-	keyHash := HashAPIKey(plaintextKey)
+	// Rotated keys use the currently-configured scheme, not necessarily the
+	// scheme of the old key. This lets operators migrate forward by
+	// rotating — run a sweep after setting a pepper and the whole fleet
+	// converges to HMAC.
+	keyHash, hashAlgo := HashAPIKeyForStorage(km.pepper, plaintextKey)
 
 	// Calculate new expiration
 	var newExpiresAt *time.Time
@@ -275,15 +293,15 @@ func (km *KeyManager) RotateAPIKey(
 
 	// Insert new key
 	insertQuery := `
-		INSERT INTO api_keys (key_hash, name, user_id, permissions, expires_at, rotated_from, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+		INSERT INTO api_keys (key_hash, hash_algorithm, name, user_id, permissions, expires_at, rotated_from, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
 		RETURNING id, created_at
 	`
 
 	var newID uuid.UUID
 	var createdAt time.Time
 
-	err = tx.QueryRow(ctx, insertQuery, keyHash, newName, oldKey.UserID, permissionsJSON, newExpiresAt, oldKeyID).
+	err = tx.QueryRow(ctx, insertQuery, keyHash, hashAlgo, newName, oldKey.UserID, permissionsJSON, newExpiresAt, oldKeyID).
 		Scan(&newID, &createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert new key: %w", err)
@@ -315,37 +333,71 @@ func (km *KeyManager) RotateAPIKey(
 // ValidateAPIKey checks if an API key is valid
 // This is a more comprehensive check than the basic auth middleware
 //
-// Returns the key details if valid, or an appropriate error
+// # Returns the key details if valid, or an appropriate error
+//
+// SEC-009 (#123): probes both the HMAC hash (when a pepper is configured)
+// and the legacy SHA-256 hash so existing keys keep working during the
+// rollout window.
 func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (*APIKeyDetails, error) {
-	keyHash := HashAPIKey(plaintextKey)
+	legacyHash := HashAPIKey(plaintextKey)
 
-	query := `
+	type probe struct {
+		hash string
+		algo string
+	}
+	probes := make([]probe, 0, 2)
+	if km.pepper != "" {
+		probes = append(probes, probe{
+			hash: HashAPIKeyHMAC(km.pepper, plaintextKey),
+			algo: HashAlgoHMACSHA256,
+		})
+	}
+	probes = append(probes, probe{hash: legacyHash, algo: HashAlgoSHA256})
+
+	const query = `
 		SELECT id, name, user_id, permissions, is_active, revoked,
 		       created_at, expires_at, last_used_at, rotated_from
 		FROM api_keys
-		WHERE key_hash = $1
+		WHERE key_hash = $1 AND COALESCE(hash_algorithm, 'sha256') = $2
 	`
 
-	var key APIKeyDetails
-	var permissionsJSON []byte
-
-	err := km.db.QueryRow(ctx, query, keyHash).Scan(
-		&key.ID,
-		&key.Name,
-		&key.UserID,
-		&permissionsJSON,
-		&key.IsActive,
-		&key.Revoked,
-		&key.CreatedAt,
-		&key.ExpiresAt,
-		&key.LastUsedAt,
-		&key.RotatedFrom,
+	var (
+		key             APIKeyDetails
+		permissionsJSON []byte
+		lastErr         error
+		found           bool
 	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+
+	for _, p := range probes {
+		err := km.db.QueryRow(ctx, query, p.hash, p.algo).Scan(
+			&key.ID,
+			&key.Name,
+			&key.UserID,
+			&permissionsJSON,
+			&key.IsActive,
+			&key.Revoked,
+			&key.CreatedAt,
+			&key.ExpiresAt,
+			&key.LastUsedAt,
+			&key.RotatedFrom,
+		)
+		if err == nil {
+			found = true
+			break
+		}
+		lastErr = err
+		if !errors.Is(err, pgx.ErrNoRows) {
+			// A non-ErrNoRows error (DB outage, query syntax, etc.) is
+			// fatal — don't mask it by continuing to the next probe.
+			return nil, fmt.Errorf("failed to query key: %w", err)
+		}
+	}
+
+	if !found {
+		if errors.Is(lastErr, pgx.ErrNoRows) {
 			return nil, ErrKeyNotFound
 		}
-		return nil, fmt.Errorf("failed to query key: %w", err)
+		return nil, fmt.Errorf("failed to query key: %w", lastErr)
 	}
 
 	// Parse permissions

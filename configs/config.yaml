@@ -264,6 +264,12 @@ api:
     trust_forwarded_proto: false     # Set true only behind a trusted reverse proxy (K8s ingress, ALB)
                                      # that strips and re-sets X-Forwarded-Proto. When false (default),
                                      # the header is ignored to prevent bypass over plain HTTP.
+    key_pepper: ""                   # HMAC-SHA256 pepper for api_keys.key_hash (SEC-009 / #123).
+                                     # Leave empty in dev — keys fall back to legacy raw SHA-256.
+                                     # In production set via CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long
+                                     # random string loaded from your secret manager. Rotating the
+                                     # pepper invalidates every HMAC-hashed key; legacy sha256 rows
+                                     # keep working until opportunistically rehashed on next use.
 
   # CORS Configuration
   # Controls which origins can access the API from browsers
