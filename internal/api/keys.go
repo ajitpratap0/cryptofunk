@@ -74,8 +74,10 @@ func NewKeyManager(db KeyManagerDB) *KeyManager {
 
 // NewKeyManagerWithPool creates a new KeyManager with a pgxpool.Pool.
 //
-// Deprecated: prefer NewKeyManagerWithPepper in production — same
-// rationale as NewKeyManager (SEC-009 / #123).
+// Deprecated: prefer NewKeyManagerWithPepper in production. Raw
+// SHA-256 without a pepper is vulnerable to precomputed rainbow
+// tables if the DB is stolen — see SEC-009 (#123). This constructor
+// remains for test and dev paths where an HMAC pepper is unavailable.
 func NewKeyManagerWithPool(db *pgxpool.Pool) *KeyManager {
 	return &KeyManager{
 		db: db,
@@ -426,6 +428,12 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		// future refactor ever produces no probes, we return ErrKeyNotFound
 		// instead of wrapping a nil error and giving callers a misleading
 		// "failed to query key: <nil>" string.
+		//
+		// Note: the fmt.Errorf branch below is unreachable today because
+		// the probe loop returns early on any non-ErrNoRows error (see
+		// the `if !errors.Is(err, pgx.ErrNoRows)` check inside the loop).
+		// Kept as a defensive fallback for future refactors that might
+		// collect errors across probes instead of returning early.
 		if lastErr == nil || errors.Is(lastErr, pgx.ErrNoRows) {
 			return nil, ErrKeyNotFound
 		}

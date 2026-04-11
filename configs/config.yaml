@@ -264,19 +264,26 @@ api:
     trust_forwarded_proto: false     # Set true only behind a trusted reverse proxy (K8s ingress, ALB)
                                      # that strips and re-sets X-Forwarded-Proto. When false (default),
                                      # the header is ignored to prevent bypass over plain HTTP.
-    key_pepper: ""                   # HMAC-SHA256 pepper for api_keys.key_hash (SEC-009 / #123).
-                                     # Leave empty in dev — keys fall back to legacy raw SHA-256.
-                                     # In production set via CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long
-                                     # random string loaded from your secret manager. Rotating the
-                                     # pepper invalidates every HMAC-hashed key; legacy sha256 rows
-                                     # keep working until opportunistically rehashed on next use.
-                                     #
-                                     # Before rotating, measure the blast radius:
-                                     #   SELECT hash_algorithm, COUNT(*)
-                                     #   FROM api_keys WHERE revoked = FALSE AND is_active = TRUE
-                                     #   GROUP BY hash_algorithm;
-                                     # Rows with hash_algorithm='hmac-sha256' will be invalidated
-                                     # by a rotation; rows with 'sha256' survive.
+    # api.auth.key_pepper: HMAC-SHA256 pepper for api_keys.key_hash (SEC-009 / #123)
+    # ------------------------------------------------------------------------
+    # INTENTIONALLY NOT SET HERE. This is a secret and must NEVER be committed
+    # to version control. Set it exclusively via the environment variable
+    # CRYPTOFUNK_API_AUTH_KEY_PEPPER, loaded from your secret manager.
+    #
+    # The viper default is empty, which falls back to legacy raw SHA-256
+    # (acceptable for dev only). Production deployments must export
+    # CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long random string (32+ bytes
+    # from a CSPRNG); the startup log will Warn if it's missing.
+    #
+    # Rotating the pepper invalidates every HMAC-hashed key. Before rotating,
+    # measure the blast radius:
+    #
+    #   SELECT hash_algorithm, COUNT(*)
+    #   FROM api_keys WHERE revoked = FALSE AND is_active = TRUE
+    #   GROUP BY hash_algorithm;
+    #
+    # Rows with hash_algorithm='hmac-sha256' will be invalidated by a
+    # rotation; rows with 'sha256' survive (they don't depend on the pepper).
 
   # CORS Configuration
   # Controls which origins can access the API from browsers

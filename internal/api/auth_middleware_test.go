@@ -917,12 +917,13 @@ func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
 		mock.ExpectQuery("SELECT id, key_hash, name").
 			WithArgs(legacyHash, HashAlgoSHA256).
 			WillReturnRows(newRow(legacyHash))
-		// Two async UPDATEs: rehashLegacyKey fires BEFORE the
-		// last_used_at goroutine in ValidateKey (source order). The
-		// in-order matcher expects them in that order. Use WithArgs
-		// with AnyArg so the rehash's 4-parameter call and the
-		// last_used_at's 1-parameter call both match cleanly instead
-		// of logging "expected 0, but got N arguments".
+		// Two sequential UPDATEs issued by the SINGLE runAsyncKeyOps
+		// goroutine — rehash first, then last_used_at. The helper
+		// chains them in one goroutine so pgxmock's in-order matcher
+		// is deterministic. Use WithArgs with AnyArg so the rehash's
+		// 4-parameter call and the last_used_at's 1-parameter call
+		// both match cleanly instead of logging "expected 0, but got
+		// N arguments".
 		mock.ExpectExec("UPDATE api_keys SET key_hash").
 			WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 			WillReturnResult(pgxmock.NewResult("UPDATE", 1))

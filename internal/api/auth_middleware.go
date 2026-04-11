@@ -301,14 +301,14 @@ func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
 //
 // Timing channel note: during the migration window a legacy sha256 key
 // takes two DB round-trips (HMAC miss, then sha256 hit) while an
-// HMAC-stored key takes one. A sub-millisecond observer could in
-// principle distinguish the two code paths. The risk is low because
-// network RTT and PostgreSQL query planning noise dominate the
-// difference, and the migration window closes as keys drain forward
-// (the drain is observable via the "Upgraded legacy API key hash to
-// hmac-sha256" log lines). This is an accepted temporary degradation,
-// not a long-term condition — the steady state after migration is one
-// probe, one round-trip.
+// HMAC-stored key takes one — an observer measuring response times
+// could in principle distinguish the two code paths. The difference
+// is 1-10 ms (two PostgreSQL round trips vs one), not sub-millisecond.
+// In practice network RTT variance and query planning noise dominate
+// this difference, and the exposure window is temporary — it closes
+// as keys drain forward via opportunistic rehash (observable via the
+// "Upgraded legacy API key hash to hmac-sha256" log lines). The
+// steady state after migration is one probe, one round-trip.
 func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, error) {
 	if s.db == nil {
 		return nil, nil
