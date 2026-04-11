@@ -94,7 +94,7 @@ func TestTrustForwardedProto_SEC004(t *testing.T) {
 		router.Use(AuthMiddleware(store, config))
 		router.GET("/secure", okHandler)
 
-		req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/secure", nil)
 		req.Header.Set("X-API-Key", "any-key")
 		req.Header.Set("X-Forwarded-Proto", "https")
 		req.Host = "api.example.com"
@@ -119,7 +119,7 @@ func TestTrustForwardedProto_SEC004(t *testing.T) {
 		router.Use(AuthMiddleware(store, config))
 		router.GET("/secure", okHandler)
 
-		req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/secure", nil)
 		req.Header.Set("X-API-Key", "any-key")
 		req.Header.Set("X-Forwarded-Proto", "https")
 		req.Host = "api.example.com"
@@ -144,7 +144,7 @@ func TestTrustForwardedProto_SEC004(t *testing.T) {
 		router.Use(AuthMiddleware(store, config))
 		router.GET("/secure", okHandler)
 
-		req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/secure", nil)
 		req.Header.Set("X-API-Key", "any-key")
 		req.Host = "[::1]:8080"
 
