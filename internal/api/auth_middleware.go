@@ -48,7 +48,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
@@ -105,9 +104,15 @@ type hashProbe struct {
 	algorithm string
 }
 
-// APIKeyStore handles API key storage and validation
+// APIKeyStore handles API key storage and validation.
+//
+// The db field is typed as the KeyManagerDB interface rather than
+// *pgxpool.Pool (concrete) so tests can inject pgxmock and exercise
+// the dual-probe + rehash paths without needing testcontainers.
+// *pgxpool.Pool satisfies the interface so production wiring is
+// unchanged.
 type APIKeyStore struct {
-	db      *pgxpool.Pool
+	db      KeyManagerDB
 	enabled bool
 	pepper  string // HMAC pepper for new keys; empty = legacy SHA-256 only
 }
@@ -133,6 +138,20 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 // a key validated through both the middleware and the key-management
 // endpoint still only produces one UPDATE.
 var inFlightRehashes sync.Map // map[uuid.UUID]struct{}
+
+// rehashWG tracks spawned rehash goroutines so tests can drain them
+// before tearing down mocks. Production code doesn't call Wait directly
+// — the goroutines terminate themselves within the 5s timeout and a
+// SIGTERM with a reasonable drain window will let them finish. Exposed
+// via waitForRehashesForTest for test cleanup only.
+var rehashWG sync.WaitGroup
+
+// waitForRehashesForTest blocks until every rehash goroutine spawned by
+// rehashAPIKeyAsync has returned. Test-only: used by pgxmock-based unit
+// tests to prevent the async UPDATE from racing mock.Close().
+func waitForRehashesForTest() {
+	rehashWG.Wait()
+}
 
 // rehashAPIKeyAsync fires an async UPDATE that replaces a legacy
 // sha256-hashed key_hash row with the HMAC-SHA256 equivalent, so the row
@@ -160,10 +179,12 @@ func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaint
 		return
 	}
 	newHash := MustHashAPIKeyHMAC(pepper, plaintextKey)
+	rehashWG.Add(1)
 	// gosec G118 and contextcheck suppressed: the rehash is intentionally
 	// detached from the request context so it completes even if the
 	// caller cancels. The 5s timeout below bounds the work independently.
 	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
+		defer rehashWG.Done()
 		defer inFlightRehashes.Delete(id)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -189,14 +210,16 @@ type rehashExecutor interface {
 
 // NewAPIKeyStore creates a new API key store using the legacy raw-SHA-256
 // hash scheme. Prefer NewAPIKeyStoreWithPepper in production.
-func NewAPIKeyStore(db *pgxpool.Pool, enabled bool) *APIKeyStore {
+func NewAPIKeyStore(db KeyManagerDB, enabled bool) *APIKeyStore {
 	return NewAPIKeyStoreWithPepper(db, enabled, "")
 }
 
 // NewAPIKeyStoreWithPepper creates a new API key store configured with an
 // HMAC pepper for new keys. Legacy SHA-256 rows in api_keys remain valid
 // and are opportunistically rehashed on first successful validation.
-func NewAPIKeyStoreWithPepper(db *pgxpool.Pool, enabled bool, pepper string) *APIKeyStore {
+// Accepts the KeyManagerDB interface so tests can pass pgxmock while
+// production passes a *pgxpool.Pool (which satisfies the interface).
+func NewAPIKeyStoreWithPepper(db KeyManagerDB, enabled bool, pepper string) *APIKeyStore {
 	return &APIKeyStore{
 		db:      db,
 		enabled: enabled,
@@ -387,10 +410,14 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 		s.rehashLegacyKey(apiKey.ID, key)
 	}
 
-	// Update last used timestamp asynchronously with timeout context
-	// Using a detached context with timeout to avoid leaking the request context
+	// Update last used timestamp asynchronously with timeout context.
+	// Using a detached context with timeout to avoid leaking the request
+	// context. Registered with rehashWG so tests can drain before
+	// tearing down pgxmock.
 	apiKeyID := apiKey.ID // Capture value to avoid closure over pointer
-	go func() {           //nolint:gosec
+	rehashWG.Add(1)
+	go func() { //nolint:gosec,contextcheck
+		defer rehashWG.Done()
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		updateQuery := `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`
