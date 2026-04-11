@@ -137,24 +137,37 @@ var inFlightRehashes sync.Map // map[uuid.UUID]struct{}
 
 // asyncKeyOpsWG tracks every background goroutine spawned by key
 // validation paths — runAsyncKeyOps serialises the opportunistic
-// rehash and the last_used_at refresh into one goroutine. Tests
-// drain this WaitGroup via waitForRehashesForTest before tearing
-// down pgxmock so the async UPDATE doesn't race the mock teardown.
+// rehash and the last_used_at refresh into one goroutine. The
+// graceful-shutdown path in cmd/api/main.go calls DrainAsyncKeyOps()
+// with a bounded timeout so in-flight UPDATEs finish before the DB
+// pool closes. Tests drain via the waitForRehashesForTest helper in
+// export_test.go so the async UPDATE doesn't race mock.Close().
 //
-// Production shutdown note: main.go does NOT call asyncKeyOpsWG.Wait()
-// on SIGTERM today. The goroutines carry their own 5s context timeout
-// so a deployment drain window of >=5s lets them complete cleanly. If
-// sub-5s terminations become a concern (tight rolling deploys, pod
-// evictions), wire asyncKeyOpsWG.Wait() with a bounded timeout into
-// the graceful shutdown path (see TODO in cmd/api/main.go shutdown).
+// Exposed as a package-level var (not a method) because both the
+// store and the key manager spawn goroutines through the shared
+// runAsyncKeyOps helper, and both need the same drain target.
 var asyncKeyOpsWG sync.WaitGroup
 
-// waitForRehashesForTest blocks until every async key-op goroutine
-// spawned by runAsyncKeyOps has returned. Test-only: used by
-// pgxmock-based unit tests to prevent the async UPDATE from racing
-// mock.Close().
-func waitForRehashesForTest() {
-	asyncKeyOpsWG.Wait()
+// DrainAsyncKeyOps blocks until every in-flight async key-op
+// goroutine has returned, or the context is cancelled. Called from
+// the graceful shutdown path so rehash and last_used_at UPDATEs
+// started just before SIGTERM can finish before the DB pool closes
+// and the process exits. Returns ctx.Err() if the context elapses
+// before the drain completes (the caller logs it and proceeds — an
+// in-flight UPDATE against a closed pool will fail to commit but
+// never corrupts on-disk state).
+func DrainAsyncKeyOps(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		asyncKeyOpsWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // runAsyncKeyOps is the single shared async post-validation worker

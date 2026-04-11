@@ -44,6 +44,12 @@ ALTER TABLE api_keys
 -- INSERT (bypassing the application) or a future refactor that adds a
 -- third scheme can't silently land an unexpected value in the column.
 -- Postgres allows ADD CONSTRAINT to be idempotent via a DO block.
+--
+-- Future schemes (e.g. 'argon2id', 'scrypt', or a versioned 'hmac-sha256-v2')
+-- will require an ALTER TABLE ... DROP CONSTRAINT api_keys_hash_algorithm_check
+-- followed by ADD CONSTRAINT with the expanded value list — handled in a
+-- new numbered migration so this one stays an immutable historical record
+-- of the original SEC-009 rollout.
 DO $$
 BEGIN
     IF NOT EXISTS (

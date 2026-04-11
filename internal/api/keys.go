@@ -389,7 +389,6 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		key             APIKeyDetails
 		permissionsJSON []byte
 		storedHash      string
-		lastErr         error
 		found           bool
 		matchedAlgo     string
 		matchedHash     string
@@ -415,29 +414,21 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 			matchedHash = p.hash
 			break
 		}
-		lastErr = err
 		if !errors.Is(err, pgx.ErrNoRows) {
 			// A non-ErrNoRows error (DB outage, query syntax, etc.) is
 			// fatal — don't mask it by continuing to the next probe.
 			return nil, fmt.Errorf("failed to query key: %w", err)
 		}
+		// pgx.ErrNoRows: no row matched this probe — continue to the
+		// next candidate. We deliberately do NOT track lastErr here
+		// because the loop already returns early on every non-ErrNoRows
+		// error, so the only possible terminal state when found==false
+		// is "all probes returned ErrNoRows" — which we report as
+		// ErrKeyNotFound below regardless of the specific probe order.
 	}
 
 	if !found {
-		// Treat "empty candidate list" as not-found for robustness: if a
-		// future refactor ever produces no probes, we return ErrKeyNotFound
-		// instead of wrapping a nil error and giving callers a misleading
-		// "failed to query key: <nil>" string.
-		//
-		// Note: the fmt.Errorf branch below is unreachable today because
-		// the probe loop returns early on any non-ErrNoRows error (see
-		// the `if !errors.Is(err, pgx.ErrNoRows)` check inside the loop).
-		// Kept as a defensive fallback for future refactors that might
-		// collect errors across probes instead of returning early.
-		if lastErr == nil || errors.Is(lastErr, pgx.ErrNoRows) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, fmt.Errorf("failed to query key: %w", lastErr)
+		return nil, ErrKeyNotFound
 	}
 
 	// Constant-time comparison to prevent timing oracle attacks (#122 / SEC-008).

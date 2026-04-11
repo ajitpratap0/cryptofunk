@@ -275,15 +275,20 @@ func (s *APIServer) start() {
 		os.Exit(1)
 	}
 
-	// TODO(SEC-009): wire api.WaitForAsyncKeyOps (or its exported
-	// sibling when one lands) into this drain path so in-flight
-	// opportunistic-rehash and last_used_at goroutines complete before
-	// os.Exit instead of being killed with the process. Currently the
-	// 5s per-goroutine context.WithTimeout inside the goroutines
-	// bounds the DB operation, not the process lifetime — a SIGTERM
-	// with a <5s drain window will abandon them. The goroutines are
-	// best-effort (the next validation retries), so this is not a
-	// correctness issue, just a cleanliness one.
+	// SEC-009: drain in-flight opportunistic-rehash and last_used_at
+	// goroutines so they finish their UPDATEs before the DB pool closes
+	// and the process exits. Each goroutine carries its own 5s context
+	// timeout for the DB op itself, so a 10s wall-clock cap here is
+	// generous (it's the max time we'll spend waiting for the WaitGroup,
+	// not the DB op). On context elapse we log and proceed — the
+	// goroutines are best-effort (the next validation retries the
+	// last_used_at update and the rehash), so a missed drain is a
+	// cleanliness issue, never a correctness one.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer drainCancel()
+	if err := api.DrainAsyncKeyOps(drainCtx); err != nil {
+		log.Warn().Err(err).Msg("async key-op drain timed out — in-flight UPDATEs abandoned (best-effort, retried on next validation)")
+	}
 
 	log.Info().Msg("API server stopped")
 }

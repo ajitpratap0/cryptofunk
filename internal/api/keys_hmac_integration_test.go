@@ -84,8 +84,14 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 		require.NotNil(t, apiKey, "legacy sha256 key should validate via fallback probe")
 		assert.Equal(t, "Legacy Key", apiKey.Name)
 
-		// Give the async rehash goroutine time to run, then confirm the
-		// row was upgraded in place (same id, new hash + algorithm).
+		// Drain the async key-op WaitGroup first so on fast machines
+		// the assertion below sees the rehashed row immediately. The
+		// require.Eventually that follows is the safety net for slow
+		// CI runners where the goroutine hasn't yet committed by the
+		// time waitForRehashesForTest returns (it only waits for the
+		// goroutine to exit, not for the visibility of the UPDATE
+		// across the connection pool's read snapshot).
+		waitForRehashesForTest()
 		require.Eventually(t, func() bool {
 			var hash, algo string
 			if err := pool.QueryRow(ctx, `
