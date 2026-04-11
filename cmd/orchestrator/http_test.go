@@ -461,9 +461,15 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 		{name: "wrong X-Orchestrator-Secret blocks valid Bearer → 401", xHeaderValue: "wrong-secret", bearerValue: secret, wantStatus: http.StatusUnauthorized},
 	}
 
+	// Per-test http.Client avoids cross-subtest connection reuse via
+	// http.DefaultClient. On -count=2 runs DefaultClient's idle
+	// connection pool can mask cleanup ordering issues between subtests;
+	// a fresh Transport per subtest makes each test fully isolated.
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: &http.Transport{}}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
@@ -478,7 +484,7 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 				req.Header.Set("Authorization", "Bearer "+tc.bearerValue)
 			}
 
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatalf("request: %v", err)
 			}
@@ -519,13 +525,14 @@ func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
 		t.Fatal("server.Addr() returned nil after Start")
 	}
 
+	client := &http.Client{Transport: &http.Transport{}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr.String()+"/metrics", nil)
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

@@ -232,12 +232,19 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		// ingress or ALB that terminates TLS). Without that flag the
 		// header is user-spoofable over plain HTTP and bypasses the
 		// check entirely (SEC-004 / #118).
+		//
+		// We return 403 Forbidden (not 401 Unauthorized) because the
+		// problem is the transport, not the credentials. 401 implies
+		// "try again with a valid key", but no key will pass until the
+		// transport is upgraded to TLS. 403 signals "your access is
+		// forbidden at this transport level" — semantically the
+		// correct HTTP status for "wrong scheme, can't continue".
+		//
 		// `middleware` carries the variant's logPrefix as a structured
-		// field instead of being concatenated into the message string.
-		// Two reasons: (1) zero allocations on every request that hits
-		// a log path (string concat builds a fresh string per call),
-		// (2) downstream log indexers (Loki, Datadog) can filter on
-		// `middleware="WS auth"` without regex matching the message.
+		// zerolog field instead of being concatenated into the message
+		// string. Two reasons: (1) zero allocations per-request on the
+		// log path, (2) Loki/Datadog can filter on
+		// `middleware="WS auth"` without regex matching the body.
 		if config.RequireHTTPS && c.Request.TLS == nil {
 			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
 			host := c.Request.Host

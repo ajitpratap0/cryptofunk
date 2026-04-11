@@ -30,6 +30,7 @@ import (
 type HTTPServer struct {
 	server       *http.Server
 	listener     net.Listener // captured at Start so tests can read .Addr()
+	listenerMu   sync.Mutex   // guards listener for safe Start/Addr concurrency
 	orchestrator *orchestrator.Orchestrator
 	port         int
 	startTime    time.Time
@@ -128,9 +129,8 @@ func orchestratorAuthMiddleware(secret string, next http.HandlerFunc) http.Handl
 		}
 
 		// Fall back to Authorization: Bearer <secret>.
-		// strings.HasPrefix is intentionally NOT used here because we
-		// want a strict match on the "Bearer " token to avoid spurious
-		// matches on schemes like "Bearer123". Trim once and compare.
+		// Manual prefix check: avoids importing strings for a single
+		// package-level use and stays allocation-free on the hot path.
 		const bearerPrefix = "Bearer "
 		if authz := r.Header.Get("Authorization"); len(authz) > len(bearerPrefix) && authz[:len(bearerPrefix)] == bearerPrefix {
 			token := authz[len(bearerPrefix):]
@@ -206,11 +206,13 @@ func (h *HTTPServer) Start() error {
 	if err != nil {
 		return fmt.Errorf("orchestrator http: bind %s: %w", h.server.Addr, err)
 	}
-	// Capture the listener so Addr() can return the actual bound
-	// address, including the case where the caller passed port 0 and
-	// the kernel picked an ephemeral port. Tests rely on this to
-	// avoid hardcoded ports across the suite.
+	// Capture the listener under the mutex so Addr() can safely read
+	// it from any goroutine (even though today's tests call Addr()
+	// sequentially after Start(), a future t.Parallel() split must
+	// not trigger a -race flag).
+	h.listenerMu.Lock()
 	h.listener = listener
+	h.listenerMu.Unlock()
 
 	go func() {
 		log.Info().
@@ -230,6 +232,8 @@ func (h *HTTPServer) Start() error {
 // Useful for tests that pass port 0 to NewHTTPServer and need to
 // discover the kernel-assigned ephemeral port to build a request URL.
 func (h *HTTPServer) Addr() net.Addr {
+	h.listenerMu.Lock()
+	defer h.listenerMu.Unlock()
 	if h.listener == nil {
 		return nil
 	}

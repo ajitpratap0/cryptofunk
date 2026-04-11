@@ -156,6 +156,76 @@ func TestTrustForwardedProto_SEC004(t *testing.T) {
 	})
 }
 
+// =============================================================================
+// extractKey function tests (unit tests for key-lookup precedence)
+// =============================================================================
+
+// TestExtractKeyHeaderOrBearer verifies the standard HTTP key-lookup
+// precedence: configured header → Authorization: Bearer.
+func TestExtractKeyHeaderOrBearer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	extract := func(headerName, headerVal, authz string) string {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		if headerVal != "" {
+			c.Request.Header.Set(headerName, headerVal)
+		}
+		if authz != "" {
+			c.Request.Header.Set("Authorization", authz)
+		}
+		return extractKeyHeaderOrBearer(c, headerName)
+	}
+
+	assert.Equal(t, "hdr-key", extract("X-API-Key", "hdr-key", ""),
+		"header alone")
+	assert.Equal(t, "bearer-key", extract("X-API-Key", "", "Bearer bearer-key"),
+		"bearer alone")
+	assert.Equal(t, "hdr-key", extract("X-API-Key", "hdr-key", "Bearer bearer-key"),
+		"header takes precedence over bearer")
+	assert.Equal(t, "", extract("X-API-Key", "", ""),
+		"empty when neither present")
+	assert.Equal(t, "", extract("X-API-Key", "", "Basic dXNlcjpwYXNz"),
+		"ignores non-Bearer auth schemes")
+}
+
+// TestExtractKeyHeaderBearerOrQuery verifies the WS-specific lookup:
+// configured header → Authorization: Bearer → ?api_key= query.
+func TestExtractKeyHeaderBearerOrQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	extract := func(headerName, headerVal, authz, queryKey string) string {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		url := "/"
+		if queryKey != "" {
+			url = "/?api_key=" + queryKey
+		}
+		c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		if headerVal != "" {
+			c.Request.Header.Set(headerName, headerVal)
+		}
+		if authz != "" {
+			c.Request.Header.Set("Authorization", authz)
+		}
+		return extractKeyHeaderBearerOrQuery(c, headerName)
+	}
+
+	assert.Equal(t, "hdr-key", extract("X-API-Key", "hdr-key", "", ""),
+		"header alone")
+	assert.Equal(t, "bearer-key", extract("X-API-Key", "", "Bearer bearer-key", ""),
+		"bearer alone")
+	assert.Equal(t, "query-key", extract("X-API-Key", "", "", "query-key"),
+		"query alone")
+	assert.Equal(t, "hdr-key", extract("X-API-Key", "hdr-key", "Bearer bearer-key", "query-key"),
+		"header beats bearer and query")
+	assert.Equal(t, "bearer-key", extract("X-API-Key", "", "Bearer bearer-key", "query-key"),
+		"bearer beats query")
+	assert.Equal(t, "", extract("X-API-Key", "", "", ""),
+		"empty when all absent")
+}
+
 // TestWebSocketAuthMiddleware_SEC010 verifies the WebSocket-specific
 // auth middleware for SEC-010 / #124. The middleware must accept the
 // API key from the configured header OR an `?api_key=` query parameter
