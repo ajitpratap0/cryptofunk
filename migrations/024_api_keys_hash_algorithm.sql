@@ -16,6 +16,27 @@
 -- its first successful validation after the upgrade, so the fleet drains
 -- to the new scheme as keys are used.
 
+-- Pre-flight sanity check: if this migration has run before and rows
+-- were re-tagged to a value other than 'sha256' or 'hmac-sha256', fail
+-- loudly rather than overwriting them. A fresh schema has zero rows
+-- and hits the NO-OP path.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'api_keys' AND column_name = 'hash_algorithm'
+    ) THEN
+        IF EXISTS (
+            SELECT 1 FROM api_keys
+            WHERE hash_algorithm IS NOT NULL
+              AND hash_algorithm NOT IN ('sha256', 'hmac-sha256')
+            LIMIT 1
+        ) THEN
+            RAISE EXCEPTION 'migration 024: api_keys.hash_algorithm contains unexpected values — manual inspection required before re-running';
+        END IF;
+    END IF;
+END $$;
+
 ALTER TABLE api_keys
     ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(32) NOT NULL DEFAULT 'sha256';
 

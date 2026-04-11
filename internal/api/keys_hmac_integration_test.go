@@ -56,7 +56,7 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, HashAlgoHMACSHA256, storedAlgo, "new keys should use hmac-sha256")
-		assert.Equal(t, MustHashAPIKeyHMAC(pepper, created.Key), storedHash,
+		assert.Equal(t, mustHashAPIKeyHMAC(pepper, created.Key), storedHash,
 			"stored hash must equal HMAC(pepper, plaintext)")
 		assert.NotEqual(t, HashAPIKey(created.Key), storedHash,
 			"stored hash must NOT equal raw SHA-256 of plaintext")
@@ -91,7 +91,7 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 			`, legacy.ID).Scan(&hash, &algo); err != nil {
 				return false
 			}
-			return algo == HashAlgoHMACSHA256 && hash == MustHashAPIKeyHMAC(pepper, legacy.Key)
+			return algo == HashAlgoHMACSHA256 && hash == mustHashAPIKeyHMAC(pepper, legacy.Key)
 		}, 5*time.Second, 50*time.Millisecond,
 			"legacy key should be opportunistically rehashed to hmac-sha256 on first use")
 	})
@@ -122,6 +122,11 @@ func TestKeyManager_HMACPepper_SEC009(t *testing.T) {
 		require.NotNil(t, details)
 		assert.Equal(t, "Legacy KM", details.Name)
 	})
+
+	// Drain async goroutines between subtests so last_used_at / rehash
+	// updates from earlier subtests don't race the pool lifecycle of
+	// the next subtest.
+	waitForRehashesForTest()
 
 	t.Run("pepper rotation invalidates HMAC keys after opportunistic rehash", func(t *testing.T) {
 		// The documented operator footgun: a key created and then rehashed

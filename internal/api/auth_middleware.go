@@ -139,18 +139,28 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 // endpoint still only produces one UPDATE.
 var inFlightRehashes sync.Map // map[uuid.UUID]struct{}
 
-// rehashWG tracks spawned rehash goroutines so tests can drain them
-// before tearing down mocks. Production code doesn't call Wait directly
-// — the goroutines terminate themselves within the 5s timeout and a
-// SIGTERM with a reasonable drain window will let them finish. Exposed
-// via waitForRehashesForTest for test cleanup only.
-var rehashWG sync.WaitGroup
+// asyncKeyOpsWG tracks every background goroutine spawned by key
+// validation paths: the opportunistic rehash (rehashAPIKeyAsync) AND
+// the last_used_at refresh fired at the end of a successful
+// ValidateKey. Tests drain this WaitGroup before tearing down pgxmock
+// so async UPDATEs don't race the mock teardown.
+//
+// Production shutdown note: main.go does NOT call asyncKeyOpsWG.Wait()
+// on SIGTERM today. The goroutines carry their own 5s context timeout
+// so a deployment drain window of >=5s lets them complete cleanly. If
+// sub-5s terminations become a concern (tight rolling deploys, pod
+// evictions), wire asyncKeyOpsWG.Wait() with a bounded timeout into
+// the graceful shutdown path.
+var asyncKeyOpsWG sync.WaitGroup
 
-// waitForRehashesForTest blocks until every rehash goroutine spawned by
-// rehashAPIKeyAsync has returned. Test-only: used by pgxmock-based unit
-// tests to prevent the async UPDATE from racing mock.Close().
+// waitForRehashesForTest blocks until every async key-op goroutine
+// (rehash + last_used_at updates) has returned. Test-only: used by
+// pgxmock-based unit tests to prevent the async UPDATE from racing
+// mock.Close(). The name is retained even though the WG now covers
+// last_used_at as well, because test call sites already use it and
+// "WaitForAsyncKeyOps" is a mouthful.
 func waitForRehashesForTest() {
-	rehashWG.Wait()
+	asyncKeyOpsWG.Wait()
 }
 
 // rehashAPIKeyAsync fires an async UPDATE that replaces a legacy
@@ -178,13 +188,13 @@ func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaint
 	if _, alreadyInFlight := inFlightRehashes.LoadOrStore(keyID, struct{}{}); alreadyInFlight {
 		return
 	}
-	newHash := MustHashAPIKeyHMAC(pepper, plaintextKey)
-	rehashWG.Add(1)
+	newHash := mustHashAPIKeyHMAC(pepper, plaintextKey)
+	asyncKeyOpsWG.Add(1)
 	// gosec G118 and contextcheck suppressed: the rehash is intentionally
 	// detached from the request context so it completes even if the
 	// caller cancels. The 5s timeout below bounds the work independently.
 	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
-		defer rehashWG.Done()
+		defer asyncKeyOpsWG.Done()
 		defer inFlightRehashes.Delete(id)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -236,7 +246,7 @@ func HashAPIKey(key string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// MustHashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as
+// mustHashAPIKeyHMAC computes HMAC-SHA256(pepper, key) for storing as
 // the key_hash column. An attacker with a stolen DB dump can no longer
 // run rainbow tables against the stored hashes without also obtaining
 // the pepper.
@@ -249,13 +259,13 @@ func HashAPIKey(key string) string {
 // to deliver. Production code routes through HashAPIKeyForStorage
 // which dispatches to HashAPIKey (legacy sha256) when no pepper is
 // configured, so this panic only fires when a caller reaches
-// MustHashAPIKeyHMAC directly with an empty pepper — which is a
+// mustHashAPIKeyHMAC directly with an empty pepper — which is a
 // programming bug, not a runtime condition. Callers inside this
 // package that build probe lists already gate on pepper != "" before
 // reaching this function.
-func MustHashAPIKeyHMAC(pepper, key string) string {
+func mustHashAPIKeyHMAC(pepper, key string) string {
 	if pepper == "" {
-		panic("MustHashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
+		panic("mustHashAPIKeyHMAC called with empty pepper — route through HashAPIKeyForStorage instead")
 	}
 	mac := hmac.New(sha256.New, []byte(pepper))
 	mac.Write([]byte(key))
@@ -271,7 +281,7 @@ func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
 	if pepper == "" {
 		return HashAPIKey(key), HashAlgoSHA256
 	}
-	return MustHashAPIKeyHMAC(pepper, key), HashAlgoHMACSHA256
+	return mustHashAPIKeyHMAC(pepper, key), HashAlgoHMACSHA256
 }
 
 // ValidateKey checks if an API key is valid and returns the associated key record
@@ -313,7 +323,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	candidates := make([]hashProbe, 0, 2)
 	if s.pepper != "" {
 		candidates = append(candidates, hashProbe{
-			hash:      MustHashAPIKeyHMAC(s.pepper, key),
+			hash:      mustHashAPIKeyHMAC(s.pepper, key),
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
@@ -412,12 +422,12 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 
 	// Update last used timestamp asynchronously with timeout context.
 	// Using a detached context with timeout to avoid leaking the request
-	// context. Registered with rehashWG so tests can drain before
+	// context. Registered with asyncKeyOpsWG so tests can drain before
 	// tearing down pgxmock.
 	apiKeyID := apiKey.ID // Capture value to avoid closure over pointer
-	rehashWG.Add(1)
+	asyncKeyOpsWG.Add(1)
 	go func() { //nolint:gosec,contextcheck
-		defer rehashWG.Done()
+		defer asyncKeyOpsWG.Done()
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		updateQuery := `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`

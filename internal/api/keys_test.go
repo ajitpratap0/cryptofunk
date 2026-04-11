@@ -276,10 +276,10 @@ func TestValidateAPIKey(t *testing.T) {
 
 				rows := pgxmock.NewRows([]string{
 					"id", "name", "user_id", "permissions", "is_active", "revoked",
-					"created_at", "expires_at", "last_used_at", "rotated_from",
+					"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 				}).AddRow(
 					keyID, "My Key", "user-123", permissionsJSON, true, false,
-					now, &expiresAt, &lastUsed, nil,
+					now, &expiresAt, &lastUsed, nil, keyHash,
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
@@ -319,10 +319,10 @@ func TestValidateAPIKey(t *testing.T) {
 
 				rows := pgxmock.NewRows([]string{
 					"id", "name", "user_id", "permissions", "is_active", "revoked",
-					"created_at", "expires_at", "last_used_at", "rotated_from",
+					"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 				}).AddRow(
 					keyID, "Revoked Key", "user", permissionsJSON, true, true,
-					now, nil, nil, nil,
+					now, nil, nil, nil, keyHash,
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
@@ -344,10 +344,10 @@ func TestValidateAPIKey(t *testing.T) {
 
 				rows := pgxmock.NewRows([]string{
 					"id", "name", "user_id", "permissions", "is_active", "revoked",
-					"created_at", "expires_at", "last_used_at", "rotated_from",
+					"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 				}).AddRow(
 					keyID, "Inactive Key", "user", permissionsJSON, false, false,
-					now, nil, nil, nil,
+					now, nil, nil, nil, keyHash,
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
@@ -370,10 +370,10 @@ func TestValidateAPIKey(t *testing.T) {
 
 				rows := pgxmock.NewRows([]string{
 					"id", "name", "user_id", "permissions", "is_active", "revoked",
-					"created_at", "expires_at", "last_used_at", "rotated_from",
+					"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 				}).AddRow(
 					keyID, "Expired Key", "user", permissionsJSON, true, false,
-					now, &expiredAt, nil, nil,
+					now, &expiredAt, nil, nil, keyHash,
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
@@ -395,10 +395,10 @@ func TestValidateAPIKey(t *testing.T) {
 
 				rows := pgxmock.NewRows([]string{
 					"id", "name", "user_id", "permissions", "is_active", "revoked",
-					"created_at", "expires_at", "last_used_at", "rotated_from",
+					"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 				}).AddRow(
 					keyID, "No Expiry Key", "admin", permissionsJSON, true, false,
-					now, nil, nil, nil,
+					now, nil, nil, nil, keyHash,
 				)
 
 				mock.ExpectQuery("SELECT id, name, user_id").
@@ -1225,10 +1225,10 @@ func TestValidateAPIKeyInvalidPermissionsJSON(t *testing.T) {
 
 	rows := pgxmock.NewRows([]string{
 		"id", "name", "user_id", "permissions", "is_active", "revoked",
-		"created_at", "expires_at", "last_used_at", "rotated_from",
+		"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 	}).AddRow(
 		uuid.New(), "Key", "user", []byte(`not valid json`), true, false,
-		time.Now(), nil, nil, nil,
+		time.Now(), nil, nil, nil, keyHash,
 	)
 
 	mock.ExpectQuery("SELECT id, name, user_id").
@@ -1263,14 +1263,14 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-hmac-hit"
-		hmacHash := MustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
 
 		rows := pgxmock.NewRows([]string{
 			"id", "name", "user_id", "permissions", "is_active", "revoked",
-			"created_at", "expires_at", "last_used_at", "rotated_from",
+			"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 		}).AddRow(
 			uuid.New(), "HMAC Key", "user", []byte(`["read"]`), true, false,
-			time.Now(), nil, nil, nil,
+			time.Now(), nil, nil, nil, hmacHash,
 		)
 		// Expect the HMAC probe — and NOT the legacy probe.
 		mock.ExpectQuery("SELECT id, name, user_id").
@@ -1292,7 +1292,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-legacy"
-		hmacHash := MustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
 		legacyHash := HashAPIKey(plaintext)
 
 		// First probe (HMAC) returns ErrNoRows.
@@ -1303,10 +1303,10 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		// Second probe (SHA-256) returns the key row.
 		rows := pgxmock.NewRows([]string{
 			"id", "name", "user_id", "permissions", "is_active", "revoked",
-			"created_at", "expires_at", "last_used_at", "rotated_from",
+			"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 		}).AddRow(
 			uuid.New(), "Legacy Key", "user", []byte(`["read"]`), true, false,
-			time.Now(), nil, nil, nil,
+			time.Now(), nil, nil, nil, legacyHash,
 		)
 		mock.ExpectQuery("SELECT id, name, user_id").
 			WithArgs(legacyHash, HashAlgoSHA256).
@@ -1327,7 +1327,7 @@ func TestKeyManager_ValidateAPIKey_HMAC_SEC009(t *testing.T) {
 		km := NewKeyManagerWithPepper(mock, pepper)
 
 		plaintext := "api-key-transient"
-		hmacHash := MustHashAPIKeyHMAC(pepper, plaintext)
+		hmacHash := mustHashAPIKeyHMAC(pepper, plaintext)
 
 		// HMAC probe returns a connection error — NOT ErrNoRows. The
 		// validator must propagate this instead of falling through to
@@ -1435,10 +1435,10 @@ func BenchmarkValidateAPIKey(b *testing.B) {
 
 		rows := pgxmock.NewRows([]string{
 			"id", "name", "user_id", "permissions", "is_active", "revoked",
-			"created_at", "expires_at", "last_used_at", "rotated_from",
+			"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 		}).AddRow(
 			keyID, "Key", "user", permissionsJSON, true, false,
-			now, nil, nil, nil,
+			now, nil, nil, nil, keyHash,
 		)
 
 		mock.ExpectQuery("SELECT id, name, user_id").
@@ -1447,6 +1447,8 @@ func BenchmarkValidateAPIKey(b *testing.B) {
 		b.StartTimer()
 
 		_, _ = km.ValidateAPIKey(ctx, plaintextKey)
+		// Drain async last_used_at update before next iteration.
+		waitForRehashesForTest()
 	}
 }
 
@@ -1462,26 +1464,17 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer mock.Close()
-	// A successful validation fires two async UPDATEs: the last_used_at
-	// refresh and the opportunistic rehash. MatchExpectationsInOrder(false)
-	// lets those async Exec calls land on the expected matchers in any
-	// order alongside the synchronous probe queries.
-	//
-	// Async ordering note: goroutines from iteration N may still be
-	// running when iteration N+1 registers its expectations, so a late
-	// async UPDATE can consume a matcher meant for the next iteration.
-	// In practice the benchmark loop is slow enough relative to goroutine
-	// scheduling that this doesn't cause failures, but if the benchmark
-	// ever starts reporting flaky counts investigate this first — a
-	// stricter fix would be to drain rehashes between iterations via
-	// the inFlightRehashes map, or to run the benchmark with b.N=1 and
-	// a wall-clock loop.
-	mock.MatchExpectationsInOrder(false)
+	// Each iteration drains the async goroutines from the previous one
+	// via waitForRehashesForTest() (inside the b.StopTimer() block) so
+	// there's no cross-iteration goroutine leakage. In-order expectation
+	// matching is fine because both async UPDATEs (rehash + last_used_at)
+	// have fully completed before the next iteration registers its
+	// expectations.
 
 	const pepper = "bench-pepper-32-bytes-of-material"
 	km := NewKeyManagerWithPepper(mock, pepper)
 	plaintextKey := "benchmark-legacy-key"
-	hmacHash := MustHashAPIKeyHMAC(pepper, plaintextKey)
+	hmacHash := mustHashAPIKeyHMAC(pepper, plaintextKey)
 	legacyHash := HashAPIKey(plaintextKey)
 	ctx := context.Background()
 
@@ -1500,24 +1493,29 @@ func BenchmarkValidateAPIKey_HMACLegacyFallback(b *testing.B) {
 		// Second probe: SHA-256 — hit, returns the row.
 		rows := pgxmock.NewRows([]string{
 			"id", "name", "user_id", "permissions", "is_active", "revoked",
-			"created_at", "expires_at", "last_used_at", "rotated_from",
+			"created_at", "expires_at", "last_used_at", "rotated_from", "key_hash",
 		}).AddRow(
 			keyID, "Key", "user", permissionsJSON, true, false,
-			now, nil, nil, nil,
+			now, nil, nil, nil, legacyHash,
 		)
 		mock.ExpectQuery("SELECT id, name, user_id").
 			WithArgs(legacyHash, HashAlgoSHA256).
 			WillReturnRows(rows)
 
-		// Async last_used_at update + async rehash — both are
-		// fire-and-forget; we accept them with a permissive matcher so
-		// they don't log "unexpected call" noise during the benchmark.
-		mock.ExpectExec("UPDATE api_keys").
+		// Async rehash (fires first from source order) + async
+		// last_used_at update. AnyArg matchers so the 4-param rehash
+		// and 1-param last_used_at both bind cleanly.
+		mock.ExpectExec("UPDATE api_keys SET key_hash").
+			WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-		mock.ExpectExec("UPDATE api_keys").
+		mock.ExpectExec("UPDATE api_keys SET last_used_at").
+			WithArgs(pgxmock.AnyArg()).
 			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 		b.StartTimer()
 		_, _ = km.ValidateAPIKey(ctx, plaintextKey)
+		// Drain async UPDATEs before next iteration so the mock
+		// matchers don't get consumed out of order.
+		waitForRehashesForTest()
 	}
 }

@@ -245,7 +245,13 @@ type AuthConfig struct {
 	// CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long random string from your
 	// secret manager. Rotating the pepper invalidates every HMAC-hashed
 	// key — legacy sha256 rows continue to work until rehashed.
-	KeyPepper string `mapstructure:"key_pepper"`
+	//
+	// The json:"-" / yaml:"-" tags prevent the pepper from leaking if
+	// the config struct is ever marshaled (e.g. a debug dump handler,
+	// viper.WriteConfigAs, or a test harness that logs the full cfg).
+	// The pepper should only flow from env → viper → in-memory struct;
+	// it must never appear in logs, request bodies, or config dumps.
+	KeyPepper string `mapstructure:"key_pepper" json:"-" yaml:"-"`
 }
 
 // MonitoringConfig contains monitoring settings

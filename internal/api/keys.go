@@ -26,6 +26,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -357,7 +358,7 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	probes := make([]hashProbe, 0, 2)
 	if km.pepper != "" {
 		probes = append(probes, hashProbe{
-			hash:      MustHashAPIKeyHMAC(km.pepper, plaintextKey),
+			hash:      mustHashAPIKeyHMAC(km.pepper, plaintextKey),
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
@@ -366,9 +367,12 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	// hash_algorithm is NOT NULL DEFAULT 'sha256' (migration 024), so no
 	// COALESCE is required. Using the bare column lets Postgres use the
 	// composite idx_api_keys_hash_algo index on (key_hash, hash_algorithm).
+	// key_hash is scanned back so we can run a constant-time Go-side
+	// comparison against the probed hash — belt-and-suspenders matching
+	// the middleware path in APIKeyStore.ValidateKey (#122, SEC-008).
 	const query = `
 		SELECT id, name, user_id, permissions, is_active, revoked,
-		       created_at, expires_at, last_used_at, rotated_from
+		       created_at, expires_at, last_used_at, rotated_from, key_hash
 		FROM api_keys
 		WHERE key_hash = $1 AND hash_algorithm = $2
 	`
@@ -376,9 +380,11 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	var (
 		key             APIKeyDetails
 		permissionsJSON []byte
+		storedHash      string
 		lastErr         error
 		found           bool
 		matchedAlgo     string
+		matchedHash     string
 	)
 
 	for _, p := range probes {
@@ -393,10 +399,12 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 			&key.ExpiresAt,
 			&key.LastUsedAt,
 			&key.RotatedFrom,
+			&storedHash,
 		)
 		if err == nil {
 			found = true
 			matchedAlgo = p.algorithm
+			matchedHash = p.hash
 			break
 		}
 		lastErr = err
@@ -416,6 +424,15 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 			return nil, ErrKeyNotFound
 		}
 		return nil, fmt.Errorf("failed to query key: %w", lastErr)
+	}
+
+	// Constant-time comparison to prevent timing oracle attacks (#122 / SEC-008).
+	// The SQL WHERE already guarantees storedHash == matchedHash when a row is
+	// returned, but this defends against any future optimisation or short-circuit
+	// in the DB driver that might leak key material through response-time
+	// differences. Matches the belt-and-suspenders check in APIKeyStore.ValidateKey.
+	if subtle.ConstantTimeCompare([]byte(storedHash), []byte(matchedHash)) != 1 {
+		return nil, ErrKeyNotFound
 	}
 
 	// Parse permissions
