@@ -58,15 +58,23 @@ type KeyManager struct {
 	mu            sync.Mutex
 }
 
-// NewKeyManager creates a new KeyManager instance
+// NewKeyManager creates a new KeyManager instance using the legacy raw
+// SHA-256 hash scheme.
+//
+// Deprecated: prefer NewKeyManagerWithPepper in production. Raw SHA-256
+// without a pepper is vulnerable to precomputed rainbow tables if the DB
+// is stolen — see SEC-009 (#123). This constructor remains for test and
+// dev paths where an HMAC pepper is unavailable.
 func NewKeyManager(db KeyManagerDB) *KeyManager {
 	return &KeyManager{
 		db: db,
 	}
 }
 
-// NewKeyManagerWithPool creates a new KeyManager with a pgxpool.Pool
-// This is a convenience function for production code.
+// NewKeyManagerWithPool creates a new KeyManager with a pgxpool.Pool.
+//
+// Deprecated: prefer NewKeyManagerWithPepper in production — same
+// rationale as NewKeyManager (SEC-009 / #123).
 func NewKeyManagerWithPool(db *pgxpool.Pool) *KeyManager {
 	return &KeyManager{
 		db: db,
@@ -445,33 +453,12 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	return &key, nil
 }
 
-// rehashLegacyKey is the KeyManager mirror of APIKeyStore.rehashLegacyKey.
-// It replaces a sha256-hashed key_hash row with the HMAC-SHA256 equivalent
-// so the row stops being vulnerable to rainbow tables. Runs asynchronously
-// with a detached context so a slow UPDATE doesn't delay the caller, and
-// errors are logged rather than returned because this is best-effort
-// migration.
+// rehashLegacyKey delegates to the shared rehashAPIKeyAsync helper in
+// auth_middleware.go so KeyManager and APIKeyStore share one rehash
+// implementation — SQL, logging, and detached-context semantics all live
+// in one place.
 func (km *KeyManager) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
-	if km.pepper == "" {
-		return
-	}
-	newHash := HashAPIKeyHMAC(km.pepper, plaintextKey)
-	// gosec G118 and contextcheck suppressed: detached context is
-	// intentional so the rehash completes even if the caller cancels.
-	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, err := km.db.Exec(ctx, `
-			UPDATE api_keys
-			SET key_hash = $1, hash_algorithm = $2
-			WHERE id = $3 AND hash_algorithm = $4
-		`, hash, HashAlgoHMACSHA256, id, HashAlgoSHA256)
-		if err != nil {
-			log.Warn().Err(err).Str("key_id", id.String()).Msg("Failed to rehash legacy API key to HMAC (KeyManager)")
-			return
-		}
-		log.Info().Str("key_id", id.String()).Msg("Upgraded legacy API key hash to hmac-sha256 (KeyManager)")
-	}(keyID, newHash)
+	rehashAPIKeyAsync(km.db, km.pepper, keyID, plaintextKey)
 }
 
 // RevokeAPIKey revokes an API key, preventing further use

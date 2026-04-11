@@ -104,7 +104,19 @@ func (s *APIServer) setupRoutes() {
 	// SEC-009 (#123): pass the configured HMAC pepper so new keys are
 	// stored with hash_algorithm='hmac-sha256' and legacy rows get
 	// opportunistically upgraded on first successful validation.
-	s.apiKeyStore = api.NewAPIKeyStoreWithPepper(s.db.Pool(), s.config.API.Auth.Enabled, s.config.API.Auth.KeyPepper)
+	keyPepper := s.config.API.Auth.KeyPepper
+	// Warn when a pepper is set but too short. The intent is to make a
+	// misconfiguration loud at startup — operators following the
+	// documented guidance generate 32+ random bytes from a CSPRNG, so a
+	// short value almost certainly indicates the env var was set by hand
+	// with an insecure value. Not fatal: even a short pepper is better
+	// than none, and we don't want a typo to block startup.
+	if keyPepper != "" && len(keyPepper) < 32 {
+		log.Warn().
+			Int("pepper_len", len(keyPepper)).
+			Msg("api.auth.key_pepper is shorter than 32 bytes — regenerate from a CSPRNG for full SEC-009 protection")
+	}
+	s.apiKeyStore = api.NewAPIKeyStoreWithPepper(s.db.Pool(), s.config.API.Auth.Enabled, keyPepper)
 
 	isProduction := s.config.App.Environment == envProduction
 

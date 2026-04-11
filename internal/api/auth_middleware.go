@@ -46,6 +46,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -110,26 +111,36 @@ type APIKeyStore struct {
 	pepper  string // HMAC pepper for new keys; empty = legacy SHA-256 only
 }
 
-// rehashLegacyKey replaces a SHA-256-hashed key_hash row with the
-// HMAC-SHA256 equivalent so the row stops being vulnerable to rainbow
-// tables (SEC-009 / #123). Runs asynchronously so a slow UPDATE doesn't
-// delay the caller, and errors are logged rather than returned because
-// this is best-effort migration: the legacy hash still works if we
-// don't manage to upgrade it, and the same key will be retried on the
-// next successful validation.
+// rehashLegacyKey is a thin wrapper that delegates to the package-level
+// rehashAPIKeyHelper so APIKeyStore and KeyManager share one rehash
+// implementation instead of each carrying a copy.
 func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
-	if s.pepper == "" || s.db == nil {
+	rehashAPIKeyAsync(s.db, s.pepper, keyID, plaintextKey)
+}
+
+// rehashAPIKeyAsync fires an async UPDATE that replaces a legacy
+// sha256-hashed key_hash row with the HMAC-SHA256 equivalent, so the row
+// stops being vulnerable to precomputed rainbow tables (SEC-009 / #123).
+// Shared by APIKeyStore.rehashLegacyKey (auth middleware hot path) and
+// KeyManager.rehashLegacyKey (key-management endpoint path) — keeping the
+// SQL, logging, and context lifetime in one place.
+//
+// The function returns immediately after spawning the goroutine. Errors
+// are logged rather than returned because this is best-effort migration:
+// the legacy hash still works if we don't manage to upgrade it, and the
+// same key will be retried on the next successful validation.
+func rehashAPIKeyAsync(db rehashExecutor, pepper string, keyID uuid.UUID, plaintextKey string) {
+	if pepper == "" || db == nil {
 		return
 	}
-	newHash := HashAPIKeyHMAC(s.pepper, plaintextKey)
-	// gosec G118 and contextcheck are disabled because the rehash is
-	// intentionally detached from the request context — we want it to
-	// complete even if the caller cancels. The independent 5s timeout
-	// below bounds the work.
+	newHash := HashAPIKeyHMAC(pepper, plaintextKey)
+	// gosec G118 and contextcheck suppressed: the rehash is intentionally
+	// detached from the request context so it completes even if the
+	// caller cancels. The 5s timeout below bounds the work independently.
 	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, err := s.db.Exec(ctx, `
+		_, err := db.Exec(ctx, `
 			UPDATE api_keys
 			SET key_hash = $1, hash_algorithm = $2
 			WHERE id = $3 AND hash_algorithm = $4
@@ -140,6 +151,13 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 		}
 		log.Info().Str("key_id", id.String()).Msg("Upgraded legacy API key hash to hmac-sha256")
 	}(keyID, newHash)
+}
+
+// rehashExecutor is the minimal DB surface rehashAPIKeyAsync needs. Both
+// *pgxpool.Pool (used by APIKeyStore) and KeyManagerDB (used by
+// KeyManager via an interface) satisfy it without any wrapping.
+type rehashExecutor interface {
+	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
 }
 
 // NewAPIKeyStore creates a new API key store using the legacy raw-SHA-256
@@ -209,6 +227,14 @@ func HashAPIKeyForStorage(pepper, key string) (hash, algorithm string) {
 // during the rollout. On a successful legacy-hash match, the key is
 // opportunistically rehashed to HMAC so the fleet drains to the new scheme
 // as keys are used.
+//
+// Return convention: (nil, nil) means "no matching key / not authorized"
+// — the auth middleware consumes this as a clean rejection without
+// caring about the reason (not found, revoked, inactive, expired). This
+// differs from KeyManager.ValidateAPIKey in keys.go which returns typed
+// errors (ErrKeyNotFound, ErrKeyRevoked, ...) because the
+// key-management endpoints need to explain WHY a key was rejected.
+// Unifying the two conventions is a separate refactor.
 func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, error) {
 	if s.db == nil {
 		return nil, nil
