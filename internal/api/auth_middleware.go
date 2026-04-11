@@ -4,10 +4,16 @@
 //
 // This package includes a complete API key authentication system (auth_middleware.go)
 // that provides:
-//   - API key validation via SHA-256 hashing
+//   - API key validation via SHA-256 hashing (HMAC pepper rollout in flight, see SEC-009 / #123)
 //   - Permission-based authorization
 //   - Configurable authentication (enabled/disabled via config)
-//   - Support for X-API-Key header and Authorization: Bearer tokens
+//   - Two middleware variants sharing one validation core:
+//   - AuthMiddleware: standard HTTP, accepts the configured header
+//     (default X-API-Key) or Authorization: Bearer
+//   - WebSocketAuthMiddleware: same as AuthMiddleware plus an
+//     ?api_key=<value> query-parameter fallback because browser
+//     WebSocket clients cannot set custom headers on the upgrade
+//     handshake (SEC-010 / #124)
 //
 // # Enabling Authentication
 //
@@ -178,26 +184,54 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	return &apiKey, nil
 }
 
-// AuthMiddleware creates a Gin middleware that validates API keys
-// When auth is disabled, it allows all requests through
-// When enabled, it requires a valid API key in the configured header
-func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
+// authVariant captures the per-middleware customization that
+// distinguishes AuthMiddleware from WebSocketAuthMiddleware. The
+// shared body in authMiddlewareCore reads from this struct so the
+// HTTPS gate, validation, context-setting, and logging code lives in
+// one place — eliminating ~100 lines of duplication and the drift
+// risk where one middleware grew an audit log entry that the other
+// didn't.
+type authVariant struct {
+	// logPrefix is prepended to log messages (e.g. "Auth" or "WS auth").
+	logPrefix string
+	// keyRequiredMessage is the JSON `error` body returned when no
+	// credential carrier produced a key.
+	keyRequiredMessage string
+	// httpsRequiredMessage is the JSON `error` body returned when the
+	// HTTPS gate rejects a request.
+	httpsRequiredMessage string
+	// extractKey reads the API key from the request using the variant's
+	// strategy. AuthMiddleware tries header → Bearer; the WS variant
+	// adds a `?api_key=` query-parameter fallback as the third tier.
+	extractKey func(c *gin.Context, headerName string) string
+}
+
+// authMiddlewareCore implements the shared HTTPS-gate, key-extract,
+// validate, identity-stash, and log flow for both AuthMiddleware and
+// WebSocketAuthMiddleware. The two public middlewares are now thin
+// wrappers around this body — they only differ by the authVariant
+// they pass in.
+//
+// Keep this function package-private. The seam between the two
+// middlewares is the variant struct, not a third public surface.
+func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVariant) gin.HandlerFunc {
 	if config == nil {
 		config = DefaultAuthConfig()
 	}
 
 	return func(c *gin.Context) {
-		// If auth is disabled, allow all requests
+		// Auth-disabled bypass. Both variants honor this so dev mode
+		// (auth.enabled=false) works without any per-route gating.
 		if !config.Enabled || !store.enabled {
 			c.Next()
 			return
 		}
 
-		// Check HTTPS requirement in production.
-		// Only trust X-Forwarded-Proto when TrustForwardedProto is explicitly
-		// enabled (e.g. behind a K8s ingress or ALB that terminates TLS).
-		// Without that flag the header is user-spoofable over plain HTTP and
-		// bypasses the check entirely (SEC-004 / #118).
+		// HTTPS gate. Only trust X-Forwarded-Proto when
+		// TrustForwardedProto is explicitly enabled (e.g. behind a K8s
+		// ingress or ALB that terminates TLS). Without that flag the
+		// header is user-spoofable over plain HTTP and bypasses the
+		// check entirely (SEC-004 / #118).
 		if config.RequireHTTPS && c.Request.TLS == nil {
 			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
 			host := c.Request.Host
@@ -206,60 +240,44 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 				log.Warn().
 					Str("host", host).
 					Str("ip", c.ClientIP()).
-					Msg("Auth: HTTPS required but request is HTTP")
+					Msg(variant.logPrefix + ": HTTPS required but request is plain")
 				c.JSON(http.StatusForbidden, gin.H{
-					"error": "HTTPS required for API access",
+					"error": variant.httpsRequiredMessage,
 				})
 				c.Abort()
 				return
 			}
 		}
 
-		// Extract API key from header
-		var apiKey string
-
-		// Try configured header first
-		apiKey = c.GetHeader(config.HeaderName)
-
-		// If not found, try Authorization: Bearer header
-		if apiKey == "" {
-			authHeader := c.GetHeader("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				apiKey = strings.TrimPrefix(authHeader, "Bearer ")
-			}
-		}
-
-		// No API key provided
+		apiKey := variant.extractKey(c, config.HeaderName)
 		if apiKey == "" {
 			log.Debug().
 				Str("ip", c.ClientIP()).
 				Str("path", c.Request.URL.Path).
-				Msg("Auth: No API key provided")
+				Msg(variant.logPrefix + ": No API key provided")
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "API key required",
+				"error": variant.keyRequiredMessage,
 			})
 			c.Abort()
 			return
 		}
 
-		// Validate the API key
 		keyRecord, err := store.ValidateKey(c.Request.Context(), apiKey)
 		if err != nil {
 			log.Error().Err(err).
 				Str("ip", c.ClientIP()).
-				Msg("Auth: Error validating API key")
+				Msg(variant.logPrefix + ": Error validating API key")
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "Authentication error",
 			})
 			c.Abort()
 			return
 		}
-
 		if keyRecord == nil {
 			log.Warn().
 				Str("ip", c.ClientIP()).
 				Str("path", c.Request.URL.Path).
-				Msg("Auth: Invalid or expired API key")
+				Msg(variant.logPrefix + ": Invalid or expired API key")
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid or expired API key",
 			})
@@ -267,7 +285,10 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 			return
 		}
 
-		// Set user context for downstream handlers and audit logging
+		// Stash identity for downstream handlers and audit logging.
+		// The WS handler reads these via c.GetString("api_key_id") so
+		// every accepted connection can be tied back to the issuing
+		// key in audit logs.
 		c.Set("user_id", keyRecord.UserID)
 		c.Set("api_key_id", keyRecord.ID.String())
 		c.Set("api_key_name", keyRecord.Name)
@@ -277,10 +298,47 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 			Str("user_id", keyRecord.UserID).
 			Str("key_name", keyRecord.Name).
 			Str("path", c.Request.URL.Path).
-			Msg("Auth: Request authenticated")
+			Msg(variant.logPrefix + ": Request authenticated")
 
 		c.Next()
 	}
+}
+
+// extractKeyHeaderOrBearer is the standard HTTP key-lookup strategy:
+// configured header → Authorization: Bearer. Used by AuthMiddleware.
+func extractKeyHeaderOrBearer(c *gin.Context, headerName string) string {
+	if k := c.GetHeader(headerName); k != "" {
+		return k
+	}
+	if authHeader := c.GetHeader("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+		return strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	return ""
+}
+
+// extractKeyHeaderBearerOrQuery is the WebSocket-specific key-lookup
+// strategy: header → Bearer → `?api_key=<value>` query parameter. The
+// query-parameter tier is the browser WebSocket fallback (the standard
+// new WebSocket(url) constructor offers no per-request header API).
+// SEC-010 / #124.
+func extractKeyHeaderBearerOrQuery(c *gin.Context, headerName string) string {
+	if k := extractKeyHeaderOrBearer(c, headerName); k != "" {
+		return k
+	}
+	return c.Query("api_key")
+}
+
+// AuthMiddleware creates a Gin middleware that validates API keys.
+// When auth is disabled, it allows all requests through. When enabled,
+// it requires a valid API key in the configured header (default
+// X-API-Key) OR an Authorization: Bearer token.
+func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
+	return authMiddlewareCore(store, config, authVariant{
+		logPrefix:            "Auth",
+		keyRequiredMessage:   "API key required",
+		httpsRequiredMessage: "HTTPS required for API access",
+		extractKey:           extractKeyHeaderOrBearer,
+	})
 }
 
 // WebSocketAuthMiddleware creates a Gin middleware that authenticates
@@ -309,108 +367,12 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 // close frame, which most browsers surface as a generic onerror with
 // no detail.
 func WebSocketAuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
-	if config == nil {
-		config = DefaultAuthConfig()
-	}
-
-	return func(c *gin.Context) {
-		// If auth is disabled, allow all requests through. This mirrors
-		// AuthMiddleware so /ws stays accessible in development with
-		// auth.enabled=false (the default).
-		if !config.Enabled || !store.enabled {
-			c.Next()
-			return
-		}
-
-		// HTTPS gate (parity with AuthMiddleware — see SEC-004 / #118).
-		// Plain ws:// is the WebSocket equivalent of plain http:// and
-		// would expose the api_key query parameter to passive observers
-		// on every hop, so we reject it for the same reasons.
-		if config.RequireHTTPS && c.Request.TLS == nil {
-			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
-			host := c.Request.Host
-			isLocalhost := strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]")
-			if !forwardedHTTPS && !isLocalhost {
-				log.Warn().
-					Str("host", host).
-					Str("ip", c.ClientIP()).
-					Msg("WS auth: HTTPS required but request is plain ws://")
-				c.JSON(http.StatusForbidden, gin.H{
-					"error": "wss:// required for WebSocket access",
-				})
-				c.Abort()
-				return
-			}
-		}
-
-		// 1. Configured header (works for native ws:// clients that can
-		//    set headers, e.g. server-to-server, gorilla/websocket Dialer).
-		apiKey := c.GetHeader(config.HeaderName)
-
-		// 2. Authorization: Bearer.
-		if apiKey == "" {
-			authHeader := c.GetHeader("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				apiKey = strings.TrimPrefix(authHeader, "Bearer ")
-			}
-		}
-
-		// 3. Query parameter — the browser WebSocket fallback.
-		if apiKey == "" {
-			apiKey = c.Query("api_key")
-		}
-
-		if apiKey == "" {
-			log.Debug().
-				Str("ip", c.ClientIP()).
-				Str("path", c.Request.URL.Path).
-				Msg("WS auth: No API key provided (header or query param)")
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "API key required for WebSocket connections",
-			})
-			c.Abort()
-			return
-		}
-
-		keyRecord, err := store.ValidateKey(c.Request.Context(), apiKey)
-		if err != nil {
-			log.Error().Err(err).
-				Str("ip", c.ClientIP()).
-				Msg("WS auth: Error validating API key")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Authentication error",
-			})
-			c.Abort()
-			return
-		}
-		if keyRecord == nil {
-			log.Warn().
-				Str("ip", c.ClientIP()).
-				Str("path", c.Request.URL.Path).
-				Msg("WS auth: Invalid or expired API key")
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Invalid or expired API key",
-			})
-			c.Abort()
-			return
-		}
-
-		// Stash identity for downstream audit logging — the WS handler
-		// can read these via c.GetString("api_key_id") and attach them
-		// to the Client struct for per-connection accountability.
-		c.Set("user_id", keyRecord.UserID)
-		c.Set("api_key_id", keyRecord.ID.String())
-		c.Set("api_key_name", keyRecord.Name)
-		c.Set("permissions", keyRecord.Permissions)
-
-		log.Debug().
-			Str("user_id", keyRecord.UserID).
-			Str("key_name", keyRecord.Name).
-			Str("path", c.Request.URL.Path).
-			Msg("WS auth: Request authenticated")
-
-		c.Next()
-	}
+	return authMiddlewareCore(store, config, authVariant{
+		logPrefix:            "WS auth",
+		keyRequiredMessage:   "API key required for WebSocket connections",
+		httpsRequiredMessage: "wss:// required for WebSocket access",
+		extractKey:           extractKeyHeaderBearerOrQuery,
+	})
 }
 
 // RequirePermission creates middleware that checks if the authenticated user has a specific permission

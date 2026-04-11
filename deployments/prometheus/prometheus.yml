@@ -1,3 +1,38 @@
+# =============================================================================
+# CryptoFunk Prometheus scrape config
+# =============================================================================
+#
+# Auth rollout sequence (SEC-006 / #120, SEC-010-adjacent)
+# --------------------------------------------------------
+# The orchestrator and API server gate /metrics behind a secret when their
+# respective env vars are set:
+#
+#   - Orchestrator: ORCHESTRATOR_SECRET (per-binary env var)
+#   - API server:   api.auth.enabled=true with API keys in api_keys table
+#
+# Both endpoints accept Authorization: Bearer <secret> on top of their native
+# header (X-Orchestrator-Secret / X-API-Key) so Prometheus's standard
+# `authorization` stanza works without a custom relabel hack. The rollout
+# order MUST be:
+#
+#   1. Mount the secret into the Prometheus pod (K8s Secret + volumeMount,
+#      e.g. at /etc/prometheus/secrets/orchestrator-secret).
+#   2. Uncomment the matching `authorization` block below for the
+#      affected job (orchestrator and/or api).
+#   3. Roll out the new prometheus-config ConfigMap and restart Prometheus.
+#   4. ONLY THEN set ORCHESTRATOR_SECRET / enable api.auth.enabled on the
+#      target binary. If you flip step 4 before steps 1-3, every scrape
+#      starts returning 401 and Prometheus silently marks the target as
+#      DOWN — you lose all agent counts, decision counters, queue depths,
+#      and error rates from Grafana with no obvious indicator that the
+#      degradation is auth-related.
+#
+# Today the orchestrator's secret is NOT yet wired into any K8s manifest;
+# the middleware runs in pass-through mode. Leaving the auth blocks
+# commented out keeps this file working with the current dev/staging
+# deployments and gives operators a single, audit-greppable place to
+# enable auth when they're ready.
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -23,18 +58,34 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   # CryptoFunk Orchestrator
+  # Uncomment the `authorization` block AFTER mounting the orchestrator
+  # secret into the prometheus pod (see "Auth rollout sequence" comment
+  # at the top of this file). The orchestrator middleware accepts
+  # Authorization: Bearer <secret> in addition to its native
+  # X-Orchestrator-Secret header.
   - job_name: 'orchestrator'
     static_configs:
       - targets: ['orchestrator-service.cryptofunk.svc.cluster.local:8081']
     metrics_path: '/metrics'
     scrape_interval: 10s
+    # authorization:
+    #   type: Bearer
+    #   credentials_file: /etc/prometheus/secrets/orchestrator-secret
 
   # CryptoFunk API Server
+  # Uncomment the `authorization` block AFTER api.auth.enabled=true is set
+  # on the api server AND a Prometheus-dedicated API key has been minted
+  # via /api/v1/keys. The api server's AuthMiddleware already accepts
+  # Authorization: Bearer <key> in addition to its native X-API-Key
+  # header (see internal/api/auth_middleware.go).
   - job_name: 'api'
     static_configs:
       - targets: ['api-service.cryptofunk.svc.cluster.local:80']
     metrics_path: '/metrics'
     scrape_interval: 10s
+    # authorization:
+    #   type: Bearer
+    #   credentials_file: /etc/prometheus/secrets/api-prometheus-key
 
   # MCP Servers (standalone HTTP services on ports 8090-8094)
   # Metrics require starting each server with --metrics-port <port>

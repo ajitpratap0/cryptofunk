@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -81,16 +82,51 @@ func NewHTTPServer(port int, orch *orchestrator.Orchestrator) *HTTPServer {
 	}
 }
 
+// orchestratorAuthMiddleware gates a handler behind ORCHESTRATOR_SECRET.
+//
+// Accepted credential carriers (first non-empty wins, both compared in
+// constant time):
+//  1. `X-Orchestrator-Secret: <secret>` — original control-plane header,
+//     used by ops tooling that calls /pause / /resume / /status.
+//  2. `Authorization: Bearer <secret>` — Prometheus and most off-the-shelf
+//     scrape clients only support the standard Authorization header,
+//     so /metrics needs this carrier to be reachable from a real
+//     scrape config without a custom relabel hack.
+//
+// When `secret` is empty (dev mode), the middleware is a no-op pass
+// through and BOTH carriers are ignored — the startup Warn log already
+// makes this degradation loud.
 func orchestratorAuthMiddleware(secret string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if secret != "" {
-			header := r.Header.Get("X-Orchestrator-Secret")
-			if subtle.ConstantTimeCompare([]byte(header), []byte(secret)) != 1 {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if secret == "" {
+			next(w, r)
+			return
+		}
+
+		// Try the legacy custom header first.
+		if header := r.Header.Get("X-Orchestrator-Secret"); header != "" {
+			if subtle.ConstantTimeCompare([]byte(header), []byte(secret)) == 1 {
+				next(w, r)
+				return
+			}
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Fall back to Authorization: Bearer <secret>.
+		// strings.HasPrefix is intentionally NOT used here because we
+		// want a strict match on the "Bearer " token to avoid spurious
+		// matches on schemes like "Bearer123". Trim once and compare.
+		const bearerPrefix = "Bearer "
+		if authz := r.Header.Get("Authorization"); len(authz) > len(bearerPrefix) && authz[:len(bearerPrefix)] == bearerPrefix {
+			token := authz[len(bearerPrefix):]
+			if subtle.ConstantTimeCompare([]byte(token), []byte(secret)) == 1 {
+				next(w, r)
 				return
 			}
 		}
-		next(w, r)
+
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 }
 
@@ -139,13 +175,30 @@ func (h *HTTPServer) Start() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server in goroutine
+	// Bind the listener SYNCHRONOUSLY before returning so callers (and
+	// tests) know that an immediate connection attempt will reach the
+	// listener queue. Previous behaviour spawned ListenAndServe in a
+	// goroutine and returned immediately, leaving a race window where
+	// the kernel had not yet bound the port — tests papered over this
+	// with a 100ms time.Sleep that flaked under -race on busy CI runs.
+	//
+	// net.ListenConfig.Listen (rather than the package-level net.Listen)
+	// satisfies the noctx linter and lets us bound the bind itself by
+	// the supplied context if we ever need to. The context is
+	// background here because Start() has no caller-supplied lifetime
+	// — Stop() owns shutdown via h.server.Shutdown.
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), "tcp", h.server.Addr)
+	if err != nil {
+		return fmt.Errorf("orchestrator http: bind %s: %w", h.server.Addr, err)
+	}
+
 	go func() {
 		log.Info().
 			Int("port", h.port).
 			Msg("HTTP server started (health checks, metrics)")
 
-		if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := h.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("HTTP server error")
 		}
 	}()

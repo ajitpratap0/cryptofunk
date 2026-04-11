@@ -259,25 +259,21 @@ func TestWebSocketAuthMiddleware_SEC010(t *testing.T) {
 			"query parameter is the browser-WS fallback and MUST be honored when no header is present")
 	})
 
-	t.Run("header takes precedence over query", func(t *testing.T) {
-		// If both are provided, the header wins. This matters because a
-		// downstream proxy might inject a header overriding a stale URL
-		// query — we want the deterministic precedence documented.
-		store := &APIKeyStore{db: nil, enabled: true}
-		var seenKey string
-		// Hand-roll a tiny middleware-after-WSAuth that captures whatever
-		// the lookup ended up using. We can't read it directly because
-		// WebSocketAuthMiddleware aborts before c.Next runs in the
-		// nil-DB-store case, but we CAN spy on c.Set values via a
-		// custom test handler that runs only on a happy path.
+	t.Run("header and query both present do not crash", func(t *testing.T) {
+		// When both a header and a query-parameter key are provided
+		// the middleware must not crash and must reach validation. We
+		// can't directly assert "header was read first" without an
+		// interface-typed store (the nil-DB store rejects every key
+		// the same way), so this case is a smoke test only — the
+		// extraction precedence itself is verified by inspection of
+		// extractKeyHeaderBearerOrQuery and unit-tested by the
+		// individual "header path" / "Bearer path" / "query path"
+		// subtests above.
 		//
-		// For precedence we instead assert by varying ONE input at a
-		// time and asserting the body still says "Invalid or expired"
-		// (i.e. the key reached validation) — we can't directly assert
-		// "header was read first" without an interface-typed store.
-		// Document the intent so a future refactor that introduces a
-		// store interface knows to extend this test.
-		_ = seenKey
+		// A future refactor that introduces a store interface should
+		// extend this subtest to spy on the validation call and
+		// assert which key landed there.
+		store := &APIKeyStore{db: nil, enabled: true}
 
 		router := gin.New()
 		router.GET("/ws", WebSocketAuthMiddleware(store, enabledConfig), okHandler)

@@ -351,9 +351,8 @@ func TestHTTPServerStartStop(t *testing.T) {
 	if err := server.Start(); err != nil {
 		t.Fatalf("Failed to start HTTP server: %v", err)
 	}
-
-	// Give server time to start
-	time.Sleep(100 * time.Millisecond)
+	// Start now binds the listener synchronously, so an immediate
+	// request below is guaranteed to reach the kernel listen queue.
 
 	// Test that we can make a request
 	reqCtx, reqCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -433,17 +432,21 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 		_ = server.Stop(stopCtx)
 	})
 
-	// Give the goroutine a moment to bind the listener.
-	time.Sleep(100 * time.Millisecond)
+	// No sleep needed: HTTPServer.Start() now binds the net.Listener
+	// synchronously before spawning the Serve goroutine, so by the time
+	// Start returns the kernel will queue any connection attempt.
 
 	cases := []struct {
-		name       string
-		header     string
-		wantStatus int
+		name         string
+		xHeaderValue string
+		bearerValue  string
+		wantStatus   int
 	}{
-		{name: "no header → 401", header: "", wantStatus: http.StatusUnauthorized},
-		{name: "wrong secret → 401", header: "wrong-secret", wantStatus: http.StatusUnauthorized},
-		{name: "correct secret → 200", header: secret, wantStatus: http.StatusOK},
+		{name: "no creds → 401", wantStatus: http.StatusUnauthorized},
+		{name: "wrong X-Orchestrator-Secret → 401", xHeaderValue: "wrong-secret", wantStatus: http.StatusUnauthorized},
+		{name: "wrong Bearer → 401", bearerValue: "wrong-secret", wantStatus: http.StatusUnauthorized},
+		{name: "correct X-Orchestrator-Secret → 200", xHeaderValue: secret, wantStatus: http.StatusOK},
+		{name: "correct Bearer → 200 (Prometheus path)", bearerValue: secret, wantStatus: http.StatusOK},
 	}
 
 	for _, tc := range cases {
@@ -456,8 +459,11 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create request: %v", err)
 			}
-			if tc.header != "" {
-				req.Header.Set("X-Orchestrator-Secret", tc.header)
+			if tc.xHeaderValue != "" {
+				req.Header.Set("X-Orchestrator-Secret", tc.xHeaderValue)
+			}
+			if tc.bearerValue != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.bearerValue)
 			}
 
 			resp, err := http.DefaultClient.Do(req)
@@ -494,8 +500,8 @@ func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
 		defer stopCancel()
 		_ = server.Stop(stopCtx)
 	})
-
-	time.Sleep(100 * time.Millisecond)
+	// No sleep needed: HTTPServer.Start() now binds the listener
+	// synchronously before returning.
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
