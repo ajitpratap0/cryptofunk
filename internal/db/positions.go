@@ -755,9 +755,17 @@ func (db *DB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuant
 // CreatePositionTx inserts a new position into the database within an existing transaction.
 func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Position) error {
 	// Mirror CreatePosition: include `fees` in the INSERT so the
-	// entry-side fee is preserved. ClosePosition's accumulator
-	// (`fees = fees + $4`) depends on this row starting at the
-	// entry-side fee, not 0.
+	// entry-side fee is preserved. The two close paths consume this
+	// stored fee differently:
+	//   - ClosePosition (non-Tx) accumulates `fees = fees + $4`, so
+	//     the row MUST start at the entry-side fee for the closed
+	//     record to reflect entry+exit total.
+	//   - ClosePositionTx SETs `fees = $5` directly with a
+	//     caller-computed total (see the comment at the
+	//     ClosePositionTx call site for the reasoning), so the
+	//     stored entry fee is overwritten on close.
+	// Either way, the row is wrong if we drop the entry fee at
+	// CreatePosition time, so the column belongs in the INSERT.
 	query := `
 		INSERT INTO positions (
 			id, session_id, symbol, exchange, side, entry_price, quantity,
