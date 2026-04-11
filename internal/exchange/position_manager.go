@@ -403,37 +403,49 @@ func (pm *PositionManager) averagePosition(ctx context.Context, position *db.Pos
 	return nil
 }
 
-// UpdateUnrealizedPnL updates unrealized P&L for all open positions
+// UpdateUnrealizedPnL updates unrealized P&L for all open positions.
+//
+// PERF-002 (#135): computes all unrealized P&Ls in-process first (we hold
+// the authoritative entry_price/side/quantity in memory), then issues a
+// single BulkUpdateUnrealizedPnL call instead of one SELECT+UPDATE per
+// position. For N positions, this is 1 round-trip instead of 2N.
 func (pm *PositionManager) UpdateUnrealizedPnL(ctx context.Context, prices map[string]float64) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
+	updates := make([]db.UnrealizedPnLUpdate, 0, len(pm.openPositions))
 	for symbol, position := range pm.openPositions {
 		currentPrice, ok := prices[symbol]
 		if !ok {
 			continue
 		}
 
-		// Update in database (if available)
-		if pm.db != nil {
-			err := pm.db.UpdateUnrealizedPnL(ctx, position.ID, currentPrice)
-			if err != nil {
-				log.Error().
-					Err(err).
-					Str("symbol", symbol).
-					Msg("Failed to update unrealized P&L")
-				continue
-			}
-		}
-
-		// Update in-memory position
+		// Compute in-process using the in-memory position.
 		var unrealizedPnL float64
 		if position.Side == db.PositionSideLong {
 			unrealizedPnL = (currentPrice - position.EntryPrice) * position.Quantity
 		} else {
 			unrealizedPnL = (position.EntryPrice - currentPrice) * position.Quantity
 		}
+
+		// Update in-memory first so failures to persist don't desync the
+		// in-memory view from what's computed.
 		position.UnrealizedPnL = &unrealizedPnL
+
+		updates = append(updates, db.UnrealizedPnLUpdate{
+			ID:            position.ID,
+			UnrealizedPnL: unrealizedPnL,
+		})
+	}
+
+	if pm.db != nil && len(updates) > 0 {
+		if err := pm.db.BulkUpdateUnrealizedPnL(ctx, updates); err != nil {
+			log.Error().
+				Err(err).
+				Int("rows", len(updates)).
+				Msg("Failed to bulk-update unrealized P&L")
+			return err
+		}
 	}
 
 	return nil

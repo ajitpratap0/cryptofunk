@@ -244,69 +244,59 @@ func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Pos
 	return positions, nil
 }
 
-// ClosePosition closes a position with exit price and reason
+// ClosePosition closes a position with exit price and reason.
+//
+// PERF-003 (#136): single UPDATE that computes realized_pnl server-side
+// using a CASE on side, replacing the prior SELECT-then-UPDATE pattern.
+// The WHERE clause includes exit_time IS NULL so a double-close attempt
+// returns rowsAffected=0 and is rejected, preserving the original
+// "already closed" semantics in one round-trip instead of two.
 func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
-	// Get the position first to calculate realized P&L
-	position, err := db.GetPosition(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	if position.ExitTime != nil {
-		return fmt.Errorf("position already closed: %s", id)
-	}
-
-	// Calculate realized P&L
-	var realizedPnL float64
-	if position.Side == PositionSideLong {
-		// LONG: profit when exit price > entry price
-		realizedPnL = (exitPrice - position.EntryPrice) * position.Quantity
-	} else {
-		// SHORT: profit when exit price < entry price
-		realizedPnL = (position.EntryPrice - exitPrice) * position.Quantity
-	}
-
-	// Subtract fees
-	realizedPnL -= fees
-
-	// Update position
 	now := time.Now()
-	query := `
+	const query = `
 		UPDATE positions
 		SET
 			exit_price = $2,
 			exit_time = $3,
-			realized_pnl = $4,
+			realized_pnl = CASE
+				WHEN side = 'LONG'  THEN ($2 - entry_price) * quantity - $4
+				WHEN side = 'SHORT' THEN (entry_price - $2) * quantity - $4
+				ELSE 0
+			END,
 			unrealized_pnl = 0,
-			fees = fees + $5,
-			exit_reason = $6,
-			updated_at = $7
-		WHERE id = $1
+			fees = fees + $4,
+			exit_reason = $5,
+			updated_at = $3
+		WHERE id = $1 AND exit_time IS NULL
 	`
 
-	result, err := db.pool.Exec(ctx, query,
-		id,
-		exitPrice,
-		now,
-		realizedPnL,
-		fees,
-		exitReason,
-		now,
-	)
-
+	result, err := db.pool.Exec(ctx, query, id, exitPrice, now, fees, exitReason)
 	if err != nil {
 		return fmt.Errorf("failed to close position: %w", err)
 	}
 
-	rowsAffected := result.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("position not found: %s", id)
+	if result.RowsAffected() == 0 {
+		// Either the row doesn't exist, or it was already closed. Do a
+		// targeted lookup to return the precise error so callers can
+		// distinguish the two cases; this only fires on the error path.
+		existing, getErr := db.GetPosition(ctx, id)
+		if getErr != nil {
+			return fmt.Errorf("position not found: %s", id)
+		}
+		if existing.ExitTime != nil {
+			return fmt.Errorf("position already closed: %s", id)
+		}
+		return fmt.Errorf("position not updated: %s", id)
 	}
 
 	return nil
 }
 
-// UpdateUnrealizedPnL updates the unrealized P&L for an open position
+// UpdateUnrealizedPnL updates the unrealized P&L for an open position.
+//
+// Prefer BulkUpdateUnrealizedPnL when updating more than one position at a
+// time — this method issues a SELECT followed by an UPDATE for each call
+// and is only retained for the single-position test path.
 func (db *DB) UpdateUnrealizedPnL(ctx context.Context, id uuid.UUID, currentPrice float64) error {
 	// Get the position
 	position, err := db.GetPosition(ctx, id)
@@ -340,6 +330,54 @@ func (db *DB) UpdateUnrealizedPnL(ctx context.Context, id uuid.UUID, currentPric
 		return fmt.Errorf("failed to update unrealized P&L: %w", err)
 	}
 
+	return nil
+}
+
+// UnrealizedPnLUpdate is one row in a bulk unrealized-P&L update.
+type UnrealizedPnLUpdate struct {
+	ID            uuid.UUID
+	UnrealizedPnL float64
+}
+
+// BulkUpdateUnrealizedPnL updates unrealized_pnl for many positions in a
+// single round-trip using UNNEST to expand parallel arrays into a VALUES-like
+// virtual table, then joins against it.
+//
+// PERF-002 (#135): replaces the prior N+1 pattern (position_manager.go
+// looping over open positions and calling UpdateUnrealizedPnL per row, each
+// doing SELECT + UPDATE) with one UPDATE. Callers compute the unrealized P&L
+// in-process from known entry_price/side/quantity — this method does NOT
+// recompute it, so it is also safe to use when callers already hold the
+// authoritative values in memory.
+//
+// Rows whose id is not in the positions table are silently skipped. Closed
+// positions are excluded via the exit_time IS NULL filter.
+func (db *DB) BulkUpdateUnrealizedPnL(ctx context.Context, updates []UnrealizedPnLUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, len(updates))
+	values := make([]float64, len(updates))
+	for i, u := range updates {
+		ids[i] = u.ID
+		values[i] = u.UnrealizedPnL
+	}
+
+	const query = `
+		UPDATE positions AS p
+		SET unrealized_pnl = u.unrealized_pnl,
+		    updated_at = NOW()
+		FROM (
+			SELECT unnest($1::uuid[]) AS id,
+			       unnest($2::float8[]) AS unrealized_pnl
+		) AS u
+		WHERE p.id = u.id AND p.exit_time IS NULL
+	`
+
+	if _, err := db.pool.Exec(ctx, query, ids, values); err != nil {
+		return fmt.Errorf("failed to bulk-update unrealized P&L (%d rows): %w", len(updates), err)
+	}
 	return nil
 }
 

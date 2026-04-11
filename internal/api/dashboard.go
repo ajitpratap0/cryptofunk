@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -282,6 +283,98 @@ func (h *DashboardHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup
 // Handler Methods
 // =============================================================================
 
+// dashboardBundle is the pre-fetched state a single dashboard request
+// needs. Populated in parallel by fetchDashboardBundle so the four
+// summary views are built from shared data instead of re-querying.
+type dashboardBundle struct {
+	sessions    []*db.TradingSession
+	positions   []*db.Position
+	pingErr     error
+	isPaused    bool
+	isPausedErr error // non-nil only when falling back to repo.IsTradingPaused
+}
+
+// fetchDashboardBundle runs the independent queries GetDashboard needs in
+// parallel: active sessions, all open positions, a DB ping, and the
+// orchestrator's pause state. Returns the first hard error encountered by
+// any of the essential queries (sessions/positions); pingErr and
+// isPausedErr are surfaced via the bundle for non-fatal downstream use.
+//
+// PERF-001 (#134): replaces the previous pattern where getTradingStatus,
+// getPositionSummary, and getPnLSummary each re-queried ListActiveSessions
+// and GetAllOpenPositions serially, totalling 6-8 serial round-trips per
+// dashboard request. This reduces the critical path to one parallel batch
+// of 3-4 queries followed by a single serial GetClosedFeesBySessionIDs.
+func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboardBundle, error) {
+	var (
+		bundle      dashboardBundle
+		sessionsErr error
+		posErr      error
+		wg          sync.WaitGroup
+	)
+
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		s, err := h.repo.ListActiveSessions(ctx)
+		if err != nil {
+			sessionsErr = err
+			return
+		}
+		bundle.sessions = s
+	}()
+
+	go func() {
+		defer wg.Done()
+		p, err := h.repo.GetAllOpenPositions(ctx)
+		if err != nil {
+			posErr = err
+			return
+		}
+		bundle.positions = p
+	}()
+
+	go func() {
+		defer wg.Done()
+		bundle.pingErr = h.repo.Ping(ctx)
+	}()
+
+	// Pause state — orchestrator RPC if available, DB fallback otherwise.
+	// Run in a fourth goroutine only when orchestrator is configured, since
+	// the DB fallback would duplicate IsTradingPaused which we can resolve
+	// lazily in the main goroutine if needed.
+	if h.orchestrator != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bundle.isPaused = isPausedOrchestrator(ctx, h.orchestrator)
+		}()
+	}
+
+	wg.Wait()
+
+	// Essential query errors abort the whole dashboard.
+	if sessionsErr != nil {
+		return nil, fmt.Errorf("list active sessions: %w", sessionsErr)
+	}
+	if posErr != nil {
+		return nil, fmt.Errorf("get open positions: %w", posErr)
+	}
+
+	// DB fallback for pause state only if orchestrator wasn't wired.
+	if h.orchestrator == nil {
+		paused, err := h.repo.IsTradingPaused(ctx)
+		if err != nil {
+			bundle.isPausedErr = err
+		} else {
+			bundle.isPaused = paused
+		}
+	}
+
+	return &bundle, nil
+}
+
 // GetDashboard returns the main dashboard data
 // @Summary Get dashboard data
 // @Tags Dashboard
@@ -292,38 +385,28 @@ func (h *DashboardHandler) RegisterRoutesWithRateLimiter(router *gin.RouterGroup
 func (h *DashboardHandler) GetDashboard(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get trading status
-	tradingStatus, err := h.getTradingStatus(ctx)
+	bundle, err := h.fetchDashboardBundle(ctx)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get trading status for dashboard")
+		log.Error().Err(err).Msg("Failed to fetch dashboard bundle")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to get trading status",
+			"error": "Failed to load dashboard",
 		})
 		return
 	}
 
-	// Get position summary
-	positionSummary, err := h.getPositionSummary(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get position summary for dashboard")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to get position summary",
-		})
-		return
-	}
+	tradingStatus := h.buildTradingStatus(bundle)
+	positionSummary := h.calculatePositionSummary(bundle.positions)
 
-	// Get P&L summary
-	pnlSummary, err := h.getPnLSummary(ctx)
+	pnlSummary, err := h.buildPnLSummary(ctx, bundle)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get P&L summary for dashboard")
+		log.Error().Err(err).Msg("Failed to build P&L summary for dashboard")
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get P&L summary",
 		})
 		return
 	}
 
-	// Get system status
-	systemStatus := h.getSystemStatus(ctx)
+	systemStatus := h.buildSystemStatus(ctx, bundle)
 
 	dashboard := DashboardData{
 		TradingStatus:   tradingStatus,
@@ -334,6 +417,123 @@ func (h *DashboardHandler) GetDashboard(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dashboard)
+}
+
+// buildTradingStatus is a pure-in-memory variant of getTradingStatus that
+// builds the TradingStatusInfo view from a pre-fetched dashboardBundle.
+// No DB or RPC calls — those happened in fetchDashboardBundle.
+func (h *DashboardHandler) buildTradingStatus(bundle *dashboardBundle) TradingStatusInfo {
+	status := TradingStatusInfo{
+		Mode: "PAPER", // Default
+	}
+	status.ActiveSessions = len(bundle.sessions)
+	status.IsActive = len(bundle.sessions) > 0
+	if len(bundle.sessions) > 0 {
+		latestSession := bundle.sessions[0]
+		status.CurrentSession = &latestSession.ID
+		status.Mode = string(latestSession.Mode)
+	}
+	status.IsPaused = bundle.isPaused
+	return status
+}
+
+// buildPnLSummary builds the P&L view from the pre-fetched bundle. Issues
+// exactly one additional DB query (GetClosedFeesBySessionIDs) instead of
+// re-querying sessions and open positions.
+func (h *DashboardHandler) buildPnLSummary(ctx context.Context, bundle *dashboardBundle) (PnLSummaryInfo, error) {
+	pnl := PnLSummaryInfo{}
+
+	sessionIDs := make([]uuid.UUID, 0, len(bundle.sessions))
+	for _, session := range bundle.sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+		pnl.TotalPnL += session.TotalPnL
+		pnl.TotalTrades += session.TotalTrades
+		pnl.WinningTrades += session.WinningTrades
+		pnl.LosingTrades += session.LosingTrades
+		pnl.InitialCapital += session.InitialCapital
+
+		if session.MaxDrawdown > pnl.MaxDrawdown {
+			pnl.MaxDrawdown = session.MaxDrawdown
+		}
+	}
+
+	for _, p := range bundle.positions {
+		if p.UnrealizedPnL != nil {
+			pnl.UnrealizedPnL += *p.UnrealizedPnL
+		}
+		// RealizedPnL from open positions is intentionally omitted — see the
+		// note in getPnLSummary for rationale.
+		pnl.TotalFees += p.Fees
+	}
+
+	closedFees, err := h.repo.GetClosedFeesBySessionIDs(ctx, sessionIDs)
+	if err != nil {
+		return pnl, err
+	}
+	pnl.TotalFees += closedFees
+
+	if pnl.TotalTrades > 0 {
+		pnl.WinRate = float64(pnl.WinningTrades) / float64(pnl.TotalTrades) * 100
+	}
+	pnl.RealizedPnL = pnl.TotalPnL
+
+	pnl.CurrentCapital = pnl.InitialCapital + pnl.TotalPnL + pnl.UnrealizedPnL
+	if pnl.InitialCapital > 0 {
+		returnPercent := ((pnl.CurrentCapital - pnl.InitialCapital) / pnl.InitialCapital) * 100
+		pnl.ReturnPercent = &returnPercent
+	}
+
+	return pnl, nil
+}
+
+// buildSystemStatus builds the SystemStatusInfo view from the pre-fetched
+// bundle (which already ran the DB ping in parallel). Only issues an
+// additional GetAllAgentStatuses query when the orchestrator is unreachable.
+func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashboardBundle) SystemStatusInfo {
+	status := SystemStatusInfo{
+		Status:     "healthy",
+		Uptime:     time.Since(h.startTime).String(),
+		Version:    h.version,
+		Components: make(map[string]string),
+	}
+
+	if bundle.pingErr != nil {
+		status.DatabaseOK = false
+		status.Status = "degraded"
+		status.Components["database"] = "unhealthy"
+	} else {
+		status.DatabaseOK = true
+		status.Components["database"] = "healthy"
+	}
+
+	if h.orchestrator != nil {
+		count := getActiveAgentCountOrchestrator(ctx, h.orchestrator)
+		if count >= 0 {
+			status.ActiveAgents = count
+			status.Components["orchestrator"] = "healthy"
+		} else {
+			status.Components["orchestrator"] = "unavailable"
+			agents, err := h.repo.GetAllAgentStatuses(ctx)
+			if err == nil {
+				status.ActiveAgents = len(agents)
+				status.AgentSummary = make(map[string]int)
+				for _, agent := range agents {
+					status.AgentSummary[agent.Status]++
+				}
+			}
+		}
+	} else {
+		agents, err := h.repo.GetAllAgentStatuses(ctx)
+		if err == nil {
+			status.ActiveAgents = len(agents)
+			status.AgentSummary = make(map[string]int)
+			for _, agent := range agents {
+				status.AgentSummary[agent.Status]++
+			}
+		}
+	}
+
+	return status
 }
 
 // GetPositions returns all current open positions
