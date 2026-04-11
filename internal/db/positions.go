@@ -296,7 +296,11 @@ func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64
 		if existing.ExitTime != nil {
 			return fmt.Errorf("position already closed: %s", id)
 		}
-		return fmt.Errorf("position not updated: %s", id)
+		// Genuinely anomalous: the row exists, exit_time is NULL, but the
+		// UPDATE matched 0 rows. This suggests a concurrent writer raced
+		// us or the row was modified between the UPDATE and the lookup.
+		// The message makes the triage path explicit for operators.
+		return fmt.Errorf("unexpected: position %s is open but UPDATE matched 0 rows (possible concurrent modification)", id)
 	}
 
 	return nil

@@ -3,7 +3,6 @@ package db_test
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -125,8 +124,7 @@ func TestClosePosition(t *testing.T) {
 	t.Run("close non-existent returns not found", func(t *testing.T) {
 		err := tc.DB.ClosePosition(ctx, uuid.New(), 100.0, "manual", 0.0)
 		require.Error(t, err)
-		assert.True(t,
-			strings.Contains(err.Error(), "not found"),
-			"closing a non-existent position should return 'not found', got: %v", err)
+		assert.ErrorContains(t, err, "not found",
+			"closing a non-existent position should surface a 'not found' error")
 	})
 }

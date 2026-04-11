@@ -543,6 +543,10 @@ func (h *DashboardHandler) buildSystemStatus(ctx context.Context, bundle *dashbo
 	}
 
 	if bundle.pingErr != nil {
+		// Log the underlying error so operators can diagnose the degraded
+		// state — otherwise the dashboard just reports "unhealthy" with no
+		// trail to the root cause.
+		log.Error().Err(bundle.pingErr).Msg("Dashboard database ping failed")
 		status.DatabaseOK = false
 		status.Components["database"] = componentUnhealthy
 	} else {
@@ -577,6 +581,9 @@ func (h *DashboardHandler) applyAgentAndOrchestratorStatus(ctx context.Context, 
 	loadAgentsFromDB := func() {
 		agents, err := h.repo.GetAllAgentStatuses(ctx)
 		if err != nil {
+			// Log so operators can distinguish "genuinely no agents" from
+			// "DB query failed" when the dashboard reports ActiveAgents=0.
+			log.Warn().Err(err).Msg("Failed to query agent statuses from database")
 			return
 		}
 		status.ActiveAgents = len(agents)
