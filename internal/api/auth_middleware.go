@@ -232,15 +232,22 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		// ingress or ALB that terminates TLS). Without that flag the
 		// header is user-spoofable over plain HTTP and bypasses the
 		// check entirely (SEC-004 / #118).
+		// `middleware` carries the variant's logPrefix as a structured
+		// field instead of being concatenated into the message string.
+		// Two reasons: (1) zero allocations on every request that hits
+		// a log path (string concat builds a fresh string per call),
+		// (2) downstream log indexers (Loki, Datadog) can filter on
+		// `middleware="WS auth"` without regex matching the message.
 		if config.RequireHTTPS && c.Request.TLS == nil {
 			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
 			host := c.Request.Host
 			isLocalhost := strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]")
 			if !forwardedHTTPS && !isLocalhost {
 				log.Warn().
+					Str("middleware", variant.logPrefix).
 					Str("host", host).
 					Str("ip", c.ClientIP()).
-					Msg(variant.logPrefix + ": HTTPS required but request is plain")
+					Msg("HTTPS required but request is plain")
 				c.JSON(http.StatusForbidden, gin.H{
 					"error": variant.httpsRequiredMessage,
 				})
@@ -252,9 +259,10 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		apiKey := variant.extractKey(c, config.HeaderName)
 		if apiKey == "" {
 			log.Debug().
+				Str("middleware", variant.logPrefix).
 				Str("ip", c.ClientIP()).
 				Str("path", c.Request.URL.Path).
-				Msg(variant.logPrefix + ": No API key provided")
+				Msg("No API key provided")
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": variant.keyRequiredMessage,
 			})
@@ -265,8 +273,9 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		keyRecord, err := store.ValidateKey(c.Request.Context(), apiKey)
 		if err != nil {
 			log.Error().Err(err).
+				Str("middleware", variant.logPrefix).
 				Str("ip", c.ClientIP()).
-				Msg(variant.logPrefix + ": Error validating API key")
+				Msg("Error validating API key")
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "Authentication error",
 			})
@@ -275,9 +284,10 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		}
 		if keyRecord == nil {
 			log.Warn().
+				Str("middleware", variant.logPrefix).
 				Str("ip", c.ClientIP()).
 				Str("path", c.Request.URL.Path).
-				Msg(variant.logPrefix + ": Invalid or expired API key")
+				Msg("Invalid or expired API key")
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid or expired API key",
 			})
@@ -295,10 +305,11 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		c.Set("permissions", keyRecord.Permissions)
 
 		log.Debug().
+			Str("middleware", variant.logPrefix).
 			Str("user_id", keyRecord.UserID).
 			Str("key_name", keyRecord.Name).
 			Str("path", c.Request.URL.Path).
-			Msg(variant.logPrefix + ": Request authenticated")
+			Msg("Request authenticated")
 
 		c.Next()
 	}
@@ -360,6 +371,22 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 // upgrade is a one-shot handshake whose URL is never followed by
 // further GETs that could leak it onward, AND because browsers leave
 // WS clients with no other option.
+//
+// # Access-log exposure (operator note)
+//
+// Even though the WS upgrade URL is never re-fetched, the `?api_key=`
+// value WILL appear verbatim in any HTTP access log that captures the
+// full request URI — nginx ingress, ALB, sidecar proxies, etc. Anyone
+// reading those logs will see the raw key. Mitigations:
+//
+//   - Mask `api_key` in the access-log format. nginx: a `map` block
+//     that rewrites `api_key=[^&]+` to `api_key=REDACTED` in
+//     `$request_uri` before logging. ALB / GCP HTTPS LB: equivalent
+//     strip-query-param annotations on the listener.
+//   - Use short-lived / scoped tokens for browser sessions so a
+//     leaked log line is bounded in time and capability.
+//   - Prefer the header carrier when the client can set headers
+//     (server-to-server, CLI tools, the gorilla/websocket Go Dialer).
 //
 // Validation runs BEFORE upgrader.Upgrade so a rejection produces a
 // real HTTP 401 the client can read; once Upgrade has flipped the

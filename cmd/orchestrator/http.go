@@ -20,9 +20,16 @@ import (
 	"github.com/ajitpratap0/cryptofunk/internal/orchestrator"
 )
 
-// HTTPServer provides health checks and metrics endpoints for Kubernetes
+// HTTPServer provides health checks and metrics endpoints for Kubernetes.
+//
+// The port field is the *requested* port. If callers pass 0 the kernel
+// picks an ephemeral port; the actual bound port is then exposed via
+// Addr() after Start() returns. Tests rely on this to avoid the
+// hardcoded-port collision pitfall (two listeners fighting for 18082
+// when the suite runs with -count=2 or in parallel).
 type HTTPServer struct {
 	server       *http.Server
+	listener     net.Listener // captured at Start so tests can read .Addr()
 	orchestrator *orchestrator.Orchestrator
 	port         int
 	startTime    time.Time
@@ -84,14 +91,21 @@ func NewHTTPServer(port int, orch *orchestrator.Orchestrator) *HTTPServer {
 
 // orchestratorAuthMiddleware gates a handler behind ORCHESTRATOR_SECRET.
 //
-// Accepted credential carriers (first non-empty wins, both compared in
-// constant time):
+// Accepted credential carriers (constant-time compared):
 //  1. `X-Orchestrator-Secret: <secret>` — original control-plane header,
 //     used by ops tooling that calls /pause / /resume / /status.
 //  2. `Authorization: Bearer <secret>` — Prometheus and most off-the-shelf
 //     scrape clients only support the standard Authorization header,
 //     so /metrics needs this carrier to be reachable from a real
 //     scrape config without a custom relabel hack.
+//
+// Precedence is **exclusive**, not fall-through: if the legacy
+// `X-Orchestrator-Secret` header is present, it is tried alone.
+// A wrong value in the legacy header returns 401 immediately even if
+// the request also carries a valid `Authorization: Bearer`. This
+// prevents a stale custom header from being silently overridden by a
+// fresh Bearer token. Only when the legacy header is **absent** does
+// the middleware fall through to the Bearer carrier.
 //
 // When `secret` is empty (dev mode), the middleware is a no-op pass
 // through and BOTH carriers are ignored — the startup Warn log already
@@ -192,10 +206,15 @@ func (h *HTTPServer) Start() error {
 	if err != nil {
 		return fmt.Errorf("orchestrator http: bind %s: %w", h.server.Addr, err)
 	}
+	// Capture the listener so Addr() can return the actual bound
+	// address, including the case where the caller passed port 0 and
+	// the kernel picked an ephemeral port. Tests rely on this to
+	// avoid hardcoded ports across the suite.
+	h.listener = listener
 
 	go func() {
 		log.Info().
-			Int("port", h.port).
+			Str("addr", listener.Addr().String()).
 			Msg("HTTP server started (health checks, metrics)")
 
 		if err := h.server.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -204,6 +223,17 @@ func (h *HTTPServer) Start() error {
 	}()
 
 	return nil
+}
+
+// Addr returns the live TCP address the listener is bound to. Returns
+// nil if Start() has not been called or if the listener was closed.
+// Useful for tests that pass port 0 to NewHTTPServer and need to
+// discover the kernel-assigned ephemeral port to build a request URL.
+func (h *HTTPServer) Addr() net.Addr {
+	if h.listener == nil {
+		return nil
+	}
+	return h.listener.Addr()
 }
 
 // Stop gracefully shuts down the HTTP server

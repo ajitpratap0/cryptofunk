@@ -420,9 +420,11 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 	t.Setenv("ORCHESTRATOR_SECRET", secret)
 
 	orch := createTestOrchestrator(t, false, false)
-	// Use a high ephemeral port to avoid conflicts with the parallel
-	// TestHTTPServerStartStop on 18081.
-	server := NewHTTPServer(18082, orch)
+	// Port 0 → kernel-assigned ephemeral port. Build the request URL
+	// from server.Addr() after Start so two suite runs (e.g. -count=2)
+	// or any future t.Parallel() reorganisation can never collide on
+	// a hardcoded port.
+	server := NewHTTPServer(0, orch)
 	if err := server.Start(); err != nil {
 		t.Fatalf("Failed to start HTTP server: %v", err)
 	}
@@ -432,9 +434,11 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 		_ = server.Stop(stopCtx)
 	})
 
-	// No sleep needed: HTTPServer.Start() now binds the net.Listener
-	// synchronously before spawning the Serve goroutine, so by the time
-	// Start returns the kernel will queue any connection attempt.
+	addr := server.Addr()
+	if addr == nil {
+		t.Fatal("server.Addr() returned nil after Start")
+	}
+	metricsURL := "http://" + addr.String() + "/metrics"
 
 	cases := []struct {
 		name         string
@@ -447,6 +451,14 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 		{name: "wrong Bearer → 401", bearerValue: "wrong-secret", wantStatus: http.StatusUnauthorized},
 		{name: "correct X-Orchestrator-Secret → 200", xHeaderValue: secret, wantStatus: http.StatusOK},
 		{name: "correct Bearer → 200 (Prometheus path)", bearerValue: secret, wantStatus: http.StatusOK},
+		// Header-priority edge case: if the legacy X-Orchestrator-Secret
+		// header is present but wrong, the middleware MUST NOT fall
+		// through to try Authorization: Bearer — a stale custom header
+		// should not be silently overridden by a fresh Bearer token. The
+		// behaviour is documented as "if the legacy header is present
+		// it is tried exclusively" and the test pins it down so a
+		// future refactor doesn't relax it into a confusing fall-through.
+		{name: "wrong X-Orchestrator-Secret blocks valid Bearer → 401", xHeaderValue: "wrong-secret", bearerValue: secret, wantStatus: http.StatusUnauthorized},
 	}
 
 	for _, tc := range cases {
@@ -455,7 +467,7 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:18082/metrics", nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
 			if err != nil {
 				t.Fatalf("create request: %v", err)
 			}
@@ -491,7 +503,8 @@ func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
 	t.Setenv("ORCHESTRATOR_SECRET", "")
 
 	orch := createTestOrchestrator(t, false, false)
-	server := NewHTTPServer(18083, orch)
+	// Port 0 → kernel-assigned ephemeral. See sibling test for rationale.
+	server := NewHTTPServer(0, orch)
 	if err := server.Start(); err != nil {
 		t.Fatalf("Failed to start HTTP server: %v", err)
 	}
@@ -500,12 +513,15 @@ func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
 		defer stopCancel()
 		_ = server.Stop(stopCtx)
 	})
-	// No sleep needed: HTTPServer.Start() now binds the listener
-	// synchronously before returning.
+
+	addr := server.Addr()
+	if addr == nil {
+		t.Fatal("server.Addr() returned nil after Start")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:18083/metrics", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr.String()+"/metrics", nil)
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
