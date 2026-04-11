@@ -156,6 +156,184 @@ func TestTrustForwardedProto_SEC004(t *testing.T) {
 	})
 }
 
+// TestWebSocketAuthMiddleware_SEC010 verifies the WebSocket-specific
+// auth middleware for SEC-010 / #124. The middleware must accept the
+// API key from the configured header OR an `?api_key=` query parameter
+// (browsers can't set custom headers on the WS upgrade handshake), and
+// must bail with HTTP 401 BEFORE the WS upgrade so clients see a real
+// error rather than an opaque close frame.
+//
+// All non-bypass cases use a nil-DB store: APIKeyStore.ValidateKey
+// short-circuits to (nil, nil) when db is nil, so any non-empty key
+// reaches the "keyRecord == nil" branch and returns 401. This is
+// enough to prove that the lookup REACHED validation (i.e. the header
+// or query was read correctly) without needing a pgxmock fixture for
+// every subtest. The success path is exercised end-to-end by the
+// existing AuthMiddleware tests against APIKeyStore — both middlewares
+// share the same store.ValidateKey call.
+func TestWebSocketAuthMiddleware_SEC010(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	okHandler := func(c *gin.Context) { c.String(http.StatusOK, "upgraded") }
+
+	enabledConfig := &AuthConfig{
+		Enabled:      true,
+		HeaderName:   "X-API-Key",
+		RequireHTTPS: false, // Tested separately below; off here so we focus on key lookup.
+	}
+
+	t.Run("auth disabled bypasses entirely", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: false}
+		config := &AuthConfig{Enabled: false, HeaderName: "X-API-Key"}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, config), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"auth disabled should pass through to handler")
+		assert.Equal(t, "upgraded", w.Body.String())
+	})
+
+	t.Run("missing key returns 401 with required message", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: true}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, enabledConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "API key required",
+			"missing-key 401 must distinguish itself from invalid-key 401 in the body")
+	})
+
+	t.Run("header key reaches validation", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: true}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, enabledConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+		req.Header.Set("X-API-Key", "some-key-from-header")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "Invalid or expired",
+			"key-from-header was looked up; nil-DB store rejects it as invalid (proves header path was read)")
+	})
+
+	t.Run("Bearer token reaches validation", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: true}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, enabledConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+		req.Header.Set("Authorization", "Bearer some-key-from-bearer")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "Invalid or expired",
+			"Bearer token path must be tried after the configured header")
+	})
+
+	t.Run("query parameter reaches validation", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: true}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, enabledConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws?api_key=some-key-from-query", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "Invalid or expired",
+			"query parameter is the browser-WS fallback and MUST be honored when no header is present")
+	})
+
+	t.Run("header takes precedence over query", func(t *testing.T) {
+		// If both are provided, the header wins. This matters because a
+		// downstream proxy might inject a header overriding a stale URL
+		// query — we want the deterministic precedence documented.
+		store := &APIKeyStore{db: nil, enabled: true}
+		var seenKey string
+		// Hand-roll a tiny middleware-after-WSAuth that captures whatever
+		// the lookup ended up using. We can't read it directly because
+		// WebSocketAuthMiddleware aborts before c.Next runs in the
+		// nil-DB-store case, but we CAN spy on c.Set values via a
+		// custom test handler that runs only on a happy path.
+		//
+		// For precedence we instead assert by varying ONE input at a
+		// time and asserting the body still says "Invalid or expired"
+		// (i.e. the key reached validation) — we can't directly assert
+		// "header was read first" without an interface-typed store.
+		// Document the intent so a future refactor that introduces a
+		// store interface knows to extend this test.
+		_ = seenKey
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, enabledConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws?api_key=query-key", nil)
+		req.Header.Set("X-API-Key", "header-key")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"both keys present, both rejected by nil-DB store — confirms middleware did not crash on dual input")
+	})
+
+	t.Run("https gate rejects plain ws over remote host", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: true}
+		httpsConfig := &AuthConfig{
+			Enabled:      true,
+			HeaderName:   "X-API-Key",
+			RequireHTTPS: true,
+		}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, httpsConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws?api_key=any-key", nil)
+		req.Host = "api.example.com"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"plain ws:// over a remote host must be 403 — query-param keys leak via plain transport")
+	})
+
+	t.Run("https gate allows localhost", func(t *testing.T) {
+		store := &APIKeyStore{db: nil, enabled: true}
+		httpsConfig := &AuthConfig{
+			Enabled:      true,
+			HeaderName:   "X-API-Key",
+			RequireHTTPS: true,
+		}
+
+		router := gin.New()
+		router.GET("/ws", WebSocketAuthMiddleware(store, httpsConfig), okHandler)
+
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws?api_key=any-key", nil)
+		req.Host = "localhost:8080"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		// Localhost bypasses HTTPS but still goes through validation,
+		// which the nil-DB store rejects as invalid. NOT 403.
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"localhost should bypass HTTPS gate (expect 401 from validation, not 403)")
+	})
+}
+
 // =============================================================================
 // HashAPIKey Tests
 // =============================================================================

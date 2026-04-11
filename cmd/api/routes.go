@@ -154,8 +154,19 @@ func (s *APIServer) setupRoutes() {
 		v1.GET("/health", s.handleHealth)
 		v1.GET("/status", s.handleStatus)
 
-		// WebSocket endpoint (no rate limiting - uses connection limits)
-		v1.GET("/ws", s.handleWebSocket)
+		// WebSocket endpoint (no rate limiting - uses connection limits).
+		// SEC-010 / #124: gated by WebSocketAuthMiddleware which accepts
+		// the api key from the configured header OR an `?api_key=` query
+		// parameter (browsers cannot set custom headers on the WS
+		// upgrade handshake, so the query-param fallback is the only
+		// option for the dashboard). The middleware bails BEFORE the WS
+		// upgrade so a bad key returns a real HTTP 401 instead of an
+		// opaque close frame the browser surfaces as a generic onerror.
+		if s.config.API.Auth.Enabled {
+			v1.GET("/ws", api.WebSocketAuthMiddleware(s.apiKeyStore, authConfig), s.handleWebSocket)
+		} else {
+			v1.GET("/ws", s.handleWebSocket)
+		}
 
 		// Agent routes (read-only, auth then rate limiter)
 		// QA-003 (#146): all read-only trading data endpoints now require

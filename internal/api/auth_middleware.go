@@ -283,6 +283,136 @@ func AuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
 	}
 }
 
+// WebSocketAuthMiddleware creates a Gin middleware that authenticates
+// WebSocket upgrade requests. It is API-compatible with AuthMiddleware
+// but adds an `?api_key=<value>` query-parameter fallback because
+// browser WebSocket clients cannot set custom headers on the upgrade
+// handshake — the standard `new WebSocket(url)` constructor offers no
+// per-request header API. SEC-010 / #124.
+//
+// Lookup precedence (first non-empty wins):
+//  1. The configured header (default `X-API-Key`)
+//  2. `Authorization: Bearer <key>`
+//  3. `?api_key=<value>` query parameter
+//
+// The query-param fallback is intentionally NOT extended to
+// AuthMiddleware: putting API keys in the query string of normal HTTP
+// endpoints would leak them into proxy logs, browser history, and
+// referrer headers. The fallback only exists here because the WS
+// upgrade is a one-shot handshake whose URL is never followed by
+// further GETs that could leak it onward, AND because browsers leave
+// WS clients with no other option.
+//
+// Validation runs BEFORE upgrader.Upgrade so a rejection produces a
+// real HTTP 401 the client can read; once Upgrade has flipped the
+// connection into WS frames, the only way to signal failure is a
+// close frame, which most browsers surface as a generic onerror with
+// no detail.
+func WebSocketAuthMiddleware(store *APIKeyStore, config *AuthConfig) gin.HandlerFunc {
+	if config == nil {
+		config = DefaultAuthConfig()
+	}
+
+	return func(c *gin.Context) {
+		// If auth is disabled, allow all requests through. This mirrors
+		// AuthMiddleware so /ws stays accessible in development with
+		// auth.enabled=false (the default).
+		if !config.Enabled || !store.enabled {
+			c.Next()
+			return
+		}
+
+		// HTTPS gate (parity with AuthMiddleware — see SEC-004 / #118).
+		// Plain ws:// is the WebSocket equivalent of plain http:// and
+		// would expose the api_key query parameter to passive observers
+		// on every hop, so we reject it for the same reasons.
+		if config.RequireHTTPS && c.Request.TLS == nil {
+			forwardedHTTPS := config.TrustForwardedProto && c.GetHeader("X-Forwarded-Proto") == "https"
+			host := c.Request.Host
+			isLocalhost := strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]")
+			if !forwardedHTTPS && !isLocalhost {
+				log.Warn().
+					Str("host", host).
+					Str("ip", c.ClientIP()).
+					Msg("WS auth: HTTPS required but request is plain ws://")
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "wss:// required for WebSocket access",
+				})
+				c.Abort()
+				return
+			}
+		}
+
+		// 1. Configured header (works for native ws:// clients that can
+		//    set headers, e.g. server-to-server, gorilla/websocket Dialer).
+		apiKey := c.GetHeader(config.HeaderName)
+
+		// 2. Authorization: Bearer.
+		if apiKey == "" {
+			authHeader := c.GetHeader("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+
+		// 3. Query parameter — the browser WebSocket fallback.
+		if apiKey == "" {
+			apiKey = c.Query("api_key")
+		}
+
+		if apiKey == "" {
+			log.Debug().
+				Str("ip", c.ClientIP()).
+				Str("path", c.Request.URL.Path).
+				Msg("WS auth: No API key provided (header or query param)")
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "API key required for WebSocket connections",
+			})
+			c.Abort()
+			return
+		}
+
+		keyRecord, err := store.ValidateKey(c.Request.Context(), apiKey)
+		if err != nil {
+			log.Error().Err(err).
+				Str("ip", c.ClientIP()).
+				Msg("WS auth: Error validating API key")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Authentication error",
+			})
+			c.Abort()
+			return
+		}
+		if keyRecord == nil {
+			log.Warn().
+				Str("ip", c.ClientIP()).
+				Str("path", c.Request.URL.Path).
+				Msg("WS auth: Invalid or expired API key")
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Invalid or expired API key",
+			})
+			c.Abort()
+			return
+		}
+
+		// Stash identity for downstream audit logging — the WS handler
+		// can read these via c.GetString("api_key_id") and attach them
+		// to the Client struct for per-connection accountability.
+		c.Set("user_id", keyRecord.UserID)
+		c.Set("api_key_id", keyRecord.ID.String())
+		c.Set("api_key_name", keyRecord.Name)
+		c.Set("permissions", keyRecord.Permissions)
+
+		log.Debug().
+			Str("user_id", keyRecord.UserID).
+			Str("key_name", keyRecord.Name).
+			Str("path", c.Request.URL.Path).
+			Msg("WS auth: Request authenticated")
+
+		c.Next()
+	}
+}
+
 // RequirePermission creates middleware that checks if the authenticated user has a specific permission
 func RequirePermission(permission string) gin.HandlerFunc {
 	return func(c *gin.Context) {

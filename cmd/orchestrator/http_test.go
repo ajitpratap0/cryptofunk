@@ -404,6 +404,118 @@ func TestHTTPServerStartStop(t *testing.T) {
 	}
 }
 
+// TestMetricsEndpointRequiresAuth_SEC006 verifies that /metrics on the
+// orchestrator HTTP server is gated behind ORCHESTRATOR_SECRET when the
+// secret is set, and that requests without the X-Orchestrator-Secret
+// header (or with the wrong value) get 401. The metrics surface
+// includes active agent counts, decision counters, queue depths, and
+// error rates — fingerprinting data an attacker would use to time
+// trades or pick off agents.
+//
+// Spins up the real Start() flow on an ephemeral port so the actual
+// mux wiring is exercised end-to-end (not just a hand-built mux). The
+// test sets ORCHESTRATOR_SECRET via t.Setenv so the value is restored
+// for sibling tests.
+func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
+	const secret = "test-orch-secret-32-bytes-of-material"
+	t.Setenv("ORCHESTRATOR_SECRET", secret)
+
+	orch := createTestOrchestrator(t, false, false)
+	// Use a high ephemeral port to avoid conflicts with the parallel
+	// TestHTTPServerStartStop on 18081.
+	server := NewHTTPServer(18082, orch)
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start HTTP server: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		_ = server.Stop(stopCtx)
+	})
+
+	// Give the goroutine a moment to bind the listener.
+	time.Sleep(100 * time.Millisecond)
+
+	cases := []struct {
+		name       string
+		header     string
+		wantStatus int
+	}{
+		{name: "no header → 401", header: "", wantStatus: http.StatusUnauthorized},
+		{name: "wrong secret → 401", header: "wrong-secret", wantStatus: http.StatusUnauthorized},
+		{name: "correct secret → 200", header: secret, wantStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:18082/metrics", nil)
+			if err != nil {
+				t.Fatalf("create request: %v", err)
+			}
+			if tc.header != "" {
+				req.Header.Set("X-Orchestrator-Secret", tc.header)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			defer func() {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+			}()
+
+			if resp.StatusCode != tc.wantStatus {
+				t.Errorf("status: got %d want %d", resp.StatusCode, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// TestMetricsEndpointOpenWhenNoSecret_SEC006 documents the dev-mode
+// pass-through path: when ORCHESTRATOR_SECRET is empty the middleware
+// is a no-op and /metrics serves without auth so local Prometheus and
+// dev tooling keep working. The startup Warn log makes the degradation
+// loud at process start.
+func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
+	t.Setenv("ORCHESTRATOR_SECRET", "")
+
+	orch := createTestOrchestrator(t, false, false)
+	server := NewHTTPServer(18083, orch)
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start HTTP server: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		_ = server.Stop(stopCtx)
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:18083/metrics", nil)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("dev-mode /metrics should serve without auth: got %d", resp.StatusCode)
+	}
+}
+
 // BenchmarkHealthEndpoint benchmarks the health endpoint
 func BenchmarkHealthEndpoint(b *testing.B) {
 	orch := createTestOrchestrator(&testing.T{}, false, false)

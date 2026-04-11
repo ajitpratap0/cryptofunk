@@ -100,7 +100,7 @@ func (h *HTTPServer) Start() error {
 	secret := os.Getenv("ORCHESTRATOR_SECRET")
 
 	if secret == "" {
-		log.Warn().Msg("ORCHESTRATOR_SECRET is not set: /pause, /resume, and /status endpoints are unprotected")
+		log.Warn().Msg("ORCHESTRATOR_SECRET is not set: /pause, /resume, /status, and /metrics endpoints are unprotected")
 	}
 
 	// Health check endpoints
@@ -116,8 +116,20 @@ func (h *HTTPServer) Start() error {
 	mux.HandleFunc("/resume", orchestratorAuthMiddleware(secret, h.orchestrator.HandleResumeRequest))
 	mux.HandleFunc("/status", orchestratorAuthMiddleware(secret, h.orchestrator.HandleControlStatusRequest))
 
-	// Prometheus metrics endpoint
-	mux.Handle("/metrics", promhttp.Handler())
+	// Prometheus metrics endpoint (SEC-006 / #120). Wrapped with the same
+	// orchestratorAuthMiddleware as the control endpoints because the
+	// metric labels expose internal state — active agent counts, queue
+	// depths, decision counters, error rates — that an attacker can use
+	// to fingerprint the deployment, time trades, or pick off agents.
+	// promhttp.Handler() returns an http.Handler; we adapt it to
+	// HandlerFunc by calling .ServeHTTP so the existing middleware
+	// signature stays unchanged.
+	//
+	// When ORCHESTRATOR_SECRET is empty (development), the middleware is
+	// a no-op pass-through — operators get the warning logged above and
+	// /metrics keeps working unchanged. Production deployments MUST set
+	// the secret; the K8s orchestrator-secret manifest already wires it.
+	mux.HandleFunc("/metrics", orchestratorAuthMiddleware(secret, promhttp.Handler().ServeHTTP))
 
 	h.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", h.port),
