@@ -64,19 +64,16 @@ type APIKey struct {
 	IsActive    bool       `json:"is_active"` // TB-006: Active status for rotation support
 }
 
-// AuthConfig contains authentication configuration
+// AuthConfig contains authentication configuration used by AuthMiddleware.
+// Note: the HMAC key pepper is configured on the APIKeyStore itself via
+// NewAPIKeyStoreWithPepper, not through this struct — AuthMiddleware
+// consumes a store argument directly, so threading the pepper through
+// both would be dead config.
 type AuthConfig struct {
 	Enabled             bool   `mapstructure:"enabled"`
 	HeaderName          string `mapstructure:"header_name"`           // Default: "X-API-Key" or "Authorization"
 	RequireHTTPS        bool   `mapstructure:"require_https"`         // Require HTTPS in production
 	TrustForwardedProto bool   `mapstructure:"trust_forwarded_proto"` // Trust X-Forwarded-Proto from reverse proxy (default false)
-	// KeyPepper is a server-side secret mixed with each plaintext API key
-	// via HMAC-SHA256 before it hits the database. When empty, keys fall
-	// back to the legacy raw-SHA-256 scheme — acceptable for local dev but
-	// vulnerable to rainbow-table attacks if the DB is stolen. Set this in
-	// production via CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long random string;
-	// rotating it invalidates every existing HMAC-hashed key.
-	KeyPepper string `mapstructure:"key_pepper"`
 }
 
 // DefaultAuthConfig returns the default auth configuration
@@ -86,6 +83,7 @@ func DefaultAuthConfig() *AuthConfig {
 		HeaderName:          "X-API-Key",
 		RequireHTTPS:        true,
 		TrustForwardedProto: false, // Only enable behind a trusted reverse proxy (K8s ingress, ALB)
+		// KeyPepper intentionally omitted — see type doc.
 	}
 }
 
@@ -96,8 +94,11 @@ const (
 	HashAlgoHMACSHA256 = "hmac-sha256" // HMAC-SHA256 with server-side pepper.
 )
 
-// candidateHash is one (hash, algorithm) pair probed by ValidateKey.
-type candidateHash struct {
+// hashProbe is one (hash, algorithm) pair probed during API key
+// validation. Shared by APIKeyStore.ValidateKey (auth_middleware.go) and
+// KeyManager.ValidateAPIKey (keys.go) so the dual-probe pattern lives in
+// one type — extending one path doesn't leave the other stale.
+type hashProbe struct {
 	hash      string
 	algorithm string
 }
@@ -121,11 +122,11 @@ func (s *APIKeyStore) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
 		return
 	}
 	newHash := HashAPIKeyHMAC(s.pepper, plaintextKey)
-	// contextcheck is disabled for this goroutine because the rehash is
+	// gosec G118 and contextcheck are disabled because the rehash is
 	// intentionally detached from the request context — we want it to
 	// complete even if the caller cancels. The independent 5s timeout
 	// below bounds the work.
-	go func(id uuid.UUID, hash string) { //nolint:contextcheck
+	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, err := s.db.Exec(ctx, `
@@ -218,14 +219,14 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	// path) and fall back to the legacy SHA-256. When no pepper is set we
 	// only try the legacy hash.
 	legacyHash := HashAPIKey(key)
-	candidates := make([]candidateHash, 0, 2)
+	candidates := make([]hashProbe, 0, 2)
 	if s.pepper != "" {
-		candidates = append(candidates, candidateHash{
+		candidates = append(candidates, hashProbe{
 			hash:      HashAPIKeyHMAC(s.pepper, key),
 			algorithm: HashAlgoHMACSHA256,
 		})
 	}
-	candidates = append(candidates, candidateHash{
+	candidates = append(candidates, hashProbe{
 		hash:      legacyHash,
 		algorithm: HashAlgoSHA256,
 	})
@@ -241,7 +242,7 @@ func (s *APIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKey, err
 	var (
 		apiKey     APIKey
 		storedAlgo string
-		matched    candidateHash
+		matched    hashProbe
 		found      bool
 	)
 

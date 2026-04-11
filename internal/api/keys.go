@@ -341,24 +341,23 @@ func (km *KeyManager) RotateAPIKey(
 func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (*APIKeyDetails, error) {
 	legacyHash := HashAPIKey(plaintextKey)
 
-	type probe struct {
-		hash string
-		algo string
-	}
-	probes := make([]probe, 0, 2)
+	probes := make([]hashProbe, 0, 2)
 	if km.pepper != "" {
-		probes = append(probes, probe{
-			hash: HashAPIKeyHMAC(km.pepper, plaintextKey),
-			algo: HashAlgoHMACSHA256,
+		probes = append(probes, hashProbe{
+			hash:      HashAPIKeyHMAC(km.pepper, plaintextKey),
+			algorithm: HashAlgoHMACSHA256,
 		})
 	}
-	probes = append(probes, probe{hash: legacyHash, algo: HashAlgoSHA256})
+	probes = append(probes, hashProbe{hash: legacyHash, algorithm: HashAlgoSHA256})
 
+	// hash_algorithm is NOT NULL DEFAULT 'sha256' (migration 024), so no
+	// COALESCE is required. Using the bare column lets Postgres use the
+	// composite idx_api_keys_hash_algo index on (key_hash, hash_algorithm).
 	const query = `
 		SELECT id, name, user_id, permissions, is_active, revoked,
 		       created_at, expires_at, last_used_at, rotated_from
 		FROM api_keys
-		WHERE key_hash = $1 AND COALESCE(hash_algorithm, 'sha256') = $2
+		WHERE key_hash = $1 AND hash_algorithm = $2
 	`
 
 	var (
@@ -366,10 +365,11 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		permissionsJSON []byte
 		lastErr         error
 		found           bool
+		matchedAlgo     string
 	)
 
 	for _, p := range probes {
-		err := km.db.QueryRow(ctx, query, p.hash, p.algo).Scan(
+		err := km.db.QueryRow(ctx, query, p.hash, p.algorithm).Scan(
 			&key.ID,
 			&key.Name,
 			&key.UserID,
@@ -383,6 +383,7 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		)
 		if err == nil {
 			found = true
+			matchedAlgo = p.algorithm
 			break
 		}
 		lastErr = err
@@ -417,8 +418,11 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 	}
 
 	// Update last used timestamp asynchronously
-	// Use a detached context since this is fire-and-forget, but add safety checks
-	go func(keyID uuid.UUID) { //nolint:gosec
+	// Use a detached context since this is fire-and-forget, but add safety checks.
+	// gosec G118 and contextcheck are both disabled because the update must
+	// outlive the caller's request context; the 5s timeout below bounds the
+	// work independently.
+	go func(keyID uuid.UUID) { //nolint:gosec,contextcheck
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		// Only update if key is still active to prevent race with rotation/revocation
@@ -428,7 +432,46 @@ func (km *KeyManager) ValidateAPIKey(ctx context.Context, plaintextKey string) (
 		}
 	}(key.ID)
 
+	// SEC-009 (#123): opportunistically upgrade legacy sha256 rows to
+	// hmac-sha256 on first successful validation after a pepper is
+	// configured. Matches the APIKeyStore.ValidateKey behaviour so keys
+	// validated through either path (auth middleware OR key management
+	// endpoint) drain forward. Fire-and-forget — a failed upgrade just
+	// means the next validation will retry.
+	if km.pepper != "" && matchedAlgo == HashAlgoSHA256 {
+		km.rehashLegacyKey(key.ID, plaintextKey)
+	}
+
 	return &key, nil
+}
+
+// rehashLegacyKey is the KeyManager mirror of APIKeyStore.rehashLegacyKey.
+// It replaces a sha256-hashed key_hash row with the HMAC-SHA256 equivalent
+// so the row stops being vulnerable to rainbow tables. Runs asynchronously
+// with a detached context so a slow UPDATE doesn't delay the caller, and
+// errors are logged rather than returned because this is best-effort
+// migration.
+func (km *KeyManager) rehashLegacyKey(keyID uuid.UUID, plaintextKey string) {
+	if km.pepper == "" {
+		return
+	}
+	newHash := HashAPIKeyHMAC(km.pepper, plaintextKey)
+	// gosec G118 and contextcheck suppressed: detached context is
+	// intentional so the rehash completes even if the caller cancels.
+	go func(id uuid.UUID, hash string) { //nolint:gosec,contextcheck
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := km.db.Exec(ctx, `
+			UPDATE api_keys
+			SET key_hash = $1, hash_algorithm = $2
+			WHERE id = $3 AND hash_algorithm = $4
+		`, hash, HashAlgoHMACSHA256, id, HashAlgoSHA256)
+		if err != nil {
+			log.Warn().Err(err).Str("key_id", id.String()).Msg("Failed to rehash legacy API key to HMAC (KeyManager)")
+			return
+		}
+		log.Info().Str("key_id", id.String()).Msg("Upgraded legacy API key hash to hmac-sha256 (KeyManager)")
+	}(keyID, newHash)
 }
 
 // RevokeAPIKey revokes an API key, preventing further use

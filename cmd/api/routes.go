@@ -137,7 +137,10 @@ func (s *APIServer) setupRoutes() {
 		HeaderName:          s.config.API.Auth.HeaderName,
 		RequireHTTPS:        s.config.API.Auth.RequireHTTPS,
 		TrustForwardedProto: s.config.API.Auth.TrustForwardedProto,
-		KeyPepper:           s.config.API.Auth.KeyPepper,
+		// KeyPepper is configured on s.apiKeyStore via
+		// NewAPIKeyStoreWithPepper above — it doesn't belong on the
+		// shared AuthConfig because AuthMiddleware consumes the store
+		// directly, not the pepper.
 	}
 	if authConfig.HeaderName == "" {
 		authConfig.HeaderName = "X-API-Key" // Default header name
