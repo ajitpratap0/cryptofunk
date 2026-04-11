@@ -253,6 +253,10 @@ func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Pos
 // "already closed" semantics in one round-trip instead of two.
 func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
 	now := time.Now()
+	// Query parameters:
+	//   $1 = position id, $2 = exit_price, $3 = now (exit_time / updated_at),
+	//   $4 = fees (subtracted from realized_pnl AND added to running fees total),
+	//   $5 = exit_reason.
 	const query = `
 		UPDATE positions
 		SET

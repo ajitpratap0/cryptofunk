@@ -331,8 +331,17 @@ type dashboardBundle struct {
 //
 // Concurrency note: each wg.Add is placed immediately next to its goroutine
 // launch (rather than a single up-front wg.Add(N)) so future edits can add
-// or remove parallel queries without hunting for a matching counter.
+// or remove parallel queries without hunting for a matching counter. A
+// derived context with cancel is passed to all goroutines so that if an
+// essential query (sessions or positions) fails, the remaining in-flight
+// queries are cancelled instead of running to completion.
 func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboardBundle, error) {
+	// Derived context so the first essential-query error can cancel the
+	// rest of the parallel batch. The defer guarantees cancellation on
+	// every return path (including success) to release goroutine resources.
+	fetchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var (
 		bundle      dashboardBundle
 		sessionsErr error
@@ -343,9 +352,10 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s, err := h.repo.ListActiveSessions(ctx)
+		s, err := h.repo.ListActiveSessions(fetchCtx)
 		if err != nil {
 			sessionsErr = err
+			cancel() // abort remaining parallel queries
 			return
 		}
 		bundle.sessions = s
@@ -354,9 +364,10 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		p, err := h.repo.GetAllOpenPositions(ctx)
+		p, err := h.repo.GetAllOpenPositions(fetchCtx)
 		if err != nil {
 			posErr = err
+			cancel() // abort remaining parallel queries
 			return
 		}
 		bundle.positions = p
@@ -365,7 +376,7 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		bundle.pingErr = h.repo.Ping(ctx)
+		bundle.pingErr = h.repo.Ping(fetchCtx)
 	}()
 
 	// Pause state — orchestrator RPC if available, DB fallback otherwise.
@@ -376,7 +387,7 @@ func (h *DashboardHandler) fetchDashboardBundle(ctx context.Context) (*dashboard
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			bundle.isPaused = isPausedOrchestrator(ctx, h.orchestrator)
+			bundle.isPaused = isPausedOrchestrator(fetchCtx, h.orchestrator)
 		}()
 	}
 
