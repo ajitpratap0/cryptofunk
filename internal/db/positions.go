@@ -54,14 +54,22 @@ type Position struct {
 	UpdatedAt     time.Time    `db:"updated_at"`
 }
 
-// CreatePosition inserts a new position into the database
+// CreatePosition inserts a new position into the database.
+//
+// The `fees` column is included in the INSERT so the entry-side fee
+// the caller already paid (commission, slippage, exchange fee) is
+// preserved on the row. Without this, ClosePosition's
+// `fees = fees + $4` accumulator starts from 0 instead of the entry
+// fee and the closed-position record under-reports total trading
+// cost — bug observed in TestClosePosition where fees of 1.0 + 0.5
+// resolved to 0.5 instead of 1.5.
 func (db *DB) CreatePosition(ctx context.Context, position *Position) error {
 	query := `
 		INSERT INTO positions (
 			id, session_id, symbol, exchange, side, entry_price, quantity,
-			entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+			entry_time, stop_loss, take_profit, fees, entry_reason, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		)
 	`
 
@@ -86,6 +94,7 @@ func (db *DB) CreatePosition(ctx context.Context, position *Position) error {
 		position.EntryTime,
 		position.StopLoss,
 		position.TakeProfit,
+		position.Fees,
 		position.EntryReason,
 		position.Metadata,
 		position.CreatedAt,
@@ -745,12 +754,16 @@ func (db *DB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuant
 
 // CreatePositionTx inserts a new position into the database within an existing transaction.
 func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Position) error {
+	// Mirror CreatePosition: include `fees` in the INSERT so the
+	// entry-side fee is preserved. ClosePosition's accumulator
+	// (`fees = fees + $4`) depends on this row starting at the
+	// entry-side fee, not 0.
 	query := `
 		INSERT INTO positions (
 			id, session_id, symbol, exchange, side, entry_price, quantity,
-			entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+			entry_time, stop_loss, take_profit, fees, entry_reason, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		)
 	`
 
@@ -775,6 +788,7 @@ func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Positio
 		position.EntryTime,
 		position.StopLoss,
 		position.TakeProfit,
+		position.Fees,
 		position.EntryReason,
 		position.Metadata,
 		position.CreatedAt,

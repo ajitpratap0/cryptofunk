@@ -504,7 +504,8 @@ func TestPositionHelperMethodsWithTestcontainers(t *testing.T) {
 			Quantity:   100.0,
 			EntryPrice: 20.0,
 			EntryTime:  time.Now(),
-			// Note: Fees field is not inserted by CreatePosition, defaults to 0
+			// Fees defaults to 0 here (not set on the struct), so the
+			// existing assertions on accumulated fees still hold.
 		}
 		err := tc.DB.CreatePosition(ctx, pos)
 		require.NoError(t, err)
@@ -534,7 +535,8 @@ func TestPositionHelperMethodsWithTestcontainers(t *testing.T) {
 			Quantity:   50.0,
 			EntryPrice: 10.0,
 			EntryTime:  time.Now(),
-			// Note: Fees field is not inserted by CreatePosition, defaults to 0
+			// Fees defaults to 0 here (not set on the struct), so the
+			// existing assertions on accumulated fees still hold.
 		}
 		err := tc.DB.CreatePosition(ctx, pos)
 		require.NoError(t, err)
