@@ -260,6 +260,19 @@ func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Pos
 // The WHERE clause includes exit_time IS NULL so a double-close attempt
 // returns rowsAffected=0 and is rejected, preserving the original
 // "already closed" semantics in one round-trip instead of two.
+//
+// Fee semantics — IMPORTANT contrast with ClosePositionTx:
+//   - ClosePosition (this function) ACCUMULATES via `fees = fees + $4`,
+//     so the row must already carry the entry-side fee at close time.
+//   - ClosePositionTx OVERWRITES via `fees = $5` with a caller-computed
+//     entry+exit total.
+//   - realized_pnl in ClosePosition deducts only the close-side fee
+//     ($4); ClosePositionTx deducts the full caller-computed total.
+//
+// Both are correct individually but produce slightly different
+// realized_pnl on the same trade (ClosePosition's value is overstated
+// by the entry fee). Tracked for unification in #218 — DO NOT change
+// one path without the other.
 func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
 	now := time.Now()
 	// Query parameters:
