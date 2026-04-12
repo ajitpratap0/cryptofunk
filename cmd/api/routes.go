@@ -209,8 +209,24 @@ func (s *APIServer) setupRoutes() {
 		v1.GET("/health", s.handleHealth)
 		v1.GET("/status", s.handleStatus)
 
-		// WebSocket endpoint (no rate limiting - uses connection limits)
-		v1.GET("/ws", s.handleWebSocket)
+		// WebSocket endpoint (no rate limiting - uses connection limits).
+		// SEC-010 / #124: WebSocketAuthMiddleware accepts the key from
+		// the configured header OR an `?api_key=` query parameter
+		// (browsers cannot set custom headers on the WS upgrade
+		// handshake). The middleware itself is a no-op when
+		// auth.enabled=false (via authMiddlewareCore's bypass), so we
+		// install it unconditionally — no wrapping if/else needed.
+		//
+		// NOTE (access-log exposure): the middleware scrubs `api_key`
+		// from c.Request.URL BEFORE c.Next(), but Gin's engine-level
+		// Logger middleware (if registered via gin.Default()) captures
+		// c.Request.URL.RawQuery BEFORE calling c.Next(), so the raw
+		// key may still appear in the Gin access log line. If this
+		// project switches to gin.Default() or adds a Logger() call
+		// before this route, add a gin.LogFormatterParams-based
+		// redaction or ensure the logger is registered AFTER auth.
+		// See WebSocketAuthMiddleware godoc for full operator guidance.
+		v1.GET("/ws", api.WebSocketAuthMiddleware(s.apiKeyStore, authConfig), s.handleWebSocket)
 
 		// Agent routes (read-only, auth then rate limiter)
 		// QA-003 (#146): all read-only trading data endpoints now require
