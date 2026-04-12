@@ -381,19 +381,22 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// guard simultaneously before either reaches the executor. Do not
 	// enable LIVE mode without a FOR UPDATE lock or a compensating
 	// check in the executor.
+	// Require an active trading session for ALL order types. Without
+	// a session the order record lands with session_id=NULL, which
+	// breaks AggregateSessionStats, position lookups, and P&L
+	// attribution. The SELL guard below additionally needs the
+	// session to look up the open position.
+	if sessionID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "no active trading session",
+		})
+		return
+	}
+
 	isSell := strings.EqualFold(req.Side, "sell")
 	var sellClamped bool
 	var sellOriginalQty float64
 	if isSell {
-		// Reject SELL outright when there's no active session — without
-		// a session the position lookup has nothing to query, and the
-		// order record would land with session_id=NULL.
-		if sessionID == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "no active trading session for sell order",
-			})
-			return
-		}
 		existingPos, posErr := s.db.GetOpenPositionBySymbol(ctx, *sessionID, req.Symbol)
 		if posErr != nil {
 			log.Error().Err(posErr).Str("symbol", req.Symbol).Msg("failed to look up open position for SELL guard")

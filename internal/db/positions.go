@@ -1184,20 +1184,6 @@ func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos
 	return &remain, nil
 }
 
-// countOpenPositions returns the total number of open positions (no exit).
-// Unexported: not called today because GetAllOpenPositions has no LIMIT,
-// so total_count == len(positions). Will be exported when the positions
-// endpoint gains real pagination (LIMIT/OFFSET). Kept in the DB layer
-// so the query is ready when needed.
-func (db *DB) countOpenPositions(ctx context.Context) (int, error) { //nolint:unused // kept for future pagination
-	var count int
-	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM positions WHERE exit_time IS NULL`).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count open positions: %w", err)
-	}
-	return count, nil
-}
-
 // GetOpenPositionBySymbol returns the most recent open position for a
 // given session+symbol, or (nil, nil) if none exists. This is the
 // non-transactional counterpart of GetOpenPositionBySymbolTx — used by

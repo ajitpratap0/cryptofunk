@@ -783,6 +783,10 @@ func TestSafeOrderSanitization(t *testing.T) {
 // see TestSafeOrderSanitization for the actual safeOrder sanitization coverage.
 func TestHandlePlaceOrder_NilDBReturns500(t *testing.T) {
 	server := setupMinimalServer(t)
+	// Set an active session so the nil-session guard (QA-005 R4)
+	// doesn't short-circuit to 400 before we reach the nil-DB path.
+	fakeSession := uuid.New()
+	server.activeSessionID = &fakeSession
 	// db is nil — InsertOrder will panic; gin.Recovery converts it to a 500.
 	server.router.Use(gin.Recovery())
 	server.router.POST("/api/v1/orders", server.handlePlaceOrder)
