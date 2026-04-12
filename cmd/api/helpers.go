@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
@@ -52,6 +54,23 @@ func parseIntQuery(c *gin.Context, key string, defaultVal, minVal int) int {
 		return maxPageSize
 	}
 	return v
+}
+
+// wasLimitCapped returns true if the client explicitly requested a
+// limit larger than maxPageSize. Handlers call this after
+// parseIntQuery to decide whether to include a "limit_capped" field
+// in the response so the client knows their requested page size was
+// reduced. QA-009 / #152.
+func wasLimitCapped(c *gin.Context) bool {
+	raw := c.Query("limit")
+	if raw == "" {
+		return false
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return false
+	}
+	return v > maxPageSize
 }
 
 // setActiveSessionID sets the active trading session ID (thread-safe).
@@ -293,21 +312,107 @@ func (s *APIServer) callOrchestratorWithRetry(url string) (*http.Response, error
 	return nil, fmt.Errorf("orchestrator call failed after %d attempts: %w", maxRetries, lastErr)
 }
 
-// bindJSON binds JSON request body to obj and writes the appropriate error response on failure.
-// Returns true if binding succeeded; false if it wrote an error response and the caller should return.
+// validationDetail is one field-level error returned in the "details"
+// array of a 400 response when ShouldBindJSON produces
+// validator.ValidationErrors. Exposing field + tag gives clients
+// enough context to highlight the offending form field and display a
+// human-readable hint without leaking internal struct names
+// (Field() returns the exported Go field name, not the json tag — but
+// the json tag is what the client sent, so we use the struct tag when
+// available). QA-011 / #154.
+type validationDetail struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// bindJSON binds JSON request body to obj and writes the appropriate
+// error response on failure. Returns true if binding succeeded; false
+// if it wrote an error response and the caller should return.
+//
+// When the error is a validator.ValidationErrors (struct-tag validation
+// failure), the response includes a "details" array with per-field
+// entries so the client can pinpoint which fields failed and why
+// (QA-011 / #154). Other binding errors (malformed JSON, wrong types)
+// still return the generic message because they don't carry field info.
 func bindJSON(c *gin.Context, obj any) bool {
 	if err := c.ShouldBindJSON(obj); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			log.Warn().Str("path", c.Request.URL.Path).Msg("request body too large (413)")
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
-		} else {
-			log.Warn().Str("path", c.Request.URL.Path).Err(err).Msg("invalid request body (400)")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return false
 		}
+
+		// Try to extract field-level details from the validator.
+		var validationErrs validator.ValidationErrors
+		if errors.As(err, &validationErrs) {
+			// Build a Go-field-name → json-tag lookup from the target
+			// struct so error fields use the client-facing name
+			// ("symbol") rather than the Go name ("Symbol"). Falls
+			// back to fe.Field() when the struct tag is missing.
+			jsonNames := jsonFieldNames(obj)
+			details := make([]validationDetail, 0, len(validationErrs))
+			for _, fe := range validationErrs {
+				field := fe.Field()
+				if jn, ok := jsonNames[field]; ok {
+					field = jn
+				}
+				// Include the constraint parameter so the client
+				// sees "gt=0" rather than just "gt" — immediately
+				// actionable without guessing the threshold.
+				msg := fe.Tag()
+				if p := fe.Param(); p != "" {
+					msg = fe.Tag() + "=" + p
+				}
+				details = append(details, validationDetail{
+					Field:   field,
+					Message: msg,
+				})
+			}
+			log.Warn().Str("path", c.Request.URL.Path).Int("field_errors", len(details)).Msg("validation failed (400)")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Validation failed",
+				"details": details,
+			})
+			return false
+		}
+
+		// Fallback: JSON syntax error, type mismatch, etc.
+		log.Warn().Str("path", c.Request.URL.Path).Err(err).Msg("invalid request body (400)")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return false
 	}
 	return true
+}
+
+// jsonFieldNames builds a Go-field-name → json-tag-name map from obj's
+// type. Handles pointer-to-struct and struct types. Skips fields with
+// `json:"-"` or no json tag. Used by bindJSON to translate validation
+// errors from Go names ("Symbol") to client-facing names ("symbol").
+func jsonFieldNames(obj any) map[string]string {
+	t := reflect.TypeOf(obj)
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	m := make(map[string]string, t.NumField())
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" {
+			m[f.Name] = name
+		}
+	}
+	return m
 }
 
 // truncateString truncates a string to maxLen and adds "..." if truncated.

@@ -447,6 +447,9 @@ func TestPlaceOrderWithDatabase(t *testing.T) {
 	}
 	err := server.db.CreateSession(ctx, session)
 	require.NoError(t, err)
+	// QA-005 R4: handlePlaceOrder now requires an active session for
+	// ALL order types (not just SELL). Set it so the guard passes.
+	server.activeSessionID = &session.ID
 
 	reqBody := map[string]interface{}{
 		"session_id": session.ID.String(),
@@ -578,6 +581,19 @@ func TestPaperTrade_LimitOrder(t *testing.T) {
 func TestPlaceOrder_ErrorPathSanitization(t *testing.T) {
 	server, tc := setupTestAPIServer(t)
 	_ = tc // testcontainers handles cleanup automatically
+
+	// QA-005 R4: handlePlaceOrder requires an active session.
+	ctx := context.Background()
+	session := &db.TradingSession{
+		ID:             uuid.New(),
+		Symbol:         "BTCUSDT",
+		Mode:           db.TradingModePaper,
+		Exchange:       "binance",
+		InitialCapital: 10000.0,
+		StartedAt:      time.Now(),
+	}
+	require.NoError(t, server.db.CreateSession(ctx, session))
+	server.activeSessionID = &session.ID
 
 	// Ensure mcpClient is nil so connectOrderExecutor short-circuits and executeOrder
 	// returns an error — landing in the safeOrder sanitization branch of handlePlaceOrder.
