@@ -276,32 +276,34 @@ func (db *DB) GetOpenPositionsTx(ctx context.Context, tx pgx.Tx, sessionID uuid.
 // returns rowsAffected=0 and is rejected, preserving the original
 // "already closed" semantics in one round-trip instead of two.
 //
-// Fee semantics — IMPORTANT contrast with ClosePositionTx:
-//   - ClosePosition (this function) ACCUMULATES via `fees = fees + $4`,
-//     so the row must already carry the entry-side fee at close time.
+// Fee semantics (unified in #218):
+//   - ClosePosition (this function) ACCUMULATES via `fees = fees + $4`
+//     and deducts the full accumulated total `(fees + $4)` from
+//     realized_pnl so the net P&L reflects both entry and exit costs.
 //   - ClosePositionTx OVERWRITES via `fees = $5` with a caller-computed
-//     entry+exit total.
-//   - realized_pnl in ClosePosition deducts only the close-side fee
-//     ($4); ClosePositionTx deducts the full caller-computed total.
-//
-// Both are correct individually but produce slightly different
-// realized_pnl on the same trade (ClosePosition's value is overstated
-// by the entry fee). Tracked for unification in #218 — DO NOT change
-// one path without the other.
+//     entry+exit total and deducts the same total from realized_pnl.
+//   - Both paths now produce identical realized_pnl for the same trade.
 func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
 	now := time.Now()
 	// Query parameters:
 	//   $1 = position id, $2 = exit_price, $3 = now (exit_time / updated_at),
-	//   $4 = fees (subtracted from realized_pnl AND added to running fees total),
+	//   $4 = close-side fee (added to running fees total AND included in
+	//        the realized_pnl deduction alongside the stored entry fee),
 	//   $5 = exit_reason.
+	//
+	// #218: realized_pnl now deducts (fees + $4) — the full accumulated
+	// total (entry + close) — instead of just $4 (close only). This
+	// aligns with ClosePositionTx which deducts the caller-computed
+	// entry+close total. Before this fix, realized_pnl was overstated
+	// by exactly the entry-side fee on every close.
 	const query = `
 		UPDATE positions
 		SET
 			exit_price = $2,
 			exit_time = $3,
 			realized_pnl = CASE
-				WHEN side = 'LONG'  THEN ($2 - entry_price) * quantity - $4
-				WHEN side = 'SHORT' THEN (entry_price - $2) * quantity - $4
+				WHEN side = 'LONG'  THEN ($2 - entry_price) * quantity - (fees + $4)
+				WHEN side = 'SHORT' THEN (entry_price - $2) * quantity - (fees + $4)
 				ELSE 0
 			END,
 			unrealized_pnl = 0,
