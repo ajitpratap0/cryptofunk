@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { WebSocketMessage } from '@/lib/types'
+import type { WebSocketMessage, Trade, Position, Order, Agent } from '@/lib/types'
 import { WS_URL, WS_RECONNECT_ATTEMPTS, WS_RECONNECT_INTERVAL } from '@/lib/constants'
 
 export interface WebSocketState {
@@ -156,7 +156,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     })
   }, [updateState])
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: Record<string, unknown>) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify(message))
       return true
@@ -194,11 +194,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
 // Specialized hook for trading data
 export function useTradingWebSocket() {
-  const [trades, setTrades] = useState<Record<string, any>[]>([])
-  const [positions, setPositions] = useState<Record<string, any>[]>([])
-  const [orders, setOrders] = useState<Record<string, any>[]>([])
-  const [agents, setAgents] = useState<Record<string, any>[]>([])
-  const [marketData, setMarketData] = useState<Record<string, any>>({})
+  // #104: replaced Record<string, any>[] with proper types so
+  // consumers get type-safe access to trade/position/order/agent
+  // fields. WebSocketMessage.data is still `any` at runtime (the
+  // backend sends untyped JSON), but the state arrays document the
+  // expected shape and catch misuse at compile time.
+  const [trades, setTrades] = useState<Trade[]>([])
+  const [positions, setPositions] = useState<Position[]>([])
+  const [orders, setOrders] = useState<Order[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [marketData, setMarketData] = useState<Record<string, unknown>>({})
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
     switch (message.type) {

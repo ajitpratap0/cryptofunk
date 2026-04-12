@@ -36,19 +36,23 @@ function makeWrapper() {
   )
 }
 
-const fakeTrade: Trade = {
+// #104: The API returns snake_case JSON (RawApiTrade shape); the hook
+// runs mapApiTrade to convert to the camelCase Trade type. The mock
+// must provide the raw API shape so the mapping path is exercised.
+const fakeRawTrade = {
   id: 'trade-abc',
+  order_id: 'order-123',
   symbol: 'BTCUSDT',
-  side: 'long',
-  entryPrice: 45045,
-  currentPrice: 45045,
+  exchange: 'binance',
+  side: 'BUY',
+  price: 45045,
   quantity: 0.1,
-  pnl: 0,
-  pnlPercent: 0,
-  agent: 'paper',
-  confidence: 1,
-  timestamp: '2026-03-19T16:00:00Z',
-  status: 'open',
+  quote_quantity: 4504.5,
+  commission: 0.01,
+  commission_asset: 'USDT',
+  executed_at: '2026-03-19T16:00:00Z',
+  is_maker: false,
+  created_at: '2026-03-19T16:00:00Z',
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -62,7 +66,7 @@ describe('useTrades', () => {
     const { apiClient } = await import('@/lib/api')
     vi.mocked(apiClient.getTrades).mockResolvedValueOnce({
       success: true,
-      data: { trades: [fakeTrade], count: 1 } as unknown as { trades: Trade[]; count: number },
+      data: { trades: [fakeRawTrade], count: 1 } as unknown as { trades: Trade[]; count: number },
       timestamp: new Date().toISOString(),
     })
 

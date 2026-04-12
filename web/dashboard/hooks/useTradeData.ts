@@ -117,16 +117,39 @@ export function useTrades(limit = 50, offset = 0) {
   })
 }
 
+// #104: useTrade previously always called getMockTrades(), ignoring
+// USE_MOCK_DATA entirely. Now follows the same mock/real pattern as
+// useTrades. When hitting the real API, fetches the full trade list
+// and filters client-side (no single-trade endpoint exists yet).
 export function useTrade(id: string) {
   return useQuery({
     queryKey: [...QUERY_KEYS.trades, id],
     queryFn: async () => {
-      const trades = getMockTrades()
-      const trade = trades.find(t => t.id === id)
+      if (USE_MOCK_DATA) {
+        const trades = getMockTrades()
+        const trade = trades.find(t => t.id === id)
+        return {
+          success: true as const,
+          data: trade || null,
+          timestamp: new Date().toISOString(),
+        }
+      }
+
+      const response = await apiClient.getTrades()
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch trade')
+      }
+
+      const raw: unknown = response.data
+      const tradeList: Trade[] =
+        raw && typeof raw === 'object' && 'trades' in raw
+          ? (raw as { trades: RawApiTrade[] }).trades.map(mapApiTrade)
+          : []
+      const trade = tradeList.find(t => t.id === id)
       return {
         success: true as const,
         data: trade || null,
-        timestamp: new Date().toISOString(),
+        timestamp: response.timestamp,
       }
     },
     enabled: !!id,
