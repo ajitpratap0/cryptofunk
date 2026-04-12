@@ -160,28 +160,40 @@ func (v *Validator) Alphanumeric(field, value string) {
 	}
 }
 
-// NoSpecialChars validates that a string doesn't contain special characters that could be used for injection
+// NoSpecialChars validates that a string doesn't contain special characters that could be used for injection.
+//
+// IMPORTANT: this is a defence-in-depth layer on top of pgx's
+// parameterized queries ($1, $2, ...), NOT a replacement. The real
+// injection defence is parameterisation; this blocklist catches
+// obvious misuse at the input-validation boundary and provides
+// better error messages.
 func (v *Validator) NoSpecialChars(field, value string) {
-	// Disallow characters commonly used in injection attacks
-	// #98: expanded blocklist with UNION (data exfil), EXEC (stored
-	// proc execution), CAST (type coercion bypass), TRUNCATE/ALTER/GRANT
-	// (DDL/DCL privilege escalation).
-	//
-	// IMPORTANT: this is a defence-in-depth layer on top of pgx's
-	// parameterized queries ($1, $2, ...), NOT a replacement. The real
-	// injection defence is parameterisation; this blocklist catches
-	// obvious misuse at the input-validation boundary and provides
-	// better error messages. Known limitations: CAST/GRANT/ALTER are
-	// common English words and may false-positive on legitimate input;
-	// encoding tricks (UN/**/ION, %09) bypass plain strings.Contains.
-	dangerousChars := []string{
-		"<", ">", "'", "\"", ";", "--", "/*", "*/",
-		"DROP", "SELECT", "INSERT", "UPDATE", "DELETE",
-		"UNION", "EXEC", "CAST", "TRUNCATE", "ALTER", "GRANT",
-	}
+	// Characters and multi-char sequences that are always dangerous
+	// regardless of word boundaries (syntax-level injection vectors).
+	dangerousChars := []string{"<", ">", "'", "\"", ";", "--", "/*", "*/"}
+
 	upperValue := strings.ToUpper(value)
 	for _, char := range dangerousChars {
 		if strings.Contains(upperValue, char) {
+			v.AddError(field, "contains disallowed characters")
+			return
+		}
+	}
+
+	// SQL keywords checked as whole words to avoid false positives on
+	// legitimate input ("broadcast" contains CAST, "reunion" contains
+	// UNION, "alternatively" contains ALTER). Pad the value with spaces
+	// and check for " KEYWORD " so only standalone occurrences match.
+	// #98: expanded from the original 5 keywords with UNION (data
+	// exfil), EXEC (stored proc), CAST (type coercion bypass),
+	// TRUNCATE/ALTER/GRANT (DDL/DCL escalation).
+	sqlKeywords := []string{
+		"DROP", "SELECT", "INSERT", "UPDATE", "DELETE",
+		"UNION", "EXEC", "CAST", "TRUNCATE", "ALTER", "GRANT",
+	}
+	padded := " " + upperValue + " "
+	for _, kw := range sqlKeywords {
+		if strings.Contains(padded, " "+kw+" ") {
 			v.AddError(field, "contains disallowed characters")
 			return
 		}

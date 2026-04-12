@@ -89,18 +89,21 @@ func (db *DB) CreateSession(ctx context.Context, session *TradingSession) error 
 }
 
 // GetSession retrieves a trading session by ID
-func (db *DB) GetSession(ctx context.Context, sessionID uuid.UUID) (*TradingSession, error) {
-	query := `
-		SELECT id, mode, symbol, exchange, started_at, stopped_at,
-		       initial_capital, final_capital, total_trades, winning_trades,
-		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
-		       config, metadata, created_at, updated_at
-		FROM trading_sessions
-		WHERE id = $1
-	`
+// sessionSelectQuery is shared by GetSession and GetSessionTx to avoid
+// duplicating the column list (a new column added to one but not the
+// other causes a scan mismatch panic at runtime).
+const sessionSelectQuery = `
+	SELECT id, mode, symbol, exchange, started_at, stopped_at,
+	       initial_capital, final_capital, total_trades, winning_trades,
+	       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
+	       config, metadata, created_at, updated_at
+	FROM trading_sessions
+	WHERE id = $1
+`
 
+func (db *DB) GetSession(ctx context.Context, sessionID uuid.UUID) (*TradingSession, error) {
 	var session TradingSession
-	err := db.pool.QueryRow(ctx, query, sessionID).Scan(
+	err := db.pool.QueryRow(ctx, sessionSelectQuery, sessionID).Scan(
 		&session.ID,
 		&session.Mode,
 		&session.Symbol,
@@ -132,16 +135,8 @@ func (db *DB) GetSession(ctx context.Context, sessionID uuid.UUID) (*TradingSess
 // DB-008 (#132): used by the equity snapshot to ensure the session read
 // and the snapshot INSERT see the same data.
 func (db *DB) GetSessionTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) (*TradingSession, error) {
-	query := `
-		SELECT id, mode, symbol, exchange, started_at, stopped_at,
-		       initial_capital, final_capital, total_trades, winning_trades,
-		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
-		       config, metadata, created_at, updated_at
-		FROM trading_sessions
-		WHERE id = $1
-	`
 	var session TradingSession
-	err := tx.QueryRow(ctx, query, sessionID).Scan(
+	err := tx.QueryRow(ctx, sessionSelectQuery, sessionID).Scan(
 		&session.ID, &session.Mode, &session.Symbol, &session.Exchange,
 		&session.StartedAt, &session.StoppedAt, &session.InitialCapital,
 		&session.FinalCapital, &session.TotalTrades, &session.WinningTrades,
