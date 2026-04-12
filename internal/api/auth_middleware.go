@@ -311,6 +311,21 @@ func authMiddlewareCore(store *APIKeyStore, config *AuthConfig, variant authVari
 		c.Set("api_key_name", keyRecord.Name)
 		c.Set("permissions", keyRecord.Permissions)
 
+		// Scrub the api_key query parameter from the request URL so
+		// downstream middleware (Gin's built-in Logger, any access-log
+		// sidecar reading c.Request.URL) never sees the raw key. This
+		// is a defence-in-depth measure on top of the operator guidance
+		// in the WebSocketAuthMiddleware godoc. Only fires when the
+		// param is actually present — the standard AuthMiddleware
+		// variant never populates it, so the branch is a no-op there.
+		if c.Request.URL.RawQuery != "" {
+			q := c.Request.URL.Query()
+			if q.Has("api_key") {
+				q.Del("api_key")
+				c.Request.URL.RawQuery = q.Encode()
+			}
+		}
+
 		log.Debug().
 			Str("middleware", variant.logPrefix).
 			Str("user_id", keyRecord.UserID).

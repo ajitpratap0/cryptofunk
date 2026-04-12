@@ -246,7 +246,15 @@ func (h *HTTPServer) Stop(ctx context.Context) error {
 	}
 
 	log.Info().Msg("Shutting down HTTP server...")
-	return h.server.Shutdown(ctx)
+	err := h.server.Shutdown(ctx)
+
+	// Nil the listener so Addr() returns nil after stop — prevents
+	// callers from reading a stale address on a closed listener.
+	h.listenerMu.Lock()
+	h.listener = nil
+	h.listenerMu.Unlock()
+
+	return err
 }
 
 // handleHealth handles GET /health - basic liveness check
