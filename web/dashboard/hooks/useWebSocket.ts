@@ -199,6 +199,16 @@ export function useTradingWebSocket() {
   // fields. WebSocketMessage.data is still `any` at runtime (the
   // backend sends untyped JSON), but the state arrays document the
   // expected shape and catch misuse at compile time.
+  //
+  // WARNING: the backend WS payload uses the same snake_case JSON
+  // encoding as the REST API (encoding/json on Go structs with
+  // snake_case tags). The REST path runs mapApiTrade to convert to
+  // camelCase Trade shape, but the WS path does NOT — message.data
+  // is pushed directly into the Trade[] array. Consumers accessing
+  // e.g. trade.entryPrice will get undefined at runtime because the
+  // wire format has `price`, not `entryPrice`. A mapApiTrade pass
+  // (or a shared mapper per message.type) is needed to close this
+  // gap. Tracked as a follow-up alongside #224.
   const [trades, setTrades] = useState<Trade[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [orders, setOrders] = useState<Order[]>([])

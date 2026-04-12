@@ -172,7 +172,10 @@ export function useTrade(id: string) {
 
       // Cache miss — fetch with a large limit so trades beyond the
       // default page size (50) aren't silently truncated.
-      const response = await apiClient.getTrades(1000, 0)
+      // TODO (#224): replace with GET /trades/:id once the backend
+      // supports a single-trade endpoint.
+      const MAX_TRADE_LOOKUP_LIMIT = 1000
+      const response = await apiClient.getTrades(MAX_TRADE_LOOKUP_LIMIT, 0)
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch trade')
       }
