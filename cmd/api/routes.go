@@ -21,6 +21,29 @@ import (
 // bounding memory usage per request against OOM attacks.
 const maxRequestBodyBytes = 1 << 20 // 1 MB
 
+// buildAPIAuthConfig copies the viper-loaded config.AuthConfig into the
+// runtime api.AuthConfig shape the middleware consumes. Exposed as a
+// pure function (not inline in registerRoutes) so TestAuthConfigMapping
+// in auth_config_mapping_test.go can test the LIVE wiring instead of a
+// private copy — a field added to one struct without the matching copy
+// line here is caught by that test.
+//
+// KeyPepper is intentionally NOT copied — it flows into the
+// APIKeyStore via NewAPIKeyStoreWithPepper rather than through the
+// AuthConfig surface the middleware sees.
+func buildAPIAuthConfig(src config.AuthConfig) *api.AuthConfig {
+	cfg := &api.AuthConfig{
+		Enabled:             src.Enabled,
+		HeaderName:          src.HeaderName,
+		RequireHTTPS:        src.RequireHTTPS,
+		TrustForwardedProto: src.TrustForwardedProto,
+	}
+	if cfg.HeaderName == "" {
+		cfg.HeaderName = "X-API-Key" // Default header name
+	}
+	return cfg
+}
+
 func (s *APIServer) setupMiddleware() {
 	// Recovery middleware must be first so panics in ALL subsequent middleware and handlers are caught
 	s.router.Use(gin.Recovery())
@@ -101,7 +124,46 @@ func (s *APIServer) setupRoutes() {
 
 	// Initialize API key store for authentication
 	// Auth is disabled by default for development - enable via config.yaml: api.auth.enabled = true
-	s.apiKeyStore = api.NewAPIKeyStore(s.db.Pool(), s.config.API.Auth.Enabled)
+	// SEC-009 (#123): pass the configured HMAC pepper so new keys are
+	// stored with hash_algorithm='hmac-sha256' and legacy rows get
+	// opportunistically upgraded on first successful validation.
+	keyPepper := s.config.API.Auth.KeyPepper
+	// Log the pepper configuration at startup so operators can correlate
+	// a deploy with any unexpected key-rejection spike (accidental pepper
+	// rotation silently falls back to sha256 probes for existing keys,
+	// which would otherwise leave no trail in the logs).
+	if keyPepper == "" {
+		// Warn rather than Info because running without a pepper is a
+		// documented security degradation — alert pipelines that filter
+		// below Warn will miss an Info log here.
+		log.Warn().Str("algo", "sha256").Msg("API key pepper not configured — legacy raw SHA-256 scheme in use; set CRYPTOFUNK_API_AUTH_KEY_PEPPER to enable HMAC (SEC-009)")
+	} else {
+		// Log presence as a boolean rather than the actual length. Leaking
+		// the exact byte count into log aggregators would give an attacker
+		// who compromises log storage a small but real head start on a
+		// brute-force attack by narrowing the search space — especially
+		// damaging if the pepper turns out to be shorter than the 32-byte
+		// guidance. `pepper_set: true` conveys the operational signal
+		// (pepper is wired, HMAC path is live) without the length leak.
+		log.Info().
+			Str("algo", "hmac-sha256").
+			Bool("pepper_set", true).
+			Msg("API key pepper configured — new keys will use HMAC-SHA256 (SEC-009)")
+		// Warn when a pepper is set but too short. The intent is to make
+		// a misconfiguration loud at startup — operators following the
+		// documented guidance generate 32+ random bytes from a CSPRNG,
+		// so a short value almost certainly indicates the env var was
+		// set by hand with an insecure value. Not fatal: even a short
+		// pepper is better than none, and we don't want a typo to block
+		// startup. The warning intentionally omits the exact length for
+		// the same reason as above — the message itself ("<32 bytes") is
+		// the actionable signal.
+		if len(keyPepper) < 32 {
+			log.Warn().
+				Msg("api.auth.key_pepper is shorter than 32 bytes — regenerate from a CSPRNG for full SEC-009 protection")
+		}
+	}
+	s.apiKeyStore = api.NewAPIKeyStoreWithPepper(s.db.Pool(), s.config.API.Auth.Enabled, keyPepper)
 
 	isProduction := s.config.App.Environment == envProduction
 
@@ -129,14 +191,7 @@ func (s *APIServer) setupRoutes() {
 
 	// Single auth config shared by all protected endpoints (metrics and API v1).
 	// Consolidating the previously duplicated metricsAuthConfig here (#193).
-	authConfig := &api.AuthConfig{
-		Enabled:      s.config.API.Auth.Enabled,
-		HeaderName:   s.config.API.Auth.HeaderName,
-		RequireHTTPS: s.config.API.Auth.RequireHTTPS,
-	}
-	if authConfig.HeaderName == "" {
-		authConfig.HeaderName = "X-API-Key" // Default header name
-	}
+	authConfig := buildAPIAuthConfig(s.config.API.Auth)
 
 	// Prometheus metrics endpoint (no API prefix, no rate limiting).
 	// Requires API key when auth is enabled (#120) to prevent leaking internal
@@ -305,7 +360,7 @@ func (s *APIServer) setupRoutes() {
 		// TB-006: API Key Management routes
 		// These endpoints allow users to manage their API keys (create, rotate, revoke)
 		// All key management operations require authentication
-		keysHandler := api.NewKeysHandler(s.db.Pool())
+		keysHandler := api.NewKeysHandlerWithPepper(s.db.Pool(), s.config.API.Auth.KeyPepper)
 		s.keyManager = keysHandler.GetKeyManager()
 
 		// Start the expired key cleanup worker (runs every hour)

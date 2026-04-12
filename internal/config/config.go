@@ -235,9 +235,23 @@ type APIConfig struct {
 
 // AuthConfig contains API authentication settings
 type AuthConfig struct {
-	Enabled      bool   `mapstructure:"enabled"`       // Enable API key authentication
-	HeaderName   string `mapstructure:"header_name"`   // Header name for API key (default: X-API-Key)
-	RequireHTTPS bool   `mapstructure:"require_https"` // Require HTTPS in production
+	Enabled             bool   `mapstructure:"enabled"`               // Enable API key authentication
+	HeaderName          string `mapstructure:"header_name"`           // Header name for API key (default: X-API-Key)
+	RequireHTTPS        bool   `mapstructure:"require_https"`         // Require HTTPS in production
+	TrustForwardedProto bool   `mapstructure:"trust_forwarded_proto"` // Trust X-Forwarded-Proto from reverse proxy (default false)
+	// KeyPepper is an HMAC-SHA256 pepper mixed with each API key before
+	// hashing for storage (SEC-009 / #123). Leave empty for local dev
+	// (legacy raw SHA-256). In production set via
+	// CRYPTOFUNK_API_AUTH_KEY_PEPPER to a long random string from your
+	// secret manager. Rotating the pepper invalidates every HMAC-hashed
+	// key — legacy sha256 rows continue to work until rehashed.
+	//
+	// The json:"-" / yaml:"-" tags prevent the pepper from leaking if
+	// the config struct is ever marshaled (e.g. a debug dump handler,
+	// viper.WriteConfigAs, or a test harness that logs the full cfg).
+	// The pepper should only flow from env → viper → in-memory struct;
+	// it must never appear in logs, request bodies, or config dumps.
+	KeyPepper string `mapstructure:"key_pepper" json:"-" yaml:"-"`
 }
 
 // MonitoringConfig contains monitoring settings
@@ -518,6 +532,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("api.auth.enabled", false)
 	v.SetDefault("api.auth.header_name", "X-API-Key")
 	v.SetDefault("api.auth.require_https", true)
+	v.SetDefault("api.auth.trust_forwarded_proto", false)
+	v.SetDefault("api.auth.key_pepper", "")
 
 	// Polymarket defaults
 	v.SetDefault("polymarket.mode", "paper")

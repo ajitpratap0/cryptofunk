@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/pashagolub/pgxmock/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +69,68 @@ func TestDefaultAuthConfig(t *testing.T) {
 	assert.Equal(t, "X-API-Key", config.HeaderName)
 	assert.True(t, config.RequireHTTPS)
 	assert.False(t, config.TrustForwardedProto)
+}
+
+// TestMustHashAPIKeyHMAC_SEC009 verifies the HMAC pepper helper produces
+// distinct outputs for different peppers and matches the stdlib HMAC
+// contract. Adding a server-side pepper is the core mitigation for
+// SEC-009 / #123 — a stolen DB dump is no longer enough to run rainbow
+// tables against the stored hashes.
+func TestHmacAPIKeyHash_SEC009(t *testing.T) {
+	t.Run("different peppers produce different hashes for same key", func(t *testing.T) {
+		key := "the-same-plaintext-key"
+		h1 := hmacAPIKeyHash("pepper-A", key)
+		h2 := hmacAPIKeyHash("pepper-B", key)
+		assert.NotEqual(t, h1, h2, "distinct peppers must produce distinct hashes")
+		assert.Len(t, h1, 64, "HMAC-SHA256 hex output is always 64 chars")
+		assert.Len(t, h2, 64)
+	})
+
+	t.Run("same pepper is deterministic", func(t *testing.T) {
+		h1 := hmacAPIKeyHash("secret", "my-key")
+		h2 := hmacAPIKeyHash("secret", "my-key")
+		assert.Equal(t, h1, h2, "HMAC with the same pepper+key must be deterministic")
+	})
+
+	t.Run("HMAC differs from raw SHA-256 for the same key", func(t *testing.T) {
+		key := "my-api-key"
+		sha := HashAPIKey(key)
+		// Variable name is hmacHash (not 'hmac') so it doesn't shadow the
+		// crypto/hmac package if this test ever imports it directly.
+		hmacHash := hmacAPIKeyHash("some-pepper", key)
+		assert.NotEqual(t, sha, hmacHash, "HMAC with a non-empty pepper must not equal raw SHA-256")
+	})
+
+	t.Run("panics on empty pepper", func(t *testing.T) {
+		// Documents the invariant: hmacAPIKeyHash intentionally rejects
+		// empty peppers because HMAC-SHA256 with a zero-length key has
+		// no entropy and is equivalent to a published constant. Any
+		// future "fix" that removes the panic without understanding the
+		// security implication will fail this test.
+		assert.Panics(t, func() {
+			_ = hmacAPIKeyHash("", "any-key")
+		}, "hmacAPIKeyHash must panic on empty pepper to prevent silent downgrade")
+	})
+}
+
+// TestHashAPIKeyForStorage_SEC009 covers the dispatch helper used by
+// CreateAPIKey / RotateAPIKey. Empty pepper → legacy SHA-256; non-empty
+// pepper → HMAC-SHA256. The returned algorithm marker drives the
+// api_keys.hash_algorithm column value.
+func TestHashAPIKeyForStorage_SEC009(t *testing.T) {
+	t.Run("empty pepper returns sha256", func(t *testing.T) {
+		hash, algo := HashAPIKeyForStorage("", "some-key")
+		assert.Equal(t, HashAlgoSHA256, algo)
+		assert.Equal(t, HashAPIKey("some-key"), hash)
+	})
+
+	t.Run("non-empty pepper returns hmac-sha256", func(t *testing.T) {
+		hash, algo := HashAPIKeyForStorage("my-pepper", "some-key")
+		assert.Equal(t, HashAlgoHMACSHA256, algo)
+		assert.Equal(t, hmacAPIKeyHash("my-pepper", "some-key"), hash)
+		// And it must NOT match the legacy scheme.
+		assert.NotEqual(t, HashAPIKey("some-key"), hash)
+	})
 }
 
 // TestTrustForwardedProto_SEC004 verifies that the X-Forwarded-Proto header
@@ -1010,5 +1075,166 @@ func TestAPIKeyExpiration(t *testing.T) {
 		}
 
 		assert.Nil(t, apiKey.ExpiresAt)
+	})
+}
+
+// TestAPIKeyStore_ValidateKey_HMAC_SEC009 mirrors
+// TestKeyManager_ValidateAPIKey_HMAC_SEC009 for the middleware hot
+// path. Verifies that APIKeyStore.ValidateKey:
+//  1. Probes the HMAC hash first when a pepper is configured and
+//     matches a key stored with hash_algorithm='hmac-sha256'.
+//  2. Falls back to the SHA-256 probe when the HMAC probe misses
+//     (legacy row) and still returns the key.
+//  3. Propagates non-ErrNoRows DB errors from the first probe WITHOUT
+//     silently falling through to the legacy probe — the critical
+//     security invariant introduced in round 1.
+//  4. Returns (nil, nil) when every probe reports ErrNoRows (the
+//     middleware consumes this as a clean "not authorized" rejection).
+func TestAPIKeyStore_ValidateKey_HMAC_SEC009(t *testing.T) {
+	const pepper = "unit-test-pepper-sec009"
+
+	newRow := func(keyHash string) *pgxmock.Rows {
+		return pgxmock.NewRows([]string{
+			"id", "key_hash", "name", "user_id", "permissions", "last_used_at",
+			"created_at", "expires_at", "revoked", "is_active",
+		}).AddRow(
+			uuid.New(),
+			keyHash,
+			"Test Key",
+			"test-user",
+			[]byte(`["read:decisions"]`),
+			nil,
+			time.Now(),
+			nil,
+			false,
+			true,
+		)
+	}
+
+	// Note on pgxmock v3 + concurrent Exec: pgxmock v3 has a known
+	// mutex bug when MatchExpectationsInOrder(false) is combined with
+	// concurrent Exec calls from goroutines, producing "sync: unlock
+	// of unlocked mutex" panics. These subtests use the default
+	// in-order matching: expectations are consumed in sequence, so
+	// async goroutines must spawn in a deterministic order relative
+	// to setup. waitForRehashesForTest() drains in-flight rehash
+	// goroutines before mock.Close() to avoid racing teardown.
+
+	t.Run("HMAC probe hits first", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+
+		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
+		plaintext := "middleware-key-hmac-hit"
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
+
+		mock.ExpectQuery("SELECT id, key_hash, name").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnRows(newRow(hmacHash))
+		// The only async work on the HMAC-hit path is the last_used_at update.
+		mock.ExpectExec("UPDATE api_keys SET last_used_at").
+			WithArgs(pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+		apiKey, err := store.ValidateKey(context.Background(), plaintext)
+		require.NoError(t, err)
+		require.NotNil(t, apiKey)
+		assert.Equal(t, "Test Key", apiKey.Name)
+		waitForRehashesForTest()
+		assert.NoError(t, mock.ExpectationsWereMet())
+		mock.Close()
+	})
+
+	t.Run("HMAC probe misses, SHA-256 fallback hits and triggers async rehash", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+
+		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
+		plaintext := "middleware-key-legacy"
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
+		legacyHash := HashAPIKey(plaintext)
+
+		// First probe (HMAC) returns ErrNoRows.
+		mock.ExpectQuery("SELECT id, key_hash, name").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnError(pgx.ErrNoRows)
+		// Second probe (SHA-256) returns the legacy row.
+		mock.ExpectQuery("SELECT id, key_hash, name").
+			WithArgs(legacyHash, HashAlgoSHA256).
+			WillReturnRows(newRow(legacyHash))
+		// Two sequential UPDATEs issued by the SINGLE runAsyncKeyOps
+		// goroutine — rehash first, then last_used_at. The helper
+		// chains them in one goroutine so pgxmock's in-order matcher
+		// is deterministic. Use WithArgs with AnyArg so the rehash's
+		// 4-parameter call and the last_used_at's 1-parameter call
+		// both match cleanly instead of logging "expected 0, but got
+		// N arguments".
+		mock.ExpectExec("UPDATE api_keys SET key_hash").
+			WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+		mock.ExpectExec("UPDATE api_keys SET last_used_at").
+			WithArgs(pgxmock.AnyArg()).
+			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+		apiKey, err := store.ValidateKey(context.Background(), plaintext)
+		require.NoError(t, err)
+		require.NotNil(t, apiKey, "legacy sha256 row must validate via fallback probe")
+		assert.Equal(t, "Test Key", apiKey.Name)
+		waitForRehashesForTest()
+		assert.NoError(t, mock.ExpectationsWereMet())
+		mock.Close()
+	})
+
+	t.Run("HMAC probe DB error propagates without legacy fallback", func(t *testing.T) {
+		// CRITICAL security invariant: a non-ErrNoRows error on the HMAC
+		// probe must abort validation, NOT fall through to the legacy
+		// probe. The mock's ExpectationsWereMet at the end fails if the
+		// legacy probe runs (because no matching expectation is set).
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
+		plaintext := "middleware-key-transient"
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
+
+		mock.ExpectQuery("SELECT id, key_hash, name").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnError(errors.New("connection refused"))
+
+		apiKey, err := store.ValidateKey(context.Background(), plaintext)
+		require.Error(t, err, "non-ErrNoRows DB error must propagate")
+		assert.Nil(t, apiKey)
+		assert.Contains(t, err.Error(), "connection refused")
+		assert.NoError(t, mock.ExpectationsWereMet(),
+			"legacy probe must NOT run after a non-ErrNoRows error on the HMAC probe")
+		// No async work on this path — error propagates before the
+		// goroutines spawn — so no drain needed.
+	})
+
+	t.Run("all probes miss returns nil nil for clean rejection", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		store := NewAPIKeyStoreWithPepper(mock, true, pepper)
+		plaintext := "middleware-key-not-found"
+		hmacHash := hmacAPIKeyHash(pepper, plaintext)
+		legacyHash := HashAPIKey(plaintext)
+
+		mock.ExpectQuery("SELECT id, key_hash, name").
+			WithArgs(hmacHash, HashAlgoHMACSHA256).
+			WillReturnError(pgx.ErrNoRows)
+		mock.ExpectQuery("SELECT id, key_hash, name").
+			WithArgs(legacyHash, HashAlgoSHA256).
+			WillReturnError(pgx.ErrNoRows)
+
+		apiKey, err := store.ValidateKey(context.Background(), plaintext)
+		// (nil, nil) is the documented return convention for the
+		// middleware path — the auth handler consumes this as a clean
+		// "not authorized" rejection without caring about the reason.
+		require.NoError(t, err)
+		assert.Nil(t, apiKey)
+		// No async work on the not-found path.
 	})
 }

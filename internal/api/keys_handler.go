@@ -44,10 +44,29 @@ type KeysHandler struct {
 	keyManager KeyManagerInterface
 }
 
-// NewKeysHandler creates a new KeysHandler
+// NewKeysHandler creates a new KeysHandler. The returned handler manages
+// keys with the legacy SHA-256 hash scheme.
+//
+// Deprecated: prefer NewKeysHandlerWithPepper in production so new keys
+// use HMAC with the server pepper (SEC-009 / #123).
 func NewKeysHandler(db *pgxpool.Pool) *KeysHandler {
 	return &KeysHandler{
 		keyManager: NewKeyManager(db),
+	}
+}
+
+// NewKeysHandlerWithPepper creates a new KeysHandler whose KeyManager is
+// configured with an HMAC pepper so new / rotated keys are stored with
+// hash_algorithm='hmac-sha256' (SEC-009 / #123).
+//
+// Takes the KeyManagerDB interface (not *pgxpool.Pool) for parity with
+// NewAPIKeyStoreWithPepper / NewKeyManagerWithPepper — tests can wire a
+// pgxmock pool through this constructor without going around it via
+// NewKeysHandlerWithKeyManager. Production callers pass s.db.Pool()
+// which satisfies the interface implicitly.
+func NewKeysHandlerWithPepper(db KeyManagerDB, pepper string) *KeysHandler {
+	return &KeysHandler{
+		keyManager: NewKeyManagerWithPepper(db, pepper),
 	}
 }
 
