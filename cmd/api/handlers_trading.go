@@ -978,10 +978,20 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			log.Warn().Err(err).Msg("Failed to aggregate session stats after paper trade")
 		}
 
-		// Write equity snapshot (best-effort: don't fail the trade on snapshot errors).
-		if session, err := s.db.GetSession(ctx, *sessionID); err != nil {
-			log.Warn().Err(err).Msg("Failed to re-fetch session for equity snapshot")
-		} else {
+		// DB-008 (#132): Write equity snapshot inside a short ReadCommitted
+		// transaction so the reads (GetSession + GetOpenPositions) and the
+		// INSERT are atomic. Previously the reads and write were bare pool
+		// operations outside any transaction, creating a torn-write window
+		// where concurrent trades could modify session state between the
+		// read and the insert. The snapshot tx is separate from the trade
+		// tx (which already committed above) because the snapshot needs to
+		// see the committed trade + aggregated stats. Best-effort: don't
+		// fail the trade on snapshot errors.
+		if snapErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+			session, err := s.db.GetSession(ctx, *sessionID)
+			if err != nil {
+				return fmt.Errorf("re-fetch session: %w", err)
+			}
 			openPositions, posErr := s.db.GetOpenPositions(ctx, *sessionID)
 			if posErr != nil {
 				log.Warn().Err(posErr).Str("session_id", sessionID.String()).Msg("equity snapshot: failed to fetch open positions, unrealizedPnL will be 0")
@@ -993,9 +1003,9 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				}
 			}
 			currentEquity := session.InitialCapital + session.TotalPnL + sumUnrealized
-			if snapErr := s.db.InsertEquitySnapshot(ctx, *sessionID, currentEquity, session.TotalPnL, sumUnrealized); snapErr != nil {
-				log.Warn().Err(snapErr).Msg("Failed to write equity snapshot")
-			}
+			return s.db.InsertEquitySnapshotTx(ctx, tx, *sessionID, currentEquity, session.TotalPnL, sumUnrealized)
+		}); snapErr != nil {
+			log.Warn().Err(snapErr).Msg("Failed to write equity snapshot")
 		}
 	} else {
 		// Limit orders are not immediately filled; persist the order record in NEW status.

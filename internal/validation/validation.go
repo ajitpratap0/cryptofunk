@@ -163,7 +163,14 @@ func (v *Validator) Alphanumeric(field, value string) {
 // NoSpecialChars validates that a string doesn't contain special characters that could be used for injection
 func (v *Validator) NoSpecialChars(field, value string) {
 	// Disallow characters commonly used in injection attacks
-	dangerousChars := []string{"<", ">", "'", "\"", ";", "--", "/*", "*/", "DROP", "SELECT", "INSERT", "UPDATE", "DELETE"}
+	// #98: expanded blocklist with UNION (data exfil), EXEC (stored
+	// proc execution), CAST (type coercion bypass), TRUNCATE/ALTER/GRANT
+	// (DDL/DCL privilege escalation).
+	dangerousChars := []string{
+		"<", ">", "'", "\"", ";", "--", "/*", "*/",
+		"DROP", "SELECT", "INSERT", "UPDATE", "DELETE",
+		"UNION", "EXEC", "CAST", "TRUNCATE", "ALTER", "GRANT",
+	}
 	upperValue := strings.ToUpper(value)
 	for _, char := range dangerousChars {
 		if strings.Contains(upperValue, char) {
