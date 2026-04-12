@@ -101,53 +101,41 @@ const sessionSelectQuery = `
 	WHERE id = $1
 `
 
-func (db *DB) GetSession(ctx context.Context, sessionID uuid.UUID) (*TradingSession, error) {
-	var session TradingSession
-	err := db.pool.QueryRow(ctx, sessionSelectQuery, sessionID).Scan(
-		&session.ID,
-		&session.Mode,
-		&session.Symbol,
-		&session.Exchange,
-		&session.StartedAt,
-		&session.StoppedAt,
-		&session.InitialCapital,
-		&session.FinalCapital,
-		&session.TotalTrades,
-		&session.WinningTrades,
-		&session.LosingTrades,
-		&session.TotalPnL,
-		&session.MaxDrawdown,
-		&session.SharpeRatio,
-		&session.Config,
-		&session.Metadata,
-		&session.CreatedAt,
-		&session.UpdatedAt,
+// scanSession scans a single trading session row. Shared by GetSession
+// and GetSessionTx so the column-to-field mapping lives in one place.
+func scanSession(row pgx.Row) (*TradingSession, error) {
+	var s TradingSession
+	err := row.Scan(
+		&s.ID, &s.Mode, &s.Symbol, &s.Exchange,
+		&s.StartedAt, &s.StoppedAt, &s.InitialCapital,
+		&s.FinalCapital, &s.TotalTrades, &s.WinningTrades,
+		&s.LosingTrades, &s.TotalPnL, &s.MaxDrawdown,
+		&s.SharpeRatio, &s.Config, &s.Metadata,
+		&s.CreatedAt, &s.UpdatedAt,
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
 
+func (db *DB) GetSession(ctx context.Context, sessionID uuid.UUID) (*TradingSession, error) {
+	session, err := scanSession(db.pool.QueryRow(ctx, sessionSelectQuery, sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trading session: %w", err)
 	}
-
-	return &session, nil
+	return session, nil
 }
 
 // GetSessionTx reads a trading session inside an existing transaction.
 // DB-008 (#132): used by the equity snapshot to ensure the session read
 // and the snapshot INSERT see the same data.
 func (db *DB) GetSessionTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) (*TradingSession, error) {
-	var session TradingSession
-	err := tx.QueryRow(ctx, sessionSelectQuery, sessionID).Scan(
-		&session.ID, &session.Mode, &session.Symbol, &session.Exchange,
-		&session.StartedAt, &session.StoppedAt, &session.InitialCapital,
-		&session.FinalCapital, &session.TotalTrades, &session.WinningTrades,
-		&session.LosingTrades, &session.TotalPnL, &session.MaxDrawdown,
-		&session.SharpeRatio, &session.Config, &session.Metadata,
-		&session.CreatedAt, &session.UpdatedAt,
-	)
+	session, err := scanSession(tx.QueryRow(ctx, sessionSelectQuery, sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trading session in tx: %w", err)
 	}
-	return &session, nil
+	return session, nil
 }
 
 // UpdateSessionStats updates trading session statistics

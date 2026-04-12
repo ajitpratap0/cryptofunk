@@ -35,7 +35,7 @@ func (db *DB) InsertEquitySnapshot(ctx context.Context, sessionID uuid.UUID, equ
 // InsertEquitySnapshot outside any transaction, creating a torn-write
 // window where concurrent trades could modify session state between the
 // reads (GetSessionTx, GetOpenPositionsTx) and the INSERT. This Tx
-// variant participates in a short ReadCommitted snapshot transaction
+// variant participates in a short RepeatableRead snapshot transaction
 // that wraps all three operations — separate from the already-committed
 // trade transaction because the snapshot needs to see the committed
 // trade + aggregated stats.

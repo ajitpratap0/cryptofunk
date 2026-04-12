@@ -15,14 +15,15 @@ import (
 
 // Health check handler
 func (s *APIServer) handleHealth(c *gin.Context) {
+	// #98: version intentionally excluded from this unauthenticated
+	// endpoint to prevent fingerprinting. Operators can correlate
+	// version via the authenticated /api/v1/status or Prometheus labels.
+
 	// Check database connection
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
 	if err := s.db.Ping(ctx); err != nil {
-		// #98: version removed from unauthenticated /health to prevent
-		// fingerprinting. Operators can correlate version via the
-		// authenticated /api/v1/status endpoint or Prometheus labels.
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "unhealthy",
 			"error":  "database connection failed",

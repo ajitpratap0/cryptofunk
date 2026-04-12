@@ -978,15 +978,16 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			log.Warn().Err(err).Msg("Failed to aggregate session stats after paper trade")
 		}
 
-		// DB-008 (#132): Write equity snapshot inside a short ReadCommitted
-		// transaction so the reads (GetSession + GetOpenPositions) and the
-		// INSERT are atomic. Previously the reads and write were bare pool
-		// operations outside any transaction, creating a torn-write window
-		// where concurrent trades could modify session state between the
-		// read and the insert. The snapshot tx is separate from the trade
-		// tx (which already committed above) because the snapshot needs to
-		// see the committed trade + aggregated stats. Best-effort: don't
-		// fail the trade on snapshot errors.
+		// DB-008 (#132): Write equity snapshot inside a RepeatableRead
+		// transaction so the reads (GetSessionTx + GetOpenPositionsTx)
+		// and the INSERT share the same snapshot and are atomic.
+		// Previously the reads and write were bare pool operations
+		// outside any transaction, creating a torn-write window where
+		// concurrent trades could modify session state between the
+		// read and the insert. The snapshot tx is separate from the
+		// trade tx (which already committed above) because the snapshot
+		// needs to see the committed trade + aggregated stats.
+		// Best-effort: don't fail the trade on snapshot errors.
 		// RepeatableRead (not ReadCommitted) so all statements in the tx
 		// see the same snapshot — a concurrent trade that commits between
 		// GetSessionTx and GetOpenPositionsTx won't be reflected in one
