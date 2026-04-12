@@ -30,7 +30,7 @@ import (
 type HTTPServer struct {
 	server       *http.Server
 	listener     net.Listener // captured at Start so tests can read .Addr()
-	listenerMu   sync.Mutex   // guards listener for safe Start/Addr concurrency
+	listenerMu   sync.RWMutex // guards listener for safe Start/Addr concurrency
 	orchestrator *orchestrator.Orchestrator
 	port         int
 	startTime    time.Time
@@ -232,8 +232,8 @@ func (h *HTTPServer) Start() error {
 // Useful for tests that pass port 0 to NewHTTPServer and need to
 // discover the kernel-assigned ephemeral port to build a request URL.
 func (h *HTTPServer) Addr() net.Addr {
-	h.listenerMu.Lock()
-	defer h.listenerMu.Unlock()
+	h.listenerMu.RLock()
+	defer h.listenerMu.RUnlock()
 	if h.listener == nil {
 		return nil
 	}

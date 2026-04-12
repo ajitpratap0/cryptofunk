@@ -469,6 +469,7 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			client := &http.Client{Transport: &http.Transport{}}
+			t.Cleanup(client.CloseIdleConnections)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -498,6 +499,35 @@ func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
 			}
 		})
 	}
+
+	// Edge case: "Authorization: Bearer " with nothing after the space.
+	// The manual `len(authz) > len(bearerPrefix)` check rejects this at
+	// the length gate (bearerPrefix="Bearer " is 7 chars, "Bearer " is
+	// exactly 7 so > fails). This test pins the behaviour so a future
+	// refactor to strings.HasPrefix (which would accept the empty token
+	// and pass "" to the validator) doesn't change the contract.
+	t.Run("empty Bearer token → 401", func(t *testing.T) {
+		client := &http.Client{Transport: &http.Transport{}}
+		t.Cleanup(client.CloseIdleConnections)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer ") // space-only, no token
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("empty Bearer token: got %d want 401", resp.StatusCode)
+		}
+	})
 }
 
 // TestMetricsEndpointOpenWhenNoSecret_SEC006 documents the dev-mode
@@ -526,6 +556,7 @@ func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(client.CloseIdleConnections)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr.String()+"/metrics", nil)
