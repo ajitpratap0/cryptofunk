@@ -119,13 +119,20 @@ export function useTrades(limit = 50, offset = 0) {
 
 // #104: useTrade previously always called getMockTrades(), ignoring
 // USE_MOCK_DATA entirely. Now follows the same mock/real pattern as
-// useTrades. When hitting the real API, fetches the full trade list
-// and filters client-side (no single-trade endpoint exists yet).
+// useTrades. When hitting the real API, checks the useTrades query
+// cache first to avoid a duplicate network request, then falls back
+// to a large-limit fetch (1000) so trades beyond the default page
+// size aren't silently truncated.
 //
 // Returns data: Trade | null. null means the trade wasn't found in
-// the fetched list (not an API error). Callers should check
+// the fetched data (not an API error). Callers should check
 // result.data?.data !== null before rendering detail views.
+//
+// refetchInterval is intentionally omitted: polling a detail view
+// by re-fetching the full trade list on every interval is expensive.
+// staleTime is kept so the cache is reused on tab switches.
 export function useTrade(id: string) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: [...QUERY_KEYS.trades, id],
     queryFn: async () => {
@@ -139,7 +146,29 @@ export function useTrade(id: string) {
         }
       }
 
-      const response = await apiClient.getTrades()
+      // Check the useTrades list cache first to avoid a duplicate
+      // network request when the list and detail views are mounted
+      // simultaneously.
+      const cachedQueries = queryClient.getQueriesData<{
+        success: boolean
+        data: Trade[]
+        timestamp: string
+      }>({ queryKey: QUERY_KEYS.trades })
+      for (const [, cached] of cachedQueries) {
+        if (!cached) continue
+        const found = cached.data?.find((t: Trade) => t.id === id)
+        if (found) {
+          return {
+            success: true as const,
+            data: found,
+            timestamp: cached.timestamp,
+          }
+        }
+      }
+
+      // Cache miss — fetch with a large limit so trades beyond the
+      // default page size (50) aren't silently truncated.
+      const response = await apiClient.getTrades(1000, 0)
       if (!response.success) {
         throw new Error(response.error || 'Failed to fetch trade')
       }
@@ -158,7 +187,6 @@ export function useTrade(id: string) {
     },
     enabled: !!id,
     staleTime: REFRESH_INTERVALS.trades,
-    refetchInterval: REFRESH_INTERVALS.trades,
   })
 }
 

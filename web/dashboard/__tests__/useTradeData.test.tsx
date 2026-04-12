@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import { useTrades } from '@/hooks/useTradeData'
+import { useTrades, useTrade } from '@/hooks/useTradeData'
 import type { Trade } from '@/lib/types'
 
 // ── Mock apiClient ──────────────────────────────────────────────────
@@ -125,5 +125,70 @@ describe('useTrades', () => {
     await waitFor(() => expect(vi.mocked(apiClient.getTrades)).toHaveBeenCalled())
 
     expect(apiClient.getTrades).toHaveBeenCalledWith(10, 20)
+  })
+})
+
+// ── useTrade tests ─────────────────────────────────────────────────
+
+describe('useTrade', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('returns single trade from real API by id', async () => {
+    const { apiClient } = await import('@/lib/api')
+    vi.mocked(apiClient.getTrades).mockResolvedValueOnce({
+      success: true,
+      data: { trades: [fakeRawTrade], count: 1 } as unknown as { trades: Trade[]; count: number },
+      timestamp: new Date().toISOString(),
+    })
+
+    const { result } = renderHook(() => useTrade('trade-abc'), { wrapper: makeWrapper() })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data?.data?.id).toBe('trade-abc')
+    expect(result.current.data?.data?.symbol).toBe('BTCUSDT')
+    expect(result.current.data?.data?.entryPrice).toBe(45045)
+    // Should fetch with large limit to avoid truncation
+    expect(apiClient.getTrades).toHaveBeenCalledWith(1000, 0)
+  })
+
+  it('returns null data when trade id not found', async () => {
+    const { apiClient } = await import('@/lib/api')
+    vi.mocked(apiClient.getTrades).mockResolvedValueOnce({
+      success: true,
+      data: { trades: [fakeRawTrade], count: 1 } as unknown as { trades: Trade[]; count: number },
+      timestamp: new Date().toISOString(),
+    })
+
+    const { result } = renderHook(() => useTrade('nonexistent-id'), { wrapper: makeWrapper() })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data?.data).toBeNull()
+  })
+
+  it('throws when API returns success:false', async () => {
+    const { apiClient } = await import('@/lib/api')
+    vi.mocked(apiClient.getTrades).mockResolvedValueOnce({
+      success: false,
+      data: null as unknown as { trades: Trade[]; count: number },
+      error: 'server error',
+      timestamp: new Date().toISOString(),
+    })
+
+    const { result } = renderHook(() => useTrade('trade-abc'), { wrapper: makeWrapper() })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+
+    expect((result.current.error as Error).message).toBe('server error')
+  })
+
+  it('is disabled when id is empty', () => {
+    const { result } = renderHook(() => useTrade(''), { wrapper: makeWrapper() })
+
+    // Should not trigger a fetch — stays in idle/pending state
+    expect(result.current.fetchStatus).toBe('idle')
   })
 })
