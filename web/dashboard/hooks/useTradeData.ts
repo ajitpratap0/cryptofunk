@@ -117,19 +117,88 @@ export function useTrades(limit = 50, offset = 0) {
   })
 }
 
+// #104: useTrade previously always called getMockTrades(), ignoring
+// USE_MOCK_DATA entirely. Now follows the same mock/real pattern as
+// useTrades. When hitting the real API, checks the useTrades query
+// cache first to avoid a duplicate network request, then falls back
+// to a large-limit fetch (1000) so trades beyond the default page
+// size aren't silently truncated.
+//
+// Returns data: Trade | null. null means the trade wasn't found in
+// the fetched data (not an API error). Callers should check
+// result.data?.data !== null before rendering detail views.
+//
+// refetchInterval is intentionally omitted: polling a detail view
+// by re-fetching the full trade list on every interval is expensive.
+// staleTime is kept so the cache is reused on tab switches.
 export function useTrade(id: string) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: [...QUERY_KEYS.trades, id],
     queryFn: async () => {
-      const trades = getMockTrades()
-      const trade = trades.find(t => t.id === id)
+      if (USE_MOCK_DATA) {
+        const trades = getMockTrades()
+        const trade = trades.find(t => t.id === id) ?? null
+        return {
+          success: true as const,
+          data: trade,
+          timestamp: new Date().toISOString(),
+        }
+      }
+
+      // Check the useTrades list cache first to avoid a duplicate
+      // network request when the list and detail views are mounted
+      // simultaneously.
+      const cachedQueries = queryClient.getQueriesData<{
+        success: boolean
+        data: Trade[]
+        timestamp: string
+      }>({ queryKey: QUERY_KEYS.trades })
+      for (const [, cached] of cachedQueries) {
+        // getQueriesData does a prefix match on ['trades'], so it
+        // returns both useTrades entries (data: Trade[]) AND prior
+        // useTrade entries (data: Trade | null). Guard with
+        // Array.isArray so we don't call .find() on a non-array.
+        if (!cached || !Array.isArray(cached.data)) continue
+        const found = cached.data.find((t: Trade) => t.id === id)
+        if (found) {
+          return {
+            success: true as const,
+            data: found,
+            timestamp: cached.timestamp,
+          }
+        }
+      }
+
+      // Cache miss — fetch with a large limit so trades beyond the
+      // default page size (50) aren't silently truncated.
+      // TODO (#224): replace with GET /trades/:id once the backend
+      // supports a single-trade endpoint.
+      const MAX_TRADE_LOOKUP_LIMIT = 1000
+      const response = await apiClient.getTrades(MAX_TRADE_LOOKUP_LIMIT, 0)
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to fetch trade')
+      }
+
+      const raw: unknown = response.data
+      const tradeList: Trade[] =
+        raw && typeof raw === 'object' && 'trades' in raw
+          ? (raw as { trades: RawApiTrade[] }).trades.map(mapApiTrade)
+          : []
+      const trade = tradeList.find(t => t.id === id) ?? null
       return {
         success: true as const,
-        data: trade || null,
-        timestamp: new Date().toISOString(),
+        data: trade,
+        timestamp: response.timestamp,
       }
     },
     enabled: !!id,
+    // Longer staleTime than the list hook: without refetchInterval
+    // the detail view only refreshes on remount/refocus, so a short
+    // stale window (2s) would go stale immediately and never auto-
+    // refresh, leaving the user with frozen data. 30s gives a
+    // reasonable cache-reuse window for tab switches.
+    staleTime: 30_000,
   })
 }
 

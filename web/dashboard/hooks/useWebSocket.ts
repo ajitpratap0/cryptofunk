@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { WebSocketMessage } from '@/lib/types'
+import type { WebSocketMessage, Trade, Position, Order, Agent } from '@/lib/types'
 import { WS_URL, WS_RECONNECT_ATTEMPTS, WS_RECONNECT_INTERVAL } from '@/lib/constants'
 
 export interface WebSocketState {
@@ -156,7 +156,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     })
   }, [updateState])
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: Record<string, unknown>) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify(message))
       return true
@@ -194,11 +194,26 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
 // Specialized hook for trading data
 export function useTradingWebSocket() {
-  const [trades, setTrades] = useState<Record<string, any>[]>([])
-  const [positions, setPositions] = useState<Record<string, any>[]>([])
-  const [orders, setOrders] = useState<Record<string, any>[]>([])
-  const [agents, setAgents] = useState<Record<string, any>[]>([])
-  const [marketData, setMarketData] = useState<Record<string, any>>({})
+  // #104: replaced Record<string, any>[] with proper types so
+  // consumers get type-safe access to trade/position/order/agent
+  // fields. WebSocketMessage.data is still `any` at runtime (the
+  // backend sends untyped JSON), but the state arrays document the
+  // expected shape and catch misuse at compile time.
+  //
+  // WARNING: the backend WS payload uses the same snake_case JSON
+  // encoding as the REST API (encoding/json on Go structs with
+  // snake_case tags). The REST path runs mapApiTrade to convert to
+  // camelCase Trade shape, but the WS path does NOT — message.data
+  // is pushed directly into the Trade[] array. Consumers accessing
+  // e.g. trade.entryPrice will get undefined at runtime because the
+  // wire format has `price`, not `entryPrice`. A mapApiTrade pass
+  // (or a shared mapper per message.type) is needed to close this
+  // gap. Tracked as a follow-up alongside #224.
+  const [trades, setTrades] = useState<Trade[]>([])
+  const [positions, setPositions] = useState<Position[]>([])
+  const [orders, setOrders] = useState<Order[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [marketData, setMarketData] = useState<Record<string, unknown>>({})
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
     switch (message.type) {
