@@ -150,27 +150,15 @@ func (s *APIServer) handleListPositions(c *gin.Context) {
 		positions = make([]*db.Position, 0)
 	}
 
-	resp := gin.H{
+	// Note: GetAllOpenPositions has no LIMIT (returns all open rows),
+	// so total_count would always equal len(positions) — a redundant
+	// extra DB round-trip. We omit total_count until the positions
+	// endpoint gains real pagination (LIMIT/OFFSET), at which point
+	// CountOpenPositions will provide genuine value. Review R2.
+	c.JSON(http.StatusOK, gin.H{
 		"positions": positions,
 		"count":     len(positions),
-	}
-
-	// QA-007 (#150): add total_count only for the unfiltered path.
-	// When session_id is present the response contains session-scoped
-	// positions, so a global COUNT(*) would be misleading (review R1).
-	if sessionIDStr == "" {
-		totalCount, countErr := s.db.CountOpenPositions(ctx)
-		if countErr != nil {
-			log.Error().Err(countErr).Msg("failed to count open positions")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to retrieve position count",
-			})
-			return
-		}
-		resp["total_count"] = totalCount
-	}
-
-	c.JSON(http.StatusOK, resp)
+	})
 }
 
 func (s *APIServer) handleGetPosition(c *gin.Context) {
@@ -387,6 +375,12 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// service so we only need a snapshot check — the executor is
 	// responsible for the final atomic fill. This guard prevents
 	// obviously invalid SELL orders from reaching the executor at all.
+	//
+	// NOTE: snapshot check only — not a durable reservation. Two
+	// concurrent SELL orders for the same symbol can both pass this
+	// guard simultaneously before either reaches the executor. Do not
+	// enable LIVE mode without a FOR UPDATE lock or a compensating
+	// check in the executor.
 	isSell := strings.EqualFold(req.Side, "sell")
 	var sellClamped bool
 	var sellOriginalQty float64

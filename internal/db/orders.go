@@ -685,6 +685,11 @@ func scanOrders(rows interface {
 // CountOrders returns the total number of orders in the database.
 // Used by handleListOrders to populate the total_count response field
 // for paginated queries (QA-007 / #150).
+//
+// NOTE: SELECT COUNT(*) on a large table requires a full sequential or
+// index scan. For a high-frequency trading system this table can grow
+// large; consider an estimated count (pg_class.reltuples) or a
+// materialized counter if latency becomes a concern at scale.
 func (db *DB) CountOrders(ctx context.Context) (int, error) {
 	var count int
 	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM orders`).Scan(&count)
