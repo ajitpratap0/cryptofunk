@@ -1182,3 +1182,66 @@ func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos
 	remain.UpdatedAt = now
 	return &remain, nil
 }
+
+// CountOpenPositions returns the total number of open positions (no exit).
+// Used by handleListPositions to populate the total_count response field
+// (QA-007 / #150).
+func (db *DB) CountOpenPositions(ctx context.Context) (int, error) {
+	var count int
+	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM positions WHERE exit_time IS NULL`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count open positions: %w", err)
+	}
+	return count, nil
+}
+
+// GetOpenPositionBySymbol returns the most recent open position for a
+// given session+symbol, or (nil, nil) if none exists. This is the
+// non-transactional counterpart of GetOpenPositionBySymbolTx — used by
+// read-only pre-validation checks (e.g. the SELL oversell guard in
+// handlePlaceOrder, QA-005 / #148) where a FOR UPDATE lock is
+// unnecessary because the caller only needs a snapshot, not a durable
+// reservation.
+func (db *DB) GetOpenPositionBySymbol(ctx context.Context, sessionID uuid.UUID, symbol string) (*Position, error) {
+	query := `
+		SELECT
+			id, session_id, symbol, exchange, side, entry_price, exit_price,
+			quantity, entry_time, exit_time, stop_loss, take_profit,
+			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+			metadata, created_at, updated_at
+		FROM positions
+		WHERE symbol = $1 AND session_id = $2 AND exit_time IS NULL
+		ORDER BY entry_time DESC
+		LIMIT 1
+	`
+	var position Position
+	err := db.pool.QueryRow(ctx, query, symbol, sessionID).Scan(
+		&position.ID,
+		&position.SessionID,
+		&position.Symbol,
+		&position.Exchange,
+		&position.Side,
+		&position.EntryPrice,
+		&position.ExitPrice,
+		&position.Quantity,
+		&position.EntryTime,
+		&position.ExitTime,
+		&position.StopLoss,
+		&position.TakeProfit,
+		&position.RealizedPnL,
+		&position.UnrealizedPnL,
+		&position.Fees,
+		&position.EntryReason,
+		&position.ExitReason,
+		&position.Metadata,
+		&position.CreatedAt,
+		&position.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get open position by symbol: %w", err)
+	}
+	return &position, nil
+}

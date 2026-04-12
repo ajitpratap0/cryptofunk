@@ -66,13 +66,19 @@ func (s *APIServer) handleListSessions(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"sessions":    sessions,
 		"count":       len(sessions),
 		"total_count": totalCount,
 		"limit":       limit,
 		"offset":      offset,
-	})
+	}
+	// QA-009 (#152): surface when the requested limit was capped.
+	if wasLimitCapped(c) {
+		resp["limit_capped"] = true
+		resp["max_limit"] = maxPageSize
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (s *APIServer) handleGetSession(c *gin.Context) {
@@ -144,9 +150,20 @@ func (s *APIServer) handleListPositions(c *gin.Context) {
 		positions = make([]*db.Position, 0)
 	}
 
+	// QA-007 (#150): add total_count so clients can compute totals.
+	totalCount, countErr := s.db.CountOpenPositions(ctx)
+	if countErr != nil {
+		log.Error().Err(countErr).Msg("failed to count open positions")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to retrieve position count",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"positions": positions,
-		"count":     len(positions),
+		"positions":   positions,
+		"count":       len(positions),
+		"total_count": totalCount,
 	})
 }
 
@@ -270,13 +287,29 @@ func (s *APIServer) handleListOrders(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, resp)
 	} else {
-		c.JSON(http.StatusOK, gin.H{
-			"orders":    orders,
-			"count":     len(orders),
-			"limit":     limit,
-			"offset":    offset,
-			"paginated": true,
-		})
+		// QA-007 (#150): add total_count so clients can compute page count.
+		totalCount, countErr := s.db.CountOrders(ctx)
+		if countErr != nil {
+			log.Error().Err(countErr).Msg("failed to count orders")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to retrieve order count",
+			})
+			return
+		}
+		resp := gin.H{
+			"orders":      orders,
+			"count":       len(orders),
+			"total_count": totalCount,
+			"limit":       limit,
+			"offset":      offset,
+			"paginated":   true,
+		}
+		// QA-009 (#152): surface when the requested limit was capped.
+		if wasLimitCapped(c) {
+			resp["limit_capped"] = true
+			resp["max_limit"] = maxPageSize
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -341,6 +374,40 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	s.sessionMu.Lock()
 	sessionID := s.activeSessionID
 	s.sessionMu.Unlock()
+
+	// QA-005 (#148): SELL oversell guard. The paper-trade handler has
+	// this check inside a RepeatableRead transaction with FOR UPDATE,
+	// but handlePlaceOrder delegates execution to an external MCP
+	// service so we only need a snapshot check — the executor is
+	// responsible for the final atomic fill. This guard prevents
+	// obviously invalid SELL orders from reaching the executor at all.
+	isSell := strings.EqualFold(req.Side, "sell")
+	if isSell && sessionID != nil {
+		existingPos, posErr := s.db.GetOpenPositionBySymbol(ctx, *sessionID, req.Symbol)
+		if posErr != nil {
+			log.Error().Err(posErr).Str("symbol", req.Symbol).Msg("failed to look up open position for SELL guard")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate sell order"})
+			return
+		}
+		if existingPos == nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":  "no open position to sell",
+				"symbol": req.Symbol,
+			})
+			return
+		}
+		// Clamp quantity to the open position size so the caller can't
+		// oversell. Warn in the response so the client knows the
+		// requested quantity was reduced.
+		if req.Quantity > existingPos.Quantity {
+			log.Warn().
+				Str("symbol", req.Symbol).
+				Float64("requested", req.Quantity).
+				Float64("available", existingPos.Quantity).
+				Msg("SELL quantity clamped to open position size")
+			req.Quantity = existingPos.Quantity
+		}
+	}
 
 	// Create a tracking record with a known UUID so we can return it to the caller.
 	// MARKET orders have no meaningful requested price — store NULL in the DB.

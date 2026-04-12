@@ -681,3 +681,15 @@ func scanOrders(rows interface {
 
 	return orders, nil
 }
+
+// CountOrders returns the total number of orders in the database.
+// Used by handleListOrders to populate the total_count response field
+// for paginated queries (QA-007 / #150).
+func (db *DB) CountOrders(ctx context.Context) (int, error) {
+	var count int
+	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM orders`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count orders: %w", err)
+	}
+	return count, nil
+}

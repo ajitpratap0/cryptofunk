@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ajitpratap0/cryptofunk/internal/config"
 )
@@ -91,6 +93,91 @@ func TestBindJSONValid(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+// TestBindJSONValidationDetails verifies that bindJSON returns field-level
+// validation errors when struct-tag validation fails (QA-011 / #154).
+// The response must include {"error":"Validation failed","details":[...]}
+// where each detail has a "field" and "message" key so the client can
+// highlight the offending form field.
+func TestBindJSONValidationDetails(t *testing.T) {
+	type testReq struct {
+		Symbol   string  `json:"symbol" binding:"required"`
+		Quantity float64 `json:"quantity" binding:"required,gt=0"`
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/test", func(c *gin.Context) {
+		var req testReq
+		if !bindJSON(c, &req) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	t.Run("missing required fields returns details array", func(t *testing.T) {
+		// Empty body: both Symbol and Quantity fail validation.
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", bytes.NewBufferString(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Validation failed", resp["error"])
+
+		details, ok := resp["details"].([]any)
+		require.True(t, ok, "details should be an array")
+		assert.Len(t, details, 2, "both Symbol and Quantity should fail")
+
+		// Collect field names from details.
+		fields := make(map[string]string)
+		for _, d := range details {
+			dm := d.(map[string]any)
+			fields[dm["field"].(string)] = dm["message"].(string)
+		}
+		assert.Equal(t, "required", fields["Symbol"])
+		assert.Equal(t, "required", fields["Quantity"])
+	})
+
+	t.Run("gt=0 violation returns the tag name", func(t *testing.T) {
+		// Symbol provided but Quantity is -1 (fails gt=0). We use -1
+		// rather than 0 because Gin's required tag on float64 treats
+		// 0 as the zero value (= missing), firing required before gt.
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", bytes.NewBufferString(`{"symbol":"BTC","quantity":-1}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Validation failed", resp["error"])
+
+		details := resp["details"].([]any)
+		assert.Len(t, details, 1)
+		dm := details[0].(map[string]any)
+		assert.Equal(t, "Quantity", dm["field"])
+		assert.Equal(t, "gt", dm["message"])
+	})
+
+	t.Run("malformed JSON still returns generic error", func(t *testing.T) {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", bytes.NewBufferString(`not json`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "invalid request body", resp["error"])
+		assert.Nil(t, resp["details"], "malformed JSON should not produce field details")
+	})
 }
 
 // TestParseIntQuery tests the parseIntQuery helper for pagination edge cases.
