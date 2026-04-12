@@ -54,14 +54,22 @@ type Position struct {
 	UpdatedAt     time.Time    `db:"updated_at"`
 }
 
-// CreatePosition inserts a new position into the database
+// CreatePosition inserts a new position into the database.
+//
+// The `fees` column is included in the INSERT so the entry-side fee
+// the caller already paid (commission, slippage, exchange fee) is
+// preserved on the row. Without this, ClosePosition's
+// `fees = fees + $4` accumulator starts from 0 instead of the entry
+// fee and the closed-position record under-reports total trading
+// cost — bug observed in TestClosePosition where fees of 1.0 + 0.5
+// resolved to 0.5 instead of 1.5.
 func (db *DB) CreatePosition(ctx context.Context, position *Position) error {
 	query := `
 		INSERT INTO positions (
 			id, session_id, symbol, exchange, side, entry_price, quantity,
-			entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+			entry_time, stop_loss, take_profit, fees, entry_reason, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		)
 	`
 
@@ -86,6 +94,7 @@ func (db *DB) CreatePosition(ctx context.Context, position *Position) error {
 		position.EntryTime,
 		position.StopLoss,
 		position.TakeProfit,
+		position.Fees,
 		position.EntryReason,
 		position.Metadata,
 		position.CreatedAt,
@@ -251,6 +260,19 @@ func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Pos
 // The WHERE clause includes exit_time IS NULL so a double-close attempt
 // returns rowsAffected=0 and is rejected, preserving the original
 // "already closed" semantics in one round-trip instead of two.
+//
+// Fee semantics — IMPORTANT contrast with ClosePositionTx:
+//   - ClosePosition (this function) ACCUMULATES via `fees = fees + $4`,
+//     so the row must already carry the entry-side fee at close time.
+//   - ClosePositionTx OVERWRITES via `fees = $5` with a caller-computed
+//     entry+exit total.
+//   - realized_pnl in ClosePosition deducts only the close-side fee
+//     ($4); ClosePositionTx deducts the full caller-computed total.
+//
+// Both are correct individually but produce slightly different
+// realized_pnl on the same trade (ClosePosition's value is overstated
+// by the entry fee). Tracked for unification in #218 — DO NOT change
+// one path without the other.
 func (db *DB) ClosePosition(ctx context.Context, id uuid.UUID, exitPrice float64, exitReason string, fees float64) error {
 	now := time.Now()
 	// Query parameters:
@@ -745,12 +767,24 @@ func (db *DB) UpdatePositionQuantity(ctx context.Context, id uuid.UUID, newQuant
 
 // CreatePositionTx inserts a new position into the database within an existing transaction.
 func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Position) error {
+	// Mirror CreatePosition: include `fees` in the INSERT so the
+	// entry-side fee is preserved. The two close paths consume this
+	// stored fee differently:
+	//   - ClosePosition (non-Tx) accumulates `fees = fees + $4`, so
+	//     the row MUST start at the entry-side fee for the closed
+	//     record to reflect entry+exit total.
+	//   - ClosePositionTx SETs `fees = $5` directly with a
+	//     caller-computed total (see the comment at the
+	//     ClosePositionTx call site for the reasoning), so the
+	//     stored entry fee is overwritten on close.
+	// Either way, the row is wrong if we drop the entry fee at
+	// CreatePosition time, so the column belongs in the INSERT.
 	query := `
 		INSERT INTO positions (
 			id, session_id, symbol, exchange, side, entry_price, quantity,
-			entry_time, stop_loss, take_profit, entry_reason, metadata, created_at, updated_at
+			entry_time, stop_loss, take_profit, fees, entry_reason, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		)
 	`
 
@@ -775,6 +809,7 @@ func (db *DB) CreatePositionTx(ctx context.Context, tx pgx.Tx, position *Positio
 		position.EntryTime,
 		position.StopLoss,
 		position.TakeProfit,
+		position.Fees,
 		position.EntryReason,
 		position.Metadata,
 		position.CreatedAt,
