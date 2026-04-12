@@ -128,6 +128,33 @@ func (db *DB) GetSession(ctx context.Context, sessionID uuid.UUID) (*TradingSess
 	return &session, nil
 }
 
+// GetSessionTx reads a trading session inside an existing transaction.
+// DB-008 (#132): used by the equity snapshot to ensure the session read
+// and the snapshot INSERT see the same data.
+func (db *DB) GetSessionTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) (*TradingSession, error) {
+	query := `
+		SELECT id, mode, symbol, exchange, started_at, stopped_at,
+		       initial_capital, final_capital, total_trades, winning_trades,
+		       losing_trades, total_pnl, max_drawdown, sharpe_ratio,
+		       config, metadata, created_at, updated_at
+		FROM trading_sessions
+		WHERE id = $1
+	`
+	var session TradingSession
+	err := tx.QueryRow(ctx, query, sessionID).Scan(
+		&session.ID, &session.Mode, &session.Symbol, &session.Exchange,
+		&session.StartedAt, &session.StoppedAt, &session.InitialCapital,
+		&session.FinalCapital, &session.TotalTrades, &session.WinningTrades,
+		&session.LosingTrades, &session.TotalPnL, &session.MaxDrawdown,
+		&session.SharpeRatio, &session.Config, &session.Metadata,
+		&session.CreatedAt, &session.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trading session in tx: %w", err)
+	}
+	return &session, nil
+}
+
 // UpdateSessionStats updates trading session statistics
 func (db *DB) UpdateSessionStats(ctx context.Context, sessionID uuid.UUID, stats SessionStats) error {
 	query := `

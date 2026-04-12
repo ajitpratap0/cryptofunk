@@ -988,11 +988,15 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 		// see the committed trade + aggregated stats. Best-effort: don't
 		// fail the trade on snapshot errors.
 		if snapErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
-			session, err := s.db.GetSession(ctx, *sessionID)
+			// All reads go through tx (not s.db) so they share the same
+			// connection and see a consistent snapshot — fixing the torn-
+			// write bug where s.db.GetSession and s.db.GetOpenPositions
+			// ran on separate autocommit connections (review R1).
+			session, err := s.db.GetSessionTx(ctx, tx, *sessionID)
 			if err != nil {
 				return fmt.Errorf("re-fetch session: %w", err)
 			}
-			openPositions, posErr := s.db.GetOpenPositions(ctx, *sessionID)
+			openPositions, posErr := s.db.GetOpenPositionsTx(ctx, tx, *sessionID)
 			if posErr != nil {
 				log.Warn().Err(posErr).Str("session_id", sessionID.String()).Msg("equity snapshot: failed to fetch open positions, unrealizedPnL will be 0")
 			}

@@ -166,6 +166,14 @@ func (v *Validator) NoSpecialChars(field, value string) {
 	// #98: expanded blocklist with UNION (data exfil), EXEC (stored
 	// proc execution), CAST (type coercion bypass), TRUNCATE/ALTER/GRANT
 	// (DDL/DCL privilege escalation).
+	//
+	// IMPORTANT: this is a defence-in-depth layer on top of pgx's
+	// parameterized queries ($1, $2, ...), NOT a replacement. The real
+	// injection defence is parameterisation; this blocklist catches
+	// obvious misuse at the input-validation boundary and provides
+	// better error messages. Known limitations: CAST/GRANT/ALTER are
+	// common English words and may false-positive on legitimate input;
+	// encoding tricks (UN/**/ION, %09) bypass plain strings.Contains.
 	dangerousChars := []string{
 		"<", ">", "'", "\"", ";", "--", "/*", "*/",
 		"DROP", "SELECT", "INSERT", "UPDATE", "DELETE",
