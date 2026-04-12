@@ -121,16 +121,20 @@ export function useTrades(limit = 50, offset = 0) {
 // USE_MOCK_DATA entirely. Now follows the same mock/real pattern as
 // useTrades. When hitting the real API, fetches the full trade list
 // and filters client-side (no single-trade endpoint exists yet).
+//
+// Returns data: Trade | null. null means the trade wasn't found in
+// the fetched list (not an API error). Callers should check
+// result.data?.data !== null before rendering detail views.
 export function useTrade(id: string) {
   return useQuery({
     queryKey: [...QUERY_KEYS.trades, id],
     queryFn: async () => {
       if (USE_MOCK_DATA) {
         const trades = getMockTrades()
-        const trade = trades.find(t => t.id === id)
+        const trade = trades.find(t => t.id === id) ?? null
         return {
           success: true as const,
-          data: trade || null,
+          data: trade,
           timestamp: new Date().toISOString(),
         }
       }
@@ -145,14 +149,16 @@ export function useTrade(id: string) {
         raw && typeof raw === 'object' && 'trades' in raw
           ? (raw as { trades: RawApiTrade[] }).trades.map(mapApiTrade)
           : []
-      const trade = tradeList.find(t => t.id === id)
+      const trade = tradeList.find(t => t.id === id) ?? null
       return {
         success: true as const,
-        data: trade || null,
+        data: trade,
         timestamp: response.timestamp,
       }
     },
     enabled: !!id,
+    staleTime: REFRESH_INTERVALS.trades,
+    refetchInterval: REFRESH_INTERVALS.trades,
   })
 }
 
