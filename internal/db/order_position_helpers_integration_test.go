@@ -504,7 +504,11 @@ func TestPositionHelperMethodsWithTestcontainers(t *testing.T) {
 			Quantity:   100.0,
 			EntryPrice: 20.0,
 			EntryTime:  time.Now(),
-			// Note: Fees field is not inserted by CreatePosition, defaults to 0
+			// Fees is 0 because this fixture intentionally does not set
+			// it on the struct. The post-#217 INSERT now persists that
+			// 0 to the DB explicitly (rather than relying on the column
+			// default that the old buggy path leaned on), so the
+			// downstream "0 + N" accumulation assertion still holds.
 		}
 		err := tc.DB.CreatePosition(ctx, pos)
 		require.NoError(t, err)
@@ -534,7 +538,11 @@ func TestPositionHelperMethodsWithTestcontainers(t *testing.T) {
 			Quantity:   50.0,
 			EntryPrice: 10.0,
 			EntryTime:  time.Now(),
-			// Note: Fees field is not inserted by CreatePosition, defaults to 0
+			// Fees is 0 because this fixture intentionally does not set
+			// it on the struct. The post-#217 INSERT now persists that
+			// 0 to the DB explicitly (rather than relying on the column
+			// default that the old buggy path leaned on), so the
+			// downstream "0 + N" accumulation assertion still holds.
 		}
 		err := tc.DB.CreatePosition(ctx, pos)
 		require.NoError(t, err)

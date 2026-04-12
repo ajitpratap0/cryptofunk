@@ -54,13 +54,21 @@ func TestBulkUpdateUnrealizedPnL(t *testing.T) {
 	})
 
 	t.Run("updates multiple open positions in one round-trip", func(t *testing.T) {
-		// Create three open positions
-		positions := make([]*db.Position, 3)
-		for i := range positions {
+		// Create three open positions on DISTINCT symbols. The unique
+		// partial index `idx_positions_open_session_symbol_uniq`
+		// (migration 019) forbids two OPEN rows with the same
+		// (session_id, symbol) — a single trader can hold at most one
+		// open position per pair per session — so the previous
+		// hardcoded "BTC/USDT" loop violated the constraint on the
+		// second insert. Three different symbols still exercise the
+		// bulk update path while satisfying the uniqueness invariant.
+		symbols := []string{"BTC/USDT", "ETH/USDT", "SOL/USDT"}
+		positions := make([]*db.Position, len(symbols))
+		for i, sym := range symbols {
 			positions[i] = &db.Position{
 				ID:         uuid.New(),
 				SessionID:  &session.ID,
-				Symbol:     "BTC/USDT",
+				Symbol:     sym,
 				Exchange:   "binance",
 				Side:       db.PositionSideLong,
 				EntryPrice: 50000.0,
@@ -88,10 +96,12 @@ func TestBulkUpdateUnrealizedPnL(t *testing.T) {
 
 	t.Run("closed positions are skipped", func(t *testing.T) {
 		// Open + close a position with unrealized_pnl=0 (from ClosePosition).
+		// Use AVAX/USDT to avoid colliding with the ETH/USDT open
+		// position left by the "updates multiple..." subtest above.
 		pos := &db.Position{
 			ID:         uuid.New(),
 			SessionID:  &session.ID,
-			Symbol:     "ETH/USDT",
+			Symbol:     "AVAX/USDT",
 			Exchange:   "binance",
 			Side:       db.PositionSideLong,
 			EntryPrice: 3000.0,
@@ -116,11 +126,13 @@ func TestBulkUpdateUnrealizedPnL(t *testing.T) {
 	})
 
 	t.Run("unknown IDs are silently skipped", func(t *testing.T) {
-		// Mix one real open position with an ID that doesn't exist in the DB.
+		// Mix one real open position with an ID that doesn't exist in
+		// the DB. Use DOT/USDT to avoid colliding with SOL/USDT left
+		// open by the "updates multiple..." subtest above.
 		pos := &db.Position{
 			ID:         uuid.New(),
 			SessionID:  &session.ID,
-			Symbol:     "SOL/USDT",
+			Symbol:     "DOT/USDT",
 			Exchange:   "binance",
 			Side:       db.PositionSideLong,
 			EntryPrice: 100.0,
