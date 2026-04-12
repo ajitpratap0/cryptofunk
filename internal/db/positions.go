@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -1183,10 +1184,12 @@ func (db *DB) PartialClosePositionTx(ctx context.Context, tx pgx.Tx, existingPos
 	return &remain, nil
 }
 
-// CountOpenPositions returns the total number of open positions (no exit).
-// Used by handleListPositions to populate the total_count response field
-// (QA-007 / #150).
-func (db *DB) CountOpenPositions(ctx context.Context) (int, error) {
+// countOpenPositions returns the total number of open positions (no exit).
+// Unexported: not called today because GetAllOpenPositions has no LIMIT,
+// so total_count == len(positions). Will be exported when the positions
+// endpoint gains real pagination (LIMIT/OFFSET). Kept in the DB layer
+// so the query is ready when needed.
+func (db *DB) countOpenPositions(ctx context.Context) (int, error) { //nolint:unused // kept for future pagination
 	var count int
 	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM positions WHERE exit_time IS NULL`).Scan(&count)
 	if err != nil {
@@ -1238,7 +1241,7 @@ func (db *DB) GetOpenPositionBySymbol(ctx context.Context, sessionID uuid.UUID, 
 		&position.UpdatedAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get open position by symbol: %w", err)

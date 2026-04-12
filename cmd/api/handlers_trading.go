@@ -401,7 +401,11 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 			return
 		}
 		if existingPos == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
+			// 422 Unprocessable Entity: the request is well-formed JSON
+			// with valid fields, but violates a domain rule (no position
+			// to close). Matches handlePaperTrade which uses 422 for the
+			// same semantic condition.
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
 				"error":  "no open position to sell",
 				"symbol": req.Symbol,
 			})

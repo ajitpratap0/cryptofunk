@@ -162,7 +162,7 @@ func TestBindJSONValidationDetails(t *testing.T) {
 		assert.Len(t, details, 1)
 		dm := details[0].(map[string]any)
 		assert.Equal(t, "quantity", dm["field"])
-		assert.Equal(t, "gt", dm["message"])
+		assert.Equal(t, "gt=0", dm["message"])
 	})
 
 	t.Run("malformed JSON still returns generic error", func(t *testing.T) {

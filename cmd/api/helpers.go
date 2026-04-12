@@ -357,9 +357,16 @@ func bindJSON(c *gin.Context, obj any) bool {
 				if jn, ok := jsonNames[field]; ok {
 					field = jn
 				}
+				// Include the constraint parameter so the client
+				// sees "gt=0" rather than just "gt" — immediately
+				// actionable without guessing the threshold.
+				msg := fe.Tag()
+				if p := fe.Param(); p != "" {
+					msg = fe.Tag() + "=" + p
+				}
 				details = append(details, validationDetail{
 					Field:   field,
-					Message: fe.Tag(),
+					Message: msg,
 				})
 			}
 			log.Warn().Str("path", c.Request.URL.Path).Int("field_errors", len(details)).Msg("validation failed (400)")
