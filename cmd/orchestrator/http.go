@@ -181,30 +181,29 @@ func (h *HTTPServer) Start() error {
 	// the secret; the K8s orchestrator-secret manifest already wires it.
 	mux.HandleFunc("/metrics", orchestratorAuthMiddleware(secret, promhttp.Handler().ServeHTTP))
 
-	h.server = &http.Server{
-		Addr:         fmt.Sprintf(":%d", h.port),
-		Handler:      mux,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	// Bind the listener SYNCHRONOUSLY before returning so callers (and
-	// tests) know that an immediate connection attempt will reach the
-	// listener queue. Previous behaviour spawned ListenAndServe in a
-	// goroutine and returned immediately, leaving a race window where
-	// the kernel had not yet bound the port — tests papered over this
-	// with a 100ms time.Sleep that flaked under -race on busy CI runs.
+	// Bind the listener SYNCHRONOUSLY before constructing h.server so
+	// callers (and tests) know that an immediate connection attempt
+	// will reach the listener queue, AND so a bind failure doesn't
+	// leave h.server set on a never-served *http.Server (Stop() would
+	// call Shutdown() on it, which is harmless but misleading).
 	//
 	// net.ListenConfig.Listen (rather than the package-level net.Listen)
 	// satisfies the noctx linter and lets us bound the bind itself by
 	// the supplied context if we ever need to. The context is
 	// background here because Start() has no caller-supplied lifetime
 	// — Stop() owns shutdown via h.server.Shutdown.
+	addr := fmt.Sprintf(":%d", h.port)
 	lc := net.ListenConfig{}
-	listener, err := lc.Listen(context.Background(), "tcp", h.server.Addr)
+	listener, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("orchestrator http: bind %s: %w", h.server.Addr, err)
+		return fmt.Errorf("orchestrator http: bind %s: %w", addr, err)
+	}
+
+	h.server = &http.Server{
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 	// Capture the listener under the mutex so Addr() can safely read
 	// it from any goroutine (even though today's tests call Addr()
