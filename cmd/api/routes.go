@@ -161,6 +161,16 @@ func (s *APIServer) setupRoutes() {
 		// handshake). The middleware itself is a no-op when
 		// auth.enabled=false (via authMiddlewareCore's bypass), so we
 		// install it unconditionally — no wrapping if/else needed.
+		//
+		// NOTE (access-log exposure): the middleware scrubs `api_key`
+		// from c.Request.URL BEFORE c.Next(), but Gin's engine-level
+		// Logger middleware (if registered via gin.Default()) captures
+		// c.Request.URL.RawQuery BEFORE calling c.Next(), so the raw
+		// key may still appear in the Gin access log line. If this
+		// project switches to gin.Default() or adds a Logger() call
+		// before this route, add a gin.LogFormatterParams-based
+		// redaction or ensure the logger is registered AFTER auth.
+		// See WebSocketAuthMiddleware godoc for full operator guidance.
 		v1.GET("/ws", api.WebSocketAuthMiddleware(s.apiKeyStore, authConfig), s.handleWebSocket)
 
 		// Agent routes (read-only, auth then rate limiter)

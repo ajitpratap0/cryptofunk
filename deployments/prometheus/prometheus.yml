@@ -71,6 +71,11 @@ scrape_configs:
     # authorization:
     #   type: Bearer
     #   credentials_file: /etc/prometheus/secrets/orchestrator-secret
+    # # Add tls_config if the target uses HTTPS; without it the Bearer
+    # # token is sent in cleartext over the cluster network. For most
+    # # K8s cluster-internal traffic this is acceptable, but consider
+    # # enabling mTLS via a service mesh if the cluster network is
+    # # untrusted.
 
   # CryptoFunk API Server
   # Uncomment the `authorization` block AFTER api.auth.enabled=true is set
@@ -86,6 +91,7 @@ scrape_configs:
     # authorization:
     #   type: Bearer
     #   credentials_file: /etc/prometheus/secrets/api-prometheus-key
+    # # Same tls_config note as orchestrator above.
 
   # MCP Servers (standalone HTTP services on ports 8090-8094)
   # Metrics require starting each server with --metrics-port <port>
