@@ -351,9 +351,8 @@ func TestHTTPServerStartStop(t *testing.T) {
 	if err := server.Start(); err != nil {
 		t.Fatalf("Failed to start HTTP server: %v", err)
 	}
-
-	// Give server time to start
-	time.Sleep(100 * time.Millisecond)
+	// Start now binds the listener synchronously, so an immediate
+	// request below is guaranteed to reach the kernel listen queue.
 
 	// Test that we can make a request
 	reqCtx, reqCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -401,6 +400,179 @@ func TestHTTPServerStartStop(t *testing.T) {
 			_ = verifyResp.Body.Close()
 		}
 		t.Error("Expected request to fail after server stop, but it succeeded")
+	}
+}
+
+// TestMetricsEndpointRequiresAuth_SEC006 verifies that /metrics on the
+// orchestrator HTTP server is gated behind ORCHESTRATOR_SECRET when the
+// secret is set, and that requests without the X-Orchestrator-Secret
+// header (or with the wrong value) get 401. The metrics surface
+// includes active agent counts, decision counters, queue depths, and
+// error rates — fingerprinting data an attacker would use to time
+// trades or pick off agents.
+//
+// Spins up the real Start() flow on an ephemeral port so the actual
+// mux wiring is exercised end-to-end (not just a hand-built mux). The
+// test sets ORCHESTRATOR_SECRET via t.Setenv so the value is restored
+// for sibling tests.
+func TestMetricsEndpointRequiresAuth_SEC006(t *testing.T) {
+	const secret = "test-orch-secret-32-bytes-of-material"
+	t.Setenv("ORCHESTRATOR_SECRET", secret)
+
+	orch := createTestOrchestrator(t, false, false)
+	// Port 0 → kernel-assigned ephemeral port. Build the request URL
+	// from server.Addr() after Start so two suite runs (e.g. -count=2)
+	// or any future t.Parallel() reorganisation can never collide on
+	// a hardcoded port.
+	server := NewHTTPServer(0, orch)
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start HTTP server: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		_ = server.Stop(stopCtx)
+	})
+
+	addr := server.Addr()
+	if addr == nil {
+		t.Fatal("server.Addr() returned nil after Start")
+	}
+	metricsURL := "http://" + addr.String() + "/metrics"
+
+	cases := []struct {
+		name         string
+		xHeaderValue string
+		bearerValue  string
+		wantStatus   int
+	}{
+		{name: "no creds → 401", wantStatus: http.StatusUnauthorized},
+		{name: "wrong X-Orchestrator-Secret → 401", xHeaderValue: "wrong-secret", wantStatus: http.StatusUnauthorized},
+		{name: "wrong Bearer → 401", bearerValue: "wrong-secret", wantStatus: http.StatusUnauthorized},
+		{name: "correct X-Orchestrator-Secret → 200", xHeaderValue: secret, wantStatus: http.StatusOK},
+		{name: "correct Bearer → 200 (Prometheus path)", bearerValue: secret, wantStatus: http.StatusOK},
+		// Header-priority edge case: if the legacy X-Orchestrator-Secret
+		// header is present but wrong, the middleware MUST NOT fall
+		// through to try Authorization: Bearer — a stale custom header
+		// should not be silently overridden by a fresh Bearer token. The
+		// behaviour is documented as "if the legacy header is present
+		// it is tried exclusively" and the test pins it down so a
+		// future refactor doesn't relax it into a confusing fall-through.
+		{name: "wrong X-Orchestrator-Secret blocks valid Bearer → 401", xHeaderValue: "wrong-secret", bearerValue: secret, wantStatus: http.StatusUnauthorized},
+	}
+
+	// Per-test http.Client avoids cross-subtest connection reuse via
+	// http.DefaultClient. On -count=2 runs DefaultClient's idle
+	// connection pool can mask cleanup ordering issues between subtests;
+	// a fresh Transport per subtest makes each test fully isolated.
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: &http.Transport{}}
+			t.Cleanup(client.CloseIdleConnections)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+			if err != nil {
+				t.Fatalf("create request: %v", err)
+			}
+			if tc.xHeaderValue != "" {
+				req.Header.Set("X-Orchestrator-Secret", tc.xHeaderValue)
+			}
+			if tc.bearerValue != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.bearerValue)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			defer func() {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+			}()
+
+			if resp.StatusCode != tc.wantStatus {
+				t.Errorf("status: got %d want %d", resp.StatusCode, tc.wantStatus)
+			}
+		})
+	}
+
+	// Edge case: "Authorization: Bearer " with nothing after the space.
+	// The manual `len(authz) > len(bearerPrefix)` check rejects this at
+	// the length gate (bearerPrefix="Bearer " is 7 chars, "Bearer " is
+	// exactly 7 so > fails). This test pins the behaviour so a future
+	// refactor to strings.HasPrefix (which would accept the empty token
+	// and pass "" to the validator) doesn't change the contract.
+	t.Run("empty Bearer token → 401", func(t *testing.T) {
+		client := &http.Client{Transport: &http.Transport{}}
+		t.Cleanup(client.CloseIdleConnections)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer ") // space-only, no token
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("empty Bearer token: got %d want 401", resp.StatusCode)
+		}
+	})
+}
+
+// TestMetricsEndpointOpenWhenNoSecret_SEC006 documents the dev-mode
+// pass-through path: when ORCHESTRATOR_SECRET is empty the middleware
+// is a no-op and /metrics serves without auth so local Prometheus and
+// dev tooling keep working. The startup Warn log makes the degradation
+// loud at process start.
+func TestMetricsEndpointOpenWhenNoSecret_SEC006(t *testing.T) {
+	t.Setenv("ORCHESTRATOR_SECRET", "")
+
+	orch := createTestOrchestrator(t, false, false)
+	// Port 0 → kernel-assigned ephemeral. See sibling test for rationale.
+	server := NewHTTPServer(0, orch)
+	if err := server.Start(); err != nil {
+		t.Fatalf("Failed to start HTTP server: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		_ = server.Stop(stopCtx)
+	})
+
+	addr := server.Addr()
+	if addr == nil {
+		t.Fatal("server.Addr() returned nil after Start")
+	}
+
+	client := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(client.CloseIdleConnections)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr.String()+"/metrics", nil)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("dev-mode /metrics should serve without auth: got %d", resp.StatusCode)
 	}
 }
 
