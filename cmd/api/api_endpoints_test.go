@@ -87,7 +87,9 @@ func TestHealthEndpoint(t *testing.T) {
 
 	assert.Equal(t, "healthy", response["status"])
 	assert.NotEmpty(t, response["uptime"]) // Handler returns uptime, not timestamp
-	assert.NotEmpty(t, response["version"])
+	// #98: version intentionally removed from unauthenticated /health
+	// to prevent fingerprinting. Verify it's absent.
+	assert.Nil(t, response["version"], "version must not be exposed on unauthenticated /health")
 }
 
 // TestStatusEndpoint tests the /status endpoint
