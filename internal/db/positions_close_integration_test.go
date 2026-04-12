@@ -61,15 +61,16 @@ func TestClosePosition(t *testing.T) {
 		}
 		require.NoError(t, tc.DB.CreatePosition(ctx, pos))
 
-		// Exit at 51000 on a LONG, quantity 0.2, fees 0.5:
-		// realized_pnl = (51000 - 50000) * 0.2 - 0.5 = 199.5
+		// Exit at 51000 on a LONG, quantity 0.2, entry fees 1.0, close fees 0.5:
+		// #218: realized_pnl = (51000 - 50000) * 0.2 - (1.0 + 0.5) = 198.5
+		// (deducts the full accumulated fee total, not just the close fee)
 		require.NoError(t, tc.DB.ClosePosition(ctx, pos.ID, 51000.0, "take_profit", 0.5))
 
 		got, err := tc.DB.GetPosition(ctx, pos.ID)
 		require.NoError(t, err)
 		require.NotNil(t, got.ExitTime, "exit_time should be set")
 		require.NotNil(t, got.RealizedPnL, "realized_pnl should be populated")
-		assert.InDelta(t, 199.5, *got.RealizedPnL, 0.0001)
+		assert.InDelta(t, 198.5, *got.RealizedPnL, 0.0001)
 		assert.InDelta(t, 1.5, got.Fees, 0.0001, "fees should accumulate (1.0 + 0.5)")
 		require.NotNil(t, got.ExitPrice)
 		assert.InDelta(t, 51000.0, *got.ExitPrice, 0.0001)
@@ -77,7 +78,7 @@ func TestClosePosition(t *testing.T) {
 		assert.Equal(t, "take_profit", *got.ExitReason)
 	})
 
-	t.Run("close SHORT computes realized_pnl with inverted sign", func(t *testing.T) {
+	t.Run("close SHORT computes realized_pnl with inverted sign and entry fees", func(t *testing.T) {
 		pos := &db.Position{
 			ID:         uuid.New(),
 			SessionID:  &session.ID,
@@ -87,17 +88,19 @@ func TestClosePosition(t *testing.T) {
 			EntryPrice: 3000.0,
 			Quantity:   1.0,
 			EntryTime:  time.Now(),
+			Fees:       0.75, // #218 R1: exercise (fees + $4) for SHORT too
 		}
 		require.NoError(t, tc.DB.CreatePosition(ctx, pos))
 
-		// Exit at 2900 on a SHORT, quantity 1.0, fees 0:
-		// realized_pnl = (3000 - 2900) * 1.0 - 0 = 100.0
-		require.NoError(t, tc.DB.ClosePosition(ctx, pos.ID, 2900.0, "stop_loss", 0.0))
+		// Exit at 2900 on a SHORT, qty 1.0, entry fees 0.75, close fees 0.25:
+		// #218: realized_pnl = (3000 - 2900) * 1.0 - (0.75 + 0.25) = 99.0
+		require.NoError(t, tc.DB.ClosePosition(ctx, pos.ID, 2900.0, "stop_loss", 0.25))
 
 		got, err := tc.DB.GetPosition(ctx, pos.ID)
 		require.NoError(t, err)
 		require.NotNil(t, got.RealizedPnL)
-		assert.InDelta(t, 100.0, *got.RealizedPnL, 0.0001)
+		assert.InDelta(t, 99.0, *got.RealizedPnL, 0.0001)
+		assert.InDelta(t, 1.0, got.Fees, 0.0001, "fees should accumulate (0.75 + 0.25)")
 	})
 
 	t.Run("double-close returns already closed", func(t *testing.T) {
