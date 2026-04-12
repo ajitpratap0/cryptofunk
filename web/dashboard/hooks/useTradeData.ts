@@ -155,8 +155,12 @@ export function useTrade(id: string) {
         timestamp: string
       }>({ queryKey: QUERY_KEYS.trades })
       for (const [, cached] of cachedQueries) {
-        if (!cached) continue
-        const found = cached.data?.find((t: Trade) => t.id === id)
+        // getQueriesData does a prefix match on ['trades'], so it
+        // returns both useTrades entries (data: Trade[]) AND prior
+        // useTrade entries (data: Trade | null). Guard with
+        // Array.isArray so we don't call .find() on a non-array.
+        if (!cached || !Array.isArray(cached.data)) continue
+        const found = cached.data.find((t: Trade) => t.id === id)
         if (found) {
           return {
             success: true as const,
@@ -186,7 +190,12 @@ export function useTrade(id: string) {
       }
     },
     enabled: !!id,
-    staleTime: REFRESH_INTERVALS.trades,
+    // Longer staleTime than the list hook: without refetchInterval
+    // the detail view only refreshes on remount/refocus, so a short
+    // stale window (2s) would go stale immediately and never auto-
+    // refresh, leaving the user with frozen data. 30s gives a
+    // reasonable cache-reuse window for tab switches.
+    staleTime: 30_000,
   })
 }
 
