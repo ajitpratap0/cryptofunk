@@ -198,19 +198,21 @@ func (db *DB) GetPosition(ctx context.Context, id uuid.UUID) (*Position, error) 
 }
 
 // GetOpenPositions retrieves all open positions for a session
-func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Position, error) {
-	query := `
-		SELECT
-			id, session_id, symbol, exchange, side, entry_price, exit_price,
-			quantity, entry_time, exit_time, stop_loss, take_profit,
-			realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
-			metadata, created_at, updated_at
-		FROM positions
-		WHERE session_id = $1 AND exit_time IS NULL
-		ORDER BY entry_time DESC
-	`
+// openPositionsQuery is shared by GetOpenPositions and GetOpenPositionsTx
+// to avoid duplicating the column list.
+const openPositionsQuery = `
+	SELECT
+		id, session_id, symbol, exchange, side, entry_price, exit_price,
+		quantity, entry_time, exit_time, stop_loss, take_profit,
+		realized_pnl, unrealized_pnl, fees, entry_reason, exit_reason,
+		metadata, created_at, updated_at
+	FROM positions
+	WHERE session_id = $1 AND exit_time IS NULL
+	ORDER BY entry_time DESC
+`
 
-	rows, err := db.pool.Query(ctx, query, sessionID)
+func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Position, error) {
+	rows, err := db.pool.Query(ctx, openPositionsQuery, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query open positions: %w", err)
 	}
@@ -252,6 +254,18 @@ func (db *DB) GetOpenPositions(ctx context.Context, sessionID uuid.UUID) ([]*Pos
 	}
 
 	return positions, nil
+}
+
+// GetOpenPositionsTx reads open positions inside an existing transaction.
+// DB-008 (#132): used by the equity snapshot so the read and the
+// snapshot INSERT see the same data within one atomic unit.
+func (db *DB) GetOpenPositionsTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) ([]*Position, error) {
+	rows, err := tx.Query(ctx, openPositionsQuery, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query open positions in tx: %w", err)
+	}
+	defer rows.Close()
+	return scanPositions(rows)
 }
 
 // ClosePosition closes a position with exit price and reason.

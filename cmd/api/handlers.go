@@ -20,18 +20,19 @@ func (s *APIServer) handleHealth(c *gin.Context) {
 	defer cancel()
 
 	if err := s.db.Ping(ctx); err != nil {
+		// #98: version removed from unauthenticated /health to prevent
+		// fingerprinting. Operators can correlate version via the
+		// authenticated /api/v1/status endpoint or Prometheus labels.
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":  "unhealthy",
-			"error":   "database connection failed",
-			"version": config.Version,
+			"status": "unhealthy",
+			"error":  "database connection failed",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "healthy",
-		"version": config.Version,
-		"uptime":  time.Since(startTime).String(),
+		"status": "healthy",
+		"uptime": time.Since(startTime).String(),
 	})
 }
 

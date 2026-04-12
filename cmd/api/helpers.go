@@ -482,6 +482,11 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 		// connect-src includes wss: to allow secure WebSocket connections from the dashboard.
 		c.Header("Content-Security-Policy", "default-src 'self'; connect-src 'self' wss:")
 
+		// #98: prevent caching of API responses containing trading data,
+		// positions, or session state. no-store ensures neither the browser
+		// nor any intermediate proxy retains a copy.
+		c.Header("Cache-Control", "no-store")
+
 		c.Next()
 	}
 }

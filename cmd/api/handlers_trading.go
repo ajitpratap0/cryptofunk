@@ -978,13 +978,35 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 			log.Warn().Err(err).Msg("Failed to aggregate session stats after paper trade")
 		}
 
-		// Write equity snapshot (best-effort: don't fail the trade on snapshot errors).
-		if session, err := s.db.GetSession(ctx, *sessionID); err != nil {
-			log.Warn().Err(err).Msg("Failed to re-fetch session for equity snapshot")
-		} else {
-			openPositions, posErr := s.db.GetOpenPositions(ctx, *sessionID)
+		// DB-008 (#132): Write equity snapshot inside a short ReadCommitted
+		// transaction so the reads (GetSession + GetOpenPositions) and the
+		// INSERT are atomic. Previously the reads and write were bare pool
+		// operations outside any transaction, creating a torn-write window
+		// where concurrent trades could modify session state between the
+		// read and the insert. The snapshot tx is separate from the trade
+		// tx (which already committed above) because the snapshot needs to
+		// see the committed trade + aggregated stats. Best-effort: don't
+		// fail the trade on snapshot errors.
+		// RepeatableRead (not ReadCommitted) so all statements in the tx
+		// see the same snapshot — a concurrent trade that commits between
+		// GetSessionTx and GetOpenPositionsTx won't be reflected in one
+		// read but not the other, keeping the equity figure consistent.
+		if snapErr := s.db.WithTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
+			// All reads go through tx (not s.db) so they share the same
+			// connection and see a consistent snapshot — fixing the torn-
+			// write bug where s.db.GetSession and s.db.GetOpenPositions
+			// ran on separate autocommit connections (review R1).
+			session, err := s.db.GetSessionTx(ctx, tx, *sessionID)
+			if err != nil {
+				return fmt.Errorf("re-fetch session: %w", err)
+			}
+			openPositions, posErr := s.db.GetOpenPositionsTx(ctx, tx, *sessionID)
 			if posErr != nil {
-				log.Warn().Err(posErr).Str("session_id", sessionID.String()).Msg("equity snapshot: failed to fetch open positions, unrealizedPnL will be 0")
+				// Return the error: PostgreSQL puts the tx into an aborted
+				// state on any query failure, so subsequent operations would
+				// fail anyway. WithTx will rollback and the outer log.Warn
+				// catches it in one place.
+				return fmt.Errorf("fetch open positions: %w", posErr)
 			}
 			var sumUnrealized float64
 			for _, p := range openPositions {
@@ -993,9 +1015,9 @@ func (s *APIServer) handlePaperTrade(c *gin.Context) {
 				}
 			}
 			currentEquity := session.InitialCapital + session.TotalPnL + sumUnrealized
-			if snapErr := s.db.InsertEquitySnapshot(ctx, *sessionID, currentEquity, session.TotalPnL, sumUnrealized); snapErr != nil {
-				log.Warn().Err(snapErr).Msg("Failed to write equity snapshot")
-			}
+			return s.db.InsertEquitySnapshotTx(ctx, tx, *sessionID, currentEquity, session.TotalPnL, sumUnrealized)
+		}); snapErr != nil {
+			log.Warn().Err(snapErr).Msg("Failed to write equity snapshot")
 		}
 	} else {
 		// Limit orders are not immediately filled; persist the order record in NEW status.

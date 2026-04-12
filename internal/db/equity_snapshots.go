@@ -30,6 +30,23 @@ func (db *DB) InsertEquitySnapshot(ctx context.Context, sessionID uuid.UUID, equ
 	return err
 }
 
+// InsertEquitySnapshotTx writes an equity snapshot inside an existing
+// transaction. DB-008 (#132): the paper-trade handler previously called
+// InsertEquitySnapshot outside any transaction, creating a torn-write
+// window where concurrent trades could modify session state between the
+// reads (GetSessionTx, GetOpenPositionsTx) and the INSERT. This Tx
+// variant participates in a short ReadCommitted snapshot transaction
+// that wraps all three operations — separate from the already-committed
+// trade transaction because the snapshot needs to see the committed
+// trade + aggregated stats.
+func (db *DB) InsertEquitySnapshotTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID, equity, realizedPnL, unrealizedPnL float64) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO equity_snapshots (session_id, equity, realized_pnl, unrealized_pnl)
+		VALUES ($1, $2, $3, $4)
+	`, sessionID, equity, realizedPnL, unrealizedPnL)
+	return err
+}
+
 // ListEquitySnapshots returns the most-recent [limit] equity snapshots for the given
 // session, in chronological order (oldest-to-newest among the returned records).
 // When limit=0 all snapshots are returned (no LIMIT clause is added; LIMIT 0 in
