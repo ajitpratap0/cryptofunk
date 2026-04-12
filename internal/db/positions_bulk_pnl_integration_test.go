@@ -96,10 +96,12 @@ func TestBulkUpdateUnrealizedPnL(t *testing.T) {
 
 	t.Run("closed positions are skipped", func(t *testing.T) {
 		// Open + close a position with unrealized_pnl=0 (from ClosePosition).
+		// Use AVAX/USDT to avoid colliding with the ETH/USDT open
+		// position left by the "updates multiple..." subtest above.
 		pos := &db.Position{
 			ID:         uuid.New(),
 			SessionID:  &session.ID,
-			Symbol:     "ETH/USDT",
+			Symbol:     "AVAX/USDT",
 			Exchange:   "binance",
 			Side:       db.PositionSideLong,
 			EntryPrice: 3000.0,
@@ -124,11 +126,13 @@ func TestBulkUpdateUnrealizedPnL(t *testing.T) {
 	})
 
 	t.Run("unknown IDs are silently skipped", func(t *testing.T) {
-		// Mix one real open position with an ID that doesn't exist in the DB.
+		// Mix one real open position with an ID that doesn't exist in
+		// the DB. Use DOT/USDT to avoid colliding with SOL/USDT left
+		// open by the "updates multiple..." subtest above.
 		pos := &db.Position{
 			ID:         uuid.New(),
 			SessionID:  &session.ID,
-			Symbol:     "SOL/USDT",
+			Symbol:     "DOT/USDT",
 			Exchange:   "binance",
 			Side:       db.PositionSideLong,
 			EntryPrice: 100.0,
