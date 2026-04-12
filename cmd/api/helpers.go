@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -345,10 +346,19 @@ func bindJSON(c *gin.Context, obj any) bool {
 		// Try to extract field-level details from the validator.
 		var validationErrs validator.ValidationErrors
 		if errors.As(err, &validationErrs) {
+			// Build a Go-field-name → json-tag lookup from the target
+			// struct so error fields use the client-facing name
+			// ("symbol") rather than the Go name ("Symbol"). Falls
+			// back to fe.Field() when the struct tag is missing.
+			jsonNames := jsonFieldNames(obj)
 			details := make([]validationDetail, 0, len(validationErrs))
 			for _, fe := range validationErrs {
+				field := fe.Field()
+				if jn, ok := jsonNames[field]; ok {
+					field = jn
+				}
 				details = append(details, validationDetail{
-					Field:   fe.Field(),
+					Field:   field,
 					Message: fe.Tag(),
 				})
 			}
@@ -366,6 +376,36 @@ func bindJSON(c *gin.Context, obj any) bool {
 		return false
 	}
 	return true
+}
+
+// jsonFieldNames builds a Go-field-name → json-tag-name map from obj's
+// type. Handles pointer-to-struct and struct types. Skips fields with
+// `json:"-"` or no json tag. Used by bindJSON to translate validation
+// errors from Go names ("Symbol") to client-facing names ("symbol").
+func jsonFieldNames(obj any) map[string]string {
+	t := reflect.TypeOf(obj)
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	m := make(map[string]string, t.NumField())
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name != "" {
+			m[f.Name] = name
+		}
+	}
+	return m
 }
 
 // truncateString truncates a string to maxLen and adds "..." if truncated.

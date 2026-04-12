@@ -150,21 +150,27 @@ func (s *APIServer) handleListPositions(c *gin.Context) {
 		positions = make([]*db.Position, 0)
 	}
 
-	// QA-007 (#150): add total_count so clients can compute totals.
-	totalCount, countErr := s.db.CountOpenPositions(ctx)
-	if countErr != nil {
-		log.Error().Err(countErr).Msg("failed to count open positions")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to retrieve position count",
-		})
-		return
+	resp := gin.H{
+		"positions": positions,
+		"count":     len(positions),
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"positions":   positions,
-		"count":       len(positions),
-		"total_count": totalCount,
-	})
+	// QA-007 (#150): add total_count only for the unfiltered path.
+	// When session_id is present the response contains session-scoped
+	// positions, so a global COUNT(*) would be misleading (review R1).
+	if sessionIDStr == "" {
+		totalCount, countErr := s.db.CountOpenPositions(ctx)
+		if countErr != nil {
+			log.Error().Err(countErr).Msg("failed to count open positions")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to retrieve position count",
+			})
+			return
+		}
+		resp["total_count"] = totalCount
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 func (s *APIServer) handleGetPosition(c *gin.Context) {
@@ -382,7 +388,18 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 	// responsible for the final atomic fill. This guard prevents
 	// obviously invalid SELL orders from reaching the executor at all.
 	isSell := strings.EqualFold(req.Side, "sell")
-	if isSell && sessionID != nil {
+	var sellClamped bool
+	var sellOriginalQty float64
+	if isSell {
+		// Reject SELL outright when there's no active session — without
+		// a session the position lookup has nothing to query, and the
+		// order record would land with session_id=NULL.
+		if sessionID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "no active trading session for sell order",
+			})
+			return
+		}
 		existingPos, posErr := s.db.GetOpenPositionBySymbol(ctx, *sessionID, req.Symbol)
 		if posErr != nil {
 			log.Error().Err(posErr).Str("symbol", req.Symbol).Msg("failed to look up open position for SELL guard")
@@ -397,15 +414,17 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 			return
 		}
 		// Clamp quantity to the open position size so the caller can't
-		// oversell. Warn in the response so the client knows the
-		// requested quantity was reduced.
+		// oversell. Record the original quantity so we can surface it
+		// in the response — silent mutation was flagged in review R1.
 		if req.Quantity > existingPos.Quantity {
 			log.Warn().
 				Str("symbol", req.Symbol).
 				Float64("requested", req.Quantity).
 				Float64("available", existingPos.Quantity).
 				Msg("SELL quantity clamped to open position size")
+			sellOriginalQty = req.Quantity
 			req.Quantity = existingPos.Quantity
+			sellClamped = true
 		}
 	}
 
@@ -516,10 +535,19 @@ func (s *APIServer) handlePlaceOrder(c *gin.Context) {
 		log.Warn().Err(broadcastErr).Msg("Failed to broadcast order update")
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
+	resp := gin.H{
 		"order":   order,
 		"message": "Order executed successfully",
-	})
+	}
+	// QA-005 (#148) review R1: surface when the SELL quantity was
+	// clamped so the client knows the fill quantity differs from what
+	// was requested. Without this the caller sees a 201 with
+	// the clamped quantity and has no way to know it was reduced.
+	if sellClamped {
+		resp["warning"] = fmt.Sprintf("requested quantity %.8f clamped to open position size %.8f", sellOriginalQty, req.Quantity)
+		resp["original_quantity"] = sellOriginalQty
+	}
+	c.JSON(http.StatusCreated, resp)
 }
 
 func (s *APIServer) handleCancelOrder(c *gin.Context) {

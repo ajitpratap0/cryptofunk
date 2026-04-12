@@ -139,8 +139,8 @@ func TestBindJSONValidationDetails(t *testing.T) {
 			dm := d.(map[string]any)
 			fields[dm["field"].(string)] = dm["message"].(string)
 		}
-		assert.Equal(t, "required", fields["Symbol"])
-		assert.Equal(t, "required", fields["Quantity"])
+		assert.Equal(t, "required", fields["symbol"])
+		assert.Equal(t, "required", fields["quantity"])
 	})
 
 	t.Run("gt=0 violation returns the tag name", func(t *testing.T) {
@@ -161,7 +161,7 @@ func TestBindJSONValidationDetails(t *testing.T) {
 		details := resp["details"].([]any)
 		assert.Len(t, details, 1)
 		dm := details[0].(map[string]any)
-		assert.Equal(t, "Quantity", dm["field"])
+		assert.Equal(t, "quantity", dm["field"])
 		assert.Equal(t, "gt", dm["message"])
 	})
 
